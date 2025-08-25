@@ -1,0 +1,37 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+out
+
+# VSCode
+.vscode/
+.vscode-test/
+.vscodeignore
+*.vsix
+
+# Mac
+.DS_Store
+
+# BMAD methods
+.bmad-core/
+.clinerules/
+.gemini/
+.github/
+.kilocode/
+.kilocodemodes
+docs/
+
+# tsconfig
+tsconfig.json
+eslint.config.mjs
+
+package-lock.json
+package.json
+
+# Readme
+README.md
+
+# tests
+tests/
