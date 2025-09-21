@@ -8,6 +8,7 @@
   "engines": {
     "vscode": "^1.103.0"
   },
+  "icon": "media/Genie.png",
   "categories": [
     "Other"
   ],
@@ -32,7 +33,8 @@
           "default": false,
           "markdownDescription": "%config.autoStageAllForDiff.desc%",
           "tags": [
-          "experimental"]
+            "experimental"
+          ]
         },
         "gitCommitGenie.gemini.rpmLimit": {
           "type": "number",
@@ -92,7 +94,9 @@
         "gitCommitGenie.workspaceFiles.excludePatterns": {
           "order": 5,
           "type": "array",
-          "items": { "type": "string" },
+          "items": {
+            "type": "string"
+          },
           "default": [],
           "markdownDescription": "%config.workspaceFiles.excludePatterns.desc%"
         },

@@ -301,9 +301,7 @@ export class GeminiService extends BaseLLMService {
             const textOut = (res as any)?.text || (res as any)?.response?.text?.() || '';
             if (textOut) {
                 const json = this.safeExtractJson<any>(textOut);
-                if (json?.commit_message) {
-                    return { content: json.commit_message };
-                }
+                if (json?.commit_message) { return { content: json.commit_message }; }
                 return { content: textOut };
             }
             return { message: 'Failed to generate commit message from Gemini.', statusCode: 500 };

@@ -417,6 +417,44 @@ function sanitizeBodyCommitTypePrefixes(message: string): string {
   return lines.join('\n');
 }
 
+async function enforceTargetLanguageForCommit(
+  commitMessage: string,
+  targetLanguage: string | undefined,
+  chat: ChatFn
+): Promise<string> {
+  const lang = (targetLanguage || '').trim();
+  if (!lang) { return commitMessage; }
+
+  const system: ChatMessage = {
+    role: 'system',
+    content: [
+      'You are a precise editor for Conventional Commit messages.',
+      'Return STRICT JSON only; do not include markdown or code fences.'
+    ].join('\n')
+  };
+  const user: ChatMessage = {
+    role: 'user',
+    content: [
+      'Task: Ensure the following Conventional Commit message uses the target language for all narrative text',
+      '(description, body bullet contents, and footer values) while preserving tokens and structure.',
+      '- Do NOT translate the Conventional Commit <type> token (must remain one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore).',
+      '- Do NOT translate footer tokens such as BREAKING CHANGE or Refs.',
+      '- Preserve the exact structure: header, blank lines, body, footers.',
+      `Target language: ${lang}`,
+      'Return only JSON: {"commit_message": string}',
+      '--- Commit message:',
+      commitMessage
+    ].join('\n')
+  };
+  try {
+    const reply = await chat([system, user], { temperature: 0 });
+    const parsed = extractJson<{ commit_message?: string }>(reply);
+    return parsed?.commit_message?.trim() || commitMessage;
+  } catch {
+    return commitMessage;
+  }
+}
+
 export async function generateCommitMessageChain(
   inputs: ChainInputs,
   chat: ChatFn,
@@ -462,6 +500,13 @@ export async function generateCommitMessageChain(
 
   // Sanitize body: remove commit-type-like prefixes in bullets to avoid header leakage
   finalMessage = sanitizeBodyCommitTypePrefixes(finalMessage);
+
+  // Enforce target language strictly while preserving tokens/structure
+  try {
+    finalMessage = await enforceTargetLanguageForCommit(finalMessage, inputs.targetLanguage, chat);
+  } catch {
+    // ignore
+  }
 
   return {
     commitMessage: finalMessage,

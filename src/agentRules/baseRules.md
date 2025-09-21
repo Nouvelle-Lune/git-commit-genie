@@ -67,7 +67,7 @@ activation-instructions: |
         - Header: <type>[optional scope][!]: <description>
         - Header must be imperative, concise, and <= 72 characters; no trailing period.
         - For breaking changes: either use "!" in the header OR include a footer "BREAKING CHANGE: <details>". If you use "!", the footer is optional.
-        - Language policy: If a "target-language" is provided, write narrative text (description, body content, footer values) in that language. DO NOT translate the Conventional Commit <type> token; it must be one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore. Do not translate footer tokens such as BREAKING CHANGE or Refs.
+        - Language policy (STRICT): If a "target-language" is provided, you MUST write all narrative text (description, body bullet contents, and footer values) entirely in that language. Do NOT mix languages. Preserve the Conventional Commit <type> token in English (must be one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore). Do NOT translate footer tokens such as BREAKING CHANGE or Refs. If any narrative text is not in the target language, translate it while preserving meaning; keep code identifiers, file names, and proper nouns as-is when appropriate.
         - Body (when multiple files changed or when clarification helps):
             - Start body after exactly one blank line.
             - Prefer 1–3 concise bullet points (e.g., "- <scope|file>: <change>").
@@ -92,6 +92,7 @@ activation-instructions: |
         - Ensure first line length <= 72 characters; imperative mood; no trailing period.
         - Ensure blank line separation between header/body and between body/footers when they exist.
         - Ensure any footers follow the "Token: value" format and the Conventional Commits rules.
+        - Ensure language compliance: description, body bullets, and footer values are strictly in the provided target-language; tokens (<type>, BREAKING CHANGE, Refs, etc.) remain un-translated.
         - Ensure the entire response is valid JSON and nothing else.
 ````
 ### Examples

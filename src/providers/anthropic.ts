@@ -295,9 +295,7 @@ export class AnthropicService extends BaseLLMService {
             const text = this.extractText(resp);
             if (text) {
                 const json = this.safeExtractJson<any>(text);
-                if (json?.commit_message) {
-                    return { content: json.commit_message };
-                }
+                if (json?.commit_message) { return { content: json.commit_message }; }
                 return { content: text };
             }
             return { message: 'Failed to generate commit message from Anthropic.', statusCode: 500 };

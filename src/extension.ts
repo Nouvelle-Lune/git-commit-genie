@@ -26,7 +26,7 @@ export function activate(context: vscode.ExtensionContext) {
 	]);
 
 	const getProvider = (): string => (context.globalState.get<string>('gitCommitGenie.provider', 'openai'));
-	
+
 	const getModel = (provider: string): string => {
 		switch (provider) {
 			case 'deepseek':
@@ -336,9 +336,7 @@ export function activate(context: vscode.ExtensionContext) {
 			current = currentCfg.get<boolean>('gitCommitGenie.useChainPrompts', false);
 		}
 		await currentCfg.update('gitCommitGenie.chain.enabled', !current, vscode.ConfigurationTarget.Global);
-		// Also keep legacy key in sync for a few versions to avoid breaking older code paths
-		await currentCfg.update('gitCommitGenie.useChainPrompts', !current, vscode.ConfigurationTarget.Global);
-		await context.globalState.update('gitCommitGenie.useChainPrompts', !current);
+
 		updateStatusBar();
 		vscode.window.showInformationMessage(
 			vscode.l10n.t(
