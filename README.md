@@ -81,12 +81,19 @@ All settings are under: `Git Commit Genie`.
 
 | Setting                                       | Type    | Default | Description                                                                      |
 | --------------------------------------------- | ------- | ------- | -------------------------------------------------------------------------------- |
-| `gitCommitGenie.templatesPath`                | string  | ""      | Absolute path to user commit template file (optional).                           |
+| `gitCommitGenie.templatesPath`                | string  | ""      | Absolute path to a custom commit template file (optional).                       |
+| `gitCommitGenie.autoStageAllForDiff`          | boolean | false   | When nothing is staged: temporarily stage all changes to build the diff, then restore staging. Use with caution. |
 | `gitCommitGenie.chain.enabled`                | boolean | false   | Enable multi‑step chain prompting. More accurate, higher latency & token cost.   |
 | `gitCommitGenie.chain.maxParallel`            | number  | 2       | Max parallel LLM calls during chain prompting. Increase carefully to avoid 429s. |
+| `gitCommitGenie.workspaceFiles.enabled`       | boolean | true    | Include a compact list of workspace filenames in the prompt.                     |
+| `gitCommitGenie.workspaceFiles.maxFiles`      | number  | 2000    | Max number of filenames to send; hard‑truncated beyond this.                     |
+| `gitCommitGenie.workspaceFiles.excludePatterns` | array | []      | Extra gitignore‑style patterns to exclude from the filename list.                |
+| `gitCommitGenie.commitLanguage`               | string  | `auto`  | Target language for generated messages. Options: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`. |
 | `gitCommitGenie.gemini.rpmLimit`              | number  | 8       | Local soft RPM throttle for Gemini. Adjust for higher tiers.                     |
 | `gitCommitGenie.gemini.tpmLimit`              | number  | 200000  | Local soft TPM throttle for Gemini.                                              |
 | `gitCommitGenie.gemini.expectedTokensPerCall` | number  | 8000    | Heuristic tokens per call for budgeting.                                         |
+
+Note: `gitCommitGenie.chainMaxParallel` is deprecated; use `gitCommitGenie.chain.maxParallel`.
 
 ## Command List
 
