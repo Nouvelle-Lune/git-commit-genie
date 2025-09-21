@@ -15,5 +15,8 @@
   "config.chain.maxParallelNew.desc": "Maximum parallel LLM calls used by chain prompting across all providers. Increase carefully to avoid provider rate limits.",
   "config.gemini.rpmLimit.desc": "Gemini soft Requests-Per-Minute limit used by local throttling. Tip: For free tier keep <= 8 (official ~10 RPM) to avoid 429; increase for higher tiers.",
   "config.gemini.tpmLimit.desc": "Gemini soft Tokens-Per-Minute limit used by local throttling. Tip: Free tier stay <= 200k (official ~250k TPM); raise after upgrading.",
-  "config.gemini.expectedTokensPerCall.desc": "Estimated tokens per request for pre-allocation in TPM budgeting. Increase if diffs/templates are large; decrease or lower concurrency if you hit 429s often."
+  "config.gemini.expectedTokensPerCall.desc": "Estimated tokens per request for pre-allocation in TPM budgeting. Increase if diffs/templates are large; decrease or lower concurrency if you hit 429s often.",
+  "config.workspaceFiles.enabled.desc": "Include a compact list of workspace filenames in the prompt. You can disable this if prompts get too large.",
+  "config.workspaceFiles.maxFiles.desc": "Maximum number of filenames to send. If the number exceeds this limit, the list is hard-truncated.",
+  "config.workspaceFiles.excludePatterns.desc": "Additional gitignore-style patterns to exclude from the filename list."
 }

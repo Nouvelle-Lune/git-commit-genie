@@ -15,5 +15,8 @@
   "config.chain.maxParallelNew.desc": "链式提示并行 LLM 调用最大数量。谨慎增大以避免触发速率限制。",
   "config.gemini.rpmLimit.desc": "Gemini 每分钟请求软上限（本地节流）。提示：免费层建议 <= 8（官方约 10 RPM），更高层可适当提高。",
   "config.gemini.tpmLimit.desc": "Gemini 每分钟 Token 软上限（本地节流）。提示：免费层建议 <= 200k（官方约 250k TPM），升级后可提高。",
-  "config.gemini.expectedTokensPerCall.desc": "单次调用预估 token 用量（用于 TPM 预算）。diff/模板较大可增大；频繁 429 可减小或降低并发。"
+  "config.gemini.expectedTokensPerCall.desc": "单次调用预估 token 用量（用于 TPM 预算）。diff/模板较大可增大；频繁 429 可减小或降低并发。",
+  "config.workspaceFiles.enabled.desc": "在提示中包含工作区文件名列表。如果超出Token限制，可关闭此项。",
+  "config.workspaceFiles.maxFiles.desc": "要传递的文件名数量上限。超过该上限将进行硬截断。",
+  "config.workspaceFiles.excludePatterns.desc": "附加的 gitignore 风格排除规则"
 }
