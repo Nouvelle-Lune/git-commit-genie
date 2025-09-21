@@ -228,10 +228,10 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://example.com/placeholder/git-commit-genie.git"
+    "url": "https://github.com/Nouvelle-Lune/git-commit-genie.git"
   },
-  "homepage": "https://example.com/placeholder/git-commit-genie#readme",
+  "homepage": "https://github.com/Nouvelle-Lune/git-commit-genie",
   "bugs": {
-    "url": "https://example.com/placeholder/git-commit-genie/issues"
+    "url": "https://github.com/Nouvelle-Lune/git-commit-genie/issues"
   }
 }
