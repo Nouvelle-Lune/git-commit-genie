@@ -48,8 +48,9 @@ Strongly Opinionated Conventional Commit Template
 
 ## Recommended Style B: JSON Policy (High Reliability)
 
-Add a JSON Policy block (no code fences required). The model more reliably extracts rules. Example:
+Add a JSON Policy block (code fences optional; shown here for GitHub rendering). The model more reliably extracts rules. Example:
 
+```json
 {
   "header": {
     "requireScope": true,
@@ -74,6 +75,7 @@ Add a JSON Policy block (no code fences required). The model more reliably extra
     "tone": "imperative"
   }
 }
+```
 
 You may surround the JSON with additional natural language notes—both styles can coexist and will be merged.
 

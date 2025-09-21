@@ -49,8 +49,9 @@ Strongly Opinionated Conventional Commit Template
 
 ## 推荐写法 B：JSON Policy（高可靠）
 
-为提升“可抽取性”，你可以在模板中加入一个 JSON Policy 区块（无需代码块标记），模型会更可靠地抽取到策略。示例：
+为提升“可抽取性”，你可以在模板中加入一个 JSON Policy 区块（代码块可选；此处为便于 GitHub 显示而加）。示例：
 
+```json
 {
   "header": {
     "requireScope": true,
@@ -75,6 +76,7 @@ Strongly Opinionated Conventional Commit Template
     "tone": "imperative"
   }
 }
+```
 
 可在 JSON 之前/之后继续写自然语言说明，两者可并存。抽取器会尽力综合。
 
@@ -121,4 +123,3 @@ Refs: N/A
 ---
 
 [English Version / 英文版本](./user-template-guide.md)
-

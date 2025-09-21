@@ -16,6 +16,20 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 - 通过一个简单的模板文件定义 Body / Footers / 语气 / 词汇偏好。
 - 支持多模型动态切换，快速选择最适合的提供商与模型。
 
+## Usage
+![usage](../media/demo.gif)
+
+默认生成的提交信息遵循 Conventional Commits 1.0.0 规范，详情见：https://www.conventionalcommits.org/en/v1.0.0/#specification
+
+基本格式：
+```
+<type>[optional scope]: <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
 ## Tips
 
 - 少量 / 轻量级提交：优先选择轻巧快速的模型，生成更快、Token 消耗更低。
