@@ -18,6 +18,7 @@
   "manageModels.selectModel": "选择一个 {0} 模型…",
   "manageModels.configured": "已配置 {0}: {1}",
   "manageModels.currentSuffix": "（当前）",
+  "manageModels.currentLabel": "当前",
 
   "chain.toggled": "链式提示已{0}.",
   "chain.enabled": "启用",

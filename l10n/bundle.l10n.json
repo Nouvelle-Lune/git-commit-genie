@@ -18,6 +18,7 @@
   "manageModels.selectModel": "Select a {0} model…",
   "manageModels.configured": "Configured {0}: {1}",
   "manageModels.currentSuffix": " (current)",
+  "manageModels.currentLabel": "Current",
 
   "chain.toggled": "Chain prompting {0}.",
   "chain.enabled": "enabled",

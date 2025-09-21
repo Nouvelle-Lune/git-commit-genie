@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { DiffData, DiffHunk, DiffStatus} from '../git/git_types';
 import { API, Change, GitExtension, Repository, Status } from "../git/git";
 import * as path from 'path';
+import { spawn } from 'child_process';
 
 /**
  * Gets the Git API from the VS Code Git extension, if available.
@@ -75,25 +76,62 @@ export class DiffService {
 			console.warn('No Git repository found or it could not be initialized in time.');
 			return [];
 		}
-		// TODO: 适配vscode的智能提交功能（智能提交会在暂存区为空时自动提交所有更改）
-		const indexChanges = repo.state.indexChanges;
+
+		// Gather staged changes; optionally auto-stage everything if enabled and nothing is staged
+		let indexChanges = repo.state.indexChanges;
+		let stagedTemporarily = false;
+		const gitPath = api.git.path;
+		const cwd = repo.rootUri.fsPath;
+		const runGit = async (args: string[]) => new Promise<void>((resolve, reject) => {
+			const child = spawn(gitPath, args, { cwd });
+			let stderr = '';
+			child.stderr.on('data', d => { stderr += String(d); });
+			child.on('error', reject);
+			child.on('close', (code) => {
+				if (code === 0) { resolve(); }
+				else { reject(new Error(`git ${args.join(' ')} failed with code ${code}: ${stderr}`)); }
+			});
+		});
 
 		if (indexChanges.length === 0) {
-			console.warn('No changes found in the Git repository.');
-			return [];
+			const autoStage = vscode.workspace.getConfiguration().get<boolean>('gitCommitGenie.autoStageAllForDiff', false);
+			if (autoStage) {
+				try {
+					await runGit(['add', '-A']);
+					stagedTemporarily = true;
+					await repo.status();
+					indexChanges = repo.state.indexChanges;
+				} catch (e) {
+					console.warn('[Genie] Auto-stage for diff failed:', e);
+				}
+			}
+			if (indexChanges.length === 0) {
+				console.warn('No changes found in the Git repository.');
+				return [];
+			}
 		}
 
 		const diffDataPromises: Promise<DiffData | null>[] = [];
-
-
 		for (const change of indexChanges) {
 			diffDataPromises.push(this.processChange(repo, change));
 		}
-
 		const diffs = await Promise.all(diffDataPromises);
+
+		// Restore index if we temporarily staged files
+		if (stagedTemporarily) {
+			try {
+				await runGit(['reset', '-q', 'HEAD', '--', '.']);
+				await repo.status();
+			} catch (e2) {
+				console.warn('[Genie] Auto-stage cleanup failed:', e2);
+			}
+		}
 
 		return diffs.filter((d): d is DiffData => d !== null && d.status !== 'ignored');
 	}
+
+	// Close outer block if any lingering scopes existed (no-op stylistically)
+
 
 	/**
 	 * Processes a single Change object into a structured DiffData object.
@@ -106,7 +144,6 @@ export class DiffService {
 		const fileName: string = path.relative(repo.rootUri.fsPath, change.uri.fsPath);
 
 		let rawDiff: string;
-		// TODO: 捕获逻辑不够健壮，找不到没有ADD的文件，查阅官方API尝试修复
 		try {
 			if (this.isStaged(change.status)) {
 				rawDiff = await repo.diffIndexWithHEAD(change.uri.fsPath);

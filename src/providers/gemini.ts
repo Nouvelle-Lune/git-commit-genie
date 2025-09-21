@@ -116,12 +116,12 @@ export class GeminiService extends BaseLLMService {
         }
         await this.context.globalState.update(key, now);
         const choice = await vscode.window.showWarningMessage(
-            vscode.l10n.t(I18N.rateLimit.hit, provider, model, 'gitCommitGenie.chainMaxParallel'),
+            vscode.l10n.t(I18N.rateLimit.hit, provider, model, vscode.l10n.t(I18N.settings.chainMaxParallelLabel)),
             vscode.l10n.t(I18N.actions.openSettings),
             vscode.l10n.t(I18N.actions.dismiss)
         );
         if (choice === vscode.l10n.t(I18N.actions.openSettings)) {
-            vscode.commands.executeCommand('workbench.action.openSettings', 'gitCommitGenie.chainMaxParallel');
+            vscode.commands.executeCommand('workbench.action.openSettings', 'gitCommitGenie.chain.maxParallel');
         }
     }
 

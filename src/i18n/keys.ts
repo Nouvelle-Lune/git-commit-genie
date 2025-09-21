@@ -22,7 +22,8 @@ export const L10N_KEYS = {
     noModels: 'manageModels.noModels',
     selectModel: 'manageModels.selectModel',
     configured: 'manageModels.configured',
-    currentSuffix: 'manageModels.currentSuffix'
+    currentSuffix: 'manageModels.currentSuffix',
+    currentLabel: 'manageModels.currentLabel'
   },
   chain: {
     toggled: 'chain.toggled',
@@ -42,6 +43,9 @@ export const L10N_KEYS = {
   },
   rateLimit: {
     hit: 'rateLimit.hit'
+  },
+  settings: {
+    chainMaxParallelLabel: 'settings.chain.maxParallelLabel'
   }
 } as const;
 

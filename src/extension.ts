@@ -77,11 +77,6 @@ export function activate(context: vscode.ExtensionContext) {
 		// Shorten model display: remove trailing date/version suffix like -20250219 or -20250219-v1
 		const shortenModelName = (m: string): string => {
 			if (!m) { return m; }
-			// Common patterns we want to strip:
-			// -YYYYMMDD
-			// -YYYYMMDDv?N (rare)
-			// -YYYYMMDD-vN
-			// Keep the core part before the date if it matches.
 			const datePattern = /(.*?)-(20\d{6})(?:[-]?v?\d+)?$/; // captures prefix and a 4-digit year starting with 20 plus MMDD
 			const match = m.match(datePattern);
 			if (match) {
@@ -90,7 +85,7 @@ export function activate(context: vscode.ExtensionContext) {
 			return m;
 		};
 		const modelLabel = model && model.trim() ? shortenModelName(model.trim()) : vscode.l10n.t(I18N.statusBar.selectModel);
-		statusBarItem.text = `$(chat-sparkle) Genie: ${providerLabel} ${modelLabel}${chainBadge}`;
+		statusBarItem.text = `$(chat-sparkle) Genie: ${modelLabel}${chainBadge}`;
 		statusBarItem.tooltip = model && model.trim()
 			? vscode.l10n.t(I18N.statusBar.tooltipConfigured, providerLabel, model)
 			: vscode.l10n.t(I18N.statusBar.tooltipNeedConfig, providerLabel);
@@ -212,8 +207,16 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 
 		const currentModel = context.globalState.get<string>(modelStateKey, '');
+		const activeProvider = getProvider().toLowerCase();
+		const isActiveProvider = providerPick.value.toLowerCase() === activeProvider;
+		const modelItems: Array<vscode.QuickPickItem & { value: string }> = models.map(m => ({
+			label: m,
+			value: m,
+			description: isActiveProvider && m === currentModel ? vscode.l10n.t(I18N.manageModels.currentLabel) : undefined,
+			picked: isActiveProvider && m === currentModel
+		}));
 		const modelPick = await vscode.window.showQuickPick(
-			models.map(m => ({ label: m + (m === currentModel ? vscode.l10n.t(I18N.manageModels.currentSuffix) : ''), value: m })),
+			modelItems,
 			{ placeHolder: vscode.l10n.t(I18N.manageModels.selectModel, providerPick.label) }
 		);
 		if (!modelPick) { return; }

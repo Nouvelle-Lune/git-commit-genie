@@ -30,7 +30,9 @@
           "order": 1,
           "type": "boolean",
           "default": false,
-          "markdownDescription": "%config.autoStageAllForDiff.desc%"
+          "markdownDescription": "%config.autoStageAllForDiff.desc%",
+          "tags": [
+          "experimental"]
         },
         "gitCommitGenie.gemini.rpmLimit": {
           "type": "number",
