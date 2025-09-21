@@ -2,7 +2,7 @@
 
 # Git Commit Genie
 
-English version: [English README](./README.md)
+English version: [English README](../README.md)
 
 </div>
 

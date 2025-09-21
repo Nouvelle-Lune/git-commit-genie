@@ -2,7 +2,7 @@
 
 # Git Commit Genie
 
-Chinese version: [中文说明](./README.zh-CN.md)
+Chinese version: [中文说明](./docs/README.zh-CN.md)
 
 </div>
 
@@ -18,18 +18,18 @@ Git Commit Genie analyzes your staged Git diff and generates high‑quality Conv
 
 ## Core Features
 
-| Feature | Description |
-|---------|-------------|
-| Multi‑provider LLM support | Supports OpenAI, DeepSeek, Anthropic, Gemini. |
-| Chain Prompting Mode | Optional multi‑step pipeline: per‑file summaries → structured synthesis → validation & minimal fix‑ups (improves accuracy & template adherence). |
-| User Template Strategy | Provide a template file via `gitCommitGenie.templatesPath` to strongly influence body sections, footers, tone, lexicon. Fallback to built‑in rules when absent/invalid. |
-| Conventional Commit Enforcement | Header validation (type, optional scope, optional `!`, ≤ 72 chars, imperative, no trailing period). |
-| Diff Awareness | Only staged changes are analyzed; intelligently classifies type (`feat`, `fix`, `docs`, `refactor`, etc.). |
-| Token & Rate Safeguards | Retry with backoff; local soft limits (Gemini); parallelism control for chain mode. |
-| Status Bar Integration | Shows provider, model, and chain mode badge (`· Chain`). Click to configure. |
-| Cancellation | Cancel in‑progress generation directly from the SCM title bar button. |
-| Secure Secret Storage | API keys stored in VS Code secret storage (not in settings JSON). |
-| Internationalization | Built‑in English + Simplified Chinese. |
+| Feature                         | Description                                                                                                                                                             |
+| ------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Multi‑provider LLM support      | Supports OpenAI, DeepSeek, Anthropic, Gemini.                                                                                                                           |
+| Chain Prompting Mode            | Optional multi‑step pipeline: per‑file summaries → structured synthesis → validation & minimal fix‑ups (improves accuracy & template adherence).                        |
+| User Template Strategy          | Provide a template file via `gitCommitGenie.templatesPath` to strongly influence body sections, footers, tone, lexicon. Fallback to built‑in rules when absent/invalid. |
+| Conventional Commit Enforcement | Header validation (type, optional scope, optional `!`, ≤ 72 chars, imperative, no trailing period).                                                                     |
+| Diff Awareness                  | Only staged changes are analyzed; intelligently classifies type (`feat`, `fix`, `docs`, `refactor`, etc.).                                                              |
+| Token & Rate Safeguards         | Retry with backoff; local soft limits (Gemini); parallelism control for chain mode.                                                                                     |
+| Status Bar Integration          | Shows provider, model, and chain mode badge (`· Chain`). Click to configure.                                                                                            |
+| Cancellation                    | Cancel in‑progress generation directly from the SCM title bar button.                                                                                                   |
+| Secure Secret Storage           | API keys stored in VS Code secret storage (not in settings JSON).                                                                                                       |
+| Internationalization            | Built‑in English + Simplified Chinese.                                                                                                                                  |
 
 ## How It Works
 
@@ -53,34 +53,34 @@ If chain prompting is disabled: single prompt (lower latency, less structural & 
 
 ## Requirements
 
-| Requirement | Notes |
-|-------------|-------|
-| VS Code | Engine `^1.103.0` or newer. |
-| Git Extension | Bundled (`vscode.git`); must be enabled. |
-| Network Access | Needed to call chosen LLM provider. |
-| API Key | For each provider you intend to use (stored securely). |
+| Requirement    | Notes                                                  |
+| -------------- | ------------------------------------------------------ |
+| VS Code        | Engine `^1.103.0` or newer.                            |
+| Git Extension  | Bundled (`vscode.git`); must be enabled.               |
+| Network Access | Needed to call chosen LLM provider.                    |
+| API Key        | For each provider you intend to use (stored securely). |
 
 ## Configuration (Settings)
 
 All settings are under: `Git Commit Genie`.
 
-| Setting | Type | Default | Description |
-|---------|------|---------|-------------|
-| `gitCommitGenie.templatesPath` | string | "" | Absolute path to user commit template file (optional). |
-| `gitCommitGenie.chain.enabled` | boolean | false | Enable multi‑step chain prompting. More accurate, higher latency & token cost. |
-| `gitCommitGenie.chain.maxParallel` | number | 2 | Max parallel LLM calls during chain prompting. Increase carefully to avoid 429s. |
-| `gitCommitGenie.gemini.rpmLimit` | number | 8 | Local soft RPM throttle for Gemini. Adjust for higher tiers. |
-| `gitCommitGenie.gemini.tpmLimit` | number | 200000 | Local soft TPM throttle for Gemini. |
-| `gitCommitGenie.gemini.expectedTokensPerCall` | number | 8000 | Heuristic tokens per call for budgeting. |
+| Setting                                       | Type    | Default | Description                                                                      |
+| --------------------------------------------- | ------- | ------- | -------------------------------------------------------------------------------- |
+| `gitCommitGenie.templatesPath`                | string  | ""      | Absolute path to user commit template file (optional).                           |
+| `gitCommitGenie.chain.enabled`                | boolean | false   | Enable multi‑step chain prompting. More accurate, higher latency & token cost.   |
+| `gitCommitGenie.chain.maxParallel`            | number  | 2       | Max parallel LLM calls during chain prompting. Increase carefully to avoid 429s. |
+| `gitCommitGenie.gemini.rpmLimit`              | number  | 8       | Local soft RPM throttle for Gemini. Adjust for higher tiers.                     |
+| `gitCommitGenie.gemini.tpmLimit`              | number  | 200000  | Local soft TPM throttle for Gemini.                                              |
+| `gitCommitGenie.gemini.expectedTokensPerCall` | number  | 8000    | Heuristic tokens per call for budgeting.                                         |
 
 ## Command List
 
-| Command ID | Title | Purpose |
-|------------|-------|---------|
-| `git-commit-genie.generateCommitMessage` | AI Generate | Produce commit message for staged changes. |
-| `git-commit-genie.cancelGeneration` | Stop | Cancel in‑flight generation. |
-| `git-commit-genie.manageModels` | Manage Models | Select provider, enter/replace API key, choose model. |
-| `git-commit-genie.toggleChainMode` | Toggle Chain Prompting | Quickly enable/disable chain mode. |
+| Command ID                               | Title                  | Purpose                                               |
+| ---------------------------------------- | ---------------------- | ----------------------------------------------------- |
+| `git-commit-genie.generateCommitMessage` | AI Generate            | Produce commit message for staged changes.            |
+| `git-commit-genie.cancelGeneration`      | Stop                   | Cancel in‑flight generation.                          |
+| `git-commit-genie.manageModels`          | Manage Models          | Select provider, enter/replace API key, choose model. |
+| `git-commit-genie.toggleChainMode`       | Toggle Chain Prompting | Quickly enable/disable chain mode.                    |
 
 SCM Title Bar: shows "Generate commit message" or "Stop generate" depending on state.
 
@@ -91,7 +91,7 @@ Provide an absolute path via `gitCommitGenie.templatesPath`. When present & non�
 1. Natural Language bullet preferences.
 2. Embedded JSON Policy block for higher extraction reliability.
 
-Full guides: [English](./user-template-guide.md) | [中文](./user-template-guide.zh-CN.md)
+Full guides: [English](./docs/user-template-guide.md) | [中文](./docs/user-template-guide.zh-CN.md)
 
 Minimum example:
 ```
@@ -104,10 +104,10 @@ Minimal Template
 
 ## Chain Prompting vs Single Shot
 
-| Mode | Pros | Cons | When to Use |
-|------|------|------|-------------|
+| Mode            | Pros                                                       | Cons                         | When to Use                                              |
+| --------------- | ---------------------------------------------------------- | ---------------------------- | -------------------------------------------------------- |
 | Chain Prompting | Best structure, template fidelity, classification accuracy | Higher latency & token usage | Larger multi‑file commits; enforce strict template style |
-| Single Shot | Fast, cheaper | Less nuanced structure | Quick small fix / typo commits |
+| Single Shot     | Fast, cheaper                                              | Less nuanced structure       | Quick small fix / typo commits                           |
 
 Toggle via command or enable permanently in settings.
 
@@ -119,13 +119,13 @@ Toggle via command or enable permanently in settings.
 
 ## Troubleshooting
 
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| "No staged changes found" | You haven't staged files | Stage with Source Control view or `git add`. |
-| Empty / generic output | Template unclear | Add JSON Policy block for clearer extraction. |
-| Frequent 429 / rate limit | Parallelism too high | Lower `chain.maxParallel`; reduce template size. |
-| Chain badge missing | Chain disabled | Toggle via command or setting. |
-| Asked for API key again | Secret cleared | Re‑enter via Manage Models. |
+| Symptom                   | Cause                    | Fix                                              |
+| ------------------------- | ------------------------ | ------------------------------------------------ |
+| "No staged changes found" | You haven't staged files | Stage with Source Control view or `git add`.     |
+| Empty / generic output    | Template unclear         | Add JSON Policy block for clearer extraction.    |
+| Frequent 429 / rate limit | Parallelism too high     | Lower `chain.maxParallel`; reduce template size. |
+| Chain badge missing       | Chain disabled           | Toggle via command or setting.                   |
+| Asked for API key again   | Secret cleared           | Re‑enter via Manage Models.                      |
 
 ## License
 

@@ -19,8 +19,11 @@ out
 .github/
 .kilocode/
 .kilocodemodes
-docs/
+docs_/
 
 
 # tests
 tests/
+
+.gitignore
+
