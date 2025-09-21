@@ -6,9 +6,7 @@ dist
 out
 
 # VSCode
-.vscode/
 .vscode-test/
-.vscodeignore
 *.vsix
 
 # Mac
@@ -23,11 +21,6 @@ out
 .kilocodemodes
 docs/
 
-# tsconfig
-tsconfig.json
-eslint.config.mjs
-
-package-lock.json
 
 # tests
 tests/
