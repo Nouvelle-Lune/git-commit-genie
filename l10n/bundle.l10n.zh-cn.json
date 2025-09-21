@@ -1,0 +1,20 @@
+{
+  "status.tooltip.configured": "Git Commit Genie: {0} / {1}",
+  "status.tooltip.needConfig": "Git Commit Genie: {0} — 点击以配置模型",
+
+  "manageModels.selectProvider": "选择一个提供商…",
+  "manageModels.savedKeyDetected": "检测到已保存的 {0} API Key",
+  "manageModels.reuseSavedKey": "使用已保存的 Key ({0})",
+  "manageModels.replaceKey": "更换 Key",
+  "manageModels.clearReenter": "清除并重新输入",
+  "manageModels.cancel": "取消",
+  "manageModels.enterNewKeyTitle": "输入新的 {0} API Key",
+  "manageModels.enterKeyTitle": "输入 {0} API Key",
+  "manageModels.listingModels": "正在使用已保存 Key 获取 {0} 模型…",
+  "manageModels.validatingKey": "正在验证 {0} API Key…",
+  "manageModels.noModels": "未获取到可用模型。",
+  "manageModels.selectModel": "选择一个 {0} 模型…",
+  "manageModels.configured": "已配置 {0}: {1}",
+
+  "chain.toggled": "链式提示已{0}."
+}

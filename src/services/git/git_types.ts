@@ -24,4 +24,5 @@ export interface DiffData {
   status: DiffStatus;
   diffHunks: DiffHunk[];
   rawDiff: string; // Keep the raw diff for context or fallback
+  userPrompt?: string;
 }

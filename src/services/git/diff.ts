@@ -127,7 +127,6 @@ export class DiffService {
 
 		const diffHunks: DiffHunk[] = this.parseDiff(rawDiff);
 
-		console.log(`Diff for ${fileName}:\n`, rawDiff);
 		
 		return {
 			fileName,

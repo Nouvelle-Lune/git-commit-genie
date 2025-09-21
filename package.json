@@ -1,0 +1,175 @@
+{
+  "name": "git-commit-genie",
+  "displayName": "%displayName%",
+  "publisher": "Lune",
+  "description": "%description%",
+  "version": "0.0.1",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.103.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "l10n": "./l10n",
+  "contributes": {
+    "configuration": {
+      "title": "Git Commit Genie",
+      "properties": {
+        "gitCommitGenie.templatesPath": {
+          "order": 0,
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%config.templatesPath.desc%"
+        },
+        "gitCommitGenie.gemini.rpmLimit": {
+          "type": "number",
+          "default": 8,
+          "minimum": 1,
+          "markdownDescription": "%config.gemini.rpmLimit.desc%"
+        },
+        "gitCommitGenie.gemini.tpmLimit": {
+          "type": "number",
+          "default": 200000,
+          "minimum": 1000,
+          "markdownDescription": "%config.gemini.tpmLimit.desc%"
+        },
+        "gitCommitGenie.gemini.expectedTokensPerCall": {
+          "type": "number",
+          "default": 8000,
+          "minimum": 512,
+          "markdownDescription": "%config.gemini.expectedTokensPerCall.desc%"
+        },
+        "gitCommitGenie.chain.enabled": {
+          "order": 1,
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%config.chain.enabled.desc%"
+        },
+        "gitCommitGenie.chain.maxParallel": {
+          "order": 2,
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "markdownDescription": "%config.chain.maxParallelNew.desc%"
+        },
+        "gitCommitGenie.useChainPrompts": {
+          "order": 1,
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%config.useChainPrompts.desc%",
+          "deprecationMessage": "Deprecated: use gitCommitGenie.chain.enabled instead"
+        },
+        "gitCommitGenie.chainMaxParallel": {
+          "order": 2,
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "markdownDescription": "%config.chainMaxParallel.desc%",
+          "deprecationMessage": "Deprecated: use gitCommitGenie.chain.maxParallel instead"
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "git-commit-genie.generateCommitMessage",
+        "title": "%command.generate%",
+        "icon": "$(chat-sparkle)"
+      },
+      {
+        "command": "git-commit-genie.cancelGeneration",
+        "title": "%command.cancel%",
+        "icon": "$(stop-circle)",
+        "category": "Git Commit Genie"
+      },
+      {
+        "command": "git-commit-genie.manageModels",
+        "title": "%command.manageModels%",
+        "category": "Git Commit Genie",
+        "icon": "$(gear)"
+      },
+      {
+        "command": "git-commit-genie.toggleChainMode",
+        "title": "%command.toggleChain%",
+        "category": "Git Commit Genie",
+        "icon": "$(circuit-board)"
+      }
+    ],
+    "menus": {
+      "scm/title": [
+        {
+          "command": "git-commit-genie.generateCommitMessage",
+          "when": "scmProvider == 'git' && gitCommitGenie.generating != true",
+          "group": "navigation@1000"
+        },
+        {
+          "command": "git-commit-genie.cancelGeneration",
+          "when": "scmProvider == 'git' && gitCommitGenie.generating == true",
+          "group": "navigation@1000"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "git-commit-genie-sidebar",
+          "title": "Git Commit Genie",
+          "icon": "media/icon.svg",
+          "when": "false"
+        }
+      ]
+    },
+    "views": {
+      "git-commit-genie-sidebar": [
+        {
+          "id": "git-commit-genie.sidebar",
+          "name": "Chat",
+          "type": "webview",
+          "when": "false"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "clean": "rm -rf out",
+    "vscode:prepublish": "npm run clean && npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile && npm run lint",
+    "lint": "eslint src",
+    "test": "vscode-test"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "22.x",
+    "@types/sinon": "^17.0.4",
+    "@types/vscode": "^1.103.0",
+    "@typescript-eslint/eslint-plugin": "^8.39.0",
+    "@typescript-eslint/parser": "^8.39.0",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
+    "eslint": "^9.32.0",
+    "sinon": "^21.0.0",
+    "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.63.0",
+    "@google/genai": "^0.3.1",
+    "openai": "^4.0.0"
+  },
+  "extensionDependencies": [
+    "vscode.git"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://example.com/placeholder/git-commit-genie.git"
+  },
+  "homepage": "https://example.com/placeholder/git-commit-genie#readme",
+  "bugs": {
+    "url": "https://example.com/placeholder/git-commit-genie/issues"
+  }
+}

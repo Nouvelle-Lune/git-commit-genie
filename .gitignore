@@ -28,10 +28,6 @@ tsconfig.json
 eslint.config.mjs
 
 package-lock.json
-package.json
-
-# Readme
-README.md
 
 # tests
 tests/

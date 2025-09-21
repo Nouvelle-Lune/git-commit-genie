@@ -1,0 +1,20 @@
+{
+  "status.tooltip.configured": "Git Commit Genie: {0} / {1}",
+  "status.tooltip.needConfig": "Git Commit Genie: {0} — click to configure models",
+
+  "manageModels.selectProvider": "Select a provider…",
+  "manageModels.savedKeyDetected": "Saved {0} API Key detected",
+  "manageModels.reuseSavedKey": "Reuse saved key ({0})",
+  "manageModels.replaceKey": "Replace key",
+  "manageModels.clearReenter": "Clear & re-enter",
+  "manageModels.cancel": "Cancel",
+  "manageModels.enterNewKeyTitle": "Enter new {0} API Key",
+  "manageModels.enterKeyTitle": "Enter {0} API Key",
+  "manageModels.listingModels": "Listing {0} models using saved key…",
+  "manageModels.validatingKey": "Validating {0} API Key…",
+  "manageModels.noModels": "No models available.",
+  "manageModels.selectModel": "Select a {0} model…",
+  "manageModels.configured": "Configured {0}: {1}",
+
+  "chain.toggled": "Chain prompting {0}."
+}
