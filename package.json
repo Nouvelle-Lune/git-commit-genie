@@ -56,7 +56,10 @@
           "order": 1,
           "type": "boolean",
           "default": false,
-          "markdownDescription": "%config.chain.enabled.desc%"
+          "markdownDescription": "%config.chain.enabled.desc%",
+          "tags": [
+            "experimental"
+          ]
         },
         "gitCommitGenie.chain.maxParallel": {
           "order": 2,
@@ -65,13 +68,6 @@
           "minimum": 1,
           "markdownDescription": "%config.chain.maxParallelNew.desc%"
         },
-        "gitCommitGenie.useChainPrompts": {
-          "order": 1,
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "%config.useChainPrompts.desc%",
-          "deprecationMessage": "Deprecated: use gitCommitGenie.chain.enabled instead"
-        },
         "gitCommitGenie.chainMaxParallel": {
           "order": 2,
           "type": "number",
@@ -79,6 +75,26 @@
           "minimum": 1,
           "markdownDescription": "%config.chainMaxParallel.desc%",
           "deprecationMessage": "Deprecated: use gitCommitGenie.chain.maxParallel instead"
+        },
+        "gitCommitGenie.workspaceFiles.enabled": {
+          "order": 3,
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.workspaceFiles.enabled.desc%"
+        },
+        "gitCommitGenie.workspaceFiles.maxFiles": {
+          "order": 4,
+          "type": "number",
+          "default": 2000,
+          "minimum": 0,
+          "markdownDescription": "%config.workspaceFiles.maxFiles.desc%"
+        },
+        "gitCommitGenie.workspaceFiles.excludePatterns": {
+          "order": 5,
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "%config.workspaceFiles.excludePatterns.desc%"
         }
       }
     },
@@ -86,7 +102,7 @@
       {
         "command": "git-commit-genie.generateCommitMessage",
         "title": "%command.generate%",
-        "icon": "$(chat-sparkle)"
+        "icon": "media/Genie.svg"
       },
       {
         "command": "git-commit-genie.cancelGeneration",
@@ -126,7 +142,7 @@
         {
           "id": "git-commit-genie-sidebar",
           "title": "%views.activitybar.title%",
-          "icon": "media/icon.svg",
+          "icon": "media/Genie.svg",
           "when": "false"
         }
       ]
