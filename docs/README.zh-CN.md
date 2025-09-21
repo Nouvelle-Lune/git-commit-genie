@@ -19,6 +19,8 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 ## Usage
 <img src="../media/demo.gif" width="200"/>
 
+## 格式
+
 默认生成的提交信息遵循 Conventional Commits 1.0.0 规范，详情见：https://www.conventionalcommits.org/en/v1.0.0/#specification
 
 基本格式：

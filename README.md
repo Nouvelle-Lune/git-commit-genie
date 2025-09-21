@@ -13,6 +13,8 @@ Git Commit Genie analyzes your staged Git diff and generates high‑quality Conv
 ## Usage
 <img src="./media/demo.gif" width="200"/>
 
+## Format
+
 By default, generated commit messages follow the Conventional Commits 1.0.0 specification. See the spec: https://www.conventionalcommits.org/en/v1.0.0/#specification
 
 Basic format:
