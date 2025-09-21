@@ -103,8 +103,6 @@ export function activate(context: vscode.ExtensionContext) {
 		);
 	}
 
-	// No config watchers: provider/model are now stored in globalState and API keys in SecretStorage
-
 	// Manage Models: provider -> API key -> model selection
 	context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.manageModels', async () => {
 		const providerPick = await vscode.window.showQuickPick([

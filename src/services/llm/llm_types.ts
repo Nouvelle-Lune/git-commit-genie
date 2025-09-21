@@ -7,48 +7,48 @@ import { DiffData } from '../git/git_types';
  * Represents the response from the LLM service.
  */
 export interface LLMResponse {
-  	content: string;
+	content: string;
 }
 
 /**
  * Represents an error from the LLM service.
  */
 export interface LLMError {
-  	message: string;
-  	statusCode?: number;
+	message: string;
+	statusCode?: number;
 }
 
 /**
  * Interface for an LLM service provider.
  */
 export interface LLMService {
-  
-  	refreshFromSettings(): Promise<void>;
-  
-    validateApiKeyAndListModels(apiKey: string): Promise<string[]>;
-  
-  	setApiKey(apiKey: string): Promise<void>;
-  
-  	clearApiKey(): Promise<void>;
 
-  	generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
+	refreshFromSettings(): Promise<void>;
+
+	validateApiKeyAndListModels(apiKey: string): Promise<string[]>;
+
+	setApiKey(apiKey: string): Promise<void>;
+
+	clearApiKey(): Promise<void>;
+
+	generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
 
 }
 
 export abstract class BaseLLMService implements LLMService {
-    protected context: vscode.ExtensionContext;
+	protected context: vscode.ExtensionContext;
 
-    constructor(context: vscode.ExtensionContext) {
-	  this.context = context;
-    }
+	constructor(context: vscode.ExtensionContext) {
+		this.context = context;
+	}
 
-  	abstract refreshFromSettings(): Promise<void>;
-  	abstract validateApiKeyAndListModels(apiKey: string): Promise<string[]>;
-  	abstract setApiKey(apiKey: string): Promise<void>;
-  	abstract clearApiKey(): Promise<void>;
-  	abstract generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
+	abstract refreshFromSettings(): Promise<void>;
+	abstract validateApiKeyAndListModels(apiKey: string): Promise<string[]>;
+	abstract setApiKey(apiKey: string): Promise<void>;
+	abstract clearApiKey(): Promise<void>;
+	abstract generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
 
-    	protected async buildJsonDiff(diffs: DiffData[], templatesPath?: string): Promise<string> {
+	protected async buildJsonDiff(diffs: DiffData[], templatesPath?: string): Promise<string> {
 		const time = new Date().toISOString();
 
 		// Settings for workspace files payload
@@ -204,4 +204,4 @@ export abstract class BaseLLMService implements LLMService {
 		};
 		return JSON.stringify(data, null, 2);
 	}
-	}
+}
