@@ -73,7 +73,7 @@ export function activate(context: vscode.ExtensionContext) {
 		const model = getModel(provider);
 		const providerLabel = provider === 'deepseek' ? 'DeepSeek' : provider === 'anthropic' ? 'Anthropic' : provider === 'gemini' ? 'Gemini' : 'OpenAI';
 		const chain = readChainEnabled();
-		const chainBadge = chain ? ' · Chain' : '';
+		const chainBadge = chain ? vscode.l10n.t(I18N.statusBar.chainBadge) : '';
 		// Shorten model display: remove trailing date/version suffix like -20250219 or -20250219-v1
 		const shortenModelName = (m: string): string => {
 			if (!m) { return m; }
@@ -89,7 +89,7 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			return m;
 		};
-		const modelLabel = model && model.trim() ? shortenModelName(model.trim()) : vscode.l10n.t('gitCommitGenie.statusBar.selectModel', 'Select Model');
+		const modelLabel = model && model.trim() ? shortenModelName(model.trim()) : vscode.l10n.t(I18N.statusBar.selectModel);
 		statusBarItem.text = `$(chat-sparkle) Genie: ${providerLabel} ${modelLabel}${chainBadge}`;
 		statusBarItem.tooltip = model && model.trim()
 			? vscode.l10n.t(I18N.statusBar.tooltipConfigured, providerLabel, model)
@@ -213,7 +213,7 @@ export function activate(context: vscode.ExtensionContext) {
 
 		const currentModel = context.globalState.get<string>(modelStateKey, '');
 		const modelPick = await vscode.window.showQuickPick(
-			models.map(m => ({ label: m + (m === currentModel ? vscode.l10n.t(' (current)') : ''), value: m })),
+			models.map(m => ({ label: m + (m === currentModel ? vscode.l10n.t(I18N.manageModels.currentSuffix) : ''), value: m })),
 			{ placeHolder: vscode.l10n.t(I18N.manageModels.selectModel, providerPick.label) }
 		);
 		if (!modelPick) { return; }
@@ -277,14 +277,14 @@ export function activate(context: vscode.ExtensionContext) {
 		currentCancelSource = cts;
 		vscode.window.withProgress({
 			location: vscode.ProgressLocation.SourceControl,
-			title: 'AI Generating Commit Message...',
+			title: vscode.l10n.t(I18N.generation.progressTitle),
 			cancellable: true,
 		}, async (progress, token) => {
 			token.onCancellationRequested(() => cts.cancel());
 			try {
 				const diffs = await diffService.getDiff();
 				if (diffs.length === 0) {
-					vscode.window.showInformationMessage('No staged changes found.');
+					vscode.window.showInformationMessage(vscode.l10n.t(I18N.generation.noStagedChanges));
 					return;
 				}
 
@@ -303,16 +303,16 @@ export function activate(context: vscode.ExtensionContext) {
 						return;
 					}
 					if (result.statusCode === 499 || /Cancelled/i.test(result.message)) {
-						vscode.window.showInformationMessage('AI generation cancelled.');
+						vscode.window.showInformationMessage(vscode.l10n.t(I18N.generation.cancelled));
 					} else {
-						vscode.window.showErrorMessage(`Error generating commit message: ${result.message}`);
+						vscode.window.showErrorMessage(vscode.l10n.t(I18N.generation.errorGenerating, result.message));
 					}
 				}
 			} catch (error: any) {
 				if (cts.token.isCancellationRequested) {
-					vscode.window.showInformationMessage('AI generation cancelled.');
+					vscode.window.showInformationMessage(vscode.l10n.t(I18N.generation.cancelled));
 				} else {
-					vscode.window.showErrorMessage(`Failed to generate commit message: ${error.message}`);
+					vscode.window.showErrorMessage(vscode.l10n.t(I18N.generation.failedToGenerate, error.message));
 				}
 			} finally {
 				cts.dispose();
@@ -337,7 +337,12 @@ export function activate(context: vscode.ExtensionContext) {
 		await currentCfg.update('gitCommitGenie.useChainPrompts', !current, vscode.ConfigurationTarget.Global);
 		await context.globalState.update('gitCommitGenie.useChainPrompts', !current);
 		updateStatusBar();
-		vscode.window.showInformationMessage(vscode.l10n.t(I18N.chain.toggled, !current ? 'enabled' : 'disabled'));
+		vscode.window.showInformationMessage(
+			vscode.l10n.t(
+				I18N.chain.toggled,
+				!current ? vscode.l10n.t(I18N.chain.enabled) : vscode.l10n.t(I18N.chain.disabled)
+			)
+		);
 	}));
 
 	// Listen to configuration changes for useChainPrompts to refresh UI

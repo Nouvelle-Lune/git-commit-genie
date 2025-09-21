@@ -1,6 +1,8 @@
 {
   "status.tooltip.configured": "Git Commit Genie: {0} / {1}",
   "status.tooltip.needConfig": "Git Commit Genie: {0} — 点击以配置模型",
+  "gitCommitGenie.statusBar.selectModel": "选择模型",
+  "status.chainBadge": " · Chain",
 
   "manageModels.selectProvider": "选择一个提供商…",
   "manageModels.savedKeyDetected": "检测到已保存的 {0} API Key",
@@ -15,6 +17,19 @@
   "manageModels.noModels": "未获取到可用模型。",
   "manageModels.selectModel": "选择一个 {0} 模型…",
   "manageModels.configured": "已配置 {0}: {1}",
+  "manageModels.currentSuffix": "（当前）",
 
-  "chain.toggled": "链式提示已{0}."
+  "chain.toggled": "链式提示已{0}.",
+  "chain.enabled": "启用",
+  "chain.disabled": "禁用",
+
+  "generation.progressTitle": "AI 正在生成提交信息…",
+  "generation.noStagedChanges": "未找到已暂存的更改。",
+  "generation.cancelled": "已取消 AI 生成。",
+  "generation.errorGenerating": "生成提交信息出错：{0}",
+  "generation.failedToGenerate": "生成提交信息失败：{0}",
+
+  "rateLimit.hit": "已触发 {0}（{1}）的速率限制。请考虑降低链式并发（{2}）或升级您的套餐。",
+  "action.openSettings": "打开设置",
+  "action.dismiss": "忽略"
 }

@@ -3,6 +3,7 @@ import { DiffService } from '../services/git/diff';
 
 import { OpenAIService } from '../providers/openai';
 import { DeepSeekService } from "../providers/deepseek";
+import { L10N_KEYS as I18N } from '../i18n/keys';
 
 
 export class SidebarView implements vscode.WebviewViewProvider {
@@ -40,7 +41,7 @@ export class SidebarView implements vscode.WebviewViewProvider {
                     {
                         const diffs = await this._diffService.getDiff();
                         if (diffs.length === 0) {
-                            vscode.window.showInformationMessage("No staged changes found.");
+                            vscode.window.showInformationMessage(vscode.l10n.t(I18N.generation.noStagedChanges));
                             return;
                         }
 
@@ -62,7 +63,7 @@ export class SidebarView implements vscode.WebviewViewProvider {
                                 content: result.content
                             });
                         } else {
-                            vscode.window.showErrorMessage(`Error generating commit message: ${result.message}`);
+                            vscode.window.showErrorMessage(vscode.l10n.t(I18N.generation.errorGenerating, result.message));
                         }
 
                         break;

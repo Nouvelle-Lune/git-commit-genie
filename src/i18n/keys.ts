@@ -4,7 +4,9 @@
 export const L10N_KEYS = {
   statusBar: {
     tooltipConfigured: 'status.tooltip.configured',
-    tooltipNeedConfig: 'status.tooltip.needConfig'
+    tooltipNeedConfig: 'status.tooltip.needConfig',
+    selectModel: 'gitCommitGenie.statusBar.selectModel',
+    chainBadge: 'status.chainBadge'
   },
   manageModels: {
     selectProvider: 'manageModels.selectProvider',
@@ -19,10 +21,27 @@ export const L10N_KEYS = {
     validatingKey: 'manageModels.validatingKey',
     noModels: 'manageModels.noModels',
     selectModel: 'manageModels.selectModel',
-    configured: 'manageModels.configured'
+    configured: 'manageModels.configured',
+    currentSuffix: 'manageModels.currentSuffix'
   },
   chain: {
-    toggled: 'chain.toggled'
+    toggled: 'chain.toggled',
+    enabled: 'chain.enabled',
+    disabled: 'chain.disabled'
+  },
+  generation: {
+    progressTitle: 'generation.progressTitle',
+    noStagedChanges: 'generation.noStagedChanges',
+    cancelled: 'generation.cancelled',
+    errorGenerating: 'generation.errorGenerating',
+    failedToGenerate: 'generation.failedToGenerate'
+  },
+  actions: {
+    openSettings: 'action.openSettings',
+    dismiss: 'action.dismiss'
+  },
+  rateLimit: {
+    hit: 'rateLimit.hit'
   }
 } as const;
 

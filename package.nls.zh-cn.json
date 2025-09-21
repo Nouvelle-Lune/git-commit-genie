@@ -1,6 +1,10 @@
 {
   "displayName": "Git Commit Genie",
   "description": "AI 辅助的提交信息生成",
+  "configuration.title": "Git Commit Genie",
+  "category.title": "Git Commit Genie",
+  "views.activitybar.title": "Git Commit Genie",
+  "views.sidebar.chat": "聊天",
   "command.generate": "生成提交信息",
   "command.cancel": "停止生成",
   "command.manageModels": "Git Commit Genie: 管理模型",

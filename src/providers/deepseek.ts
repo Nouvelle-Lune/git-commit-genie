@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { LLMError, LLMResponse } from '../services/llm/llm_types';
 import { BaseLLMService } from "../services/llm/llm_types";
+import { L10N_KEYS as I18N } from '../i18n/keys';
 import { DiffData } from '../services/git/git_types';
 import OpenAI from 'openai';
 import { generateCommitMessageChain, ChatFn } from "../services/llm/utils/chainPrompts";
@@ -86,11 +87,11 @@ export class DeepSeekService extends BaseLLMService {
         if (now - last < 60_000) return;
         await this.context.globalState.update(key, now);
         const choice = await vscode.window.showWarningMessage(
-            `Rate limit hit for ${provider} (${model}). Consider lowering chain concurrency (gitCommitGenie.chainMaxParallel) or upgrading your plan.`,
-            'Open Settings',
-            'Dismiss'
+            vscode.l10n.t(I18N.rateLimit.hit, provider, model, 'gitCommitGenie.chainMaxParallel'),
+            vscode.l10n.t(I18N.actions.openSettings),
+            vscode.l10n.t(I18N.actions.dismiss)
         );
-        if (choice === 'Open Settings') {
+        if (choice === vscode.l10n.t(I18N.actions.openSettings)) {
             vscode.commands.executeCommand('workbench.action.openSettings', 'gitCommitGenie.chainMaxParallel');
         }
     }

@@ -18,7 +18,7 @@
   "l10n": "./l10n",
   "contributes": {
     "configuration": {
-      "title": "Git Commit Genie",
+      "title": "%configuration.title%",
       "properties": {
         "gitCommitGenie.templatesPath": {
           "order": 0,
@@ -84,18 +84,18 @@
         "command": "git-commit-genie.cancelGeneration",
         "title": "%command.cancel%",
         "icon": "$(stop-circle)",
-        "category": "Git Commit Genie"
+        "category": "%category.title%"
       },
       {
         "command": "git-commit-genie.manageModels",
         "title": "%command.manageModels%",
-        "category": "Git Commit Genie",
+        "category": "%category.title%",
         "icon": "$(gear)"
       },
       {
         "command": "git-commit-genie.toggleChainMode",
         "title": "%command.toggleChain%",
-        "category": "Git Commit Genie",
+        "category": "%category.title%",
         "icon": "$(circuit-board)"
       }
     ],
@@ -117,7 +117,7 @@
       "activitybar": [
         {
           "id": "git-commit-genie-sidebar",
-          "title": "Git Commit Genie",
+          "title": "%views.activitybar.title%",
           "icon": "media/icon.svg",
           "when": "false"
         }
@@ -127,7 +127,7 @@
       "git-commit-genie-sidebar": [
         {
           "id": "git-commit-genie.sidebar",
-          "name": "Chat",
+          "name": "%views.sidebar.chat%",
           "type": "webview",
           "when": "false"
         }

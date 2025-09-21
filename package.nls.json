@@ -1,6 +1,10 @@
 {
   "displayName": "Git Commit Genie",
   "description": "AI assisted commit message generation.",
+  "configuration.title": "Git Commit Genie",
+  "category.title": "Git Commit Genie",
+  "views.activitybar.title": "Git Commit Genie",
+  "views.sidebar.chat": "Chat",
   "command.generate": "Generate commit message",
   "command.cancel": "Stop generate",
   "command.manageModels": "Git Commit Genie: Manage Models",

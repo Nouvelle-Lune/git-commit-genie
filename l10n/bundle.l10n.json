@@ -1,6 +1,8 @@
 {
   "status.tooltip.configured": "Git Commit Genie: {0} / {1}",
   "status.tooltip.needConfig": "Git Commit Genie: {0} — click to configure models",
+  "gitCommitGenie.statusBar.selectModel": "Select Model",
+  "status.chainBadge": " · Chain",
 
   "manageModels.selectProvider": "Select a provider…",
   "manageModels.savedKeyDetected": "Saved {0} API Key detected",
@@ -15,6 +17,19 @@
   "manageModels.noModels": "No models available.",
   "manageModels.selectModel": "Select a {0} model…",
   "manageModels.configured": "Configured {0}: {1}",
+  "manageModels.currentSuffix": " (current)",
 
-  "chain.toggled": "Chain prompting {0}."
+  "chain.toggled": "Chain prompting {0}.",
+  "chain.enabled": "enabled",
+  "chain.disabled": "disabled",
+
+  "generation.progressTitle": "AI Generating Commit Message…",
+  "generation.noStagedChanges": "No staged changes found.",
+  "generation.cancelled": "AI generation cancelled.",
+  "generation.errorGenerating": "Error generating commit message: {0}",
+  "generation.failedToGenerate": "Failed to generate commit message: {0}",
+
+  "rateLimit.hit": "Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.",
+  "action.openSettings": "Open Settings",
+  "action.dismiss": "Dismiss"
 }
