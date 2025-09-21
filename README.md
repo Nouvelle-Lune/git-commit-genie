@@ -42,7 +42,7 @@ Basic format:
 | Conventional Commit Enforcement | Header validation (type, optional scope, optional `!`, ≤ 72 chars, imperative, no trailing period).                                                                     |
 | Diff Awareness                  | Only staged changes are analyzed; intelligently classifies type (`feat`, `fix`, `docs`, `refactor`, etc.).                                                              |
 | Token & Rate Safeguards         | Retry with backoff; local soft limits (Gemini); parallelism control for chain mode.                                                                                     |
-| Status Bar Integration          | Shows provider, model, and chain mode badge (`· Chain`). Click to configure.                                                                                            |
+| Status Bar Integration          | Shows model. Click to configure.                                                                                                                                        |
 | Cancellation                    | Cancel in‑progress generation directly from the SCM title bar button.                                                                                                   |
 | Secure Secret Storage           | API keys stored in VS Code secret storage (not in settings JSON).                                                                                                       |
 | Internationalization            | Built‑in English + Simplified Chinese.                                                                                                                                  |
@@ -51,13 +51,12 @@ Basic format:
 
 1. You stage your changes.
 2. Run command: `Git Commit Genie: AI Generate` (SCM toolbar button or Command Palette).
-3. Genie collects structured diffs (staged only) via the official Git extension API.
-4. If Chain Prompting is enabled:
-	- Generate file‑level summaries in parallel (bounded by `gitCommitGenie.chain.maxParallel`).
+3. If Chain Prompting is enabled:
+	- Generate file‑level summaries in parallel
 	- Synthesize & classify change type and scope.
 	- Apply template policy (if valid) to shape body & footers.
 	- Run structural + style self‑check and minimal fix‑ups.
-5. Result is injected into the repository input box—review / tweak / commit.
+4. Result is injected into the repository input box—review / tweak / commit.
 
 If chain prompting is disabled: single prompt (lower latency, less structural & stylistic richness).
 

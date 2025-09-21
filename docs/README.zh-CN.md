@@ -45,10 +45,10 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | 多模型提供商             | 支持 OpenAI、DeepSeek、Anthropic、Gemini等。                                                                                   |
 | 链式提示模式             | 多步：文件级摘要 → 结构化综合 → 校验修复，显著提升准确度与模板贴合度。                                                         |
 | 用户模板策略             | 通过 `gitCommitGenie.templatesPath` 指向模板文件，抽取策略影响段落顺序、必填 footers、词汇偏好等。无模板或无效时回退默认规则。 |
-| Conventional Commit 校验 | 头行格式（type(scope)!: desc），长度 ≤ 72，祈使句，无句号。                                                                    |
+| Conventional Commit 校验 | 头行格式（type(scope)!: desc），长度 ≤ 72，无句号。                                                                            |
 | Diff 感知                | 仅读取“已暂存”更改；自动推断类型（feat / fix / docs / refactor 等）。                                                          |
 | Token 与速率保护         | 429 自动退避重试；Gemini 软限本地节流；并发可配置。                                                                            |
-| 状态栏集成               | 显示当前 Provider + Model + 链式标记“· Chain”，可点击管理。                                                                    |
+| 状态栏集成               | 显示当前 Model，可点击管理。                                                                                                   |
 | 生成取消                 | SCM 标题栏按钮可实时取消正在进行的生成。                                                                                       |
 | 安全存储                 | API Key 使用 VS Code SecretStorage，不写入明文设置。                                                                           |
 | 国际化支持               | 内置英文 + 简体中文。                                                                                                          |
@@ -57,13 +57,12 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 
 1. 暂存（Stage）你的变更。
 2. 执行命令：`Git Commit Genie: AI Generate`（SCM 顶部按钮或命令面板）。
-3. 扩展通过 Git 官方 API 收集结构化 diff。
-4. 若开启链式模式：
-   - 并行生成文件级摘要（受 `gitCommitGenie.chain.maxParallel` 限制）
+3. 若开启链式模式：
+   - 并行生成文件级摘要
    - 综合分析类型与 scope
    - 应用模板策略（若有效）
    - 结构 + 风格自检与最小修复
-5. 输出写入仓库提交框，可人工微调后提交。
+4. 输出写入仓库提交框，可人工微调后提交。
 
 未开启链式：使用单轮提示 → 更低延迟，但结构与风格细腻度稍弱。
 
@@ -162,4 +161,4 @@ MIT
 
 ---
 
-让提交信息再也不痛苦。
+让提交信息不再痛苦。
