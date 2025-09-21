@@ -26,6 +26,12 @@
           "default": "",
           "markdownDescription": "%config.templatesPath.desc%"
         },
+        "gitCommitGenie.autoStageAllForDiff": {
+          "order": 1,
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%config.autoStageAllForDiff.desc%"
+        },
         "gitCommitGenie.gemini.rpmLimit": {
           "type": "number",
           "default": 8,

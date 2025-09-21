@@ -10,6 +10,7 @@
   "command.manageModels": "Git Commit Genie: Manage Models",
   "command.toggleChain": "Git Commit Genie: Toggle Chain Prompting",
   "config.templatesPath.desc": "Path to a custom commit message template file (optional).",
+  "config.autoStageAllForDiff.desc": "If no staged changes, temporarily stage all (git add -A) to collect diffs, then restore the index (git reset HEAD -- .). Only the index is touched; your working tree remains unchanged.",
   "config.chain.enabled.desc": "Enable multi-step chain prompting for commit generation (It makes the generated commit messages more detailed and accurate, and better aligns with the user's template, but it will increase latency and token consumption).",
   "config.chain.maxParallelNew.desc": "Maximum parallel LLM calls used by chain prompting across all providers. Increase carefully to avoid provider rate limits.",
   "config.gemini.rpmLimit.desc": "Gemini soft Requests-Per-Minute limit used by local throttling. Tip: For free tier keep <= 8 (official ~10 RPM) to avoid 429; increase for higher tiers.",
