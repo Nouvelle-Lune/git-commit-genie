@@ -1,51 +1,52 @@
-// Centralized localization keys used in runtime code.
-// Use vscode.l10n.t(keys.something) to translate.
+// Centralized localization messages (English defaults) used in runtime code.
+// Use vscode.l10n.t(I18N.something) to translate. In the default
+// language (en), vscode.l10n returns the message as-is.
 
 export const L10N_KEYS = {
   statusBar: {
-    tooltipConfigured: 'status.tooltip.configured',
-    tooltipNeedConfig: 'status.tooltip.needConfig',
-    selectModel: 'gitCommitGenie.statusBar.selectModel',
-    chainBadge: 'status.chainBadge'
+    tooltipConfigured: 'Git Commit Genie: {0} / {1}',
+    tooltipNeedConfig: 'Git Commit Genie: {0} — click to configure models',
+    selectModel: 'Select Model',
+    chainBadge: ' · Chain'
   },
   manageModels: {
-    selectProvider: 'manageModels.selectProvider',
-    savedKeyDetected: 'manageModels.savedKeyDetected',
-    reuseSavedKey: 'manageModels.reuseSavedKey',
-    replaceKey: 'manageModels.replaceKey',
-    clearReenter: 'manageModels.clearReenter',
-    cancel: 'manageModels.cancel',
-    enterNewKeyTitle: 'manageModels.enterNewKeyTitle',
-    enterKeyTitle: 'manageModels.enterKeyTitle',
-    listingModels: 'manageModels.listingModels',
-    validatingKey: 'manageModels.validatingKey',
-    noModels: 'manageModels.noModels',
-    selectModel: 'manageModels.selectModel',
-    configured: 'manageModels.configured',
-    currentSuffix: 'manageModels.currentSuffix',
-    currentLabel: 'manageModels.currentLabel'
+    selectProvider: 'Select a provider…',
+    savedKeyDetected: 'Saved {0} API Key detected',
+    reuseSavedKey: 'Reuse saved key ({0})',
+    replaceKey: 'Replace key',
+    clearReenter: 'Clear & re-enter',
+    cancel: 'Cancel',
+    enterNewKeyTitle: 'Enter new {0} API Key',
+    enterKeyTitle: 'Enter {0} API Key',
+    listingModels: 'Listing {0} models using saved key…',
+    validatingKey: 'Validating {0} API Key…',
+    noModels: 'No models available.',
+    selectModel: 'Select a {0} model…',
+    configured: 'Configured {0}: {1}',
+    currentSuffix: ' (current)',
+    currentLabel: 'Current'
   },
   chain: {
-    toggled: 'chain.toggled',
-    enabled: 'chain.enabled',
-    disabled: 'chain.disabled'
+    toggled: 'Chain prompting {0}.',
+    enabled: 'enabled',
+    disabled: 'disabled'
   },
   generation: {
-    progressTitle: 'generation.progressTitle',
-    noStagedChanges: 'generation.noStagedChanges',
-    cancelled: 'generation.cancelled',
-    errorGenerating: 'generation.errorGenerating',
-    failedToGenerate: 'generation.failedToGenerate'
+    progressTitle: 'AI Generating Commit Message…',
+    noStagedChanges: 'No staged changes found.',
+    cancelled: 'AI generation cancelled.',
+    errorGenerating: 'Error generating commit message: {0}',
+    failedToGenerate: 'Failed to generate commit message: {0}'
   },
   actions: {
-    openSettings: 'action.openSettings',
-    dismiss: 'action.dismiss'
+    openSettings: 'Open Settings',
+    dismiss: 'Dismiss'
   },
   rateLimit: {
-    hit: 'rateLimit.hit'
+    hit: 'Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.'
   },
   settings: {
-    chainMaxParallelLabel: 'settings.chain.maxParallelLabel'
+    chainMaxParallelLabel: 'Max Parallel Chains'
   }
 } as const;
 

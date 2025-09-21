@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import { DiffData } from '../git/git_types';
 
 /**
@@ -47,36 +48,125 @@ export abstract class BaseLLMService implements LLMService {
   	abstract clearApiKey(): Promise<void>;
   	abstract generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
 
-  	protected async buildJsonDiff(diffs: DiffData[], templatesPath?: string): Promise<string> {
-
+    	protected async buildJsonDiff(diffs: DiffData[], templatesPath?: string): Promise<string> {
 		const time = new Date().toISOString();
 
-		function buildFileTree(paths: string[]): string {
-			const tree: any = {};
-			for (const fullPath of paths) {
-				const parts = fullPath.split(/[\\/]/).filter(Boolean);
-				let current = tree;
-				
-				for (let i = 0; i < parts.length - 1; i++) {
-					const part = parts[i];
-					if (!current[part]) {
-						current[part] = {};
-					}
-					current = current[part];
-				}
-				
-				if (parts.length > 0) {
-					const fileName = parts[parts.length - 1];
-					current[fileName] = null;
-				}
-			}
-			
-			return JSON.stringify(tree, null, 4);
+		// Settings for workspace files payload
+		const cfg = vscode.workspace.getConfiguration();
+		const includeWorkspaceFiles = cfg.get<boolean>('gitCommitGenie.workspaceFiles.enabled', true);
+		const maxFilesSetting = Math.max(0, cfg.get<number>('gitCommitGenie.workspaceFiles.maxFiles', 2000) || 0);
+		const userExcludePatterns = cfg.get<string[]>('gitCommitGenie.workspaceFiles.excludePatterns', []) || [];
+
+		// Parse .gitignore (root of each workspace folder) into patterns
+		function parseGitignore(content: string): string[] {
+			return content
+				.split(/\r?\n/)
+				.map(l => l.trim())
+				.filter(l => l && !l.startsWith('#'));
 		}
 
-		const files = await vscode.workspace.findFiles('**/*');
-		const filePaths = files.map(file => file.fsPath);
-		const fileTree = buildFileTree(filePaths);
+		function escapeRegex(s: string): string {
+			return s.replace(/[|\\{}()[\]^$+?.]/g, '\\$&');
+		}
+
+		function segmentPatternToRegex(seg: string): string {
+			// Convert a single path segment glob to regex (no '/')
+			let out = '';
+			for (let i = 0; i < seg.length; i++) {
+				const ch = seg[i];
+				if (ch === '*') out += '[^/]*';
+				else if (ch === '?') out += '[^/]';
+				else out += escapeRegex(ch);
+			}
+			return out;
+		}
+
+		function globToRegExp(glob: string): { regex: RegExp; negate: boolean; dirOnly: boolean; rooted: boolean } {
+			let g = glob.trim();
+			let negate = false;
+			if (g.startsWith('!')) { negate = true; g = g.slice(1).trim(); }
+			const dirOnly = g.endsWith('/');
+			if (dirOnly) g = g.slice(0, -1);
+			const rooted = g.startsWith('/');
+			if (rooted) g = g.slice(1);
+
+			const parts = g.split('/');
+			const reParts = parts.map(p => p === '**' ? '.*' : segmentPatternToRegex(p));
+			let body = reParts.join('/');
+			// If pattern contains '**', allow crossing directory boundaries freely
+			body = body.replace(/(^|\/)\.\*($|\/)/g, '(/.*)?');
+
+			let pattern = '';
+			if (rooted) {
+				pattern = '^' + body + (dirOnly ? '(/.*)?$' : '$');
+			} else {
+				// match at any depth, but align to segment boundary
+				pattern = '(^|.*/)' + body + (dirOnly ? '(/.*)?$' : '($|/.*$)');
+			}
+			return { regex: new RegExp(pattern), negate, dirOnly, rooted };
+		}
+
+		function compilePatterns(patterns: string[]): Array<{ regex: RegExp; negate: boolean }> {
+			const compiled: Array<{ regex: RegExp; negate: boolean }> = [];
+			for (const p of patterns) {
+				try { compiled.push(globToRegExp(p)); } catch { /* ignore bad patterns */ }
+			}
+			return compiled;
+		}
+
+		function isIgnored(relPath: string, rules: Array<{ regex: RegExp; negate: boolean }>): boolean {
+			const p = relPath.replace(/\\/g, '/');
+			let ignored = false;
+			for (const r of rules) {
+				if (r.regex.test(p)) {
+					ignored = !r.negate; // negation flips to include
+				}
+			}
+			return ignored;
+		}
+
+		let workspaceFilesStr = '';
+		if (includeWorkspaceFiles) {
+			// Collect patterns: all .gitignore files at workspace roots + user excludes
+			const allPatterns: string[] = [];
+			const folders = vscode.workspace.workspaceFolders || [];
+			for (const f of folders) {
+				try {
+					const gi = path.join(f.uri.fsPath, '.gitignore');
+					if (fs.existsSync(gi)) {
+						const content = fs.readFileSync(gi, 'utf-8');
+						allPatterns.push(...parseGitignore(content));
+					}
+				} catch { /* ignore */ }
+			}
+			allPatterns.push(...userExcludePatterns);
+			const rules = compilePatterns(allPatterns);
+
+			// Find files across all workspace folders without explicit excludes; hard cap results
+			const scanCap = maxFilesSetting > 0 ? Math.max(1000, maxFilesSetting * 5) : 5000;
+			const allUris: vscode.Uri[] = [];
+			if (folders.length) {
+				for (const f of folders) {
+					const found = await vscode.workspace.findFiles(new vscode.RelativePattern(f, '**/*'), undefined, scanCap);
+					allUris.push(...found);
+				}
+			} else {
+				const found = await vscode.workspace.findFiles('**/*', undefined, scanCap);
+				allUris.push(...found);
+			}
+
+			// Build unique basenames, applying ignore rules; then hard-truncate to maxFiles
+			const names = new Set<string>();
+			for (const u of allUris) {
+				const rel = vscode.workspace.asRelativePath(u, false).replace(/\\/g, '/');
+				if (isIgnored(rel, rules)) continue;
+				const base = path.posix.basename(rel);
+				if (!base) continue;
+				names.add(base);
+				if (maxFilesSetting > 0 && names.size >= maxFilesSetting) break;
+			}
+			workspaceFilesStr = Array.from(names.values()).join('\n');
+		}
 
 		let userTemplateContent = '';
 		if (templatesPath && typeof templatesPath === 'string' && templatesPath.trim()) {
@@ -90,7 +180,7 @@ export abstract class BaseLLMService implements LLMService {
 						}
 					}
 				}
-			} catch (e: any) {
+			} catch {
 				userTemplateContent = '';
 			}
 		}
@@ -99,12 +189,12 @@ export abstract class BaseLLMService implements LLMService {
 			"diffs": diffs.map(diff => ({
 				fileName: diff.fileName,
 				rawDiff: diff.rawDiff,
-				status: diff.status // "added" | "modified" | "deleted"
+				status: diff.status
 			})),
 			"current-time": time,
-			"workspace-files": fileTree,
+			"workspace-files": workspaceFilesStr,
 			"user-template": userTemplateContent
 		};
-		return JSON.stringify(data, null, 4);
+		return JSON.stringify(data, null, 2);
 	}
 	}

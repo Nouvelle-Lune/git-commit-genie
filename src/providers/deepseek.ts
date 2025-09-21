@@ -211,6 +211,7 @@ export class DeepSeekService extends BaseLLMService {
             const controller = new AbortController();
             options?.token?.onCancellationRequested(() => controller.abort());
             let response: any;
+            // attempt twice
             for (let attempt = 0; attempt < 2; attempt++) {
                 try {
                     response = await this.openai.chat.completions.create({

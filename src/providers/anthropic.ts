@@ -191,7 +191,7 @@ export class AnthropicService extends BaseLLMService {
                         try {
                             const resp = await this.client.messages.create({
                                 model,
-                                max_tokens: 2048,
+                                max_tokens: 4096,
                                 temperature: 0,
                                 system: systemText || undefined,
                                 messages: conversation
