@@ -19,4 +19,18 @@
   "config.workspaceFiles.enabled.desc": "在提示中包含工作区文件名列表。如果超出Token限制，可关闭此项。",
   "config.workspaceFiles.maxFiles.desc": "要传递的文件名数量上限。超过该上限将进行硬截断。",
   "config.workspaceFiles.excludePatterns.desc": "附加的 gitignore 风格排除规则"
+  ,
+  "config.commitLanguage.desc": "生成的提交信息目标语言。",
+  "config.commitLanguage.auto": "自动（跟随 VS Code 显示语言）",
+  "config.commitLanguage.en": "英文",
+  "config.commitLanguage.zhCN": "中文（简体）",
+  "config.commitLanguage.zhTW": "中文（繁体）",
+  "config.commitLanguage.ja": "日文",
+  "config.commitLanguage.ko": "韩文",
+  "config.commitLanguage.de": "德文",
+  "config.commitLanguage.fr": "法文",
+  "config.commitLanguage.es": "西班牙文",
+  "config.commitLanguage.pt": "葡萄牙文",
+  "config.commitLanguage.ru": "俄文",
+  "config.commitLanguage.it": "意大利文"
 }

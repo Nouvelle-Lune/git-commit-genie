@@ -185,6 +185,12 @@ export abstract class BaseLLMService implements LLMService {
 			}
 		}
 
+		// Preferred output language for generated commit message
+		let targetLanguage = cfg.get<string>('gitCommitGenie.commitLanguage', 'auto') || 'auto';
+		if (!targetLanguage || targetLanguage === 'auto') {
+			try { targetLanguage = (vscode.env.language || 'en'); } catch { targetLanguage = 'en'; }
+		}
+
 		const data = {
 			"diffs": diffs.map(diff => ({
 				fileName: diff.fileName,
@@ -193,7 +199,8 @@ export abstract class BaseLLMService implements LLMService {
 			})),
 			"current-time": time,
 			"workspace-files": workspaceFilesStr,
-			"user-template": userTemplateContent
+			"user-template": userTemplateContent,
+			"target-language": targetLanguage
 		};
 		return JSON.stringify(data, null, 2);
 	}

@@ -238,7 +238,8 @@ export class AnthropicService extends BaseLLMService {
                     baseRulesMarkdown: baseRule,
                     currentTime: parsed?.["current-time"],
                     workspaceFilesTree: parsed?.["workspace-files"],
-                    userTemplate: parsed?.["user-template"]
+                    userTemplate: parsed?.["user-template"],
+                    targetLanguage: parsed?.["target-language"]
                 }, chat, { maxParallel: chainMaxParallel });
                 if (usages.length) {
                     const sum = usages.reduce((acc, u) => ({

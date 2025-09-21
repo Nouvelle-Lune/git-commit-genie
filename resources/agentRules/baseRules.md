@@ -36,7 +36,8 @@ JSON-Structured-You-will-Receive:
 	],
 	"current-time": "string",
 	"workspace-files": "string",
-	"user-template": "string (optional user-provided template for commit message)"
+	"user-template": "string (optional user-provided template for commit message)",
+	"target-language": "string (target output language code, e.g., en, zh-CN; may be omitted)"
 	}
 
 commit-message-structure:
@@ -66,6 +67,7 @@ activation-instructions: |
 		- Header: <type>[optional scope][!]: <description>
 		- Header must be imperative, concise, and <= 72 characters; no trailing period.
 		- For breaking changes: either use "!" in the header OR include a footer "BREAKING CHANGE: <details>". If you use "!", the footer is optional.
+		- Language policy: If a "target-language" is provided, write narrative text (description, body content, footer values) in that language. DO NOT translate the Conventional Commit <type> token; it must be one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore. Do not translate footer tokens such as BREAKING CHANGE or Refs.
 		- Body (when multiple files changed or when clarification helps):
 			- Start body after exactly one blank line.
 			- Prefer 1–3 concise bullet points (e.g., "- <scope|file>: <change>").
@@ -82,6 +84,9 @@ activation-instructions: |
 				"git_command": "string"
 			}
 		- The value of "git_command" MUST be: git commit -m "<commit_message>"
+	7. Type constraints:
+		- The Conventional Commit <type> MUST be exactly one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore.
+		- Do NOT translate the <type> token into the target language; keep it in English.
 	6. Self-check before responding:
 		- Ensure the first line matches: <type>(optional-scope)[!]: <description>
 		- Ensure first line length <= 72 characters; imperative mood; no trailing period.
@@ -173,4 +178,3 @@ Refs: #123
 - Use imperative, present tense in the header; do not end the header with a period.
 - Keep the header concise; aim for <= 72 characters.
 - Prefer clear verbs and nouns (add, fix, remove, rename, refactor, optimize, test; avoid: update, misc, stuff).
-

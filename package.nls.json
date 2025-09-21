@@ -19,4 +19,18 @@
   "config.workspaceFiles.enabled.desc": "Include a compact list of workspace filenames in the prompt. You can disable this if prompts get too large.",
   "config.workspaceFiles.maxFiles.desc": "Maximum number of filenames to send. If the number exceeds this limit, the list is hard-truncated.",
   "config.workspaceFiles.excludePatterns.desc": "Additional gitignore-style patterns to exclude from the filename list."
+  ,
+  "config.commitLanguage.desc": "Target language for generated commit messages.",
+  "config.commitLanguage.auto": "Auto (match VS Code display language)",
+  "config.commitLanguage.en": "English",
+  "config.commitLanguage.zhCN": "Chinese (Simplified)",
+  "config.commitLanguage.zhTW": "Chinese (Traditional)",
+  "config.commitLanguage.ja": "Japanese",
+  "config.commitLanguage.ko": "Korean",
+  "config.commitLanguage.de": "German",
+  "config.commitLanguage.fr": "French",
+  "config.commitLanguage.es": "Spanish",
+  "config.commitLanguage.pt": "Portuguese",
+  "config.commitLanguage.ru": "Russian",
+  "config.commitLanguage.it": "Italian"
 }

@@ -85,6 +85,7 @@ export interface ChainInputs {
   currentTime?: string;
   workspaceFilesTree?: string;
   userTemplate?: string;
+  targetLanguage?: string;
 }
 
 export interface FileSummary {
@@ -175,7 +176,7 @@ async function classifyAndDraft(
 		footers?: { token: string; value: string }[];
 	}
 }> {
-  const { baseRulesMarkdown, userTemplate, workspaceFilesTree, currentTime } = inputs;
+  const { baseRulesMarkdown, userTemplate, workspaceFilesTree, currentTime, targetLanguage } = inputs;
   const templatePolicyJson = opts?.templatePolicyJson ?? '';
 
 	const system: ChatMessage = {
@@ -183,7 +184,7 @@ async function classifyAndDraft(
 		content: [
 			'You are an expert on Conventional Commits. Return STRICT JSON only.',
 			'Follow the provided rules and examples EXACTLY. No markdown in values.',
-			'Preferred types: feat, fix, docs, style, refactor, perf, test, build, ci, chore. Others are allowed only if clearly justified.'
+			'Allowed types (use exactly one): feat, fix, docs, style, refactor, perf, test, build, ci, chore.'
 		].join('\n')
 	};
 
@@ -192,7 +193,8 @@ async function classifyAndDraft(
     file_summaries: summaries,
     workspace_files: workspaceFilesTree ?? '',
     template: userTemplate ?? '',
-    template_policy: templatePolicyJson || ''
+    template_policy: templatePolicyJson || '',
+    target_language: targetLanguage || ''
   };
 
   const lines: string[] = [
@@ -202,7 +204,7 @@ async function classifyAndDraft(
     baseRulesMarkdown,
     '--- Output JSON schema (STRICT):',
     '{',
-    '  "type": "feat|fix|docs|style|refactor|perf|test|build|ci|chore|other",',
+    '  "type": "feat|fix|docs|style|refactor|perf|test|build|ci|chore",',
     '  "scope": "string|null",',
     '  "breaking": "boolean",',
     '  "description": "string",',
@@ -219,6 +221,7 @@ async function classifyAndDraft(
       '- Conventional Commit HEADER MUST remain valid at all times.',
     );
   }
+  const allowedTypes = 'feat, fix, docs, style, refactor, perf, test, build, ci, chore';
   lines.push(
     'Body bullets MUST NOT include commit types (feat, fix, docs, style, refactor, perf, test, build, ci, chore) or "!" markers; use file/scope labels only.',
     'First line: <type>[optional scope][!]: <description>',
@@ -228,6 +231,9 @@ async function classifyAndDraft(
     'Footers must start after one blank line (after body if present)' + (templatePolicyJson ? '; include any required footers per template_policy.' : '.'),
     'First line length must be <= 72 characters.',
     'No markdown, code fences, or extra commentary in any field.',
+    `Type constraint: The Conventional Commit <type> MUST be exactly one of: ${allowedTypes}.`,
+    `Language requirement: Use the target language for narrative text (description, body, footer values). Do NOT translate the <type> token; keep it in English. Do NOT translate footer tokens like BREAKING CHANGE or Refs.`,
+    (targetLanguage && targetLanguage.trim() ? `Target language hint: ${targetLanguage}` : 'Target language hint: en'),
     'Return strictly valid JSON.'
   );
 
@@ -309,6 +315,7 @@ async function validateAndFix(
       '{"status":"valid","commit_message": string,"violations":[]}',
       'If invalid, minimally edit to fix and return:',
       '{"status":"fixed","commit_message": string, "violations": string[], "notes": string}',
+      'Additionally enforce: header <type> MUST be one of [feat, fix, docs, style, refactor, perf, test, build, ci, chore] and MUST NOT be translated.',
       'Additional requirement: Body bullets MUST NOT contain commit types (feat, fix, docs, style, refactor, perf, test, build, ci, chore) or "!" markers. If present, remove those prefixes and keep concise descriptions.',
       '--- Commit message:',
       commitMessage,

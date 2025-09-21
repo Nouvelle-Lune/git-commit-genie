@@ -95,6 +95,40 @@
           "items": { "type": "string" },
           "default": [],
           "markdownDescription": "%config.workspaceFiles.excludePatterns.desc%"
+        },
+        "gitCommitGenie.commitLanguage": {
+          "order": 0,
+          "type": "string",
+          "default": "auto",
+          "enum": [
+            "auto",
+            "en",
+            "zh-CN",
+            "zh-TW",
+            "ja",
+            "ko",
+            "de",
+            "fr",
+            "es",
+            "pt",
+            "ru",
+            "it"
+          ],
+          "enumDescriptions": [
+            "%config.commitLanguage.auto%",
+            "%config.commitLanguage.en%",
+            "%config.commitLanguage.zhCN%",
+            "%config.commitLanguage.zhTW%",
+            "%config.commitLanguage.ja%",
+            "%config.commitLanguage.ko%",
+            "%config.commitLanguage.de%",
+            "%config.commitLanguage.fr%",
+            "%config.commitLanguage.es%",
+            "%config.commitLanguage.pt%",
+            "%config.commitLanguage.ru%",
+            "%config.commitLanguage.it%"
+          ],
+          "markdownDescription": "%config.commitLanguage.desc%"
         }
       }
     },

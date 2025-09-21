@@ -189,7 +189,8 @@ export class DeepSeekService extends BaseLLMService {
                         baseRulesMarkdown: baseRule,
                         currentTime: parsed?.["current-time"],
                         workspaceFilesTree: parsed?.["workspace-files"],
-                        userTemplate: parsed?.["user-template"] // now actual content
+                        userTemplate: parsed?.["user-template"], // now actual content
+                        targetLanguage: parsed?.["target-language"]
                     },
                     chat,
                     { maxParallel: chainMaxParallel }
