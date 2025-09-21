@@ -1,6 +1,6 @@
 {
   "displayName": "Git Commit Genie",
-  "description": "AI assisted commit message generation.",
+  "description": "AI assisted commit message generation. Never suffer through writing commit messages again.",
   "configuration.title": "Git Commit Genie",
   "category.title": "Git Commit Genie",
   "views.activitybar.title": "Git Commit Genie",
@@ -18,8 +18,7 @@
   "config.gemini.expectedTokensPerCall.desc": "Estimated tokens per request for pre-allocation in TPM budgeting. Increase if diffs/templates are large; decrease or lower concurrency if you hit 429s often.",
   "config.workspaceFiles.enabled.desc": "Include a compact list of workspace filenames in the prompt. You can disable this if prompts get too large.",
   "config.workspaceFiles.maxFiles.desc": "Maximum number of filenames to send. If the number exceeds this limit, the list is hard-truncated.",
-  "config.workspaceFiles.excludePatterns.desc": "Additional gitignore-style patterns to exclude from the filename list."
-  ,
+  "config.workspaceFiles.excludePatterns.desc": "Additional gitignore-style patterns to exclude from the filename list.",
   "config.commitLanguage.desc": "Target language for generated commit messages.",
   "config.commitLanguage.auto": "Auto (match VS Code display language)",
   "config.commitLanguage.en": "English",

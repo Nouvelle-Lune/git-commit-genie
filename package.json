@@ -3,7 +3,7 @@
   "displayName": "%displayName%",
   "publisher": "Lune",
   "description": "%description%",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.103.0"

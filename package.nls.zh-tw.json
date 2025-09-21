@@ -1,6 +1,6 @@
 {
   "displayName": "Git Commit Genie",
-  "description": "AI 輔助的提交資訊生成",
+  "description": "AI 輔助的提交資訊生成， 讓提交資訊再也不痛苦。",
   "configuration.title": "Git Commit Genie",
   "category.title": "Git Commit Genie",
   "views.activitybar.title": "Git Commit Genie",

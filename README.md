@@ -10,6 +10,12 @@ Chinese version: [中文说明](./README.zh-CN.md)
 
 Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using mainstream LLM providers (OpenAI / DeepSeek / Anthropic / Gemini). Supports optional multi‑step chain prompting and user template strategy to improve structural consistency and style alignment.
 
+## Tips
+
+- Small or trivial commits: prefer a lightweight, fast model to speed up generation and reduce token usage.
+- Large, multi‑file commits: consider switching to a stronger model for better analysis and structure.
+- You can switch models anytime via "Git Commit Genie: Manage Models".
+
 ## Core Features
 
 | Feature | Description |
