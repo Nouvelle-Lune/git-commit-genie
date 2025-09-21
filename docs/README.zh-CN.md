@@ -17,7 +17,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 - 支持多模型动态切换，快速选择最适合的提供商与模型。
 
 ## Usage
-![usage](../media/demo.gif)
+<img src="../media/demo.gif" width="200"/>
 
 默认生成的提交信息遵循 Conventional Commits 1.0.0 规范，详情见：https://www.conventionalcommits.org/en/v1.0.0/#specification
 

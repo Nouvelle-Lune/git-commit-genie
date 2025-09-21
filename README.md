@@ -11,7 +11,7 @@ Chinese version: [中文说明](./docs/README.zh-CN.md)
 Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using mainstream LLM providers (OpenAI / DeepSeek / Anthropic / Gemini). Supports optional multi‑step chain prompting and user template strategy to improve structural consistency and style alignment.
 
 ## Usage
-![usage](./media/demo.gif)
+<img src="./media/demo.gif" width="200"/>
 
 By default, generated commit messages follow the Conventional Commits 1.0.0 specification. See the spec: https://www.conventionalcommits.org/en/v1.0.0/#specification
 
