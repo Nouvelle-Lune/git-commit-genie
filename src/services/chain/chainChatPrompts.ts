@@ -166,7 +166,7 @@ export function buildValidateAndFixMessages(commitMessage: string, checklistText
         '- Header length <= 72; imperative; no trailing period',
         '- One blank line between header/body and body/footers',
         '- Language policy: narrative text follows target language; do NOT translate <type> or footer tokens',
-        '- Body: optional; keep bullets concise; follow template sections/bullet style if present',
+        '- Body: optional; when no user-template, prefer short paragraphs separated by blank lines (no list markers). If a template requires bullets/sections, follow it exactly',
         '- Footers: Token: value; use hyphen in tokens (except BREAKING CHANGE)',
         '- Breaking change: either ! in header or BREAKING CHANGE: <details> footer',
         '- Multiple footers allowed; BREAKING-CHANGE == BREAKING CHANGE',
@@ -261,7 +261,7 @@ export function buildEnforceLanguageMessages(commitMessage: string, lang: string
         role: 'user',
         content: [
             'Task: Ensure the following Conventional Commit message uses the target language for all narrative text',
-            '(description, body bullet contents, and footer values) while preserving tokens and structure.',
+            '(description, body contents, and footer values) while preserving tokens and structure.',
             '- Do NOT translate the Conventional Commit <type> token (must remain one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore).',
             '- Do NOT translate footer tokens such as BREAKING CHANGE or Refs.',
             '- Preserve the exact structure: header, blank lines, body, footers.',

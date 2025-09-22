@@ -71,8 +71,8 @@ activation-instructions: |
 		- Language policy: If a "target-language" is provided, write narrative text (description, body content, footer values) in that language. DO NOT translate the Conventional Commit <type> token; it must be one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore. Do not translate footer tokens such as BREAKING CHANGE or Refs.
 		- Body (when multiple files changed or when clarification helps):
 			- Start body after exactly one blank line.
-			- Prefer 1–3 concise bullet points unless the template specifies otherwise.
-			- If a user template requires a specific body structure (sections, headings, bullet markers, labels, or phrasing), FOLLOW IT EXACTLY.
+			- Default style (no user-template): prefer 1–3 short paragraphs separated by blank lines. Do NOT use list markers (no "- ", "* ", or numbers).
+			- If a user template requires a specific body structure (sections, headings, bullet markers, labels, or phrasing), FOLLOW IT EXACTLY and use bullets only when explicitly required by the template.
 		- Footers:
 			- Start after exactly one blank line (after body if present).
 			- Use the format "Token: value". Use "-" instead of spaces in tokens, except "BREAKING CHANGE".
@@ -150,8 +150,8 @@ Refs: #123
 
 ```
 {
-  "commit_message": "fix(parser): handle empty tokens safely\n\n- parser: avoid throwing on empty arrays\n- tests: add boundary cases\n\nRefs: #123",
-  "git_command": "git commit -m \"fix(parser): handle empty tokens safely\\n\\n- parser: avoid throwing on empty arrays\\n- tests: add boundary cases\\n\\nRefs: #123\""
+  "commit_message": "fix(parser): handle empty tokens safely\n\nParser: avoid throwing on empty arrays when input is empty.\n\nTests: add boundary cases for empty tokens and null inputs.\n\nRefs: #123",
+  "git_command": "git commit -m \"fix(parser): handle empty tokens safely\\n\\nParser: avoid throwing on empty arrays when input is empty.\\n\\nTests: add boundary cases for empty tokens and null inputs.\\n\\nRefs: #123\""
 }
 ```
 

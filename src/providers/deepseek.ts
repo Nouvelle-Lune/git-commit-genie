@@ -76,7 +76,7 @@ export class DeepSeekService extends BaseLLMService {
         const m = msg.match(/retry in\s+([0-9.]+)s/i);
         if (m) {
             const sec = parseFloat(m[1]);
-            if (!isNaN(sec)) return Math.max(1000, Math.floor(sec * 1000));
+            if (!isNaN(sec)) { return Math.max(1000, Math.floor(sec * 1000)); }
         }
         return def;
     }
@@ -85,7 +85,7 @@ export class DeepSeekService extends BaseLLMService {
         const key = 'gitCommitGenie.rateLimitWarned';
         const last = this.context.globalState.get<number>(key, 0) ?? 0;
         const now = Date.now();
-        if (now - last < 60_000) return;
+        if (now - last < 60_000) { return; }
         await this.context.globalState.update(key, now);
         const choice = await vscode.window.showWarningMessage(
             vscode.l10n.t(I18N.rateLimit.hit, provider, model, vscode.l10n.t(I18N.settings.chainMaxParallelLabel)),
