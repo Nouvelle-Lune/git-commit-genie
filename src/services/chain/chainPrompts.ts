@@ -415,6 +415,8 @@ export async function generateCommitMessageChain(
 	}
 
 	const workers = Array.from({ length: Math.min(maxParallel, diffs.length || 1) }, () => worker());
+
+	// Waiting for all workers to complete
 	await Promise.all(workers);
 
 	// If user provided a template, extract a template policy first (template-first precedence)

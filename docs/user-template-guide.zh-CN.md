@@ -49,7 +49,7 @@ Strongly Opinionated Conventional Commit Template
 
 ## 推荐写法 B：JSON Policy（高可靠）
 
-为提升“可抽取性”，你可以在模板中加入一个 JSON Policy 区块（代码块可选；此处为便于 GitHub 显示而加）。示例：
+为提升“可抽取性”，你可以在模板中加入一个 JSON Policy 区块。示例：
 
 ```json
 {

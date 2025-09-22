@@ -48,7 +48,7 @@ Strongly Opinionated Conventional Commit Template
 
 ## Recommended Style B: JSON Policy (High Reliability)
 
-Add a JSON Policy block (code fences optional; shown here for GitHub rendering). The model more reliably extracts rules. Example:
+ The model more reliably extracts rules. Example:
 
 ```json
 {
