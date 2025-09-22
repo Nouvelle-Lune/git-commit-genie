@@ -8,7 +8,7 @@
   "command.generate": "Generate commit message",
   "command.cancel": "Stop generate",
   "command.manageModels": "Git Commit Genie: Manage Models",
-  "command.toggleChain": "Git Commit Genie: Toggle Chain of Thought Mode",
+  "command.toggleChain": "Git Commit Genie: Toggle thinking Mode",
   "config.templatesPath.desc": "Absolute path to a custom commit message template file (optional).",
   "config.autoStageAllForDiff.desc": "Only when the staging area is empty: temporarily stage all changes to build the diff, then restore your staging state. Use with caution—this may include unrelated changes in the prompt.",
   "config.chain.enabled.desc": "Enable multi-step chain prompting for commit generation (It makes the generated commit messages more detailed and accurate, and better aligns with the user's template, but it will increase latency and token consumption).",

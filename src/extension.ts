@@ -284,7 +284,18 @@ export function activate(context: vscode.ExtensionContext) {
 					const api = gitExtension.getAPI(1);
 					const repo = api.repositories[0];
 					if (repo) {
-						repo.inputBox.value = result.content;
+						// Simulate typing effect
+						const fullText = result.content;
+						repo.inputBox.value = '';
+						let i = 0;
+						const interval = setInterval(() => {
+							if (i <= fullText.length) {
+								repo.inputBox.value = fullText.slice(0, i);
+								i++;
+							} else {
+								clearInterval(interval);
+							}
+						}, 15); // typing speed
 					}
 				} else {
 					if (result.statusCode === 401) {
