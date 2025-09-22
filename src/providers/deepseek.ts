@@ -97,21 +97,6 @@ export class DeepSeekService extends BaseLLMService {
         }
     }
 
-    private safeExtractJson<T = any>(text: string): T | null {
-        if (!text) return null;
-        let trimmed = text.trim();
-        const fenceMatch = trimmed.match(/```[a-zA-Z]*\n([\s\S]*?)```/);
-        if (fenceMatch && fenceMatch[1]) trimmed = fenceMatch[1].trim();
-        try { return JSON.parse(trimmed) as T; } catch { }
-        const start = trimmed.indexOf('{');
-        const end = trimmed.lastIndexOf('}');
-        if (start !== -1 && end !== -1 && end > start) {
-            const slice = trimmed.slice(start, end + 1);
-            try { return JSON.parse(slice) as T; } catch { }
-        }
-        return null;
-    }
-
     async generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError> {
         if (!this.openai) {
             return {
@@ -228,7 +213,8 @@ export class DeepSeekService extends BaseLLMService {
                             { role: 'system', content: baseRule },
                             { role: 'user', content: jsonDiff }
                         ],
-                        temperature: 0.0
+                        temperature: 0.0,
+                        response_format: { "type": "json_object" }
                     }, { signal: controller.signal });
                     break;
                 } catch (e: any) {
@@ -251,9 +237,9 @@ export class DeepSeekService extends BaseLLMService {
                 console.log('[Genie][DeepSeek] Legacy call tokens: (usage not provided)');
             }
 
-            const content = response.choices[0]?.message?.content;
+            const content: string = response.choices[0]?.message?.content;
             if (content) {
-                const jsonResponse = this.safeExtractJson<any>(content);
+                const jsonResponse = JSON.parse(content.trim());
                 if (jsonResponse?.commit_message) {
                     return { content: jsonResponse.commit_message };
                 }
