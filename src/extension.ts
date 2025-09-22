@@ -40,7 +40,7 @@ export function activate(context: vscode.ExtensionContext) {
 		}
 	};
 
-	const pickService = (): any => {
+	const pickService = (): OpenAIService | DeepSeekService | AnthropicService | GeminiService => {
 		const provider = getProvider();
 		const service = llmServices.get(provider || 'openai') || openAIService;
 		return service;
@@ -93,15 +93,6 @@ export function activate(context: vscode.ExtensionContext) {
 	};
 	updateStatusBar();
 	context.subscriptions.push(statusBarItem);
-
-	// TODO: Feature flag: temporarily disable sidebar registration
-	const ENABLE_SIDEBAR = false;
-	if (ENABLE_SIDEBAR) {
-		const sidebarView = new SidebarView(context.extensionUri, diffService, llmService);
-		context.subscriptions.push(
-			vscode.window.registerWebviewViewProvider(SidebarView.viewType, sidebarView)
-		);
-	}
 
 	// Manage Models: provider -> API key -> model selection
 	context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.manageModels', async () => {
