@@ -2,10 +2,10 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import OpenAI from 'openai';
-import { LLMError, LLMResponse } from '../services/llm/llm_types';
+import { LLMError, LLMResponse } from '../services/llm/llmTypes';
 import { L10N_KEYS as I18N } from '../i18n/keys';
-import { BaseLLMService } from "../services/llm/llm_types";
-import { DiffData } from '../services/git/git_types';
+import { BaseLLMService } from "../services/llm/llmTypes";
+import { DiffData } from '../services/git/gitTypes';
 import { generateCommitMessageChain, ChatFn } from "../services/llm/utils/chainPrompts";
 
 const SECRET_OPENAI_API_KEY = 'gitCommitGenie.secret.openaiApiKey';
@@ -88,7 +88,7 @@ export class OpenAIService extends BaseLLMService {
             return 0;
         };
         const fromHeaders = Math.max(parseDur(resetReq || ''), parseDur(resetTok || ''));
-    if (fromHeaders > 0) { return Math.max(500, fromHeaders); }
+        if (fromHeaders > 0) { return Math.max(500, fromHeaders); }
         // Fallback textual hints
         const msg: string = err?.message || '';
         const m = msg.match(/retry in\s+([0-9.]+)s/i);
@@ -100,10 +100,10 @@ export class OpenAIService extends BaseLLMService {
     }
 
     private getResponseOutputText(resp: any): string {
-    if (!resp) { return ''; }
+        if (!resp) { return ''; }
         // SDK helper if available
         const direct = (resp as any).output_text;
-    if (typeof direct === 'string' && direct.trim()) { return direct; }
+        if (typeof direct === 'string' && direct.trim()) { return direct; }
         // Aggregate from output array
         const out = (resp as any).output;
         if (Array.isArray(out)) {
@@ -125,7 +125,7 @@ export class OpenAIService extends BaseLLMService {
 
     private getResponseUsage(resp: any): { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined {
         const u = (resp as any)?.usage;
-    if (!u) { return undefined; }
+        if (!u) { return undefined; }
         const prompt_tokens = u.input_tokens ?? u.prompt_tokens;
         const completion_tokens = u.output_tokens ?? u.completion_tokens;
         const total_tokens = u.total_tokens ?? ((prompt_tokens || 0) + (completion_tokens || 0));
@@ -136,7 +136,7 @@ export class OpenAIService extends BaseLLMService {
         const key = 'gitCommitGenie.rateLimitWarned';
         const last = this.context.globalState.get<number>(key, 0) ?? 0;
         const now = Date.now();
-    if (now - last < 60_000) { return; } // show at most once per minute
+        if (now - last < 60_000) { return; } // show at most once per minute
         await this.context.globalState.update(key, now);
         const choice = await vscode.window.showWarningMessage(
             vscode.l10n.t(I18N.rateLimit.hit, provider, model, vscode.l10n.t(I18N.settings.chainMaxParallelLabel)),
@@ -149,16 +149,16 @@ export class OpenAIService extends BaseLLMService {
     }
 
     private safeExtractJson<T = any>(text: string): T | null {
-    if (!text) { return null; }
+        if (!text) { return null; }
         let trimmed = text.trim();
         const fenceMatch = trimmed.match(/```[a-zA-Z]*\n([\s\S]*?)```/);
-    if (fenceMatch && fenceMatch[1]) { trimmed = fenceMatch[1].trim(); }
-        try { return JSON.parse(trimmed) as T; } catch {}
+        if (fenceMatch && fenceMatch[1]) { trimmed = fenceMatch[1].trim(); }
+        try { return JSON.parse(trimmed) as T; } catch { }
         const start = trimmed.indexOf('{');
         const end = trimmed.lastIndexOf('}');
         if (start !== -1 && end !== -1 && end > start) {
             const slice = trimmed.slice(start, end + 1);
-            try { return JSON.parse(slice) as T; } catch {}
+            try { return JSON.parse(slice) as T; } catch { }
         }
         return null;
     }

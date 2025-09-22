@@ -49,23 +49,21 @@ export function activate(context: vscode.ExtensionContext) {
 
 	// Status bar: show active provider & model and allow quick change
 	const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+
 	statusBarItem.command = 'git-commit-genie.manageModels';
-	const readChainEnabled = (): boolean => {
-		const cfg = vscode.workspace.getConfiguration();
+
+	function readChainEnabled(): boolean {
+		const cfg: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration();
 		// New key
 		const newVal = cfg.get<boolean>('gitCommitGenie.chain.enabled');
 		if (typeof newVal === 'boolean') {
-			// Mirror to legacy global state for any leftover reads elsewhere
 			context.globalState.update('gitCommitGenie.useChainPrompts', newVal);
 			return newVal;
+		} else {
+			// newVal is undefined
+			return false;
 		}
-		// Fallback to legacy key or globalState
-		const legacyVal = cfg.get<boolean>('gitCommitGenie.useChainPrompts');
-		if (typeof legacyVal === 'boolean') {
-			return legacyVal;
-		}
-		return context.globalState.get<boolean>('gitCommitGenie.useChainPrompts', false);
-	};
+	}
 
 	const updateStatusBar = () => {
 		const provider = getProvider().toLowerCase();

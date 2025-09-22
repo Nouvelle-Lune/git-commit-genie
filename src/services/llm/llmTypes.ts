@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { DiffData } from '../git/git_types';
+import { DiffData } from '../git/gitTypes';
 
 /**
  * Represents the response from the LLM service.

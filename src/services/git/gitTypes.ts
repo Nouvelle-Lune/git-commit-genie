@@ -1,4 +1,4 @@
-import { Change, Status } from "../git/git";
+import { Change, Status } from "./git";
 
 /**
  * Represents the status of a file in the diff.
@@ -9,10 +9,10 @@ export type DiffStatus = 'added' | 'deleted' | 'modified' | 'renamed' | 'untrack
  * A "hunk" is a contiguous block of changes in a diff.
  */
 export interface DiffHunk {
-    header: string; // The hunk header, e.g., @@ -1,3 +1,9 @@
-    content: string; // The actual lines of the hunk
-    additions: string[]; // Lines added in this hunk
-    deletions: string[]; // Lines removed in this hunk
+  header: string; // The hunk header, e.g., @@ -1,3 +1,9 @@
+  content: string; // The actual lines of the hunk
+  additions: string[]; // Lines added in this hunk
+  deletions: string[]; // Lines removed in this hunk
 }
 
 /**

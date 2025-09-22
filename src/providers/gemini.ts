@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { BaseLLMService, LLMError, LLMResponse } from "../services/llm/llm_types";
+import { BaseLLMService, LLMError, LLMResponse } from "../services/llm/llmTypes";
 import { L10N_KEYS as I18N } from '../i18n/keys';
-import { DiffData } from "../services/git/git_types";
+import { DiffData } from "../services/git/gitTypes";
 import { generateCommitMessageChain, ChatFn, ChatMessage } from "../services/llm/utils/chainPrompts";
 
 const SECRET_GEMINI_API_KEY = 'gitCommitGenie.secret.geminiApiKey';
@@ -75,12 +75,12 @@ export class GeminiService extends BaseLLMService {
         }
         try {
             return JSON.parse(trimmed) as T;
-        } catch {}
+        } catch { }
         const start = trimmed.indexOf('{');
         const end = trimmed.lastIndexOf('}');
         if (start !== -1 && end !== -1 && end > start) {
             const slice = trimmed.slice(start, end + 1);
-            try { return JSON.parse(slice) as T; } catch {}
+            try { return JSON.parse(slice) as T; } catch { }
         }
         return null;
     }
@@ -167,7 +167,7 @@ export class GeminiService extends BaseLLMService {
             let mutex = Promise.resolve();
             const runExclusive = async <T>(fn: () => Promise<T>): Promise<T> => {
                 const p = mutex.then(fn);
-                mutex = p.then(() => {}, () => {});
+                mutex = p.then(() => { }, () => { });
                 return p;
             };
             const acquireSlot = async () => {

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { DiffData, DiffHunk, DiffStatus} from '../git/git_types';
+import { DiffData, DiffHunk, DiffStatus } from './gitTypes';
 import { API, Change, GitExtension, Repository, Status } from "../git/git";
 import * as path from 'path';
 import { spawn } from 'child_process';
@@ -164,7 +164,7 @@ export class DiffService {
 
 		const diffHunks: DiffHunk[] = this.parseDiff(rawDiff);
 
-		
+
 		return {
 			fileName,
 			status,
@@ -185,7 +185,7 @@ export class DiffService {
 		}
 
 		const lines: string[] = cleanOutput.split('\n');
-		
+
 		const hunkStartPositions: number[] = [];
 		let pos: number = 0;
 		while (pos < lines.length) {
@@ -197,7 +197,7 @@ export class DiffService {
 
 		const diffHunks: DiffHunk[] = [];
 		diffHunks.push(...hunkStartPositions.map(startPos => this.parseHunk(startPos, lines)));
-		
+
 		return diffHunks;
 	}
 
@@ -229,7 +229,7 @@ export class DiffService {
 			additions,
 			deletions
 		};
-		
+
 	}
 
 	private isStaged(status: Status): boolean {
@@ -242,7 +242,7 @@ export class DiffService {
 			default:
 				return false;
 		}
-		
+
 	}
 
 	/**
