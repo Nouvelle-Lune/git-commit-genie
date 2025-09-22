@@ -4,7 +4,8 @@ import * as path from 'path';
 import { BaseLLMService, LLMError, LLMResponse } from "../services/llm/llmTypes";
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { DiffData } from "../services/git/gitTypes";
-import { generateCommitMessageChain, ChatFn } from "../services/llm/utils/chainPrompts";
+import { generateCommitMessageChain } from "../services/chain/chainPrompts";
+import { ChatFn } from "./../services/chain/chainTypes";
 
 const SECRET_ANTHROPIC_API_KEY = 'gitCommitGenie.secret.anthropicApiKey';
 

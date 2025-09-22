@@ -6,7 +6,8 @@ import { BaseLLMService } from "../services/llm/llmTypes";
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { DiffData } from '../services/git/gitTypes';
 import OpenAI from 'openai';
-import { generateCommitMessageChain, ChatFn } from "../services/llm/utils/chainPrompts";
+import { generateCommitMessageChain } from "../services/chain/chainPrompts";
+import { ChatFn } from "../services/chain/chainTypes";
 
 const DEEPSEEK_API_URL = 'https://api.deepseek.com';
 const SECRET_DEEPSEEK_API_KEY = 'gitCommitGenie.secret.deepseekApiKey';

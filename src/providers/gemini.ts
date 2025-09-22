@@ -4,7 +4,8 @@ import * as path from 'path';
 import { BaseLLMService, LLMError, LLMResponse } from "../services/llm/llmTypes";
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { DiffData } from "../services/git/gitTypes";
-import { generateCommitMessageChain, ChatFn, ChatMessage } from "../services/llm/utils/chainPrompts";
+import { generateCommitMessageChain } from "../services/chain/chainPrompts";
+import { ChatMessage, ChatFn } from "../services/chain/chainTypes";
 
 const SECRET_GEMINI_API_KEY = 'gitCommitGenie.secret.geminiApiKey';
 
