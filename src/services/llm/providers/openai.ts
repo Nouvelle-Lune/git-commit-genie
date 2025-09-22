@@ -3,12 +3,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import OpenAI from 'openai';
 import { makeParseableTextFormat } from 'openai/lib/parser';
-import { LLMError, LLMResponse } from '../services/llm/llmTypes';
-import { L10N_KEYS as I18N } from '../i18n/keys';
-import { BaseLLMService } from "../services/llm/llmTypes";
-import { DiffData } from '../services/git/gitTypes';
-import { generateCommitMessageChain } from "../services/chain/chainThinking";
-import { ChatFn } from "../services/chain/chainTypes";
+import { LLMError, LLMResponse } from '../llmTypes';
+import { L10N_KEYS as I18N } from '../../../i18n/keys';
+import { BaseLLMService } from "../llmTypes";
+import { DiffData } from '../../git/gitTypes';
+import { generateCommitMessageChain } from "../../chain/chainThinking";
+import { ChatFn } from "../../chain/chainTypes";
 
 const SECRET_OPENAI_API_KEY = 'gitCommitGenie.secret.openaiApiKey';
 

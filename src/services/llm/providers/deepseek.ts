@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { LLMError, LLMResponse } from '../services/llm/llmTypes';
-import { BaseLLMService } from "../services/llm/llmTypes";
-import { L10N_KEYS as I18N } from '../i18n/keys';
-import { DiffData } from '../services/git/gitTypes';
+import { LLMError, LLMResponse } from '../llmTypes';
+import { BaseLLMService } from "../llmTypes";
+import { L10N_KEYS as I18N } from '../../../i18n/keys';
+import { DiffData } from '../../git/gitTypes';
 import OpenAI from 'openai';
-import { generateCommitMessageChain } from "../services/chain/chainThinking";
-import { ChatFn } from "../services/chain/chainTypes";
+import { generateCommitMessageChain } from "../../chain/chainThinking";
+import { ChatFn } from "../../chain/chainTypes";
 
 const DEEPSEEK_API_URL = 'https://api.deepseek.com';
 const SECRET_DEEPSEEK_API_KEY = 'gitCommitGenie.secret.deepseekApiKey';

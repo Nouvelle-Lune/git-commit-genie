@@ -1,11 +1,11 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { BaseLLMService, LLMError, LLMResponse } from "../services/llm/llmTypes";
-import { L10N_KEYS as I18N } from '../i18n/keys';
-import { DiffData } from "../services/git/gitTypes";
-import { generateCommitMessageChain } from "../services/chain/chainThinking";
-import { ChatFn } from "./../services/chain/chainTypes";
+import { BaseLLMService, LLMError, LLMResponse } from "../llmTypes";
+import { L10N_KEYS as I18N } from '../../../i18n/keys';
+import { DiffData } from "../../git/gitTypes";
+import { generateCommitMessageChain } from "../../chain/chainThinking";
+import { ChatFn } from "../../chain/chainTypes";
 
 const SECRET_ANTHROPIC_API_KEY = 'gitCommitGenie.secret.anthropicApiKey';
 
