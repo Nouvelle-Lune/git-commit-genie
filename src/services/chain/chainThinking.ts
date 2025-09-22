@@ -1,6 +1,14 @@
 import { DiffData } from "../git/gitTypes";
-import { ChatRole, ChatMessage, ChatFn } from "./chainTypes";
+import { ChatFn, NormalizedLang } from "./chainTypes";
 import { ChainInputs, FileSummary, ChainOutputs } from "./chainTypes";
+import {
+	buildPolicyExtractionMessages,
+	buildSummarizeFileMessages,
+	buildClassifyAndDraftMessages,
+	buildValidateAndFixMessages,
+	buildEnforceStrictFixMessages,
+	buildEnforceLanguageMessages,
+} from "./chainChatPrompts";
 
 function isValidPolicyShape(obj: any): boolean {
 	if (!obj || typeof obj !== 'object') { return false; }
@@ -13,25 +21,8 @@ function isValidPolicyShape(obj: any): boolean {
 
 async function extractTemplatePolicy(userTemplate: string, chat: ChatFn): Promise<string> {
 	if (!userTemplate || !userTemplate.trim()) { return ''; }
-	const system: ChatMessage = {
-		role: 'system',
-		content: 'You are a configuration extractor. Return STRICT JSON only; no markdown.'
-	};
-	const user: ChatMessage = {
-		role: 'user',
-		content: [
-			'Extract a concise policy from the following commit template. Output only JSON with this schema:',
-			'{',
-			'  "header": {"requireScope": boolean, "scopeDerivation": "directory|repo|none", "preferBangForBreaking": boolean, "alsoRequireBreakingFooter": boolean},',
-			'  "body": {"alwaysInclude": boolean, "orderedSections": string[], "bulletRules": Array<{"section": string, "maxBullets"?: number, "style"?: "dash"|"asterisk"}>},',
-			'  "footers": {"required": string[], "defaults": Array<{"token": string, "value": string}>},',
-			'  "lexicon": {"prefer": string[], "avoid": string[], "tone": "imperative|neutral|friendly"}',
-			'}',
-			'Template:',
-			userTemplate
-		].join('\n')
-	};
-	const reply = await chat([system, user], { temperature: 0 });
+	const messages = buildPolicyExtractionMessages(userTemplate);
+	const reply = await chat(messages, { temperature: 0 });
 	const text = reply?.trim() || '';
 	try {
 		const parsed = JSON.parse(text);
@@ -63,29 +54,8 @@ function extractJson<T = any>(text: string): T | null {
 }
 
 async function summarizeSingleFile(diff: DiffData, chat: ChatFn): Promise<FileSummary> {
-	const system: ChatMessage = {
-		role: 'system',
-		content:
-			'You are a senior software engineer helping generate high-quality Conventional Commit messages. Analyze a single unified git diff and return a strict JSON summary. No commentary.'
-	};
-
-	const user: ChatMessage = {
-		role: 'user',
-		content: [
-			'Summarize the following file change. Requirements:',
-			'- Identify a concise change summary (<= 18 words).',
-			'- Detect if this change might be a breaking change (boolean).',
-			'- Respond ONLY with JSON using this schema:',
-			'{"file": string, "status": "added|modified|deleted|renamed|untracked|ignored", "summary": string, "breaking": boolean}',
-			'---',
-			`file: ${diff.fileName}`,
-			`status: ${diff.status}`,
-			'diff:',
-			diff.rawDiff
-		].join('\n')
-	};
-
-	const reply = await chat([system, user], { temperature: 0 });
+	const messages = buildSummarizeFileMessages(diff);
+	const reply = await chat(messages, { temperature: 0 });
 	const parsed = extractJson<FileSummary>(reply);
 	if (!parsed || !parsed.file || !parsed.summary) {
 		return {
@@ -115,70 +85,9 @@ async function classifyAndDraft(
 		footers?: { token: string; value: string }[];
 	}
 }> {
-	const { baseRulesMarkdown, userTemplate, workspaceFilesTree, currentTime, targetLanguage } = inputs;
 	const templatePolicyJson = opts?.templatePolicyJson ?? '';
-
-	const system: ChatMessage = {
-		role: 'system',
-		content: [
-			'You are an expert on Conventional Commits. Return STRICT JSON only.',
-			'Follow the provided rules and examples EXACTLY. No markdown in values.',
-			'Allowed types (use exactly one): feat, fix, docs, style, refactor, perf, test, build, ci, chore.'
-		].join('\n')
-	};
-
-	const payload = {
-		now: currentTime ?? new Date().toISOString(),
-		file_summaries: summaries,
-		workspace_files: workspaceFilesTree ?? '',
-		template: userTemplate ?? '',
-		template_policy: templatePolicyJson || '',
-		target_language: targetLanguage || ''
-	};
-
-	const lines: string[] = [
-		'Inputs (JSON):',
-		JSON.stringify(payload, null, 2),
-		'--- Rules and examples (Markdown):',
-		baseRulesMarkdown,
-		'--- Output JSON schema (STRICT):',
-		'{',
-		'  "type": "feat|fix|docs|style|refactor|perf|test|build|ci|chore",',
-		'  "scope": "string|null",',
-		'  "breaking": "boolean",',
-		'  "description": "string",',
-		'  "body": "string|null",',
-		'  "footers": "Array<{token:string,value:string}>",',
-		'  "commit_message": "string",',
-		'  "notes": "string"',
-		'}',
-	];
-	if (templatePolicyJson) {
-		lines.push(
-			'Precedence and assembly rules (MUST follow):',
-			'- If a template and template_policy are provided, FOLLOW THEM STRICTLY for body/footers structure, wording preferences, and required sections.',
-			'- Conventional Commit HEADER MUST remain valid at all times.',
-		);
-	}
-	const allowedTypes = 'feat, fix, docs, style, refactor, perf, test, build, ci, chore';
-	lines.push(
-		'Body bullets MUST NOT include commit types (feat, fix, docs, style, refactor, perf, test, build, ci, chore) or "!" markers; use file/scope labels only.',
-		'First line: <type>[optional scope][!]: <description>',
-		'If breaking=true and you use "!", do not require BREAKING CHANGE footer.',
-		'If breaking=true and no "!" is used, include a footer: BREAKING CHANGE: <details>.',
-		'Body must start after one blank line' + (templatePolicyJson ? '; format body according to template_policy if present.' : '.'),
-		'Footers must start after one blank line (after body if present)' + (templatePolicyJson ? '; include any required footers per template_policy.' : '.'),
-		'First line length must be <= 72 characters.',
-		'No markdown, code fences, or extra commentary in any field.',
-		`Type constraint: The Conventional Commit <type> MUST be exactly one of: ${allowedTypes}.`,
-		`Language requirement: Use the target language for narrative text (description, body, footer values). Do NOT translate the <type> token; keep it in English. Do NOT translate footer tokens like BREAKING CHANGE or Refs.`,
-		(targetLanguage && targetLanguage.trim() ? `Target language hint: ${targetLanguage}` : 'Target language hint: en'),
-		'Return strictly valid JSON.'
-	);
-
-	const user: ChatMessage = { role: 'user', content: lines.join('\n') };
-
-	const reply = await chat([system, user], { temperature: 0 });
+	const messages = buildClassifyAndDraftMessages(summaries, inputs, templatePolicyJson);
+	const reply = await chat(messages, { temperature: 0 });
 	const parsed = extractJson<{
 		type?: string;
 		scope?: string | null;
@@ -239,31 +148,8 @@ async function validateAndFix(
 	baseRulesMarkdown: string,
 	chat: ChatFn
 ): Promise<{ validMessage: string; notes?: string; violations?: string[] }> {
-	const system: ChatMessage = {
-		role: 'system',
-		content: [
-			'You are a strict Conventional Commits validator and fixer. Output ONLY JSON.',
-			'Do not include markdown. Apply minimal edits when fixing.'
-		].join('\n')
-	};
-
-	const user: ChatMessage = {
-		role: 'user',
-		content: [
-			'Check the following commit message against the rules. If valid, return:',
-			'{"status":"valid","commit_message": string,"violations":[]}',
-			'If invalid, minimally edit to fix and return:',
-			'{"status":"fixed","commit_message": string, "violations": string[], "notes": string}',
-			'Additionally enforce: header <type> MUST be one of [feat, fix, docs, style, refactor, perf, test, build, ci, chore] and MUST NOT be translated.',
-			'Additional requirement: Body bullets MUST NOT contain commit types (feat, fix, docs, style, refactor, perf, test, build, ci, chore) or "!" markers. If present, remove those prefixes and keep concise descriptions.',
-			'--- Commit message:',
-			commitMessage,
-			'--- Rules (Markdown):',
-			baseRulesMarkdown
-		].join('\n')
-	};
-
-	const reply = await chat([system, user], { temperature: 0 });
+	const messages = buildValidateAndFixMessages(commitMessage, baseRulesMarkdown);
+	const reply = await chat(messages, { temperature: 0 });
 	const parsed = extractJson<{ status?: string; commit_message?: string; notes?: string; violations?: string[] }>(reply);
 	if (parsed?.commit_message) {
 		return { validMessage: parsed.commit_message, notes: parsed.notes, violations: parsed.violations };
@@ -299,24 +185,8 @@ async function enforceStrictWithLLM(
 	baseRulesMarkdown: string,
 	chat: ChatFn
 ): Promise<string> {
-	const system: ChatMessage = {
-		role: 'system',
-		content: 'Return STRICT JSON only. Fix commit message to satisfy Conventional Commits exactly.'
-	};
-	const user: ChatMessage = {
-		role: 'user',
-		content: [
-			'Fix the commit message to satisfy all constraints. Output only:',
-			'{"commit_message": string}',
-			'Current message:',
-			current,
-			'Detected problems:',
-			JSON.stringify(problems),
-			'Rules (Markdown):',
-			baseRulesMarkdown
-		].join('\n')
-	};
-	const reply = await chat([system, user], { temperature: 0 });
+	const messages = buildEnforceStrictFixMessages(current, problems, baseRulesMarkdown);
+	const reply = await chat(messages, { temperature: 0 });
 	const parsed = extractJson<{ commit_message?: string }>(reply);
 	return parsed?.commit_message || current;
 }
@@ -326,12 +196,12 @@ function sanitizeBodyCommitTypePrefixes(message: string): string {
 	const footerTokenPattern = /^(BREAKING CHANGE|[A-Za-z][A-Za-z-]+):\s/;
 
 	const lines = message.split('\n');
-	if (lines.length === 0) return message;
+	if (lines.length === 0) { return message; }
 
 	// find body start: first blank line after header (line 0)
 	let i = 1;
-	while (i < lines.length && lines[i].trim() !== '') i++;
-	if (i >= lines.length - 1) return message; // no body
+	while (i < lines.length && lines[i].trim() !== '') { i++; }
+	if (i >= lines.length - 1) { return message; } // no body
 	const bodyStart = i + 1;
 
 	// find footers start: first line matching token pattern after body start
@@ -364,34 +234,149 @@ async function enforceTargetLanguageForCommit(
 	const lang = (targetLanguage || '').trim();
 	if (!lang) { return commitMessage; }
 
-	const system: ChatMessage = {
-		role: 'system',
-		content: [
-			'You are a precise editor for Conventional Commit messages.',
-			'Return STRICT JSON only; do not include markdown or code fences.'
-		].join('\n')
-	};
-	const user: ChatMessage = {
-		role: 'user',
-		content: [
-			'Task: Ensure the following Conventional Commit message uses the target language for all narrative text',
-			'(description, body bullet contents, and footer values) while preserving tokens and structure.',
-			'- Do NOT translate the Conventional Commit <type> token (must remain one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore).',
-			'- Do NOT translate footer tokens such as BREAKING CHANGE or Refs.',
-			'- Preserve the exact structure: header, blank lines, body, footers.',
-			`Target language: ${lang}`,
-			'Return only JSON: {"commit_message": string}',
-			'--- Commit message:',
-			commitMessage
-		].join('\n')
-	};
+	// 1) Quick heuristic: if the narrative text already matches target language, skip LLM
+	const normalized = normalizeLanguageCode(lang);
+	if (normalized !== 'other') {
+		const narrative = extractNarrativeTextForLanguageCheck(commitMessage);
+		const verdict = isLikelyTargetLanguage(narrative, normalized);
+		if (verdict === 'yes') {
+			return commitMessage;
+		}
+		// If verdict is 'no' or 'uncertain', fall through to model-based enforcement.
+	}
 	try {
-		const reply = await chat([system, user], { temperature: 0 });
+		const messages = buildEnforceLanguageMessages(commitMessage, lang);
+		const reply = await chat(messages, { temperature: 0 });
 		const parsed = extractJson<{ commit_message?: string }>(reply);
 		return parsed?.commit_message?.trim() || commitMessage;
 	} catch {
 		return commitMessage;
 	}
+}
+
+// --- language detection ---
+
+function normalizeLanguageCode(input: string): NormalizedLang {
+	const t = (input || '').trim().toLowerCase();
+	if (!t) { return 'other'; }
+	// English
+	if (['en', 'en-us', 'en-gb', 'english', 'eng', '英语', '英文'].includes(t)) { return 'en'; }
+	// Chinese (treat simplified/traditional the same for detection)
+	if ([
+		'zh', 'zh-cn', 'zh-sg', 'zh-hans', 'zh-hant', 'zh-tw', 'zh-hk',
+		'chinese', 'zhongwen', '中文', '简体中文', '繁體中文', '漢語', '汉语', '華語', '华语'
+	].includes(t)) { return 'zh'; }
+	// Japanese
+	if (['ja', 'ja-jp', 'japanese', '日本語', 'にほんご', '日语', '日文'].includes(t)) { return 'ja'; }
+	// Korean
+	if (['ko', 'ko-kr', 'korean', '한국어', '한글', '韓國語', '韩语', '韓文', '朝鲜语'].includes(t)) { return 'ko'; }
+	return 'other';
+}
+
+function extractNarrativeTextForLanguageCheck(message: string): string {
+	if (!message) { return ''; }
+	const lines = message.split('\n');
+	if (lines.length === 0) { return ''; }
+
+	const header = lines[0] || '';
+	const colonIdx = header.indexOf(':');
+	const desc = colonIdx !== -1 ? header.slice(colonIdx + 1).trim() : header.trim();
+
+	// Find body start: first blank line after header
+	let i = 1;
+	while (i < lines.length && lines[i].trim() !== '') { i++; }
+	const bodyStart = i + 1;
+
+	// Find footers start: first token-like footer (BREAKING CHANGE or Token: value)
+	const footerTokenPattern = /^(BREAKING CHANGE|[A-Za-z][A-Za-z-]+):\s/;
+	let footersStart = lines.length;
+	for (let j = bodyStart; j < lines.length; j++) {
+		if (footerTokenPattern.test(lines[j])) { footersStart = j; break; }
+	}
+
+	const bodyLines: string[] = [];
+	for (let j = bodyStart; j < footersStart; j++) {
+		const l = lines[j];
+		// strip common bullet prefixes
+		const m = l.match(/^\s*([-*])\s+(.*)$/);
+		bodyLines.push(m ? m[2] : l);
+	}
+
+	return [desc, ...bodyLines].join(' ').trim();
+}
+
+function isLikelyTargetLanguage(text: string, target: NormalizedLang): 'yes' | 'no' | 'uncertain' {
+	const scores = countScripts(text);
+
+	// Total letters seen (approximate narrative signal)
+	const totalSignal = scores.asciiLetters + scores.cjk + scores.hiragana + scores.katakana + scores.hangul;
+	if (totalSignal === 0) { return 'uncertain'; }
+
+	switch (target) {
+		case 'en': {
+			const nonLatin = scores.cjk + scores.hiragana + scores.katakana + scores.hangul;
+			if (nonLatin === 0) { return 'yes'; }
+			if (nonLatin > 0 && scores.asciiLetters === 0) { return 'no'; }
+			return 'uncertain';
+		}
+		case 'zh': {
+			// Favor CJK without kana/hangul; allow some ASCII for code/tokens
+			const kanaHangul = scores.hiragana + scores.katakana + scores.hangul;
+			if (scores.cjk >= 4 && kanaHangul === 0) { return 'yes'; }
+			if (scores.cjk >= 2 && scores.cjk >= scores.asciiLetters) { return 'yes'; }
+			if (scores.cjk === 0 && (scores.hiragana + scores.katakana + scores.hangul) > 0) { return 'no'; }
+			if (scores.cjk === 0 && scores.asciiLetters > 0) { return 'uncertain'; }
+			return 'uncertain';
+		}
+		case 'ja': {
+			// Presence of kana is a strong indicator
+			if ((scores.hiragana + scores.katakana) >= 2) { return 'yes'; }
+			if (scores.cjk >= 2 && (scores.hiragana + scores.katakana) >= 1) { return 'yes'; }
+			if ((scores.hiragana + scores.katakana + scores.hangul) === 0 && scores.asciiLetters > 0) { return 'no'; }
+			return 'uncertain';
+		}
+		case 'ko': {
+			if (scores.hangul >= 2) { return 'yes'; }
+			if (scores.hangul === 0 && (scores.hiragana + scores.katakana + scores.cjk) > 0) { return 'no'; }
+			return 'uncertain';
+		}
+		default:
+			return 'uncertain';
+	}
+}
+
+function countScripts(text: string): {
+	asciiLetters: number;
+	cjk: number;
+	hiragana: number;
+	katakana: number;
+	hangul: number;
+} {
+	let asciiLetters = 0;
+	let cjk = 0;
+	let hiragana = 0;
+	let katakana = 0;
+	let hangul = 0;
+
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		const code = ch.charCodeAt(0);
+		// ASCII letters
+		if ((code >= 65 && code <= 90) || (code >= 97 && code <= 122)) { asciiLetters++; continue; }
+		// CJK Unified Ideographs + Ext A + Compatibility Ideographs (BMP ranges)
+		if (
+			(code >= 0x3400 && code <= 0x4DBF) ||
+			(code >= 0x4E00 && code <= 0x9FFF) ||
+			(code >= 0xF900 && code <= 0xFAFF)
+		) { cjk++; continue; }
+		// Hiragana
+		if (code >= 0x3040 && code <= 0x309F) { hiragana++; continue; }
+		// Katakana (including Phonetic Extensions)
+		if ((code >= 0x30A0 && code <= 0x30FF) || (code >= 0x31F0 && code <= 0x31FF)) { katakana++; continue; }
+		// Hangul (Jamo + Syllables + Compatibility Jamo)
+		if ((code >= 0x1100 && code <= 0x11FF) || (code >= 0x3130 && code <= 0x318F) || (code >= 0xAC00 && code <= 0xD7AF)) { hangul++; continue; }
+	}
+	return { asciiLetters, cjk, hiragana, katakana, hangul };
 }
 
 export async function generateCommitMessageChain(
@@ -420,6 +405,7 @@ export async function generateCommitMessageChain(
 	await Promise.all(workers);
 
 	// If user provided a template, extract a template policy first (template-first precedence)
+	// TODO: Support different template in different repo (monorepo)
 	let templatePolicyJson = '';
 	if (inputs.userTemplate && inputs.userTemplate.trim()) {
 		try {

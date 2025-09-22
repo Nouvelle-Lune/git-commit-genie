@@ -4,6 +4,8 @@ import { DiffData } from "../git/gitTypes";
 
 export type ChatRole = 'system' | 'user';
 
+export type NormalizedLang = 'en' | 'zh' | 'ja' | 'ko' | 'other';
+
 export interface ChatMessage {
     role: ChatRole;
     content: string;

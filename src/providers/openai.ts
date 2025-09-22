@@ -6,7 +6,7 @@ import { LLMError, LLMResponse } from '../services/llm/llmTypes';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { BaseLLMService } from "../services/llm/llmTypes";
 import { DiffData } from '../services/git/gitTypes';
-import { generateCommitMessageChain } from "../services/chain/chainPrompts";
+import { generateCommitMessageChain } from "../services/chain/chainThinking";
 import { ChatFn } from "../services/chain/chainTypes";
 
 const SECRET_OPENAI_API_KEY = 'gitCommitGenie.secret.openaiApiKey';
