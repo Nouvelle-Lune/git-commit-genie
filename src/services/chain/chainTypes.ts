@@ -31,6 +31,11 @@ export interface TemplatePolicy {
         alwaysInclude?: boolean;
         orderedSections?: string[]; // e.g., ["Summary", "Changes", "Impact", "Risk", "Notes"]
         bulletRules?: Array<{ section: string; maxBullets?: number; style?: 'dash' | 'asterisk' }>;
+        // Simplified single-switch for bullet content style
+        // - 'plain': no special prefixes in bullets
+        // - 'file-prefixed': bullets start with file/scope label
+        // - 'type-prefixed': bullets start with commit type token (feat|fix|...)
+        bulletContentMode?: 'plain' | 'file-prefixed' | 'type-prefixed';
     };
     footers?: {
         required?: string[]; // e.g., ["Refs"]

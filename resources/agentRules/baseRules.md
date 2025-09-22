@@ -51,8 +51,9 @@ activation-instructions: |
 	Follow these steps to generate the commit message:
 
 	1. Analyze the provided git diff(s) and the workspace files tree to understand the changes.
-	2. Template precedence (only if present and non-empty): If "user-template" is provided and contains meaningful guidance, ALIGN the body/footers/tone/wording with the template. However, ALWAYS keep the Conventional Commit header valid. If the template is empty or not coherent, ignore it and use the defaults.
+	2. User template precedence (applies in all modes): If "user-template" is provided and contains meaningful guidance, you MUST strictly align body structure, section ordering, bullet style, tone/lexicon, and required footers with the template. Do not invent extra sections or change ordering beyond what the template specifies. If the template conflicts with Conventional Commit rules, the header and structural separation rules take precedence; otherwise the template takes precedence. If the template is empty, incoherent, or contradicts itself, fall back to defaults but keep any unambiguous parts (e.g., required footers or tone).
 	3. Determine the change type and optional scope:
+		if User template specifies a type or scope, use that. Otherwise, infer type and scope from the changes:
 		- Type heuristics:
 			- Only docs changed -> docs
 			- Only tests changed -> test
@@ -70,12 +71,13 @@ activation-instructions: |
 		- Language policy: If a "target-language" is provided, write narrative text (description, body content, footer values) in that language. DO NOT translate the Conventional Commit <type> token; it must be one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore. Do not translate footer tokens such as BREAKING CHANGE or Refs.
 		- Body (when multiple files changed or when clarification helps):
 			- Start body after exactly one blank line.
-			- Prefer 1–3 concise bullet points (e.g., "- <scope|file>: <change>").
-			- If a user template requires a specific body structure, follow it.
+			- Prefer 1–3 concise bullet points unless the template specifies otherwise.
+			- If a user template requires a specific body structure (sections, headings, bullet markers, labels, or phrasing), FOLLOW IT EXACTLY.
 		- Footers:
 			- Start after exactly one blank line (after body if present).
 			- Use the format "Token: value". Use "-" instead of spaces in tokens, except "BREAKING CHANGE".
 			- If the template requires a specific footer (e.g., Refs), include it. If no reference is available and a Refs footer is required, use "Refs: N/A".
+			- Preserve footer token names in English (e.g., BREAKING CHANGE, Refs), even when writing narrative text in another language.
 	5. Output requirements (STRICT):
 		- Return ONLY a valid JSON object (no markdown, no code fences, no extra commentary).
 		- Keys:

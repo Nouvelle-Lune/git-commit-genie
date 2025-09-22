@@ -10,6 +10,8 @@ import {
 	buildEnforceLanguageMessages,
 } from "./chainChatPrompts";
 
+import { normalizeLanguageCode, extractNarrativeTextForLanguageCheck, isLikelyTargetLanguage } from "./langDetector";
+
 function isValidPolicyShape(obj: any): boolean {
 	if (!obj || typeof obj !== 'object') { return false; }
 	const keys = Object.keys(obj);
@@ -146,9 +148,10 @@ async function classifyAndDraft(
 async function validateAndFix(
 	commitMessage: string,
 	baseRulesMarkdown: string,
-	chat: ChatFn
+	chat: ChatFn,
+	opts?: { templatePolicyJson?: string }
 ): Promise<{ validMessage: string; notes?: string; violations?: string[] }> {
-	const messages = buildValidateAndFixMessages(commitMessage, baseRulesMarkdown);
+	const messages = buildValidateAndFixMessages(commitMessage, baseRulesMarkdown, opts?.templatePolicyJson);
 	const reply = await chat(messages, { temperature: 0 });
 	const parsed = extractJson<{ status?: string; commit_message?: string; notes?: string; violations?: string[] }>(reply);
 	if (parsed?.commit_message) {
@@ -191,40 +194,6 @@ async function enforceStrictWithLLM(
 	return parsed?.commit_message || current;
 }
 
-function sanitizeBodyCommitTypePrefixes(message: string): string {
-	const typePattern = /^(feat|fix|docs|style|refactor|perf|test|build|ci|chore)(\([^)]+\))?(!)?:\s*/i;
-	const footerTokenPattern = /^(BREAKING CHANGE|[A-Za-z][A-Za-z-]+):\s/;
-
-	const lines = message.split('\n');
-	if (lines.length === 0) { return message; }
-
-	// find body start: first blank line after header (line 0)
-	let i = 1;
-	while (i < lines.length && lines[i].trim() !== '') { i++; }
-	if (i >= lines.length - 1) { return message; } // no body
-	const bodyStart = i + 1;
-
-	// find footers start: first line matching token pattern after body start
-	let footersStart = lines.length;
-	for (let j = bodyStart; j < lines.length; j++) {
-		const l = lines[j];
-		if (footerTokenPattern.test(l)) { footersStart = j; break; }
-	}
-
-	for (let j = bodyStart; j < footersStart; j++) {
-		const l = lines[j];
-		const m = l.match(/^\s*([-*])\s+(.*)$/);
-		if (m) {
-			const bullet = m[1];
-			let content = m[2];
-			const stripped = content.replace(typePattern, '').trim();
-			if (stripped !== content) {
-				lines[j] = `${bullet} ${stripped}`;
-			}
-		}
-	}
-	return lines.join('\n');
-}
 
 async function enforceTargetLanguageForCommit(
 	commitMessage: string,
@@ -254,8 +223,6 @@ async function enforceTargetLanguageForCommit(
 	}
 }
 
-// --- language detection moved to langDetector ---
-import { normalizeLanguageCode, extractNarrativeTextForLanguageCheck, isLikelyTargetLanguage } from "./langDetector";
 
 export async function generateCommitMessageChain(
 	inputs: ChainInputs,
@@ -294,7 +261,7 @@ export async function generateCommitMessageChain(
 	}
 
 	const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat, { templatePolicyJson });
-	const { validMessage, notes: validationNotes } = await validateAndFix(draft, baseRulesMarkdown, chat);
+	const { validMessage, notes: validationNotes } = await validateAndFix(draft, baseRulesMarkdown, chat, { templatePolicyJson });
 
 	// Local strict check; if still not conforming, ask LLM for a minimal strict fix
 	let finalMessage = validMessage;
@@ -302,9 +269,6 @@ export async function generateCommitMessageChain(
 	if (!check.ok) {
 		finalMessage = await enforceStrictWithLLM(finalMessage, check.problems, baseRulesMarkdown, chat);
 	}
-
-	// Sanitize body: remove commit-type-like prefixes in bullets to avoid header leakage
-	finalMessage = sanitizeBodyCommitTypePrefixes(finalMessage);
 
 	// Enforce target language strictly while preserving tokens/structure
 	try {

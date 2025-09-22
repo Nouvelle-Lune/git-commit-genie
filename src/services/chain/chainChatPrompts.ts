@@ -1,13 +1,13 @@
 import { DiffData } from "../git/gitTypes";
 import { ChatMessage } from "./chainTypes";
-import { ChainInputs, FileSummary } from "./chainTypes";
+import { ChainInputs, FileSummary, TemplatePolicy } from "./chainTypes";
 
 // Centralized builders for chat prompt messages used in chainThinking
 
 export function buildPolicyExtractionMessages(userTemplate: string): ChatMessage[] {
     const system: ChatMessage = {
         role: 'system',
-        content: 'You are a configuration extractor. Return STRICT JSON only; no markdown.'
+        content: 'You are a configuration extractor, the template provided by the user may exist in a structured or natural language form. You need to analyze the provided template and accurately populate the analysis results into the user-provided schema as much as possible. For values that cannot be determined through analysis, the default values provided by the schema can be used. Return STRICT JSON only; no markdown.'
     };
     const user: ChatMessage = {
         role: 'user',
@@ -15,10 +15,21 @@ export function buildPolicyExtractionMessages(userTemplate: string): ChatMessage
             'Extract a concise policy from the following commit template. Output only JSON with this schema:',
             '{',
             '  "header": {"requireScope": boolean, "scopeDerivation": "directory|repo|none", "preferBangForBreaking": boolean, "alsoRequireBreakingFooter": boolean},',
-            '  "body": {"alwaysInclude": boolean, "orderedSections": string[], "bulletRules": Array<{"section": string, "maxBullets"?: number, "style"?: "dash"|"asterisk"}>},',
+            '  "body": {"alwaysInclude": boolean, "orderedSections": string[], "bulletRules": Array<{"section": string, "maxBullets"?: number, "style"?: "dash"|"asterisk"}>, "bulletContentMode"?: "plain"|"file-prefixed"|"type-prefixed"},',
             '  "footers": {"required": string[], "defaults": Array<{"token": string, "value": string}>},',
             '  "lexicon": {"prefer": string[], "avoid": string[], "tone": "imperative|neutral|friendly"}',
             '}',
+            'Defaults (use when unspecified or unclear):',
+            '{',
+            '  "header": {"requireScope": false, "scopeDerivation": "none", "preferBangForBreaking": false, "alsoRequireBreakingFooter": false},',
+            '  "body": {"alwaysInclude": false, "orderedSections": [], "bulletRules": [], "bulletContentMode": "plain"},',
+            '  "footers": {"required": [], "defaults": []},',
+            '  "lexicon": {"prefer": [], "avoid": [], "tone": "neutral"}',
+            '}',
+            'Rules:',
+            '- Return a single JSON object with keys: header, body, footers, lexicon.',
+            '- If a field cannot be inferred, FILL IT WITH THE DEFAULT VALUE above (do not omit).',
+            '- Do not include comments, markdown, or extra keys beyond the schema.',
             'Template:',
             userTemplate
         ].join('\n')
@@ -77,6 +88,15 @@ export function buildClassifyAndDraftMessages(
         target_language: targetLanguage || ''
     };
 
+    // Parse template policy to drive body bullet guidance (e.g., per-file prefixes)
+    let policy: TemplatePolicy | null = null;
+    try {
+        policy = templatePolicyJson ? (JSON.parse(templatePolicyJson) as TemplatePolicy) : null;
+    } catch {
+        policy = null;
+    }
+    const bulletMode: 'plain' | 'file-prefixed' | 'type-prefixed' | undefined = policy?.body?.bulletContentMode as any;
+
     const lines: string[] = [
         'Inputs (JSON):',
         JSON.stringify(payload, null, 2),
@@ -102,8 +122,16 @@ export function buildClassifyAndDraftMessages(
         );
     }
     const allowedTypes = 'feat, fix, docs, style, refactor, perf, test, build, ci, chore';
+    // Compose bullet guidance lines based on template policy
+    if (bulletMode === 'type-prefixed') {
+        lines.push('Each body bullet MUST start with a commit type token (feat|fix|docs|style|refactor|perf|test|build|ci|chore). Keep tokens in English.');
+    } else if (bulletMode === 'file-prefixed') {
+        lines.push('Prefix each body bullet with a file/scope label when relevant.');
+    } else if (bulletMode === 'plain') {
+        lines.push('Body bullets MUST NOT include commit type tokens or "!" markers. Keep bullets concise.');
+    }
+
     lines.push(
-        'Body bullets MUST NOT include commit types (feat, fix, docs, style, refactor, perf, test, build, ci, chore) or "!" markers; use file/scope labels only.',
         'First line: <type>[optional scope][!]: <description>',
         'If breaking=true and you use "!", do not require BREAKING CHANGE footer.',
         'If breaking=true and no "!" is used, include a footer: BREAKING CHANGE: <details>.',
@@ -121,7 +149,7 @@ export function buildClassifyAndDraftMessages(
     return [system, user];
 }
 
-export function buildValidateAndFixMessages(commitMessage: string, baseRulesMarkdown: string): ChatMessage[] {
+export function buildValidateAndFixMessages(commitMessage: string, baseRulesMarkdown: string, templatePolicyJson?: string): ChatMessage[] {
     const system: ChatMessage = {
         role: 'system',
         content: [
@@ -129,6 +157,21 @@ export function buildValidateAndFixMessages(commitMessage: string, baseRulesMark
             'Do not include markdown. Apply minimal edits when fixing.'
         ].join('\n')
     };
+
+    // Parse policy to decide whether to enforce no-type-prefix rule in body
+    let policy: TemplatePolicy | null = null;
+    try {
+        policy = templatePolicyJson ? (JSON.parse(templatePolicyJson) as TemplatePolicy) : null;
+    } catch {
+        policy = null;
+    }
+    const bulletMode: 'plain' | 'file-prefixed' | 'type-prefixed' | undefined = policy?.body?.bulletContentMode as any;
+
+    const extraBodyRule = bulletMode === 'type-prefixed'
+        ? 'Additional requirement: Each body bullet MUST start with a commit type token (feat|fix|docs|style|refactor|perf|test|build|ci|chore). Keep tokens in English and choose the appropriate type for that bullet.'
+        : bulletMode === 'plain'
+            ? 'Additional requirement: Body bullets MUST NOT include commit type tokens or "!" markers. If present, minimally remove those prefixes and keep concise descriptions.'
+            : '';
 
     const user: ChatMessage = {
         role: 'user',
@@ -138,7 +181,7 @@ export function buildValidateAndFixMessages(commitMessage: string, baseRulesMark
             'If invalid, minimally edit to fix and return:',
             '{"status":"fixed","commit_message": string, "violations": string[], "notes": string}',
             'Additionally enforce: header <type> MUST be one of [feat, fix, docs, style, refactor, perf, test, build, ci, chore] and MUST NOT be translated.',
-            'Additional requirement: Body bullets MUST NOT contain commit types (feat, fix, docs, style, refactor, perf, test, build, ci, chore) or "!" markers. If present, remove those prefixes and keep concise descriptions.',
+            extraBodyRule,
             '--- Commit message:',
             commitMessage,
             '--- Rules (Markdown):',
@@ -194,4 +237,3 @@ export function buildEnforceLanguageMessages(commitMessage: string, lang: string
     };
     return [system, user];
 }
-
