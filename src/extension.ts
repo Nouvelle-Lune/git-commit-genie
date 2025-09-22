@@ -6,7 +6,6 @@ import { OpenAIService } from './providers/openai';
 import { DeepSeekService } from './providers/deepseek';
 import { AnthropicService } from './providers/anthropic';
 import { GeminiService } from './providers/gemini';
-import { SidebarView } from './webviews/SidebarView';
 import { L10N_KEYS as I18N } from './i18n/keys';
 
 export function activate(context: vscode.ExtensionContext) {
