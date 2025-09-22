@@ -9,3 +9,14 @@ vsc-extension-quickstart.md
 **/*.map
 **/*.ts
 **/.vscode-test.*
+
+.bmad-core/**
+.clinerules/**
+.gemini/**
+.github/**
+.kilocode/**
+.idea/**
+.kilocodemodes
+.vsixmanifest
+
+docs_/**

@@ -3,7 +3,7 @@
   "displayName": "%displayName%",
   "publisher": "Lune-99",
   "description": "%description%",
-  "version": "1.0.1",
+  "version": "1.0.3",
   "license": "MIT",
   "engines": {
     "vscode": "^1.103.0"
@@ -15,7 +15,7 @@
   "activationEvents": [
     "onStartupFinished"
   ],
-  "main": "./out/extension.js",
+  "main": "./dist/extension.js",
   "l10n": "./l10n",
   "contributes": {
     "configuration": {
@@ -233,5 +233,15 @@
   "homepage": "https://github.com/Nouvelle-Lune/git-commit-genie",
   "bugs": {
     "url": "https://github.com/Nouvelle-Lune/git-commit-genie/issues"
-  }
+  },
+  "files": [
+    "dist",
+    "media",
+    "l10n",
+    "LICENSE.txt",
+    "README.md",
+    "package.nls.json",
+    "package.nls.zh-cn.json",
+    "package.nls.zh-tw.json"
+  ]
 }
