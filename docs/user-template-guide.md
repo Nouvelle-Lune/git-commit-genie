@@ -7,6 +7,7 @@ This guide explains how to write a User Template that strongly shapes the final 
 - Chain mode strongly enforces the extracted policy (command: `Git Commit Genie: Toggle Chain Prompting`; status bar shows `· Chain` when enabled).
 - Configure the absolute path in VS Code settings: `gitCommitGenie.templatesPath`.
 - File must exist, be non‑empty, and contain clear structured preferences.
+- You can use any format for the template file if you prefer (e.g. .txt .md .json .yaml).
 - Write the template content in English for best extraction (the internal prompts are English).
 - The header always follows Conventional Commits: `<type>(<scope>)[!]: <description>` and ≤ 72 chars. The template mainly influences Body / Footers / wording.
 

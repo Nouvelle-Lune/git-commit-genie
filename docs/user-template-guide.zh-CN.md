@@ -7,6 +7,7 @@
 - 链式模式会强力遵循模板策略（命令：Git Commit Genie: Toggle Chain Prompting；状态栏显示“· Chain”即开启）。
 - 在 VS Code 设置里配置 `gitCommitGenie.templatesPath` 为模板文件的绝对路径。
 - 文件必须真实存在、非空，且内容有明确、结构化的偏好描述。
+- 可以选择任意格式的模板文件（如.txt、.md、.json、.yaml）。
 - 为获得最佳效果，请用英文撰写模板内容（插件的提示词为英文）。
 - 头行始终严格遵循 Conventional Commits：`<type>(<scope>)[!]: <description>`，长度 ≤ 72 字符；模板主要影响 Body/Footers/用词。
 
