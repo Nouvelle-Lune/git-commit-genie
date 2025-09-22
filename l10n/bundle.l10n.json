@@ -2,8 +2,7 @@
   "Git Commit Genie: {0} / {1}": "Git Commit Genie: {0} / {1}",
   "Git Commit Genie: {0} — click to configure models": "Git Commit Genie: {0} — click to configure models",
   "Select Model": "Select Model",
-  " · Chain": " · Chain",
-
+  " · Chain": " · Thinking",
   "Select a provider…": "Select a provider…",
   "Saved {0} API Key detected": "Saved {0} API Key detected",
   "Reuse saved key ({0})": "Reuse saved key ({0})",
@@ -19,20 +18,16 @@
   "Configured {0}: {1}": "Configured {0}: {1}",
   " (current)": " (current)",
   "Current": "Current",
-
   "Chain prompting {0}.": "Chain prompting {0}.",
   "enabled": "enabled",
   "disabled": "disabled",
-
   "AI Generating Commit Message…": "AI Generating Commit Message…",
   "No staged changes found.": "No staged changes found.",
   "AI generation cancelled.": "AI generation cancelled.",
   "Error generating commit message: {0}": "Error generating commit message: {0}",
   "Failed to generate commit message: {0}": "Failed to generate commit message: {0}",
-
   "Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.": "Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.",
   "Open Settings": "Open Settings",
   "Dismiss": "Dismiss",
-
   "Max Parallel Chains": "Max Parallel Chains"
 }

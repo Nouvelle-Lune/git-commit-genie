@@ -2,8 +2,7 @@
   "Git Commit Genie: {0} / {1}": "Git Commit Genie: {0} / {1}",
   "Git Commit Genie: {0} — click to configure models": "Git Commit Genie: {0} — 點擊以設定模型",
   "Select Model": "選擇模型",
-  " · Chain": " · Chain",
-
+  " · Chain": " · Thinking",
   "Select a provider…": "選擇一個供應商…",
   "Saved {0} API Key detected": "偵測到已儲存的 {0} API Key",
   "Reuse saved key ({0})": "使用已儲存的 Key ({0})",
@@ -19,20 +18,16 @@
   "Configured {0}: {1}": "已設定 {0}: {1}",
   " (current)": "（目前）",
   "Current": "目前",
-
   "Chain prompting {0}.": "鏈式提示已{0}。",
   "enabled": "啟用",
   "disabled": "停用",
-
   "AI Generating Commit Message…": "AI 正在生成提交資訊…",
   "No staged changes found.": "未找到已暫存的變更。",
   "AI generation cancelled.": "已取消 AI 產生。",
   "Error generating commit message: {0}": "產生提交資訊錯誤：{0}",
   "Failed to generate commit message: {0}": "產生提交資訊失敗：{0}",
-
   "Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.": "已觸發 {0}（{1}）的速率限制。請考慮降低鏈式並發（{2}）或升級您的方案。",
   "Open Settings": "開啟設定",
   "Dismiss": "忽略",
-
   "Max Parallel Chains": "最大並行鏈數"
 }
