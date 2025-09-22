@@ -184,6 +184,11 @@ export class DeepSeekService extends BaseLLMService {
                     if (typeof v === 'number' && !isNaN(v)) { return v; }
                     return cfg.get<number>('gitCommitGenie.chainMaxParallel', 4);
                 })());
+                const rulesPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'baseRules.md'));
+                const baseRule = fs.readFileSync(rulesPath, 'utf-8');
+                const checklistPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'validationChecklist.md'));
+                const checklistText = fs.existsSync(checklistPath) ? fs.readFileSync(checklistPath, 'utf-8') : '';
+
                 const out = await generateCommitMessageChain(
                     {
                         diffs,
@@ -191,7 +196,8 @@ export class DeepSeekService extends BaseLLMService {
                         currentTime: parsed?.["current-time"],
                         workspaceFilesTree: parsed?.["workspace-files"],
                         userTemplate: parsed?.["user-template"], // now actual content
-                        targetLanguage: parsed?.["target-language"]
+                        targetLanguage: parsed?.["target-language"],
+                        validationChecklist: checklistText
                     },
                     chat,
                     { maxParallel: chainMaxParallel }

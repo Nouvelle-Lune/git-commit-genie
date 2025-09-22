@@ -149,7 +149,7 @@ export function buildClassifyAndDraftMessages(
     return [system, user];
 }
 
-export function buildValidateAndFixMessages(commitMessage: string, baseRulesMarkdown: string, templatePolicyJson?: string): ChatMessage[] {
+export function buildValidateAndFixMessages(commitMessage: string, checklistText?: string, templatePolicyJson?: string): ChatMessage[] {
     const system: ChatMessage = {
         role: 'system',
         content: [
@@ -158,7 +158,23 @@ export function buildValidateAndFixMessages(commitMessage: string, baseRulesMark
         ].join('\n')
     };
 
-    // Parse policy to decide whether to enforce no-type-prefix rule in body
+    // Build concise validation checklist string (provider passes it; fallback inline only)
+    const defaultChecklist = [
+        '- Header: <type>(optional-scope)[!]: <description>',
+        '- User template precedence for body/sections/bullets/tone/required footers; CC header/structure still apply',
+        '- Allowed types: feat, fix, docs, style, refactor, perf, test, build, ci, chore (English only)',
+        '- Header length <= 72; imperative; no trailing period',
+        '- One blank line between header/body and body/footers',
+        '- Language policy: narrative text follows target language; do NOT translate <type> or footer tokens',
+        '- Body: optional; keep bullets concise; follow template sections/bullet style if present',
+        '- Footers: Token: value; use hyphen in tokens (except BREAKING CHANGE)',
+        '- Breaking change: either ! in header or BREAKING CHANGE: <details> footer',
+        '- Multiple footers allowed; BREAKING-CHANGE == BREAKING CHANGE',
+        '- Required footers from template must be present; if none available, use a sensible placeholder (e.g., Refs: N/A)',
+        '- Return valid JSON only; no markdown fences or extra commentary'
+    ].join('\n');
+
+    // Parse template policy to derive extra checks (if any)
     let policy: TemplatePolicy | null = null;
     try {
         policy = templatePolicyJson ? (JSON.parse(templatePolicyJson) as TemplatePolicy) : null;
@@ -166,12 +182,33 @@ export function buildValidateAndFixMessages(commitMessage: string, baseRulesMark
         policy = null;
     }
     const bulletMode: 'plain' | 'file-prefixed' | 'type-prefixed' | undefined = policy?.body?.bulletContentMode as any;
+    const extraChecks: string[] = [];
+    if (bulletMode === 'type-prefixed') {
+        extraChecks.push('- Body bullets: each starts with a commit type token (feat|fix|docs|style|refactor|perf|test|build|ci|chore), tokens in English');
+    } else if (bulletMode === 'file-prefixed') {
+        extraChecks.push('- Body bullets: prefix with file/scope label when relevant');
+    } else if (bulletMode === 'plain') {
+        extraChecks.push('- Body bullets: do not include commit type tokens or "!" markers');
+    }
+    if (policy?.footers?.required?.length) {
+        extraChecks.push(`- Required footers: ${policy.footers.required.join(', ')}`);
+    }
+    if (policy?.header?.requireScope) {
+        extraChecks.push('- Header must include a scope');
+    }
+    if (policy?.header?.preferBangForBreaking) {
+        extraChecks.push('- For breaking changes, prefer using "!" in header');
+    }
+    if (policy?.header?.alsoRequireBreakingFooter) {
+        extraChecks.push('- For breaking changes, also include BREAKING CHANGE footer');
+    }
 
-    const extraBodyRule = bulletMode === 'type-prefixed'
-        ? 'Additional requirement: Each body bullet MUST start with a commit type token (feat|fix|docs|style|refactor|perf|test|build|ci|chore). Keep tokens in English and choose the appropriate type for that bullet.'
-        : bulletMode === 'plain'
-            ? 'Additional requirement: Body bullets MUST NOT include commit type tokens or "!" markers. If present, minimally remove those prefixes and keep concise descriptions.'
-            : '';
+    const checklist = [
+        'Validation checklist:',
+        (checklistText && checklistText.trim()) ? checklistText.trim() : defaultChecklist,
+        extraChecks.length ? 'Template-derived checks:' : '',
+        extraChecks.join('\n')
+    ].filter(Boolean).join('\n');
 
     const user: ChatMessage = {
         role: 'user',
@@ -181,11 +218,10 @@ export function buildValidateAndFixMessages(commitMessage: string, baseRulesMark
             'If invalid, minimally edit to fix and return:',
             '{"status":"fixed","commit_message": string, "violations": string[], "notes": string}',
             'Additionally enforce: header <type> MUST be one of [feat, fix, docs, style, refactor, perf, test, build, ci, chore] and MUST NOT be translated.',
-            extraBodyRule,
+            '--- Checklist:',
+            checklist,
             '--- Commit message:',
             commitMessage,
-            '--- Rules (Markdown):',
-            baseRulesMarkdown
         ].join('\n')
     };
 

@@ -194,8 +194,8 @@ export class GeminiService extends BaseLLMService {
             };
 
             if (useChain) {
-                const jsonDiff = await super.buildJsonDiff(diffs, templatesPath);
-                const parsed = JSON.parse(jsonDiff);
+            const jsonDiff = await super.buildJsonDiff(diffs, templatesPath);
+            const parsed = JSON.parse(jsonDiff);
                 const usages: Array<{ prompt?: number; candidates?: number; total?: number }> = [];
                 let callCount = 0;
                 const chat: ChatFn = async (messages, options) => {
@@ -243,6 +243,11 @@ export class GeminiService extends BaseLLMService {
                     if (typeof v === 'number' && !isNaN(v)) { return v; }
                     return cfg.get<number>('gitCommitGenie.chainMaxParallel', 4);
                 })());
+                const rulesPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'baseRules.md'));
+                const baseRule = fs.readFileSync(rulesPath, 'utf-8');
+                const checklistPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'validationChecklist.md'));
+                const checklistText = fs.existsSync(checklistPath) ? fs.readFileSync(checklistPath, 'utf-8') : '';
+
                 const out = await generateCommitMessageChain(
                     {
                         diffs,
@@ -250,7 +255,8 @@ export class GeminiService extends BaseLLMService {
                         currentTime: parsed?.["current-time"],
                         workspaceFilesTree: parsed?.["workspace-files"],
                         userTemplate: parsed?.["user-template"],
-                        targetLanguage: parsed?.["target-language"]
+                        targetLanguage: parsed?.["target-language"],
+                        validationChecklist: checklistText
                     },
                     chat,
                     { maxParallel: chainMaxParallel }

@@ -1,5 +1,8 @@
 # Changelog
 
+## [1.1.1]
+- feat: Improved commit message generation in chain-of-thought mode by refining prompt structure and reducing token usage.
+
 ## [1.1.0]
 
 - feat: Optimized the language detection logic for commit messages generated during chain-of-thought reasoning, reducing token consumption.

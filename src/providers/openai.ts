@@ -182,6 +182,8 @@ export class OpenAIService extends BaseLLMService {
             })();
             const rulesPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'baseRules.md'));
             const baseRule = fs.readFileSync(rulesPath, 'utf-8');
+            const checklistPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'validationChecklist.md'));
+            const checklistText = fs.existsSync(checklistPath) ? fs.readFileSync(checklistPath, 'utf-8') : '';
             const model = this.context.globalState.get<string>('gitCommitGenie.openaiModel', '');
             if (!model) {
                 return { message: 'OpenAI model is not selected. Please configure it via Manage Models.', statusCode: 400 };
@@ -246,7 +248,8 @@ export class OpenAIService extends BaseLLMService {
                         currentTime: parsed?.["current-time"],
                         workspaceFilesTree: parsed?.["workspace-files"],
                         userTemplate: parsed?.["user-template"],
-                        targetLanguage: parsed?.["target-language"]
+                        targetLanguage: parsed?.["target-language"],
+                        validationChecklist: checklistText
                     },
                     chat,
                     { maxParallel: chainMaxParallel }

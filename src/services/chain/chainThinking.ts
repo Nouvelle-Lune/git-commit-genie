@@ -145,19 +145,20 @@ async function classifyAndDraft(
 	};
 }
 
+// Validate and fix the draft commit message according to base rules and optional template policy
 async function validateAndFix(
-	commitMessage: string,
-	baseRulesMarkdown: string,
-	chat: ChatFn,
-	opts?: { templatePolicyJson?: string }
+    commitMessage: string,
+    checklistText: string,
+    chat: ChatFn,
+    opts?: { templatePolicyJson?: string }
 ): Promise<{ validMessage: string; notes?: string; violations?: string[] }> {
-	const messages = buildValidateAndFixMessages(commitMessage, baseRulesMarkdown, opts?.templatePolicyJson);
-	const reply = await chat(messages, { temperature: 0 });
-	const parsed = extractJson<{ status?: string; commit_message?: string; notes?: string; violations?: string[] }>(reply);
-	if (parsed?.commit_message) {
-		return { validMessage: parsed.commit_message, notes: parsed.notes, violations: parsed.violations };
-	}
-	return { validMessage: commitMessage };
+    const messages = buildValidateAndFixMessages(commitMessage, checklistText, opts?.templatePolicyJson);
+    const reply = await chat(messages, { temperature: 0 });
+    const parsed = extractJson<{ status?: string; commit_message?: string; notes?: string; violations?: string[] }>(reply);
+    if (parsed?.commit_message) {
+        return { validMessage: parsed.commit_message, notes: parsed.notes, violations: parsed.violations };
+    }
+    return { validMessage: commitMessage };
 }
 
 function headerRegex(): RegExp {
@@ -260,8 +261,8 @@ export async function generateCommitMessageChain(
 		}
 	}
 
-	const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat, { templatePolicyJson });
-	const { validMessage, notes: validationNotes } = await validateAndFix(draft, baseRulesMarkdown, chat, { templatePolicyJson });
+    const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat, { templatePolicyJson });
+    const { validMessage, notes: validationNotes } = await validateAndFix(draft, inputs.validationChecklist ?? '', chat, { templatePolicyJson });
 
 	// Local strict check; if still not conforming, ask LLM for a minimal strict fix
 	let finalMessage = validMessage;

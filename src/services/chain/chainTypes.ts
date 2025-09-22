@@ -56,6 +56,7 @@ export interface ChainInputs {
     workspaceFilesTree?: string;
     userTemplate?: string;
     targetLanguage?: string;
+    validationChecklist?: string;
 }
 
 export interface FileSummary {
