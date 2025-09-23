@@ -25,12 +25,12 @@ export function activate(context: vscode.ExtensionContext) {
 	logger.info('Git Commit Genie is activating...');
 
 	const diffService = new DiffService();
-	const openAIService = new OpenAIService(context);
-	const deepseekService = new DeepSeekService(context);
-	const anthropicService = new AnthropicService(context);
-	const geminiService = new GeminiService(context);
-
 	const templateService = new TemplateService(context);
+
+	const openAIService = new OpenAIService(context, templateService);
+	const deepseekService = new DeepSeekService(context, templateService);
+	const anthropicService = new AnthropicService(context, templateService);
+	const geminiService = new GeminiService(context, templateService);
 
 	// A map to hold different LLM services
 	const llmServices = new Map<string, any>([
@@ -301,17 +301,29 @@ export function activate(context: vscode.ExtensionContext) {
 					const repo = api.repositories[0];
 					if (repo) {
 						// Simulate typing effect
-						const fullText = result.content;
-						repo.inputBox.value = '';
-						let i = 0;
-						const interval = setInterval(() => {
-							if (i <= fullText.length) {
-								repo.inputBox.value = fullText.slice(0, i);
-								i++;
-							} else {
-								clearInterval(interval);
-							}
-						}, 15); // typing speed
+						const currentConfig = vscode.workspace.getConfiguration('gitCommitGenie');
+						let typingSpeed: number = currentConfig.get<number>('typingAnimationSpeed', -1);
+						typingSpeed = typingSpeed >= -1 ? typingSpeed : -1;
+						typingSpeed = Math.min(typingSpeed, 100);
+						if (typingSpeed === -1) {
+							// Instant fill
+							repo.inputBox.value = result.content;
+							return;
+						} else {
+							// Animated typing
+							const fullText = result.content;
+							repo.inputBox.value = '';
+							let i = 0;
+							const interval = setInterval(() => {
+								if (i <= fullText.length) {
+									repo.inputBox.value = fullText.slice(0, i);
+									i++;
+								} else {
+									clearInterval(interval);
+								}
+							}, typingSpeed); // typing speed
+						}
+
 					}
 				} else {
 					if (result.statusCode === 401) {

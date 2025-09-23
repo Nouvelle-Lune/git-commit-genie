@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { DiffData } from '../git/gitTypes';
+import { TemplateService } from '../../template/templateService';
 
 /**
  * Represents the response from the LLM service.
@@ -37,9 +38,11 @@ export interface LLMService {
 
 export abstract class BaseLLMService implements LLMService {
 	protected context: vscode.ExtensionContext;
+	protected templateService: TemplateService;
 
-	constructor(context: vscode.ExtensionContext) {
+	constructor(context: vscode.ExtensionContext, templateService: TemplateService) {
 		this.context = context;
+		this.templateService = templateService;
 	}
 
 	abstract refreshFromSettings(): Promise<void>;
@@ -56,7 +59,7 @@ export abstract class BaseLLMService implements LLMService {
 		const includeWorkspaceFiles = cfg.get<boolean>('gitCommitGenie.workspaceFiles.enabled', true);
 		const maxFilesSetting = Math.max(0, cfg.get<number>('gitCommitGenie.workspaceFiles.maxFiles', 2000) || 0);
 		const userExcludePatterns = cfg.get<string[]>('gitCommitGenie.workspaceFiles.excludePatterns', []) || [];
-		const templatesPath = cfg.get<string>('gitCommitGenie.templatesPath', '');
+		const templatesPath = this.templateService.getActiveTemplate();
 
 		// Parse .gitignore (root of each workspace folder) into patterns
 		function parseGitignore(content: string): string[] {

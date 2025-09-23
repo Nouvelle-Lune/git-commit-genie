@@ -29,6 +29,7 @@
   "config.commitLanguage.pt": "Portuguese",
   "config.commitLanguage.ru": "Russian",
   "config.commitLanguage.it": "Italian",
+  "config.typingAnimationSpeed.desc": "Speed of the commit message box typing animation in milliseconds per character. Set to -1 to disable the animation.",
   "templates.pickWorkspaceFolder": "Pick a workspace folder",
   "templates.quickPickPlaceholder": "Select / manage templates",
   "templates.createNew": "$(add) Create new template…",

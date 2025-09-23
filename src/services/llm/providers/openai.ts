@@ -6,6 +6,7 @@ import { makeParseableTextFormat } from 'openai/lib/parser';
 import { LLMError, LLMResponse } from '../llmTypes';
 import { L10N_KEYS as I18N } from '../../../i18n/keys';
 import { BaseLLMService } from "../llmTypes";
+import { TemplateService } from '../../../template/templateService';
 import { DiffData } from '../../git/gitTypes';
 import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { logger } from '../../logger';
@@ -54,8 +55,8 @@ export class OpenAIService extends BaseLLMService {
     private openai: OpenAI | null = null;
     protected context: vscode.ExtensionContext;
 
-    constructor(context: vscode.ExtensionContext) {
-        super(context);
+    constructor(context: vscode.ExtensionContext, templateService: TemplateService) {
+        super(context, templateService);
         this.context = context;
         this.refreshFromSettings();
     }

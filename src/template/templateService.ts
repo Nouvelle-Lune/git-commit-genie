@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { logger } from '../services/logger';
 import { L10N_KEYS as I18N } from '../i18n/keys';
+import { logger } from '../services/logger';
 
 // Default starter template placed into new files
 const DEFAULT_TEMPLATE = `Strongly Opinionated Conventional Commit Template\n\nHeader (must follow Conventional Commits):\n<type>(<scope>)!: <description>\n- type: feat | fix | docs | style | refactor | perf | test | build | ci | chore\n- scope: optional; keep short.\n- description: imperative, ≤ 72 chars.\n\nBody:\n- Summarize the changes with short bullets or short paragraphs.\n- Keep each bullet to one sentence.\n- Prefer active voice.\n- Mention risks/limitations if relevant.\n\nFooters:\n- Refs: <ticket or issue id> (optional)\n- Breaking-Change: <reason> (when applicable)\n`;
@@ -20,6 +20,26 @@ function ensureDir(dir: string, checkOnly?: boolean): boolean {
 
 function sanitizeName(name: string): string {
 	return name.trim().replace(/\s+/g, '-').replace(/[^a-zA-Z0-9._-]/g, '') || 'template';
+}
+
+function generateUniqueFileName(targetDir: string, baseName: string): string {
+	const baseFileName = baseName.replace(/\.md$/i, '');
+	let fileName = `${baseFileName}.md`;
+	let counter = 1;
+
+	// Check if the base name exists, and increment counter until we find a unique name
+	while (fs.existsSync(path.join(targetDir, fileName))) {
+		fileName = `${baseFileName}-${counter}.md`;
+		counter++;
+
+		// Safety check to prevent infinite loop (though highly unlikely)
+		if (counter > 1000) {
+			fileName = `${baseFileName}-${Date.now()}.md`;
+			break;
+		}
+	}
+
+	return fileName;
 }
 
 export class TemplateService {
@@ -137,20 +157,28 @@ export class TemplateService {
 	}
 
 	private async setActiveTemplate(fsPath: string) {
-		const cfg = vscode.workspace.getConfiguration();
-		const target = vscode.workspace.workspaceFolders?.length
-			? vscode.ConfigurationTarget.Workspace
-			: vscode.ConfigurationTarget.Global;
-
-		await cfg.update('gitCommitGenie.templatesPath', fsPath, target);
+		const hasWorkspace = !!vscode.workspace.workspaceFolders?.length;
+		if (hasWorkspace) {
+			await this.context.workspaceState.update('activeTemplate', fsPath);
+		} else {
+			await this.context.globalState.update('activeTemplate', fsPath);
+		}
 	}
 
 	private async clearActiveTemplate() {
-		const cfg = vscode.workspace.getConfiguration();
 		await Promise.all([
-			cfg.update('gitCommitGenie.templatesPath', '', vscode.ConfigurationTarget.Workspace),
-			cfg.update('gitCommitGenie.templatesPath', '', vscode.ConfigurationTarget.Global)
+			this.context.workspaceState.update('activeTemplate', undefined),
+			this.context.globalState.update('activeTemplate', undefined)
 		]);
+	}
+
+	getActiveTemplate(): string {
+		const hasWorkspace = !!vscode.workspace.workspaceFolders?.length;
+		if (hasWorkspace) {
+			return this.context.workspaceState.get<string>('activeTemplate', '');
+		} else {
+			return this.context.globalState.get<string>('activeTemplate', '');
+		}
 	}
 
 	async openQuickPicker() {
@@ -177,7 +205,7 @@ export class TemplateService {
 		const openButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('go-to-file'), tooltip: vscode.l10n.t(I18N.templates.buttonOpen) };
 
 		const buildItems = () => {
-			const currentPath = vscode.workspace.getConfiguration().get<string>('gitCommitGenie.templatesPath', '');
+			const currentPath = this.getActiveTemplate();
 			const globalList = this.listTemplates(globalDir);
 			const wsList = wsDir ? this.listTemplates(wsDir) : [];
 			const list: Array<TemplatePick | vscode.QuickPickItem> = [];
@@ -224,10 +252,8 @@ export class TemplateService {
 		buildItems();
 
 
-		const configListener = vscode.workspace.onDidChangeConfiguration(e => {
-			if (e.affectsConfiguration('gitCommitGenie.templatesPath')) {
-				buildItems();
-			}
+		const configListener = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+			buildItems();
 		});
 		qp.onDidHide(() => configListener.dispose());
 
@@ -247,7 +273,7 @@ export class TemplateService {
 			});
 			if (!nameInput) { return; }
 
-			const fileName = sanitizeName(nameInput).replace(/\.md$/i, '') + '.md';
+			const sanitizedBaseName = sanitizeName(nameInput);
 
 			// Determine target directory
 			const targetDir = location.value === 'workspace'
@@ -259,6 +285,9 @@ export class TemplateService {
 				return;
 			}
 
+			// Generate unique filename with auto-increment if needed
+			const fileName = generateUniqueFileName(targetDir, sanitizedBaseName);
+
 			// Update workspace directory reference
 			if (location.value === 'workspace') {
 				wsDir = targetDir;
@@ -266,10 +295,8 @@ export class TemplateService {
 
 			const filePath = path.join(targetDir, fileName);
 
-			// Create file if it doesn't exist
-			if (!fs.existsSync(filePath)) {
-				fs.writeFileSync(filePath, DEFAULT_TEMPLATE, 'utf-8');
-			}
+			// Create file (should not exist due to generateUniqueFileName)
+			fs.writeFileSync(filePath, DEFAULT_TEMPLATE, 'utf-8');
 
 			// Set as active template and open
 			await this.setActiveTemplate(filePath);
@@ -286,6 +313,7 @@ export class TemplateService {
 			if ('action' in sel && sel.action === 'select') {
 				await this.setActiveTemplate(sel.fsPath);
 				vscode.window.showInformationMessage(vscode.l10n.t(I18N.templates.templateSelected, sel.label));
+				buildItems(); // Update the display to show the new active status
 				return;
 			}
 			// Non-action textual commands
@@ -307,7 +335,7 @@ export class TemplateService {
 			if (!('action' in item)) { return; }
 
 			const tooltip = e.button.tooltip;
-			const activePath = vscode.workspace.getConfiguration().get<string>('gitCommitGenie.templatesPath', '');
+			const activePath = this.getActiveTemplate();
 
 			try {
 				if (tooltip === vscode.l10n.t(I18N.templates.buttonDelete)) {
@@ -323,16 +351,14 @@ export class TemplateService {
 					});
 					if (!newName) { return; }
 
-					const fileName = sanitizeName(newName).replace(/\.md$/i, '') + '.md';
+					const sanitizedBaseName = sanitizeName(newName);
 					const targetDir = item.storage === 'workspace'
 						? (wsDir ?? (await this.getWorkspaceTemplatesDir())!)
 						: globalDir;
-					const newPath = path.join(targetDir, fileName);
 
-					if (fs.existsSync(newPath)) {
-						vscode.window.showWarningMessage(vscode.l10n.t(I18N.templates.renameExists));
-						return;
-					}
+					// Generate unique filename for rename operation
+					const fileName = generateUniqueFileName(targetDir, sanitizedBaseName);
+					const newPath = path.join(targetDir, fileName);
 
 					fs.renameSync(item.fsPath, newPath);
 					if (activePath === item.fsPath) {

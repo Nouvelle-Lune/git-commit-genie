@@ -110,10 +110,13 @@
           ],
           "markdownDescription": "%config.commitLanguage.desc%"
         },
-        "gitCommitGenie.templatesPath": {
-          "type": "string",
-          "default": "",
-          "description": "Path to the active commit message template file."
+        "gitCommitGenie.typingAnimationSpeed": {
+          "order": 6,
+          "type": "number",
+          "default": 15,
+          "minimum": -1,
+          "maximum": 100,
+          "markdownDescription": "%config.typingAnimationSpeed.desc%"
         }
       }
     },

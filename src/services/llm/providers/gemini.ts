@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { BaseLLMService, LLMError, LLMResponse } from "../llmTypes";
+import { TemplateService } from '../../../template/templateService';
 import { L10N_KEYS as I18N } from '../../../i18n/keys';
 import { DiffData } from "../../git/gitTypes";
 import { generateCommitMessageChain } from "../../chain/chainThinking";
@@ -14,8 +15,8 @@ export class GeminiService extends BaseLLMService {
     private client: any | null = null;
     protected context: vscode.ExtensionContext;
 
-    constructor(context: vscode.ExtensionContext) {
-        super(context);
+    constructor(context: vscode.ExtensionContext, templateService: TemplateService) {
+        super(context, templateService);
         this.context = context;
         this.refreshFromSettings();
     }
