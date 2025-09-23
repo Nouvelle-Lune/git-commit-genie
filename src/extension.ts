@@ -8,8 +8,21 @@ import { AnthropicService } from './services/llm/providers/anthropic';
 import { GeminiService } from './services/llm/providers/gemini';
 import { L10N_KEYS as I18N } from './i18n/keys';
 import { TemplateService } from './template/templateService';
+import { logger, LogLevel } from './services/logger';
 
 export function activate(context: vscode.ExtensionContext) {
+
+	// Initialize OutputChannel and Logger
+	const outputChannel = vscode.window.createOutputChannel('Git Commit Genie');
+	const config = vscode.workspace.getConfiguration('gitCommitGenie');
+	const logLevel = config.get<string>('logLevel', 'info');
+	const level = logLevel === 'debug' ? LogLevel.Debug :
+		logLevel === 'warn' ? LogLevel.Warning :
+			logLevel === 'error' ? LogLevel.Error : LogLevel.Info;
+	logger.initialize(outputChannel, level);
+	context.subscriptions.push(outputChannel);
+
+	logger.info('Git Commit Genie is activating...');
 
 	const diffService = new DiffService();
 	const openAIService = new OpenAIService(context);
@@ -361,5 +374,6 @@ export function activate(context: vscode.ExtensionContext) {
 
 // This method is called when extension is deactivated
 export function deactivate() {
-	console.log('"git-commit-genie" is now deactivated.');
+	logger.info('"git-commit-genie" is now deactivated.');
+	logger.dispose();
 }

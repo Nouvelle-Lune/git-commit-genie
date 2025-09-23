@@ -6,6 +6,7 @@ import { L10N_KEYS as I18N } from '../../../i18n/keys';
 import { DiffData } from "../../git/gitTypes";
 import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { ChatMessage, ChatFn } from "../../chain/chainTypes";
+import { logger } from '../../logger';
 
 const SECRET_GEMINI_API_KEY = 'gitCommitGenie.secret.geminiApiKey';
 
@@ -27,7 +28,7 @@ export class GeminiService extends BaseLLMService {
                 const { GoogleGenAI } = require('@google/genai');
                 this.client = new GoogleGenAI({ apiKey });
             } catch (e) {
-                console.warn('Gemini SDK not available. Please install @google/genai.');
+                logger.warn('Gemini SDK not available. Please install @google/genai.');
                 this.client = null;
             }
         }
@@ -217,9 +218,9 @@ export class GeminiService extends BaseLLMService {
                             if (u) {
                                 usages.push({ prompt: u.promptTokenCount, candidates: u.candidatesTokenCount, total: u.totalTokenCount });
                                 recordUsage(u);
-                                console.log(`[Genie][Gemini] Chain call #${callCount} tokens: prompt=${u.promptTokenCount ?? 0}, completion=${u.candidatesTokenCount ?? 0}, total=${u.totalTokenCount ?? 0}`);
+                                logger.info(`[Genie][Gemini] Chain call #${callCount} tokens: prompt=${u.promptTokenCount ?? 0}, completion=${u.candidatesTokenCount ?? 0}, total=${u.totalTokenCount ?? 0}`);
                             } else {
-                                console.log(`[Genie][Gemini] Chain call #${callCount} tokens: (usage not provided)`);
+                                logger.info(`[Genie][Gemini] Chain call #${callCount} tokens: (usage not provided)`);
                             }
                             const textOut = (res as any)?.text || (res as any)?.response?.text?.() || '';
                             return textOut;
@@ -229,7 +230,7 @@ export class GeminiService extends BaseLLMService {
                             if (code === 429) {
                                 await this.maybeWarnRateLimit('Gemini', modelId);
                                 const wait = this.getRetryDelayMs(e);
-                                console.warn(`[Genie][Gemini] 429 rate-limited. Retrying in ${wait}ms (attempt ${attempt + 1}/3).`);
+                                logger.warn(`[Genie][Gemini] 429 rate-limited. Retrying in ${wait}ms (attempt ${attempt + 1}/3).`);
                                 await this.sleep(wait);
                                 continue;
                             }
@@ -269,7 +270,7 @@ export class GeminiService extends BaseLLMService {
                         completion: acc.completion + (u.candidates ?? 0),
                         total: acc.total + (u.total ?? 0)
                     }), { prompt: 0, completion: 0, total: 0 });
-                    console.log(`[Genie][Gemini] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
+                    logger.info(`[Genie][Gemini] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
                 }
                 return { content: out.commitMessage };
             }
@@ -293,7 +294,7 @@ export class GeminiService extends BaseLLMService {
                     if (code === 429) {
                         await this.maybeWarnRateLimit('Gemini', modelId);
                         const wait = this.getRetryDelayMs(e);
-                        console.warn(`[Genie][Gemini] Legacy 429 rate-limited. Retrying in ${wait}ms.`);
+                        logger.warn(`[Genie][Gemini] Legacy 429 rate-limited. Retrying in ${wait}ms.`);
                         await this.sleep(wait);
                         continue;
                     }
@@ -304,7 +305,7 @@ export class GeminiService extends BaseLLMService {
             const u = (res as any)?.usageMetadata || (res as any)?.response?.usageMetadata;
             if (u) {
                 recordUsage(u);
-                console.log(`[Genie][Gemini] Legacy call tokens: prompt=${u.promptTokenCount ?? 0}, completion=${u.candidatesTokenCount ?? 0}, total=${u.totalTokenCount ?? 0}`);
+                logger.info(`[Genie][Gemini] Legacy call tokens: prompt=${u.promptTokenCount ?? 0}, completion=${u.candidatesTokenCount ?? 0}, total=${u.totalTokenCount ?? 0}`);
             }
             const textOut = (res as any)?.text || (res as any)?.response?.text?.() || '';
             if (textOut) {

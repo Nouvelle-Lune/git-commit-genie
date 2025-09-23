@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { logger } from '../services/logger';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 
 // Default starter template placed into new files
@@ -120,7 +121,7 @@ export class TemplateService {
 			fs.appendFileSync(gitignorePath, content, { encoding: 'utf-8' });
 		} catch (error) {
 			// Silent error handling, does not affect core functionality
-			console.warn('Failed to update .gitignore:', error);
+			logger.warn('Failed to update .gitignore:', error);
 		}
 	}
 

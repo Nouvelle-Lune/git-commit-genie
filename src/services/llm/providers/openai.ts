@@ -8,6 +8,7 @@ import { L10N_KEYS as I18N } from '../../../i18n/keys';
 import { BaseLLMService } from "../llmTypes";
 import { DiffData } from '../../git/gitTypes';
 import { generateCommitMessageChain } from "../../chain/chainThinking";
+import { logger } from '../../logger';
 import { ChatFn } from "../../chain/chainTypes";
 
 const SECRET_OPENAI_API_KEY = 'gitCommitGenie.secret.openaiApiKey';
@@ -269,9 +270,9 @@ export class OpenAIService extends BaseLLMService {
                             const u = this.getResponseUsage(resp);
                             if (u) {
                                 usages.push(u);
-                                console.log(`[Genie][OpenAI] Chain call #${callCount} tokens: prompt=${u.prompt_tokens ?? 0}, completion=${u.completion_tokens ?? 0}, total=${u.total_tokens ?? 0}`);
+                                logger.info(`[Genie][OpenAI] Chain call #${callCount} tokens: prompt=${u.prompt_tokens ?? 0}, completion=${u.completion_tokens ?? 0}, total=${u.total_tokens ?? 0}`);
                             } else {
-                                console.log(`[Genie][OpenAI] Chain call #${callCount} tokens: (usage not provided)`);
+                                logger.info(`[Genie][OpenAI] Chain call #${callCount} tokens: (usage not provided)`);
                             }
                             const text = this.getResponseOutputText(resp);
                             return text || '';
@@ -286,7 +287,7 @@ export class OpenAIService extends BaseLLMService {
                                 const factor = Math.pow(2, attempt);
                                 const jitter = Math.floor(Math.random() * 300);
                                 const wait = Math.min(60_000, base * factor + jitter);
-                                console.warn(`[Genie][OpenAI] 429 rate-limited. Retrying in ${wait}ms (attempt ${attempt + 1}/4).`);
+                                logger.warn(`[Genie][OpenAI] 429 rate-limited. Retrying in ${wait}ms (attempt ${attempt + 1}/4).`);
                                 await this.sleep(wait);
                                 continue;
                             }
@@ -320,7 +321,7 @@ export class OpenAIService extends BaseLLMService {
                         completion: acc.completion + (u.completion_tokens || 0),
                         total: acc.total + (u.total_tokens || 0)
                     }), { prompt: 0, completion: 0, total: 0 });
-                    console.log(`[Genie][OpenAI] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
+                    logger.info(`[Genie][OpenAI] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
                 }
                 return { content: out.commitMessage };
             }
@@ -373,12 +374,12 @@ export class OpenAIService extends BaseLLMService {
                         const factor = Math.pow(2, attempt);
                         const jitter = Math.floor(Math.random() * 300);
                         const wait = Math.min(60_000, base * factor + jitter);
-                        console.warn(`[Genie][OpenAI] Structured call 429 rate-limited. Retrying in ${wait}ms.`);
+                        logger.warn(`[Genie][OpenAI] Structured call 429 rate-limited. Retrying in ${wait}ms.`);
                         await this.sleep(wait);
                         continue;
                     }
                     if (useStructuredOutputs && this.shouldFallbackStructuredOutputs(e)) {
-                        console.warn(`[Genie][OpenAI] Structured outputs unsupported for model '${model}'. Falling back to JSON mode.`);
+                        logger.warn(`[Genie][OpenAI] Structured outputs unsupported for model '${model}'. Falling back to JSON mode.`);
                         useStructuredOutputs = false;
                         // Retry immediately with fallback mode.
                         continue;
@@ -394,9 +395,9 @@ export class OpenAIService extends BaseLLMService {
             const usage = this.getResponseUsage(resp);
             if (usage) {
                 const modeLabel = structuredOutputsSucceeded ? 'Structured' : 'JSON';
-                console.log(`[Genie][OpenAI] ${modeLabel} call tokens: prompt=${usage.prompt_tokens ?? 0}, completion=${usage.completion_tokens ?? 0}, total=${usage.total_tokens ?? 0}`);
+                logger.info(`[Genie][OpenAI] ${modeLabel} call tokens: prompt=${usage.prompt_tokens ?? 0}, completion=${usage.completion_tokens ?? 0}, total=${usage.total_tokens ?? 0}`);
             } else {
-                console.log('[Genie][OpenAI] Structured call tokens: (usage not provided)');
+                logger.info('[Genie][OpenAI] Structured call tokens: (usage not provided)');
             }
 
             if (parsed?.commit_message) {

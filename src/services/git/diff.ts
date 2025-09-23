@@ -3,6 +3,7 @@ import { DiffData, DiffHunk, DiffStatus } from './gitTypes';
 import { API, Change, GitExtension, Repository, Status } from "../git/git";
 import * as path from 'path';
 import { spawn } from 'child_process';
+import { logger } from '../logger';
 
 /**
  * Gets the Git API from the VS Code Git extension, if available.
@@ -12,13 +13,13 @@ async function getGitApi(): Promise<API | undefined> {
 	try {
 		const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
 		if (!gitExtension) {
-			console.warn('VS Code Git extension not found.');
+			logger.warn('VS Code Git extension not found.');
 			return undefined;
 		}
 		const exports = gitExtension.getAPI(1);
 		return exports;
 	} catch (error) {
-		console.error('Failed to get Git API:', error);
+		logger.error('Failed to get Git API:', error);
 		return undefined;
 	}
 }
@@ -36,7 +37,7 @@ async function getRepository(api: API): Promise<Repository | null> {
 	if (api.onDidOpenRepository) {
 		return new Promise((resolve) => {
 			const timeout = setTimeout(() => {
-				console.warn('Timed out waiting for Git repository to open.');
+				logger.warn('Timed out waiting for Git repository to open.');
 				disposable.dispose();
 				resolve(null);
 			}, 5000); // 5-second timeout
@@ -73,11 +74,9 @@ export class DiffService {
 
 		const repo = await getRepository(api);
 		if (!repo) {
-			console.warn('No Git repository found or it could not be initialized in time.');
+			logger.warn('No Git repository found or it could not be initialized in time.');
 			return [];
-		}
-
-		// Gather staged changes; optionally auto-stage everything if enabled and nothing is staged
+		}		// Gather staged changes; optionally auto-stage everything if enabled and nothing is staged
 		let indexChanges = repo.state.indexChanges;
 		let stagedTemporarily = false;
 		const gitPath = api.git.path;
@@ -102,11 +101,11 @@ export class DiffService {
 					await repo.status();
 					indexChanges = repo.state.indexChanges;
 				} catch (e) {
-					console.warn('[Genie] Auto-stage for diff failed:', e);
+					logger.warn('[Genie] Auto-stage for diff failed:', e);
 				}
 			}
 			if (indexChanges.length === 0) {
-				console.warn('No changes found in the Git repository.');
+				logger.warn('No changes found in the Git repository.');
 				return [];
 			}
 		}
@@ -123,7 +122,7 @@ export class DiffService {
 				await runGit(['reset', '-q', 'HEAD', '--', '.']);
 				await repo.status();
 			} catch (e2) {
-				console.warn('[Genie] Auto-stage cleanup failed:', e2);
+				logger.warn('[Genie] Auto-stage cleanup failed:', e2);
 			}
 		}
 
@@ -149,12 +148,12 @@ export class DiffService {
 				rawDiff = await repo.diffIndexWithHEAD(change.uri.fsPath);
 			} else {
 				//rawDiff = await repo.diffWithHEAD(change.uri.fsPath);
-				console.error(`Unstaged diff not implemented for ${fileName}`);
+				logger.error(`Unstaged diff not implemented for ${fileName}`);
 				return null;
 			}
 
 		} catch (error) {
-			console.error(`Failed to get diff for ${fileName}:`, error);
+			logger.error(`Failed to get diff for ${fileName}:`, error);
 			return null;
 		}
 

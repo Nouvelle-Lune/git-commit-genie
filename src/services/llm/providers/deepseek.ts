@@ -8,6 +8,7 @@ import { DiffData } from '../../git/gitTypes';
 import OpenAI from 'openai';
 import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { ChatFn } from "../../chain/chainTypes";
+import { logger } from '../../logger';
 
 const DEEPSEEK_API_URL = 'https://api.deepseek.com';
 const SECRET_DEEPSEEK_API_KEY = 'gitCommitGenie.secret.deepseekApiKey';
@@ -141,9 +142,9 @@ export class DeepSeekService extends BaseLLMService {
                             const u: any = (res as any).usage;
                             if (u) {
                                 usages.push(u);
-                                console.log(`[Genie][DeepSeek] Chain call #${callCount} tokens: prompt=${u.prompt_tokens ?? 0}, completion=${u.completion_tokens ?? 0}, total=${u.total_tokens ?? 0}`);
+                                logger.info(`[Genie][DeepSeek] Chain call #${callCount} tokens: prompt=${u.prompt_tokens ?? 0}, completion=${u.completion_tokens ?? 0}, total=${u.total_tokens ?? 0}`);
                             } else {
-                                console.log(`[Genie][DeepSeek] Chain call #${callCount} tokens: (usage not provided)`);
+                                logger.info(`[Genie][DeepSeek] Chain call #${callCount} tokens: (usage not provided)`);
                             }
                             return res.choices[0]?.message?.content ?? '';
                         } catch (e: any) {
@@ -153,7 +154,7 @@ export class DeepSeekService extends BaseLLMService {
                             if (code === 429) {
                                 await this.maybeWarnRateLimit('DeepSeek', model);
                                 const wait = this.getRetryDelayMs(e);
-                                console.warn(`[Genie][DeepSeek] 429 rate-limited. Retrying in ${wait}ms (attempt ${attempt + 1}/2).`);
+                                logger.warn(`[Genie][DeepSeek] 429 rate-limited. Retrying in ${wait}ms (attempt ${attempt + 1}/2).`);
                                 await this.sleep(wait);
                                 continue;
                             }
@@ -192,7 +193,7 @@ export class DeepSeekService extends BaseLLMService {
                         completion: acc.completion + (u.completion_tokens || 0),
                         total: acc.total + (u.total_tokens || 0)
                     }), { prompt: 0, completion: 0, total: 0 });
-                    console.log(`[Genie][DeepSeek] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
+                    logger.info(`[Genie][DeepSeek] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
                 }
                 return { content: out.commitMessage };
             }
@@ -222,7 +223,7 @@ export class DeepSeekService extends BaseLLMService {
                     if (code === 429) {
                         await this.maybeWarnRateLimit('DeepSeek', model);
                         const wait = this.getRetryDelayMs(e);
-                        console.warn(`[Genie][DeepSeek] Legacy 429 rate-limited. Retrying in ${wait}ms.`);
+                        logger.warn(`[Genie][DeepSeek] Legacy 429 rate-limited. Retrying in ${wait}ms.`);
                         await this.sleep(wait);
                         continue;
                     }
@@ -231,9 +232,9 @@ export class DeepSeekService extends BaseLLMService {
             }
             const usageLegacy: any = (response as any).usage;
             if (usageLegacy) {
-                console.log(`[Genie][DeepSeek] Legacy call tokens: prompt=${usageLegacy.prompt_tokens ?? 0}, completion=${usageLegacy.completion_tokens ?? 0}, total=${usageLegacy.total_tokens ?? 0}`);
+                logger.info(`[Genie][DeepSeek] Legacy call tokens: prompt=${usageLegacy.prompt_tokens ?? 0}, completion=${usageLegacy.completion_tokens ?? 0}, total=${usageLegacy.total_tokens ?? 0}`);
             } else {
-                console.log('[Genie][DeepSeek] Legacy call tokens: (usage not provided)');
+                logger.info('[Genie][DeepSeek] Legacy call tokens: (usage not provided)');
             }
 
             const content: string = response.choices[0]?.message?.content;

@@ -6,6 +6,7 @@ import { L10N_KEYS as I18N } from '../../../i18n/keys';
 import { DiffData } from "../../git/gitTypes";
 import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { ChatFn } from "../../chain/chainTypes";
+import { logger } from '../../logger';
 
 const SECRET_ANTHROPIC_API_KEY = 'gitCommitGenie.secret.anthropicApiKey';
 
@@ -29,7 +30,7 @@ export class AnthropicService extends BaseLLMService {
                 catch { AnthropicSdk = require('anthropic').default || require('anthropic'); }
                 this.client = new AnthropicSdk({ apiKey });
             } catch (e) {
-                console.warn('Anthropic SDK not available. Please install @anthropic-ai/sdk.');
+                logger.warn('Anthropic SDK not available. Please install @anthropic-ai/sdk.');
                 this.client = null;
             }
         }
@@ -203,9 +204,9 @@ export class AnthropicService extends BaseLLMService {
                             const usage = this.getResponseUsage(resp);
                             if (usage) {
                                 usages.push(usage);
-                                console.log(`[Genie][Anthropic] Chain call #${callCount} tokens: prompt=${usage.prompt_tokens ?? 0}, completion=${usage.completion_tokens ?? 0}, total=${usage.total_tokens ?? 0}`);
+                                logger.info(`[Genie][Anthropic] Chain call #${callCount} tokens: prompt=${usage.prompt_tokens ?? 0}, completion=${usage.completion_tokens ?? 0}, total=${usage.total_tokens ?? 0}`);
                             } else {
-                                console.log(`[Genie][Anthropic] Chain call #${callCount} tokens: (usage not provided)`);
+                                logger.info(`[Genie][Anthropic] Chain call #${callCount} tokens: (usage not provided)`);
                             }
                             return this.extractText(resp) || '';
                         } catch (e: any) {
@@ -220,7 +221,7 @@ export class AnthropicService extends BaseLLMService {
                                 const factor = Math.pow(2, attempt);
                                 const jitter = Math.floor(Math.random() * 300);
                                 const wait = Math.min(60_000, base * factor + jitter);
-                                console.warn(`[Genie][Anthropic] 429 rate-limited. Retrying in ${wait}ms (attempt ${attempt + 1}/4).`);
+                                logger.warn(`[Genie][Anthropic] 429 rate-limited. Retrying in ${wait}ms (attempt ${attempt + 1}/4).`);
                                 await this.sleep(wait);
                                 continue;
                             }
@@ -251,7 +252,7 @@ export class AnthropicService extends BaseLLMService {
                         completion: acc.completion + (u.completion_tokens || 0),
                         total: acc.total + (u.total_tokens || 0)
                     }), { prompt: 0, completion: 0, total: 0 });
-                    console.log(`[Genie][Anthropic] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
+                    logger.info(`[Genie][Anthropic] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
                 }
                 return { content: out.commitMessage };
             }
@@ -283,7 +284,7 @@ export class AnthropicService extends BaseLLMService {
                         const factor = Math.pow(2, attempt);
                         const jitter = Math.floor(Math.random() * 300);
                         const wait = Math.min(60_000, base * factor + jitter);
-                        console.warn(`[Genie][Anthropic] Legacy 429 rate-limited. Retrying in ${wait}ms.`);
+                        logger.warn(`[Genie][Anthropic] Legacy 429 rate-limited. Retrying in ${wait}ms.`);
                         await this.sleep(wait);
                         continue;
                     }
@@ -292,9 +293,9 @@ export class AnthropicService extends BaseLLMService {
             }
             const usage = this.getResponseUsage(resp);
             if (usage) {
-                console.log(`[Genie][Anthropic] Legacy call tokens: prompt=${usage.prompt_tokens ?? 0}, completion=${usage.completion_tokens ?? 0}, total=${usage.total_tokens ?? 0}`);
+                logger.info(`[Genie][Anthropic] Legacy call tokens: prompt=${usage.prompt_tokens ?? 0}, completion=${usage.completion_tokens ?? 0}, total=${usage.total_tokens ?? 0}`);
             } else {
-                console.log('[Genie][Anthropic] Legacy call tokens: (usage not provided)');
+                logger.info('[Genie][Anthropic] Legacy call tokens: (usage not provided)');
             }
             const text = this.extractText(resp);
             if (text) {
