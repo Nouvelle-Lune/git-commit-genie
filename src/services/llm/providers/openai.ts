@@ -251,11 +251,9 @@ export class OpenAIService extends BaseLLMService {
                 return { message: 'OpenAI model is not selected. Please configure it via Manage Models.', statusCode: 400 };
             }
 
-            const templatesPath = vscode.workspace.getConfiguration().get<string>('gitCommitGenie.templatesPath', '');
-
             if (useChain) {
-                const jsonDiff = await super.buildJsonDiff(diffs, templatesPath);
-                const parsed = JSON.parse(jsonDiff);
+                const jsonMessage = await this.buildJsonMessage(diffs);
+                const parsed = JSON.parse(jsonMessage);
                 const usages: Array<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }> = [];
                 let callCount = 0;
                 const chat: ChatFn = async (messages, _options) => {
@@ -328,7 +326,7 @@ export class OpenAIService extends BaseLLMService {
             }
 
             // Single-shot using Structured Outputs (fallbacks to JSON mode if unsupported)
-            const jsonDiff = await super.buildJsonDiff(diffs, templatesPath);
+            const jsonMessage = await this.buildJsonMessage(diffs);
             if (options?.token?.isCancellationRequested) { return { message: 'Cancelled', statusCode: 499 }; }
             const controller = new AbortController();
             options?.token?.onCancellationRequested(() => controller.abort());
@@ -345,7 +343,7 @@ export class OpenAIService extends BaseLLMService {
                             model,
                             input: [
                                 { role: 'developer', content: baseRule },
-                                { role: 'user', content: jsonDiff }
+                                { role: 'user', content: jsonMessage }
                             ],
                             text: {
                                 format: commitMessageStructuredTextFormat,
@@ -358,7 +356,7 @@ export class OpenAIService extends BaseLLMService {
                             model,
                             input: [
                                 { role: 'developer', content: baseRule },
-                                { role: 'user', content: jsonDiff }
+                                { role: 'user', content: jsonMessage }
                             ],
                             text: { format: { type: 'json_object' } },
                         } as any, { signal: controller.signal });

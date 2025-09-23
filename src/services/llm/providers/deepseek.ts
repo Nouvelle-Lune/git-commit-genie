@@ -119,11 +119,10 @@ export class DeepSeekService extends BaseLLMService {
                 return { message: 'DeepSeek model is not selected. Please configure it via Manage Models.', statusCode: 400 };
             }
 
-            const templatesPath = vscode.workspace.getConfiguration().get<string>('gitCommitGenie.templatesPath', '');
 
             if (useChain) {
-                const jsonDiff = await super.buildJsonDiff(diffs, templatesPath);
-                const parsed = JSON.parse(jsonDiff);
+                const jsonMessage = await this.buildJsonMessage(diffs);
+                const parsed = JSON.parse(jsonMessage);
                 const usages: Array<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }> = [];
                 let callCount = 0;
                 const chat: ChatFn = async (messages, _options) => {
@@ -199,7 +198,7 @@ export class DeepSeekService extends BaseLLMService {
             }
 
             // Legacy single-shot prompt (system: rules, user: json data)
-            const jsonDiff = await super.buildJsonDiff(diffs, templatesPath);
+            const jsonMessage = await this.buildJsonMessage(diffs);
             if (options?.token?.isCancellationRequested) { return { message: 'Cancelled', statusCode: 499 }; }
             const controller = new AbortController();
             options?.token?.onCancellationRequested(() => controller.abort());
@@ -211,7 +210,7 @@ export class DeepSeekService extends BaseLLMService {
                         model,
                         messages: [
                             { role: 'system', content: baseRule },
-                            { role: 'user', content: jsonDiff }
+                            { role: 'user', content: jsonMessage }
                         ],
                         temperature: 0.0,
                         response_format: { "type": "json_object" }

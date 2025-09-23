@@ -48,7 +48,7 @@ export abstract class BaseLLMService implements LLMService {
 	abstract clearApiKey(): Promise<void>;
 	abstract generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
 
-	protected async buildJsonDiff(diffs: DiffData[], templatesPath?: string): Promise<string> {
+	protected async buildJsonMessage(diffs: DiffData[]): Promise<string> {
 		const time = new Date().toISOString();
 
 		// Settings for workspace files payload
@@ -56,6 +56,7 @@ export abstract class BaseLLMService implements LLMService {
 		const includeWorkspaceFiles = cfg.get<boolean>('gitCommitGenie.workspaceFiles.enabled', true);
 		const maxFilesSetting = Math.max(0, cfg.get<number>('gitCommitGenie.workspaceFiles.maxFiles', 2000) || 0);
 		const userExcludePatterns = cfg.get<string[]>('gitCommitGenie.workspaceFiles.excludePatterns', []) || [];
+		const templatesPath = cfg.get<string>('gitCommitGenie.templatesPath', '');
 
 		// Parse .gitignore (root of each workspace folder) into patterns
 		function parseGitignore(content: string): string[] {
@@ -74,9 +75,13 @@ export abstract class BaseLLMService implements LLMService {
 			let out = '';
 			for (let i = 0; i < seg.length; i++) {
 				const ch = seg[i];
-				if (ch === '*') out += '[^/]*';
-				else if (ch === '?') out += '[^/]';
-				else out += escapeRegex(ch);
+				if (ch === '*') {
+					out += '[^/]*';
+				} else if (ch === '?') {
+					out += '[^/]';
+				} else {
+					out += escapeRegex(ch);
+				}
 			}
 			return out;
 		}
@@ -86,9 +91,9 @@ export abstract class BaseLLMService implements LLMService {
 			let negate = false;
 			if (g.startsWith('!')) { negate = true; g = g.slice(1).trim(); }
 			const dirOnly = g.endsWith('/');
-			if (dirOnly) g = g.slice(0, -1);
+			if (dirOnly) { g = g.slice(0, -1); }
 			const rooted = g.startsWith('/');
-			if (rooted) g = g.slice(1);
+			if (rooted) { g = g.slice(1); }
 
 			const parts = g.split('/');
 			const reParts = parts.map(p => p === '**' ? '.*' : segmentPatternToRegex(p));
@@ -159,11 +164,11 @@ export abstract class BaseLLMService implements LLMService {
 			const names = new Set<string>();
 			for (const u of allUris) {
 				const rel = vscode.workspace.asRelativePath(u, false).replace(/\\/g, '/');
-				if (isIgnored(rel, rules)) continue;
+				if (isIgnored(rel, rules)) { continue; }
 				const base = path.posix.basename(rel);
-				if (!base) continue;
+				if (!base) { continue; }
 				names.add(base);
-				if (maxFilesSetting > 0 && names.size >= maxFilesSetting) break;
+				if (maxFilesSetting > 0 && names.size >= maxFilesSetting) { break; }
 			}
 			workspaceFilesStr = Array.from(names.values()).join('\n');
 		}

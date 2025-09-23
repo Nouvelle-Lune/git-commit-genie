@@ -160,7 +160,7 @@ export class AnthropicService extends BaseLLMService {
             return { message: 'Anthropic API key is not set or SDK unavailable.', statusCode: 401 };
         }
         try {
-            const templatesPath = vscode.workspace.getConfiguration().get<string>('gitCommitGenie.templatesPath', '');
+
             const rulesPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'baseRules.md'));
             const baseRule = fs.readFileSync(rulesPath, 'utf-8');
             const checklistPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'validationChecklist.md'));
@@ -177,8 +177,8 @@ export class AnthropicService extends BaseLLMService {
             })();
 
             if (useChain) {
-                const jsonDiff = await super.buildJsonDiff(diffs, templatesPath);
-                const parsed = JSON.parse(jsonDiff);
+                const jsonMessage = await this.buildJsonMessage(diffs);
+                const parsed = JSON.parse(jsonMessage);
                 const usages: Array<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }> = [];
                 let callCount = 0;
                 const chat: ChatFn = async (messages, _o) => {
@@ -257,7 +257,7 @@ export class AnthropicService extends BaseLLMService {
             }
 
             // Legacy single-shot prompt
-            const jsonDiff = await super.buildJsonDiff(diffs, templatesPath);
+            const jsonMessage = await this.buildJsonMessage(diffs);
             if (options?.token?.isCancellationRequested) {
                 return { message: 'Cancelled', statusCode: 499 };
             }
@@ -268,7 +268,7 @@ export class AnthropicService extends BaseLLMService {
                         model,
                         max_tokens: 1024,
                         system: baseRule,
-                        messages: [{ role: 'user', content: jsonDiff }],
+                        messages: [{ role: 'user', content: jsonMessage }],
                         temperature: 0
                     });
                     break;

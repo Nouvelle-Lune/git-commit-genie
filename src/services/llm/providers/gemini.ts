@@ -131,7 +131,7 @@ export class GeminiService extends BaseLLMService {
             return { message: 'Gemini API key is not set or SDK unavailable.', statusCode: 401 };
         }
         try {
-            const templatesPath = vscode.workspace.getConfiguration().get<string>('gitCommitGenie.templatesPath', '');
+
             const rulesPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'baseRules.md'));
             const baseRule = fs.readFileSync(rulesPath, 'utf-8');
             const modelId = this.context.globalState.get<string>('gitCommitGenie.geminiModel', '');
@@ -194,8 +194,8 @@ export class GeminiService extends BaseLLMService {
             };
 
             if (useChain) {
-                const jsonDiff = await super.buildJsonDiff(diffs, templatesPath);
-                const parsed = JSON.parse(jsonDiff);
+                const jsonMessage = await this.buildJsonMessage(diffs);
+                const parsed = JSON.parse(jsonMessage);
                 const usages: Array<{ prompt?: number; candidates?: number; total?: number }> = [];
                 let callCount = 0;
                 const chat: ChatFn = async (messages, options) => {
@@ -274,7 +274,7 @@ export class GeminiService extends BaseLLMService {
             }
 
             // Legacy single-shot prompt
-            const jsonDiff = await super.buildJsonDiff(diffs, templatesPath);
+            const jsonMessage = await this.buildJsonMessage(diffs);
             let legacyRes: any;
             for (let attempt = 0; attempt < 2; attempt++) {
                 try {
@@ -282,7 +282,7 @@ export class GeminiService extends BaseLLMService {
                         await acquireSlot();
                         return await this.client.models.generateContent({
                             model: modelId,
-                            contents: jsonDiff,
+                            contents: jsonMessage,
                             config: { systemInstruction: baseRule, temperature: 0 }
                         });
                     });
