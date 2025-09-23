@@ -163,7 +163,7 @@ MIT
 
 ## 致谢
 
-- Conventional Commits 规范
+- [Conventional Commits](https://conventionalcommits.org/) - https://github.com/conventional-commits/conventionalcommits.org
 - OpenAI / DeepSeek / Anthropic / Gemini 模型生态
 
 ---

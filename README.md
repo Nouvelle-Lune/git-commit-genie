@@ -155,7 +155,7 @@ MIT
 
 ## Acknowledgements
 
-- Conventional Commits specification.
+- [Conventional Commits](https://conventionalcommits.org/) - https://github.com/conventional-commits/conventionalcommits.org
 - OpenAI / DeepSeek / Anthropic / Gemini model ecosystems.
 
 ---
