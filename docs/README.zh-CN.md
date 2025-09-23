@@ -17,7 +17,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 - 支持多模型动态切换，快速选择最适合的提供商与模型。
 
 ## Usage
-<img src="../media/demo.gif" width="200"/>
+<img src="../media/demo1.gif" width="300"/>
 
 ## 格式
 
@@ -111,6 +111,8 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 SCM 标题栏：根据状态显示“Generate commit message”或“Stop generate”按钮。
 
 ## 模板编写
+通过设置 `gitCommitGenie.templatesPath` 指向一个模版文件
+<img src="../media/demo2.gif" width="600"/>
 
 模版文件存在且非空时，系统尝试抽取“模板策略”。支持：
 1. 自然语言偏好描述。

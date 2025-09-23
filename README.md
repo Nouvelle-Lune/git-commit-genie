@@ -11,7 +11,7 @@ Chinese version: [中文说明](./docs/README.zh-CN.md)
 Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using mainstream LLM providers (OpenAI / DeepSeek / Anthropic / Gemini). Supports optional multi‑step chain prompting and user template strategy to improve structural consistency and style alignment.
 
 ## Usage
-<img src="./media/demo.gif" width="200"/>
+<img src="./media/demo1.gif" width="300"/>
 
 ## Format
 
@@ -104,6 +104,8 @@ All settings are under: `Git Commit Genie`.
 SCM Title Bar: shows "Generate commit message" or "Stop generate" depending on state.
 
 ## Template Authoring
+Set `gitCommitGenie.templatesPath` to point to a template file
+<img src="./media/demo2.gif" width="600"/>
 
 When present & non‑empty, Genie attempts to extract a "Template Policy". Two authoring styles:
 
