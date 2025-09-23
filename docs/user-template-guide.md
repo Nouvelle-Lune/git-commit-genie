@@ -4,10 +4,9 @@ This guide explains how to write a User Template that strongly shapes the final 
 
 ## Prerequisites & Notes
 
-- Chain mode strongly enforces the extracted policy (command: `Git Commit Genie: Toggle Chain Prompting`; status bar shows `· Chain` when enabled).
-- Configure the absolute path in VS Code settings: `gitCommitGenie.templatesPath`.
+- Chain mode strongly enforces the extracted policy (command: `Git Commit Genie: Toggle thinking mode`; status bar shows `· Thinking` when enabled).
+- Use the command `git-commit-genie.selectTemplate` to select or create a template file.
 - File must exist, be non‑empty, and contain clear structured preferences.
-- You can use any format for the template file if you prefer (e.g. .txt .md .json .yaml).
 - Write the template content in English for best extraction (the internal prompts are English).
 - The header always follows Conventional Commits: `<type>(<scope>)[!]: <description>` and ≤ 72 chars. The template mainly influences Body / Footers / wording.
 
@@ -24,7 +23,7 @@ When policy extraction succeeds, the engine applies:
 - Lexicon preferences (prefer / avoid words) and tone (imperative / neutral / friendly).
 - Header scope guidance or `!` preference (never breaking the core spec rules though).
 
-## Recommended Style A: Natural Language (Lightweight)
+## Recommended: Natural Language
 
 Good for quick preferences. Example (save this as your template file):
 
@@ -47,36 +46,6 @@ Strongly Opinionated Conventional Commit Template
   - Prefer: add, fix, remove, rename, refactor, optimize, document, configure, test.
   - Avoid: update, various, stuff, misc.
 
-## Recommended Style B: JSON Policy (High Reliability)
-
- The model more reliably extracts rules. Example:
-
-```json
-{
-  "header": {
-    "requireScope": true,
-    "scopeDerivation": "directory",
-    "preferBangForBreaking": true,
-    "alsoRequireBreakingFooter": true
-  },
-  "body": {
-    "alwaysInclude": true,
-    "orderedSections": ["Summary", "Changes", "Impact", "Risk", "Notes"],
-    "bulletRules": [
-      { "section": "Changes", "maxBullets": 3, "style": "dash" }
-    ]
-  },
-  "footers": {
-    "required": ["Refs"],
-    "defaults": [{ "token": "Refs", "value": "N/A" }]
-  },
-  "lexicon": {
-    "prefer": ["add", "fix", "remove", "refactor", "optimize", "test"],
-    "avoid": ["update", "misc", "stuff"],
-    "tone": "imperative"
-  }
-}
-```
 
 You may surround the JSON with additional natural language notes—both styles can coexist and will be merged.
 
@@ -108,17 +77,13 @@ Refs: N/A
 ## FAQ
 
 - Template not applied?
-  - Is the path absolute and correct? Is the file non-empty?
-  - Is it sufficiently clear & structured? Try adding a JSON Policy block.
+  - Is the template activated?
+  - Is it sufficiently clear & structured?
   - Is chain mode enabled?
 - Why didn't the header format change per template desire?
   - Header must always comply with Conventional Commits. Template only influences selection (type / scope / `!`) and wording, not the core format.
 - Output too long?
   - Keep sections concise, limit bullet counts, state explicit limits in the template.
-
-## Summary
-
-A clear, structured template (preferably with a JSON Policy) dramatically improves consistency and reliability. Within a standards-compliant header, your template unifies body & footer structure, tone, and vocabulary.
 
 ---
 

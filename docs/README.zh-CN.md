@@ -85,21 +85,16 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 
 所有设置位于：`Git Commit Genie`。
 
-| Setting                                       | 类型    | 默认   | 说明                                              |
-| --------------------------------------------- | ------- | ------ | ------------------------------------------------- |
-| `gitCommitGenie.templatesPath`                | string  | ""     | 自定义提交信息模板文件绝对路径（可选）。          |
-| `gitCommitGenie.autoStageAllForDiff`          | boolean | false  | 当暂存区为空时：临时把所有更改加入暂存以生成 diff，随后还原暂存状态。谨慎使用。 |
-| `gitCommitGenie.chain.enabled`                | boolean | false  | 启用链式多步生成（更准但更慢 & Token 更多）。     |
-| `gitCommitGenie.chain.maxParallel`            | number  | 2      | 链式模式中最大并行 LLM 调用数。过高可能触发 429。 |
-| `gitCommitGenie.workspaceFiles.enabled`       | boolean | true   | 在提示中包含工作区文件名的简要列表。               |
-| `gitCommitGenie.workspaceFiles.maxFiles`      | number  | 2000   | 要传递的文件名数量上限，超过后将硬性截断。         |
-| `gitCommitGenie.workspaceFiles.excludePatterns` | array | []     | 额外的 gitignore 风格排除规则。                    |
-| `gitCommitGenie.commitLanguage`               | string  | `auto` | 生成提交信息的目标语言。选项：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。 |
-| `gitCommitGenie.gemini.rpmLimit`              | number  | 8      | Gemini 每分钟请求软限制（本地节流）。             |
-| `gitCommitGenie.gemini.tpmLimit`              | number  | 200000 | Gemini 每分钟 Token 软限制。                      |
-| `gitCommitGenie.gemini.expectedTokensPerCall` | number  | 8000   | 单次调用的预估 Token，用于预算。                  |
+| Setting                                         | 类型    | 默认   | 说明                                                                                                           |
+| ----------------------------------------------- | ------- | ------ | -------------------------------------------------------------------------------------------------------------- |
+| `gitCommitGenie.autoStageAllForDiff`            | boolean | false  | 当暂存区为空时：临时把所有更改加入暂存以生成 diff，随后还原暂存状态。谨慎使用。                                |
+| `gitCommitGenie.chain.enabled`                  | boolean | false  | 启用链式多步生成（更准但更慢 & Token 更多）。                                                                  |
+| `gitCommitGenie.chain.maxParallel`              | number  | 2      | 链式模式中最大并行 LLM 调用数。过高可能触发 429。                                                              |
+| `gitCommitGenie.workspaceFiles.enabled`         | boolean | true   | 在提示中包含工作区文件名的简要列表。                                                                           |
+| `gitCommitGenie.workspaceFiles.maxFiles`        | number  | 2000   | 要传递的文件名数量上限，超过后将硬性截断。                                                                     |
+| `gitCommitGenie.workspaceFiles.excludePatterns` | array   | []     | 额外的 gitignore 风格排除规则。                                                                                |
+| `gitCommitGenie.commitLanguage`                 | string  | `auto` | 生成提交信息的目标语言。选项：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。 |
 
-注：`gitCommitGenie.chainMaxParallel` 已弃用，请改用 `gitCommitGenie.chain.maxParallel`。
 
 
 ## 命令列表
@@ -110,14 +105,15 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `git-commit-genie.cancelGeneration`      | Stop                   | 取消当前生成。                               |
 | `git-commit-genie.manageModels`          | Manage Models          | 选择提供商 / 输入或更换 API Key / 选择模型。 |
 | `git-commit-genie.toggleChainMode`       | Toggle Chain Prompting | 快速开启/关闭链式模式。                      |
+| `git-commit-genie.selectTemplate`        | Select/Create Template | 选择或新建提交信息模板文件。                 |
 
 SCM 标题栏：根据状态显示“Generate commit message”或“Stop generate”按钮。
 
 ## 模板编写
 
-通过绝对路径配置 `gitCommitGenie.templatesPath`。文件存在且非空时，系统尝试抽取“模板策略”。支持：
+模版文件存在且非空时，系统尝试抽取“模板策略”。支持：
 1. 自然语言偏好描述。
-2. 内嵌 JSON Policy（更稳定、推荐）。
+2. markdown模版编写。
 
 完整指南： [English](./user-template-guide.md) | [中文](./user-template-guide.zh-CN.md)
 
