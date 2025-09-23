@@ -16,7 +16,7 @@ function sanitizeName(name: string): string {
   return base || 'template';
 }
 
-export class TemplateManager {
+export class TemplateService {
   constructor(private readonly context: vscode.ExtensionContext) { }
 
   private getGlobalTemplatesDir(): string {

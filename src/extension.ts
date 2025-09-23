@@ -2,11 +2,12 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
 import { DiffService } from './services/git/diff';
-import { OpenAIService } from './providers/openai';
-import { DeepSeekService } from './providers/deepseek';
-import { AnthropicService } from './providers/anthropic';
-import { GeminiService } from './providers/gemini';
+import { OpenAIService } from './services/llm/providers/openai';
+import { DeepSeekService } from './services/llm/providers/deepseek';
+import { AnthropicService } from './services/llm/providers/anthropic';
+import { GeminiService } from './services/llm/providers/gemini';
 import { L10N_KEYS as I18N } from './i18n/keys';
+import { TemplateService } from './template/templateService';
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -15,6 +16,8 @@ export function activate(context: vscode.ExtensionContext) {
 	const deepseekService = new DeepSeekService(context);
 	const anthropicService = new AnthropicService(context);
 	const geminiService = new GeminiService(context);
+
+	const templateService = new TemplateService(context);
 
 	// A map to hold different LLM services
 	const llmServices = new Map<string, any>([
@@ -323,6 +326,11 @@ export function activate(context: vscode.ExtensionContext) {
 	});
 
 	context.subscriptions.push(generateCommitMessageCommand);
+
+	// Template selection / creation
+	context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.selectTemplate', async () => {
+		await templateService.openQuickPicker();
+	}));
 
 	// Toggle chain prompting mode
 	context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.toggleChainMode', async () => {
