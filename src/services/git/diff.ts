@@ -145,9 +145,20 @@ export class DiffService {
 		let rawDiff: string;
 		try {
 			if (this.isStaged(change.status)) {
-				rawDiff = await repo.diffIndexWithHEAD(change.uri.fsPath);
+
+				if (status === 'renamed') {
+					const fullDiff = await repo.diff(true);
+
+					rawDiff = this.extractFileFromFullDiff(fullDiff, change, repo);
+
+					// If extraction fails, fall back to the original method
+					if (!rawDiff) {
+						rawDiff = await repo.diffIndexWithHEAD(change.uri.fsPath);
+					}
+				} else {
+					rawDiff = await repo.diffIndexWithHEAD(change.uri.fsPath);
+				}
 			} else {
-				//rawDiff = await repo.diffWithHEAD(change.uri.fsPath);
 				logger.error(`Unstaged diff not implemented for ${fileName}`);
 				return null;
 			}
@@ -163,13 +174,57 @@ export class DiffService {
 
 		const diffHunks: DiffHunk[] = this.parseDiff(rawDiff);
 
-
 		return {
 			fileName,
 			status,
 			diffHunks,
 			rawDiff,
 		};
+	}
+
+	/**
+	 * Extracts the diff for a specific file from the full diff output.
+	 */
+	private extractFileFromFullDiff(fullDiff: string, change: Change, repo: Repository): string {
+		const lines = fullDiff.split('\n');
+		// Get the full relative path from repo root, normalize path separators for Git
+		const relativeFilePath = path.relative(repo.rootUri.fsPath, change.uri.fsPath).replace(/\\/g, '/');
+
+		let startIndex = -1;
+		let endIndex = -1;
+
+		// Find the start of the diff for the specific file
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			// Use regex to strictly match the diff header for this specific file
+			// This handles renames where a/ and b/ paths might be different
+			const escapedPath = relativeFilePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+			const exactMatchA = new RegExp(`^diff --git a/${escapedPath} b/`);
+			const exactMatchB = new RegExp(`^diff --git a/.* b/${escapedPath}\\s*$`);
+
+			if (line.startsWith('diff --git') && (exactMatchA.test(line) || exactMatchB.test(line))) {
+				startIndex = i;
+				break;
+			}
+		}
+
+		if (startIndex === -1) {
+			return '';
+		}
+
+		// Find the end of the diff for the specific file
+		for (let i = startIndex + 1; i < lines.length; i++) {
+			if (lines[i].startsWith('diff --git')) {
+				endIndex = i;
+				break;
+			}
+		}
+
+		if (endIndex === -1) {
+			endIndex = lines.length;
+		}
+
+		return lines.slice(startIndex, endIndex).join('\n');
 	}
 
 	/**

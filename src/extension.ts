@@ -301,11 +301,9 @@ export function activate(context: vscode.ExtensionContext) {
 					const repo = api.repositories[0];
 					if (repo) {
 						// Simulate typing effect
-						const currentConfig = vscode.workspace.getConfiguration('gitCommitGenie');
-						let typingSpeed: number = currentConfig.get<number>('typingAnimationSpeed', -1);
-						typingSpeed = typingSpeed >= -1 ? typingSpeed : -1;
+						let typingSpeed: number = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('typingAnimationSpeed', -1);
 						typingSpeed = Math.min(typingSpeed, 100);
-						if (typingSpeed === -1) {
+						if (typingSpeed <= 0) {
 							// Instant fill
 							repo.inputBox.value = result.content;
 							return;
