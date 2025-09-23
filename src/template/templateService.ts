@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import { L10N_KEYS as I18N } from '../i18n/keys';
 
 // Default starter template placed into new files
 const DEFAULT_TEMPLATE = `Strongly Opinionated Conventional Commit Template\n\nHeader (must follow Conventional Commits):\n<type>(<scope>)!: <description>\n- type: feat | fix | docs | style | refactor | perf | test | build | ci | chore\n- scope: optional; keep short.\n- description: imperative, ≤ 72 chars.\n\nBody:\n- Summarize the changes with short bullets or short paragraphs.\n- Keep each bullet to one sentence.\n- Prefer active voice.\n- Mention risks/limitations if relevant.\n\nFooters:\n- Refs: <ticket or issue id> (optional)\n- Breaking-Change: <reason> (when applicable)\n`;
@@ -32,7 +33,7 @@ export class TemplateService {
 		if (folders.length === 1) { return folders[0]; }
 		const pick = await vscode.window.showQuickPick(
 			folders.map(f => ({ label: f.name, description: f.uri.fsPath, value: f })),
-			{ placeHolder: 'Pick a workspace folder' }
+			{ placeHolder: vscode.l10n.t(I18N.templates.pickWorkspaceFolder) }
 		);
 		return pick?.value;
 	}
@@ -88,14 +89,14 @@ export class TemplateService {
 		}
 
 		const qp = vscode.window.createQuickPick<TemplatePick | vscode.QuickPickItem>();
-		qp.placeholder = 'Select / manage templates';
+		qp.placeholder = vscode.l10n.t(I18N.templates.quickPickPlaceholder);
 		qp.matchOnDescription = true;
 		qp.matchOnDetail = true;
 		qp.ignoreFocusOut = true;
 
-		const renameButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('edit'), tooltip: 'Rename template' };
-		const deleteButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('remove-close'), tooltip: 'Delete template' };
-		const openButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('go-to-file'), tooltip: 'Open template' };
+		const renameButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('edit'), tooltip: vscode.l10n.t(I18N.templates.buttonRename) };
+		const deleteButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('remove-close'), tooltip: vscode.l10n.t(I18N.templates.buttonDelete) };
+		const openButton: vscode.QuickInputButton = { iconPath: new vscode.ThemeIcon('go-to-file'), tooltip: vscode.l10n.t(I18N.templates.buttonOpen) };
 
 		const buildItems = () => {
 			const currentPath = vscode.workspace.getConfiguration().get<string>('gitCommitGenie.templatesPath', '');
@@ -103,8 +104,8 @@ export class TemplateService {
 			const wsList = wsDir ? this.listTemplates(wsDir) : [];
 			const list: Array<TemplatePick | vscode.QuickPickItem> = [];
 
-			list.push({ label: '$(add) Create new template…', alwaysShow: true });
-			list.push({ label: '$(x) Deactivate current template', alwaysShow: true });
+			list.push({ label: vscode.l10n.t(I18N.templates.createNew), alwaysShow: true });
+			list.push({ label: vscode.l10n.t(I18N.templates.deactivate), alwaysShow: true });
 
 			if (wsList.length) {
 				list.push({ label: '', kind: vscode.QuickPickItemKind.Separator });
@@ -113,7 +114,7 @@ export class TemplateService {
 					const isActive: boolean = t.fsPath === currentPath;
 					list.push({
 						label: t.name,
-						description: isActive ? `.gitgenie/templates (Active) $(check)` : '.gitgenie/templates',
+						description: isActive ? `${vscode.l10n.t(I18N.templates.workspaceFolderLabel)} (${vscode.l10n.t(I18N.templates.activeSuffix)}) $(check)` : vscode.l10n.t(I18N.templates.workspaceFolderLabel),
 						action: 'select',
 						fsPath: t.fsPath,
 						storage: 'workspace',
@@ -127,7 +128,7 @@ export class TemplateService {
 					const isActive: boolean = t.fsPath === currentPath;
 					list.push({
 						label: t.name,
-						description: isActive ? `User data folder (Active) $(check)` : 'User data folder',
+						description: isActive ? `${vscode.l10n.t(I18N.templates.userDataFolderLabel)} (${vscode.l10n.t(I18N.templates.activeSuffix)}) $(check)` : vscode.l10n.t(I18N.templates.userDataFolderLabel),
 						action: 'select',
 						fsPath: t.fsPath,
 						storage: 'global',
@@ -151,14 +152,14 @@ export class TemplateService {
 		const createTemplateFlow = async () => {
 			const location = await vscode.window.showQuickPick(
 				[
-					{ label: 'Workspace (.gitgenie/templates)', value: 'workspace' as const },
-					{ label: 'User data folder', value: 'global' as const }
+					{ label: vscode.l10n.t(I18N.templates.locationWorkspace), value: 'workspace' as const },
+					{ label: vscode.l10n.t(I18N.templates.locationUser), value: 'global' as const }
 				],
-				{ placeHolder: 'Choose where to save the template' }
+				{ placeHolder: vscode.l10n.t(I18N.templates.chooseLocation) }
 			);
 			if (!location) { return; }
 			const nameInput = await vscode.window.showInputBox({
-				prompt: 'Enter template name (file will be <name>.md)',
+				prompt: vscode.l10n.t(I18N.templates.enterName),
 				value: 'commit-template'
 			});
 			if (!nameInput) {
@@ -175,7 +176,7 @@ export class TemplateService {
 			await this.setActiveTemplate(filePath);
 			const doc = await vscode.workspace.openTextDocument(filePath);
 			await vscode.window.showTextDocument(doc, { preview: false });
-			vscode.window.showInformationMessage(`Template created: ${fileName}`);
+			vscode.window.showInformationMessage(vscode.l10n.t(I18N.templates.templateCreated, fileName));
 			buildItems();
 		};
 
@@ -184,19 +185,18 @@ export class TemplateService {
 			if (!sel) { return; }
 			if ('action' in sel && sel.action === 'select') {
 				await this.setActiveTemplate(sel.fsPath);
-				vscode.window.showInformationMessage(`Template selected: ${sel.label}`);
-				qp.hide();
+				vscode.window.showInformationMessage(vscode.l10n.t(I18N.templates.templateSelected, sel.label));
 				return;
 			}
 			// Non-action textual commands
-			if (sel.label.includes('Create new template')) {
+			if (sel.label.includes(vscode.l10n.t(I18N.templates.createNew).replace(/\$\(add\)\s*/, '').split('…')[0].trim())) {
 				await createTemplateFlow();
 				return;
 			}
 
-			if (sel.label.includes('Deactivate current template')) {
+			if (sel.label.includes(vscode.l10n.t(I18N.templates.deactivate).replace(/\$\(x\)\s*/, '').split('(')[0].trim())) {
 				await this.clearActiveTemplate();
-				vscode.window.showInformationMessage('Template deactivated.');
+				vscode.window.showInformationMessage(vscode.l10n.t(I18N.templates.templateDeactivated));
 				buildItems();
 				return;
 			}
@@ -207,7 +207,7 @@ export class TemplateService {
 			if (!('action' in item)) {
 				return;
 			}
-			if (e.button.tooltip === 'Delete template') {
+			if (e.button.tooltip === vscode.l10n.t(I18N.templates.buttonDelete)) {
 				const activePath = vscode.workspace.getConfiguration().get<string>('gitCommitGenie.templatesPath', '');
 				try {
 					fs.unlinkSync(item.fsPath);
@@ -215,14 +215,14 @@ export class TemplateService {
 						await this.clearActiveTemplate();
 					}
 				} catch (err) {
-					vscode.window.showErrorMessage('Failed to delete template: ' + (err as Error).message);
+					vscode.window.showErrorMessage(vscode.l10n.t(I18N.templates.deleteFailed, (err as Error).message));
 				}
 				buildItems();
 				return;
 			}
-			if (e.button.tooltip === 'Rename template') {
+			if (e.button.tooltip === vscode.l10n.t(I18N.templates.buttonRename)) {
 				const newName = await vscode.window.showInputBox({
-					prompt: 'Enter new template name (no extension)',
+					prompt: vscode.l10n.t(I18N.templates.enterNewName),
 					value: item.label.replace(/\.md$/i, '')
 				});
 				if (!newName) { return; }
@@ -230,7 +230,7 @@ export class TemplateService {
 				const targetDir = item.storage === 'workspace' ? (wsDir ?? (await this.getWorkspaceTemplatesDir())!) : globalDir;
 				const newPath = path.join(targetDir, safe);
 				if (fs.existsSync(newPath)) {
-					vscode.window.showWarningMessage('A template with that name already exists.');
+					vscode.window.showWarningMessage(vscode.l10n.t(I18N.templates.renameExists));
 					return;
 				}
 				try {
@@ -238,17 +238,17 @@ export class TemplateService {
 					const activePath = vscode.workspace.getConfiguration().get<string>('gitCommitGenie.templatesPath', '');
 					if (activePath === item.fsPath) { await this.setActiveTemplate(newPath); }
 				} catch (err) {
-					vscode.window.showErrorMessage('Rename failed: ' + (err as Error).message);
+					vscode.window.showErrorMessage(vscode.l10n.t(I18N.templates.renameFailed, (err as Error).message));
 				}
 				buildItems();
 			}
-			if (e.button.tooltip === 'Open template') {
+			if (e.button.tooltip === vscode.l10n.t(I18N.templates.buttonOpen)) {
 				try {
 					const doc = await vscode.workspace.openTextDocument(item.fsPath);
 					await vscode.window.showTextDocument(doc, { preview: false });
 					qp.hide();
 				} catch (err) {
-					vscode.window.showErrorMessage('Failed to open template: ' + (err as Error).message);
+					vscode.window.showErrorMessage(vscode.l10n.t(I18N.templates.openFailed, (err as Error).message));
 				}
 				return;
 			}

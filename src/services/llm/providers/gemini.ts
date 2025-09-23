@@ -147,9 +147,10 @@ export class GeminiService extends BaseLLMService {
             })();
 
             // Gemini-specific throttle aligned to public limits (configurable soft limits)
-            const rpmLimit = Math.max(1, vscode.workspace.getConfiguration().get<number>('gitCommitGenie.gemini.rpmLimit', 8));
-            const tpmLimit = Math.max(1000, vscode.workspace.getConfiguration().get<number>('gitCommitGenie.gemini.tpmLimit', 200000));
-            const expectedTokensPerCall = Math.max(512, vscode.workspace.getConfiguration().get<number>('gitCommitGenie.gemini.expectedTokensPerCall', 8000));
+            // Gemini rate & token budgeting now hard-coded (settings removed)
+            const rpmLimit = 8; // previous default gitCommitGenie.gemini.rpmLimit
+            const tpmLimit = 200000; // previous default gitCommitGenie.gemini.tpmLimit
+            const expectedTokensPerCall = 8000; // previous default gitCommitGenie.gemini.expectedTokensPerCall
 
             const windowMs = 60_000;
             const reqTimes: number[] = [];

@@ -47,6 +47,30 @@ export const L10N_KEYS = {
   },
   settings: {
     chainMaxParallelLabel: 'Max Parallel Chains'
+  },
+  templates: {
+    pickWorkspaceFolder: 'Pick a workspace folder',
+    quickPickPlaceholder: 'Select / manage templates',
+    createNew: '$(add) Create new template…',
+    deactivate: '$(x) Deactivate current template',
+    workspaceFolderLabel: '.gitgenie/templates',
+    userDataFolderLabel: 'User data folder',
+    activeSuffix: 'Active',
+    buttonRename: 'Rename template',
+    buttonDelete: 'Delete template',
+    buttonOpen: 'Open template',
+    chooseLocation: 'Choose where to save the template',
+    locationWorkspace: 'Workspace (.gitgenie/templates)',
+    locationUser: 'User data folder',
+    enterName: 'Enter template name (file will be <name>.md)',
+    enterNewName: 'Enter new template name (no extension)',
+    templateCreated: 'Template created: {0}',
+    templateSelected: 'Template selected: {0}',
+    templateDeactivated: 'Template deactivated.',
+    deleteFailed: 'Failed to delete template: {0}',
+    renameExists: 'A template with that name already exists.',
+    renameFailed: 'Rename failed: {0}',
+    openFailed: 'Failed to open template: {0}'
   }
 } as const;
 

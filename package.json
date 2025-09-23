@@ -21,12 +21,6 @@
     "configuration": {
       "title": "%configuration.title%",
       "properties": {
-        "gitCommitGenie.templatesPath": {
-          "order": 0,
-          "type": "string",
-          "default": "",
-          "markdownDescription": "%config.templatesPath.desc%"
-        },
         "gitCommitGenie.autoStageAllForDiff": {
           "order": 1,
           "type": "boolean",
@@ -35,24 +29,6 @@
           "tags": [
             "experimental"
           ]
-        },
-        "gitCommitGenie.gemini.rpmLimit": {
-          "type": "number",
-          "default": 8,
-          "minimum": 1,
-          "markdownDescription": "%config.gemini.rpmLimit.desc%"
-        },
-        "gitCommitGenie.gemini.tpmLimit": {
-          "type": "number",
-          "default": 200000,
-          "minimum": 1000,
-          "markdownDescription": "%config.gemini.tpmLimit.desc%"
-        },
-        "gitCommitGenie.gemini.expectedTokensPerCall": {
-          "type": "number",
-          "default": 8000,
-          "minimum": 512,
-          "markdownDescription": "%config.gemini.expectedTokensPerCall.desc%"
         },
         "gitCommitGenie.chain.enabled": {
           "order": 1,
@@ -159,6 +135,12 @@
         "title": "%command.toggleChain%",
         "category": "%category.title%",
         "icon": "$(circuit-board)"
+      },
+      {
+        "command": "git-commit-genie.selectTemplate",
+        "title": "%command.selectTemplate%",
+        "category": "%category.title%",
+        "icon": "$(file-text)"
       }
     ],
     "menus": {
@@ -172,26 +154,6 @@
           "command": "git-commit-genie.cancelGeneration",
           "when": "scmProvider == 'git' && gitCommitGenie.generating == true",
           "group": "navigation@1000"
-        }
-      ]
-    },
-    "viewsContainers": {
-      "activitybar": [
-        {
-          "id": "git-commit-genie-sidebar",
-          "title": "%views.activitybar.title%",
-          "icon": "media/Genie.svg",
-          "when": "false"
-        }
-      ]
-    },
-    "views": {
-      "git-commit-genie-sidebar": [
-        {
-          "id": "git-commit-genie.sidebar",
-          "name": "%views.sidebar.chat%",
-          "type": "webview",
-          "when": "false"
         }
       ]
     }
