@@ -15,7 +15,7 @@ Git Commit Genie analyzes your staged Git diff and generates high‑quality Conv
 
 ## Format
 
-By default, generated commit messages follow the Conventional Commits 1.0.0 specification. See the spec: https://www.conventionalcommits.org/en/v1.0.0/#specification
+By default, generated commit messages follow the Conventional Commits 1.0.0 specification. See the spec: https://www.conventionalcommits.org/en/v1.0.0/
 
 Basic format:
 ```
