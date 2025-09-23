@@ -27,6 +27,11 @@ export interface TemplatePolicy {
         preferBangForBreaking?: boolean;
         alsoRequireBreakingFooter?: boolean;
     };
+    types?: {
+        allowed?: string[];
+        preferred?: string | null;
+        useStandardTypes?: boolean;
+    };
     body?: {
         alwaysInclude?: boolean;
         orderedSections?: string[]; // e.g., ["Summary", "Changes", "Impact", "Risk", "Notes"]
