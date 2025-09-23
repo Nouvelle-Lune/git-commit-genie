@@ -19,7 +19,7 @@
   "l10n": "./l10n",
   "contributes": {
     "configuration": {
-      "title": "%configuration.title%",
+      "title": "Git Commit Genie",
       "properties": {
         "gitCommitGenie.autoStageAllForDiff": {
           "order": 1,
@@ -109,6 +109,11 @@
             "%config.commitLanguage.it%"
           ],
           "markdownDescription": "%config.commitLanguage.desc%"
+        },
+        "gitCommitGenie.templatesPath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the active commit message template file."
         }
       }
     },
