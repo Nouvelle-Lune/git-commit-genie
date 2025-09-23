@@ -104,7 +104,8 @@ All settings are under: `Git Commit Genie`.
 SCM Title Bar: shows "Generate commit message" or "Stop generate" depending on state.
 
 ## Template Authoring
-Set `gitCommitGenie.templatesPath` to point to a template file
+Using command `Git Commit Genie: Select/Create Template`to select or create a template file.
+
 <img src="./media/demo2.gif" width="600"/>
 
 When present & non‑empty, Genie attempts to extract a "Template Policy". Two authoring styles:

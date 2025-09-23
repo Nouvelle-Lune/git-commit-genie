@@ -111,7 +111,8 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 SCM 标题栏：根据状态显示“Generate commit message”或“Stop generate”按钮。
 
 ## 模板编写
-通过设置 `gitCommitGenie.templatesPath` 指向一个模版文件
+使用命令 `Git Commit Genie: Select/Create Template` 选择或创建模板文件。
+
 <img src="../media/demo2.gif" width="600"/>
 
 模版文件存在且非空时，系统尝试抽取“模板策略”。支持：
