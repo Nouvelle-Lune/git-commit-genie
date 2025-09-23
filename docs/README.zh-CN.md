@@ -85,15 +85,16 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 
 所有设置位于：`Git Commit Genie`。
 
-| Setting                                         | 类型    | 默认   | 说明                                                                                                           |
-| ----------------------------------------------- | ------- | ------ | -------------------------------------------------------------------------------------------------------------- |
-| `gitCommitGenie.autoStageAllForDiff`            | boolean | false  | 当暂存区为空时：临时把所有更改加入暂存以生成 diff，随后还原暂存状态。谨慎使用。                                |
-| `gitCommitGenie.chain.enabled`                  | boolean | false  | 启用链式多步生成（更准但更慢 & Token 更多）。                                                                  |
-| `gitCommitGenie.chain.maxParallel`              | number  | 2      | 链式模式中最大并行 LLM 调用数。过高可能触发 429。                                                              |
-| `gitCommitGenie.workspaceFiles.enabled`         | boolean | true   | 在提示中包含工作区文件名的简要列表。                                                                           |
-| `gitCommitGenie.workspaceFiles.maxFiles`        | number  | 2000   | 要传递的文件名数量上限，超过后将硬性截断。                                                                     |
-| `gitCommitGenie.workspaceFiles.excludePatterns` | array   | []     | 额外的 gitignore 风格排除规则。                                                                                |
-| `gitCommitGenie.commitLanguage`                 | string  | `auto` | 生成提交信息的目标语言。选项：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。 |
+| Setting                                         | 类型    | 默认   | 说明                                                                                                                    |
+| ----------------------------------------------- | ------- | ------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `gitCommitGenie.autoStageAllForDiff`            | boolean | false  | 仅当暂存区为空时：临时将所有更改加入暂存用于生成 diff，生成后会自动还原暂存状态。谨慎使用，可能会把无关更改包含进提示。 |
+| `gitCommitGenie.chain.enabled`                  | boolean | false  | 启用链式多步提示生成提交信息（使得生成的提交信息更加详准确，且可以更加贴合用户模版，但将增加延迟与 Token 消耗）         |
+| `gitCommitGenie.chain.maxParallel`              | number  | 2      | 链式提示并行 LLM 调用最大数量。谨慎增大以避免触发速率限制。                                                             |
+| `gitCommitGenie.workspaceFiles.enabled`         | boolean | true   | 在提示中包含工作区文件名列表。如果超出Token限制，可关闭此项。                                                           |
+| `gitCommitGenie.workspaceFiles.maxFiles`        | number  | 2000   | 要传递的文件名数量上限。超过该上限将进行硬截断。                                                                        |
+| `gitCommitGenie.workspaceFiles.excludePatterns` | array   | []     | 附加的 gitignore 风格排除规则                                                                                           |
+| `gitCommitGenie.commitLanguage`                 | string  | `auto` | 生成的提交信息目标语言。选项：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。          |
+| `gitCommitGenie.typingAnimationSpeed`           | number  | 15     | 提交信息框打字动画速度，单位为每字符毫秒。设置 -1 关闭动画。                                                            |
 
 
 

@@ -79,15 +79,16 @@ If chain prompting is disabled: single prompt (lower latency, less structural & 
 
 All settings are under: `Git Commit Genie`.
 
-| Setting                                         | Type    | Default | Description                                                                                                                      |
-| ----------------------------------------------- | ------- | ------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `gitCommitGenie.autoStageAllForDiff`            | boolean | false   | When nothing is staged: temporarily stage all changes to build the diff, then restore staging. Use with caution.                 |
-| `gitCommitGenie.chain.enabled`                  | boolean | false   | Enable multi‑step chain prompting. More accurate, higher latency & token cost.                                                   |
-| `gitCommitGenie.chain.maxParallel`              | number  | 2       | Max parallel LLM calls during chain prompting. Increase carefully to avoid 429s.                                                 |
-| `gitCommitGenie.workspaceFiles.enabled`         | boolean | true    | Include a compact list of workspace filenames in the prompt.                                                                     |
-| `gitCommitGenie.workspaceFiles.maxFiles`        | number  | 2000    | Max number of filenames to send; hard‑truncated beyond this.                                                                     |
-| `gitCommitGenie.workspaceFiles.excludePatterns` | array   | []      | Extra gitignore‑style patterns to exclude from the filename list.                                                                |
-| `gitCommitGenie.commitLanguage`                 | string  | `auto`  | Target language for generated messages. Options: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`. |
+| Setting                                         | Type    | Default | Description                                                                                                                                                                                                                  |
+| ----------------------------------------------- | ------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gitCommitGenie.autoStageAllForDiff`            | boolean | false   | Only when the staging area is empty: temporarily stage all changes to build the diff, then restore your staging state. Use with caution—this may include unrelated changes in the prompt.                                    |
+| `gitCommitGenie.chain.enabled`                  | boolean | false   | Enable multi-step chain prompting for commit generation (It makes the generated commit messages more detailed and accurate, and better aligns with the user's template, but it will increase latency and token consumption). |
+| `gitCommitGenie.chain.maxParallel`              | number  | 2       | Maximum parallel LLM calls used by chain prompting across all providers. Increase carefully to avoid provider rate limits.                                                                                                   |
+| `gitCommitGenie.workspaceFiles.enabled`         | boolean | true    | Include a compact list of workspace filenames in the prompt. You can disable this if prompts get too large.                                                                                                                  |
+| `gitCommitGenie.workspaceFiles.maxFiles`        | number  | 2000    | Maximum number of filenames to send. If the number exceeds this limit, the list is hard-truncated.                                                                                                                           |
+| `gitCommitGenie.workspaceFiles.excludePatterns` | array   | []      | Additional gitignore-style patterns to exclude from the filename list.                                                                                                                                                       |
+| `gitCommitGenie.commitLanguage`                 | string  | `auto`  | Target language for generated commit messages. Options: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`.                                                                                      |
+| `gitCommitGenie.typingAnimationSpeed`           | number  | 15      | Speed of the commit message box typing animation in milliseconds per character. Set to -1 to disable the animation.                                                                                                          |
 
 
 ## Command List
