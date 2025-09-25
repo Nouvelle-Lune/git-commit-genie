@@ -8,7 +8,7 @@ English version: [English README](../README.md)
 
 ## 概述
 
-Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / DeepSeek / Anthropic / Gemini）自动生成高质量的 Conventional Commits 风格提交信息。支持可选“链式提示”模式（多步推理）与“用户模板”策略，显著提升结构一致性与团队风格统一。
+Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / DeepSeek / Anthropic / Gemini）自动生成高质量的 Conventional Commits 风格提交信息。内置仓库智能分析功能，自动理解项目结构和技术栈，为提交信息生成提供更好的上下文。支持可选"链式提示"模式（多步推理）与"用户模板"策略，显著提升结构一致性与团队风格统一。
 
 优势：
 - 避免在提交语句格式/措辞上反复纠结。
@@ -36,22 +36,23 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 
 - 少量 / 轻量级提交：优先选择轻巧快速的模型，生成更快、Token 消耗更低。
 - 大型 / 多文件提交：再考虑切换更强的模型，以获得更好的理解与结构质量。
-- 可随时通过命令面板运行 “Git Commit Genie: Manage Models” 切换模型。
+- 可随时通过命令面板运行 "Git Commit Genie: Manage Models" 切换模型。
 
 ## 核心特性
 
-| 特性                     | 说明                                                                                                                           |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| 多模型提供商             | 支持 OpenAI、DeepSeek、Anthropic、Gemini等。                                                                                   |
-| 链式提示模式             | 多步：文件级摘要 → 结构化综合 → 校验修复，显著提升准确度与模板贴合度。                                                         |
-| 用户模板策略             | 通过 `gitCommitGenie.templatesPath` 指向模板文件，抽取策略影响段落顺序、必填 footers、词汇偏好等。无模板或无效时回退默认规则。 |
-| Conventional Commit 校验 | 头行格式（type(scope)!: desc），长度 ≤ 72，无句号。                                                                            |
-| Diff 感知                | 仅读取“已暂存”更改；自动推断类型（feat / fix / docs / refactor 等）。                                                          |
-| Token 与速率保护         | 429 自动退避重试；Gemini 软限本地节流；并发可配置。                                                                            |
-| 状态栏集成               | 显示当前 Model，可点击管理。                                                                                                   |
-| 生成取消                 | SCM 标题栏按钮可实时取消正在进行的生成。                                                                                       |
-| 安全存储                 | API Key 使用 VS Code SecretStorage，不写入明文设置。                                                                           |
-| 国际化支持               | 内置英文 + 简体中文。                                                                                                          |
+| 特性                     | 说明                                                                                                 |
+| ------------------------ | ---------------------------------------------------------------------------------------------------- |
+| 多模型提供商             | 支持 OpenAI、DeepSeek、Anthropic、Gemini等。                                                         |
+| 仓库智能分析             | 自动分析项目结构、技术栈和架构，为提交信息生成提供上下文；支持手动刷新、实时更新和手动修改分析报告。 |
+| 链式提示模式             | 多步：文件级摘要 → 结构化综合 → 校验修复，显著提升准确度与模板贴合度。                               |
+| 用户模板策略             | 内置模板选择和创建功能，支持工作区和用户数据目录，抽取策略影响段落顺序、必填 footers、词汇偏好等。   |
+| Conventional Commit 校验 | 头行格式（type(scope)!: desc），长度 ≤ 72，无句号。                                                  |
+| Diff 感知                | 仅读取"已暂存"更改；自动推断类型（feat / fix / docs / refactor 等）。                                |
+| Token 与速率保护         | 429 自动退避重试；Gemini 软限本地节流；并发可配置。                                                  |
+| 状态栏集成               | 显示当前模型和分析状态，点击可访问功能菜单。                                                         |
+| 生成取消                 | SCM 标题栏按钮可实时取消正在进行的生成。                                                             |
+| 安全存储                 | API Key 使用 VS Code SecretStorage，不写入明文设置。                                                 |
+| 国际化支持               | 内置英文、简体中文、繁体中文等多语言支持。                                                           |
 
 ## 工作流程
 
@@ -85,28 +86,32 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 
 所有设置位于：`Git Commit Genie`。
 
-| Setting                                         | 类型    | 默认   | 说明                                                                                                                    |
-| ----------------------------------------------- | ------- | ------ | ----------------------------------------------------------------------------------------------------------------------- |
-| `gitCommitGenie.autoStageAllForDiff`            | boolean | false  | 仅当暂存区为空时：临时将所有更改加入暂存用于生成 diff，生成后会自动还原暂存状态。谨慎使用，可能会把无关更改包含进提示。 |
-| `gitCommitGenie.chain.enabled`                  | boolean | false  | 启用链式多步提示生成提交信息（使得生成的提交信息更加详准确，且可以更加贴合用户模版，但将增加延迟与 Token 消耗）         |
-| `gitCommitGenie.chain.maxParallel`              | number  | 2      | 链式提示并行 LLM 调用最大数量。谨慎增大以避免触发速率限制。                                                             |
-| `gitCommitGenie.workspaceFiles.enabled`         | boolean | true   | 在提示中包含工作区文件名列表。如果超出Token限制，可关闭此项。                                                           |
-| `gitCommitGenie.workspaceFiles.maxFiles`        | number  | 2000   | 要传递的文件名数量上限。超过该上限将进行硬截断。                                                                        |
-| `gitCommitGenie.workspaceFiles.excludePatterns` | array   | []     | 附加的 gitignore 风格排除规则                                                                                           |
-| `gitCommitGenie.commitLanguage`                 | string  | `auto` | 生成的提交信息目标语言。选项：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。          |
-| `gitCommitGenie.typingAnimationSpeed`           | number  | 15     | 提交信息框打字动画速度，单位为每字符毫秒。设置 -1 关闭动画。                                                            |
+| Setting                                             | 类型    | 默认   | 说明                                                                                                                    |
+| --------------------------------------------------- | ------- | ------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `gitCommitGenie.autoStageAllForDiff`                | boolean | false  | 仅当暂存区为空时：临时将所有更改加入暂存用于生成 diff，生成后会自动还原暂存状态。谨慎使用，可能会把无关更改包含进提示。 |
+| `gitCommitGenie.chain.enabled`                      | boolean | false  | 启用链式多步提示生成提交信息（使得生成的提交信息更加详准确，且可以更加贴合用户模版，但将增加延迟与 Token 消耗）         |
+| `gitCommitGenie.chain.maxParallel`                  | number  | 2      | 链式提示并行 LLM 调用最大数量。谨慎增大以避免触发速率限制。                                                             |
+| `gitCommitGenie.repositoryAnalysis.enabled`         | boolean | true   | 启用仓库分析以提供更好的提交信息生成上下文。                                                                            |
+| `gitCommitGenie.repositoryAnalysis.excludePatterns` | array   | []     | 仓库分析扫描时要排除的文件模式（gitignore风格）。                                                                       |
+| `gitCommitGenie.repositoryAnalysis.updateThreshold` | number  | 10     | 更新仓库分析的提交次数阈值。                                                                                            |
+| `gitCommitGenie.commitLanguage`                     | string  | `auto` | 生成的提交信息目标语言。选项：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。          |
+| `gitCommitGenie.typingAnimationSpeed`               | number  | 15     | 提交信息框打字动画速度，单位为每字符毫秒。设置 -1 关闭动画。                                                            |
 
 
 
 ## 命令列表
 
-| Command ID                               | 标题                   | 作用                                         |
-| ---------------------------------------- | ---------------------- | -------------------------------------------- |
-| `git-commit-genie.generateCommitMessage` | AI Generate            | 基于已暂存更改生成提交信息。                 |
-| `git-commit-genie.cancelGeneration`      | Stop                   | 取消当前生成。                               |
-| `git-commit-genie.manageModels`          | Manage Models          | 选择提供商 / 输入或更换 API Key / 选择模型。 |
-| `git-commit-genie.toggleChainMode`       | Toggle Chain Prompting | 快速开启/关闭链式模式。                      |
-| `git-commit-genie.selectTemplate`        | Select/Create Template | 选择或新建提交信息模板文件。                 |
+| Command ID                                   | 标题                        | 作用                                         |
+| -------------------------------------------- | --------------------------- | -------------------------------------------- |
+| `git-commit-genie.generateCommitMessage`     | AI Generate                 | 基于已暂存更改生成提交信息。                 |
+| `git-commit-genie.cancelGeneration`          | Stop                        | 取消当前生成。                               |
+| `git-commit-genie.manageModels`              | Manage Models               | 选择提供商 / 输入或更换 API Key / 选择模型。 |
+| `git-commit-genie.toggleChainMode`           | Toggle Chain Prompting      | 快速开启/关闭链式模式。                      |
+| `git-commit-genie.selectTemplate`            | Select/Create Template      | 选择或新建提交信息模板文件。                 |
+| `git-commit-genie.viewRepositoryAnalysis`    | View Repository Analysis    | 快速打开仓库分析报告。                       |
+| `git-commit-genie.refreshRepositoryAnalysis` | Refresh Repository Analysis | 手动刷新仓库分析。                           |
+| `git-commit-genie.cancelRepositoryAnalysis`  | Stop Repository Analysis    | 停止正在进行的仓库分析。                     |
+| `git-commit-genie.genieMenu`                 | Menu                        | 打开Git Commit Genie功能菜单。               |
 
 SCM 标题栏：根据状态显示“Generate commit message”或“Stop generate”按钮。
 

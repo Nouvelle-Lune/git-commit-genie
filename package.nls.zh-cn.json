@@ -13,6 +13,8 @@
   "command.viewRepositoryAnalysis": "Git Commit Genie: 查看仓库分析",
   "command.refreshRepositoryAnalysis": "Git Commit Genie: 刷新仓库分析",
   "command.cancelRepositoryAnalysis": "Git Commit Genie: 停止仓库分析",
+  "command.genieMenu": "Git Commit Genie: 菜单",
+  "command.openAnalysisJson": "Git Commit Genie: 打开分析 JSON",
   "config.autoStageAllForDiff.desc": "仅当暂存区为空时：临时将所有更改加入暂存用于生成 diff，生成后会自动还原暂存状态。谨慎使用，可能会把无关更改包含进提示。",
   "config.chain.enabled.desc": "启用链式多步提示生成提交信息（使得生成的提交信息更加详准确，且可以更加贴合用户模版，但将增加延迟与 Token 消耗）",
   "config.chain.maxParallelNew.desc": "链式提示并行 LLM 调用最大数量。谨慎增大以避免触发速率限制。",
@@ -56,6 +58,4 @@
   "templates.renameExists": "已存在同名模板。",
   "templates.renameFailed": "重命名失败：{0}",
   "templates.openFailed": "打开模板失败：{0}"
-  ,
-  
 }

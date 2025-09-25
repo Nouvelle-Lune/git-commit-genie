@@ -8,7 +8,7 @@ Chinese version: [中文说明](./docs/README.zh-CN.md)
 
 ## Overview
 
-Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using mainstream LLM providers (OpenAI / DeepSeek / Anthropic / Gemini). Supports optional multi‑step chain prompting and user template strategy to improve structural consistency and style alignment.
+Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using mainstream LLM providers (OpenAI / DeepSeek / Anthropic / Gemini). Features intelligent repository analysis that understands your project structure and tech stack to provide better context for commit generation. Supports optional multi‑step chain prompting and user template strategy to improve structural consistency and style alignment.
 
 ## Usage
 <img src="./media/demo1.gif" width="300"/>
@@ -34,18 +34,19 @@ Basic format:
 
 ## Core Features
 
-| Feature                         | Description                                                                                                                                                                                                                                        |
-| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Multi‑provider LLM support      | Supports OpenAI, DeepSeek, Anthropic, Gemini.                                                                                                                                                                                                      |
-| Chain Prompting Mode            | Optional multi‑step pipeline: per‑file summaries → structured synthesis → validation & minimal fix‑ups (improves accuracy & template adherence).                                                                                                   |
-| User Template Strategy          | Per‑repo or global templates. Use command “Git Commit Genie: Select/Create Template” to pick or create under `.gitgenie/templates` (workspace) or the user data folder (global). The chosen file path is stored in `gitCommitGenie.templatesPath`. |
-| Conventional Commit Enforcement | Header validation (type, optional scope, optional `!`, ≤ 72 chars, imperative, no trailing period).                                                                                                                                                |
-| Diff Awareness                  | Only staged changes are analyzed; intelligently classifies type (`feat`, `fix`, `docs`, `refactor`, etc.).                                                                                                                                         |
-| Token & Rate Safeguards         | Retry with backoff; local soft limits (Gemini); parallelism control for chain mode.                                                                                                                                                                |
-| Status Bar Integration          | Shows model. Click to configure.                                                                                                                                                                                                                   |
-| Cancellation                    | Cancel in‑progress generation directly from the SCM title bar button.                                                                                                                                                                              |
-| Secure Secret Storage           | API keys stored in VS Code secret storage (not in settings JSON).                                                                                                                                                                                  |
-| Internationalization            | Built‑in English + Simplified Chinese.                                                                                                                                                                                                             |
+| Feature                         | Description                                                                                                                                                                                               |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Multi‑provider LLM support      | Supports OpenAI, DeepSeek, Anthropic, Gemini.                                                                                                                                                             |
+| Repository Intelligence         | Automatically analyzes project structure, tech stack, and architecture to provide context for better commit messages; supports manual refresh, real-time updates, and manual editing of analysis reports. |
+| Chain Prompting Mode            | Optional multi‑step pipeline: per‑file summaries → structured synthesis → validation & minimal fix‑ups (improves accuracy & template adherence).                                                          |
+| User Template Strategy          | Built-in template selection and creation, supports workspace and user data directory storage, extracts strategy affecting structure, required footers, and vocabulary preferences.                        |
+| Conventional Commit Enforcement | Header validation (type, optional scope, optional `!`, ≤ 72 chars, imperative, no trailing period).                                                                                                       |
+| Diff Awareness                  | Only staged changes are analyzed; intelligently classifies type (`feat`, `fix`, `docs`, `refactor`, etc.).                                                                                                |
+| Token & Rate Safeguards         | Retry with backoff; local soft limits (Gemini); parallelism control for chain mode.                                                                                                                       |
+| Status Bar Integration          | Shows current model and analysis status, click to access feature menu.                                                                                                                                    |
+| Cancellation                    | Cancel in‑progress generation directly from the SCM title bar button.                                                                                                                                     |
+| Secure Secret Storage           | API keys stored in VS Code secret storage (not in settings JSON).                                                                                                                                         |
+| Internationalization            | Built‑in English, Simplified Chinese, Traditional Chinese, and more.                                                                                                                                      |
 
 ## How It Works
 
@@ -79,27 +80,31 @@ If chain prompting is disabled: single prompt (lower latency, less structural & 
 
 All settings are under: `Git Commit Genie`.
 
-| Setting                                         | Type    | Default | Description                                                                                                                                                                                                                  |
-| ----------------------------------------------- | ------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gitCommitGenie.autoStageAllForDiff`            | boolean | false   | Only when the staging area is empty: temporarily stage all changes to build the diff, then restore your staging state. Use with caution—this may include unrelated changes in the prompt.                                    |
-| `gitCommitGenie.chain.enabled`                  | boolean | false   | Enable multi-step chain prompting for commit generation (It makes the generated commit messages more detailed and accurate, and better aligns with the user's template, but it will increase latency and token consumption). |
-| `gitCommitGenie.chain.maxParallel`              | number  | 2       | Maximum parallel LLM calls used by chain prompting across all providers. Increase carefully to avoid provider rate limits.                                                                                                   |
-| `gitCommitGenie.workspaceFiles.enabled`         | boolean | true    | Include a compact list of workspace filenames in the prompt. You can disable this if prompts get too large.                                                                                                                  |
-| `gitCommitGenie.workspaceFiles.maxFiles`        | number  | 2000    | Maximum number of filenames to send. If the number exceeds this limit, the list is hard-truncated.                                                                                                                           |
-| `gitCommitGenie.workspaceFiles.excludePatterns` | array   | []      | Additional gitignore-style patterns to exclude from the filename list.                                                                                                                                                       |
-| `gitCommitGenie.commitLanguage`                 | string  | `auto`  | Target language for generated commit messages. Options: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`.                                                                                      |
-| `gitCommitGenie.typingAnimationSpeed`           | number  | 15      | Speed of the commit message box typing animation in milliseconds per character. Set to -1 to disable the animation.                                                                                                          |
+| Setting                                             | Type    | Default | Description                                                                                                                                                                                                                  |
+| --------------------------------------------------- | ------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `gitCommitGenie.autoStageAllForDiff`                | boolean | false   | Only when the staging area is empty: temporarily stage all changes to build the diff, then restore your staging state. Use with caution—this may include unrelated changes in the prompt.                                    |
+| `gitCommitGenie.chain.enabled`                      | boolean | false   | Enable multi-step chain prompting for commit generation (It makes the generated commit messages more detailed and accurate, and better aligns with the user's template, but it will increase latency and token consumption). |
+| `gitCommitGenie.chain.maxParallel`                  | number  | 2       | Maximum parallel LLM calls used by chain prompting across all providers. Increase carefully to avoid provider rate limits.                                                                                                   |
+| `gitCommitGenie.repositoryAnalysis.enabled`         | boolean | true    | Enable repository analysis to provide better context for commit message generation.                                                                                                                                          |
+| `gitCommitGenie.repositoryAnalysis.excludePatterns` | array   | []      | File patterns to exclude from repository analysis scanning (gitignore-style).                                                                                                                                                |
+| `gitCommitGenie.repositoryAnalysis.updateThreshold` | number  | 10      | Number of commits after which to update the repository analysis.                                                                                                                                                             |
+| `gitCommitGenie.commitLanguage`                     | string  | `auto`  | Target language for generated commit messages. Options: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`.                                                                                      |
+| `gitCommitGenie.typingAnimationSpeed`               | number  | 15      | Speed of the commit message box typing animation in milliseconds per character. Set to -1 to disable the animation.                                                                                                          |
 
 
 ## Command List
 
-| Command ID                               | Title                  | Purpose                                               |
-| ---------------------------------------- | ---------------------- | ----------------------------------------------------- |
-| `git-commit-genie.generateCommitMessage` | AI Generate            | Produce commit message for staged changes.            |
-| `git-commit-genie.cancelGeneration`      | Stop                   | Cancel in‑flight generation.                          |
-| `git-commit-genie.manageModels`          | Manage Models          | Select provider, enter/replace API key, choose model. |
-| `git-commit-genie.toggleChainMode`       | Toggle Chain Prompting | Quickly enable/disable chain mode.                    |
-| `git-commit-genie.selectTemplate`        | Select/Create Template | Pick or create a commit message template file.        |
+| Command ID                                   | Title                       | Purpose                                               |
+| -------------------------------------------- | --------------------------- | ----------------------------------------------------- |
+| `git-commit-genie.generateCommitMessage`     | AI Generate                 | Produce commit message for staged changes.            |
+| `git-commit-genie.cancelGeneration`          | Stop                        | Cancel in‑flight generation.                          |
+| `git-commit-genie.manageModels`              | Manage Models               | Select provider, enter/replace API key, choose model. |
+| `git-commit-genie.toggleChainMode`           | Toggle Chain Prompting      | Quickly enable/disable chain mode.                    |
+| `git-commit-genie.selectTemplate`            | Select/Create Template      | Pick or create a commit message template file.        |
+| `git-commit-genie.viewRepositoryAnalysis`    | View Repository Analysis    | Quick access to repository analysis report.           |
+| `git-commit-genie.refreshRepositoryAnalysis` | Refresh Repository Analysis | Manually refresh repository analysis.                 |
+| `git-commit-genie.cancelRepositoryAnalysis`  | Stop Repository Analysis    | Cancel ongoing repository analysis.                   |
+| `git-commit-genie.genieMenu`                 | Menu                        | Open Git Commit Genie feature menu.                   |
 
 SCM Title Bar: shows "Generate commit message" or "Stop generate" depending on state.
 

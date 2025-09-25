@@ -13,6 +13,8 @@
   "command.viewRepositoryAnalysis": "Git Commit Genie: 檢視倉庫分析",
   "command.refreshRepositoryAnalysis": "Git Commit Genie: 重新整理倉庫分析",
   "command.cancelRepositoryAnalysis": "Git Commit Genie: 停止倉庫分析",
+  "command.genieMenu": "Git Commit Genie: 選單",
+  "command.openAnalysisJson": "Git Commit Genie: 開啟分析 JSON",
   "config.autoStageAllForDiff.desc": "僅當暫存區為空時：臨時將所有變更加入暫存以建立 diff，之後會自動還原暫存狀態。請謹慎使用——這可能會將無關變更包含進提示。",
   "config.chain.enabled.desc": "啟用鏈式多步提示生成提交資訊（可使生成的提交資訊更詳盡且更貼合使用者模板，但會增加延遲與 Token 消耗）",
   "config.chain.maxParallelNew.desc": "鏈式提示的並行 LLM 呼叫最大數量。請謹慎增大以避免觸發速率限制。",
@@ -29,6 +31,10 @@
   "config.commitLanguage.pt": "葡萄牙文",
   "config.commitLanguage.ru": "俄文",
   "config.commitLanguage.it": "義大利文",
+  "config.repositoryAnalysis.enabled.desc": "啟用倉庫分析以提供更好的提交資訊生成上下文。",
+  "config.repositoryAnalysis.excludePatterns.desc": "倉庫分析掃描時要排除的檔案模式。",
+  "config.repositoryAnalysis.updateThreshold.desc": "更新倉庫分析的提交次數閾值。",
+  "config.developerMode.desc": "啟用開發者功能（例如開啟內部歷史紀錄檔）。",
   "config.typingAnimationSpeed.desc": "提交資訊框打字動畫速度，單位為每字元毫秒。設定 -1 關閉動畫。",
   "templates.pickWorkspaceFolder": "選擇工作區資料夾",
   "templates.quickPickPlaceholder": "選擇 / 管理模板",
@@ -52,6 +58,4 @@
   "templates.renameExists": "已存在同名模板。",
   "templates.renameFailed": "重新命名失敗：{0}",
   "templates.openFailed": "開啟模板失敗：{0}"
-  ,
-  
 }

@@ -13,6 +13,8 @@
   "command.viewRepositoryAnalysis": "Git Commit Genie: View Repository Analysis",
   "command.refreshRepositoryAnalysis": "Git Commit Genie: Refresh Repository Analysis",
   "command.cancelRepositoryAnalysis": "Git Commit Genie: Stop Repository Analysis",
+  "command.genieMenu": "Git Commit Genie: Menu",
+  "command.openAnalysisJson": "Git Commit Genie: Open Analysis JSON",
   "config.autoStageAllForDiff.desc": "Only when the staging area is empty: temporarily stage all changes to build the diff, then restore your staging state. Use with caution—this may include unrelated changes in the prompt.",
   "config.chain.enabled.desc": "Enable multi-step chain prompting for commit generation (It makes the generated commit messages more detailed and accurate, and better aligns with the user's template, but it will increase latency and token consumption).",
   "config.chain.maxParallelNew.desc": "Maximum parallel LLM calls used by chain prompting across all providers. Increase carefully to avoid provider rate limits.",
