@@ -48,6 +48,28 @@ export const L10N_KEYS = {
   settings: {
     chainMaxParallelLabel: 'Max Parallel Chains'
   },
+  common: {
+    noWorkspace: 'No workspace folder is open.'
+  },
+  genieMenu: {
+    placeholder: 'Git Commit Genie',
+    manageModels: '$(gear) Manage Models',
+    cancelAnalysis: '$(stop-circle) Cancel Analysis',
+    refreshAnalysis: '$(refresh) Refresh Analysis',
+    openMarkdown: '$(file) Open repository-analysis.md'
+  },
+  repoAnalysis: {
+    running: 'Repository analysis in progress…',
+    missing: 'Repository analysis missing. Click to re-analyze.',
+    idle: 'Repository analysis is up to date.',
+    initGitToEnable: 'Initialize a Git repository to enable analysis.',
+    promptInitialize: 'Repository analysis not found. Would you like to initialize it?',
+    initialize: 'Initialize',
+    initializingTitle: 'Initializing repository analysis...',
+    refreshingTitle: 'Refreshing repository analysis...',
+    refreshed: 'Repository analysis refreshed successfully.',
+    mdNotFound: 'repository-analysis.md not found. Use Refresh Analysis to generate it.'
+  },
   templates: {
     pickWorkspaceFolder: 'Pick a workspace folder',
     quickPickPlaceholder: 'Select / manage templates',

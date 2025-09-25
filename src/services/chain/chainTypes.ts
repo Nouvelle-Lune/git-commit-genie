@@ -54,14 +54,24 @@ export interface TemplatePolicy {
 }
 
 
+// Structured repository analysis type
+export interface RepositoryAnalysis {
+    summary?: string;
+    projectType?: string;
+    technologies?: string[];
+    insights?: string[];
+    importantFiles?: string[];
+}
+
 export interface ChainInputs {
     diffs: DiffData[];
     baseRulesMarkdown: string;
     currentTime?: string;
-    workspaceFilesTree?: string;
     userTemplate?: string;
     targetLanguage?: string;
     validationChecklist?: string;
+    // Optional repository analysis (can be string for backward compatibility or structured object)
+    repositoryAnalysis?: string | RepositoryAnalysis;
 }
 
 export interface FileSummary {

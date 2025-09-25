@@ -46,6 +46,15 @@
           "minimum": 1,
           "markdownDescription": "%config.chain.maxParallelNew.desc%"
         },
+        "gitCommitGenie.developerMode": {
+          "order": 2,
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%config.developerMode.desc%",
+          "tags": [
+            "advanced"
+          ]
+        },
         "gitCommitGenie.chainMaxParallel": {
           "order": 2,
           "type": "number",
@@ -54,27 +63,28 @@
           "markdownDescription": "%config.chainMaxParallel.desc%",
           "deprecationMessage": "Deprecated: use gitCommitGenie.chain.maxParallel instead"
         },
-        "gitCommitGenie.workspaceFiles.enabled": {
-          "order": 3,
+        "gitCommitGenie.repositoryAnalysis.enabled": {
+          "order": 6,
           "type": "boolean",
           "default": true,
-          "markdownDescription": "%config.workspaceFiles.enabled.desc%"
+          "markdownDescription": "%config.repositoryAnalysis.enabled.desc%"
         },
-        "gitCommitGenie.workspaceFiles.maxFiles": {
-          "order": 4,
-          "type": "number",
-          "default": 2000,
-          "minimum": 0,
-          "markdownDescription": "%config.workspaceFiles.maxFiles.desc%"
-        },
-        "gitCommitGenie.workspaceFiles.excludePatterns": {
-          "order": 5,
+        "gitCommitGenie.repositoryAnalysis.excludePatterns": {
+          "order": 7,
           "type": "array",
           "items": {
             "type": "string"
           },
           "default": [],
-          "markdownDescription": "%config.workspaceFiles.excludePatterns.desc%"
+          "markdownDescription": "%config.repositoryAnalysis.excludePatterns.desc%"
+        },
+        "gitCommitGenie.repositoryAnalysis.updateThreshold": {
+          "order": 8,
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 32,
+          "markdownDescription": "%config.repositoryAnalysis.updateThreshold.desc%"
         },
         "gitCommitGenie.commitLanguage": {
           "order": 0,
@@ -127,6 +137,13 @@
         "icon": "media/Genie.svg"
       },
       {
+        "command": "git-commit-genie.cancelRepositoryAnalysis",
+        "title": "%command.cancelRepositoryAnalysis%",
+        "category": "%category.title%",
+        "icon": "$(stop)",
+        "enablement": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning == true"
+      },
+      {
         "command": "git-commit-genie.cancelGeneration",
         "title": "%command.cancel%",
         "icon": "$(stop-circle)",
@@ -149,6 +166,33 @@
         "title": "%command.selectTemplate%",
         "category": "%category.title%",
         "icon": "$(file-text)"
+      },
+      {
+        "command": "git-commit-genie.viewRepositoryAnalysis",
+        "title": "%command.viewRepositoryAnalysis%",
+        "category": "%category.title%",
+        "icon": "$(search)",
+        "enablement": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true"
+      },
+      {
+        "command": "git-commit-genie.refreshRepositoryAnalysis",
+        "title": "%command.refreshRepositoryAnalysis%",
+        "category": "%category.title%",
+        "icon": "$(refresh)",
+        "enablement": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
+      },
+      {
+        "command": "git-commit-genie.genieMenu",
+        "title": "Git Commit Genie: Menu",
+        "category": "%category.title%",
+        "icon": "$(menu)"
+      },
+      {
+        "command": "git-commit-genie.openAnalysisJson",
+        "title": "Git Commit Genie: Open Analysis JSON",
+        "category": "%category.title%",
+        "icon": "$(file-code)",
+        "enablement": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && config.gitCommitGenie.developerMode"
       }
     ],
     "menus": {
@@ -162,6 +206,20 @@
           "command": "git-commit-genie.cancelGeneration",
           "when": "scmProvider == 'git' && gitCommitGenie.generating == true",
           "group": "navigation@1000"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "git-commit-genie.cancelRepositoryAnalysis",
+          "when": "false"
+        },
+        {
+          "command": "git-commit-genie.refreshRepositoryAnalysis",
+          "when": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
+        },
+        {
+          "command": "git-commit-genie.cancelRepositoryAnalysis",
+          "when": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning == true"
         }
       ]
     }

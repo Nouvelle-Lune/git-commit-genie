@@ -15,8 +15,8 @@ export class GeminiService extends BaseLLMService {
     private client: any | null = null;
     protected context: vscode.ExtensionContext;
 
-    constructor(context: vscode.ExtensionContext, templateService: TemplateService) {
-        super(context, templateService);
+    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: any) {
+        super(context, templateService, analysisService);
         this.context = context;
         this.refreshFromSettings();
     }
@@ -58,6 +58,19 @@ export class GeminiService extends BaseLLMService {
     public async clearApiKey(): Promise<void> {
         await this.context.secrets.delete(SECRET_GEMINI_API_KEY);
         this.client = null;
+    }
+
+    public async getChatFn(options?: { token?: vscode.CancellationToken }): Promise<ChatFn | LLMError> {
+        if (!this.client) { return { message: 'Gemini API key is not set or SDK unavailable.', statusCode: 401 }; }
+        const modelId = this.context.globalState.get<string>('gitCommitGenie.geminiModel', '');
+        if (!modelId) { return { message: 'Gemini model is not selected. Please configure it via Manage Models.', statusCode: 400 }; }
+        const chat: ChatFn = async (messages, _opts) => {
+            const { system, contents } = this.buildGeminiInputs(messages);
+            const res = await this.client!.models.generateContent({ model: modelId, contents, config: { systemInstruction: system, temperature: 0 } });
+            const textOut = (res as any)?.text || (res as any)?.response?.text?.() || '';
+            return textOut || '';
+        };
+        return chat;
     }
 
     private buildGeminiInputs(messages: ChatMessage[]): { system?: string; contents: string } {
@@ -256,10 +269,10 @@ export class GeminiService extends BaseLLMService {
                         diffs,
                         baseRulesMarkdown: baseRule,
                         currentTime: parsed?.["current-time"],
-                        workspaceFilesTree: parsed?.["workspace-files"],
                         userTemplate: parsed?.["user-template"],
                         targetLanguage: parsed?.["target-language"],
-                        validationChecklist: checklistText
+                        validationChecklist: checklistText,
+                        repositoryAnalysis: parsed?.["repository-analysis"]
                     },
                     chat,
                     { maxParallel: chainMaxParallel }

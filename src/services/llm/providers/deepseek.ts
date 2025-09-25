@@ -18,8 +18,8 @@ export class DeepSeekService extends BaseLLMService {
     protected context: vscode.ExtensionContext;
     private openai: OpenAI | null = null;
 
-    constructor(context: vscode.ExtensionContext, templateService: TemplateService) {
-        super(context, templateService);
+    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: any) {
+        super(context, templateService, analysisService);
         this.context = context;
         this.refreshFromSettings();
     }
@@ -69,6 +69,21 @@ export class DeepSeekService extends BaseLLMService {
     public async clearApiKey(): Promise<void> {
         await this.context.secrets.delete(SECRET_DEEPSEEK_API_KEY);
         this.openai = null;
+    }
+
+    public async getChatFn(options?: { token?: vscode.CancellationToken }): Promise<ChatFn | LLMError> {
+        if (!this.openai) {
+            return { message: 'DeepSeek API key is not set. Please set it in the settings.', statusCode: 401 };
+        }
+        const model = this.context.globalState.get<string>('gitCommitGenie.deepseekModel', '');
+        if (!model) { return { message: 'DeepSeek model is not selected. Please configure it via Manage Models.', statusCode: 400 }; }
+        const chat: ChatFn = async (messages, _opts) => {
+            const controller = new AbortController();
+            options?.token?.onCancellationRequested(() => controller.abort());
+            const res = await this.openai!.chat.completions.create({ model, messages, temperature: 0 }, { signal: controller.signal });
+            return res.choices?.[0]?.message?.content ?? '';
+        };
+        return chat;
     }
 
     private async sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -180,10 +195,10 @@ export class DeepSeekService extends BaseLLMService {
                         diffs,
                         baseRulesMarkdown: baseRule,
                         currentTime: parsed?.["current-time"],
-                        workspaceFilesTree: parsed?.["workspace-files"],
                         userTemplate: parsed?.["user-template"], // now actual content
                         targetLanguage: parsed?.["target-language"],
-                        validationChecklist: checklistText
+                        validationChecklist: checklistText,
+                        repositoryAnalysis: parsed?.["repository-analysis"]
                     },
                     chat,
                     { maxParallel: chainMaxParallel }

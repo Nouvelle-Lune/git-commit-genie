@@ -1,7 +1,10 @@
 // The module 'vscode' contains the VS Code extensibility API
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { DiffService } from './services/git/diff';
+import { Repository } from './services/git/git';
 import { OpenAIService } from './services/llm/providers/openai';
 import { DeepSeekService } from './services/llm/providers/deepseek';
 import { AnthropicService } from './services/llm/providers/anthropic';
@@ -9,6 +12,7 @@ import { GeminiService } from './services/llm/providers/gemini';
 import { L10N_KEYS as I18N } from './i18n/keys';
 import { TemplateService } from './template/templateService';
 import { logger, LogLevel } from './services/logger';
+import { RepositoryAnalysisService } from './services/analysis';
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -27,10 +31,13 @@ export function activate(context: vscode.ExtensionContext) {
 	const diffService = new DiffService();
 	const templateService = new TemplateService(context);
 
-	const openAIService = new OpenAIService(context, templateService);
-	const deepseekService = new DeepSeekService(context, templateService);
-	const anthropicService = new AnthropicService(context, templateService);
-	const geminiService = new GeminiService(context, templateService);
+	// Initialize repository analysis service - we'll pass a placeholder LLM service initially
+	const analysisService = new RepositoryAnalysisService(context, null as any);
+
+	const openAIService = new OpenAIService(context, templateService, analysisService);
+	const deepseekService = new DeepSeekService(context, templateService, analysisService);
+	const anthropicService = new AnthropicService(context, templateService, analysisService);
+	const geminiService = new GeminiService(context, templateService, analysisService);
 
 	// A map to hold different LLM services
 	const llmServices = new Map<string, any>([
@@ -62,11 +69,33 @@ export function activate(context: vscode.ExtensionContext) {
 	};
 
 	let llmService = pickService();
+	analysisService.setLLMService(llmService);
 
-	// Status bar: show active provider & model and allow quick change
-	const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+	// Status bar: single item (model + analysis state)
+	// Use Right alignment and a very low priority so it sits at the far-right edge.
+	const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, -10000);
+	statusBarItem.command = 'git-commit-genie.genieMenu';
 
-	statusBarItem.command = 'git-commit-genie.manageModels';
+	let repoAnalysisRunning = false;
+	let repoAnalysisMissing = false;
+	let hasGitRepo = false;
+
+	const detectGitRepo = (): boolean => {
+		try {
+			const wf = vscode.workspace.workspaceFolders;
+			if (!wf || wf.length === 0) { return false; }
+			const repoPath = wf[0].uri.fsPath;
+			// Simple and reliable: check for .git folder at root
+			const exists = fs.existsSync(path.join(repoPath, '.git'));
+			return exists;
+		} catch { return false; }
+	};
+	const setRepoAnalysisRunning = (running: boolean) => {
+		repoAnalysisRunning = running;
+		// Expose a context key so commands/menus can hide the refresh action while running
+		vscode.commands.executeCommand('setContext', 'gitCommitGenie.analysisRunning', running);
+		updateStatusBar();
+	};
 
 	function readChainEnabled(): boolean {
 		const cfg: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration();
@@ -80,6 +109,15 @@ export function activate(context: vscode.ExtensionContext) {
 			return false;
 		}
 	}
+
+	const isRepoAnalysisEnabled = (): boolean => {
+		try {
+			return vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis').get<boolean>('enabled', true);
+		} catch { return true; }
+	};
+
+	// Set initial context for gating repo-analysis commands/menus
+	vscode.commands.executeCommand('setContext', 'gitCommitGenie.repositoryAnalysisEnabled', isRepoAnalysisEnabled());
 
 	const updateStatusBar = () => {
 		const provider = getProvider().toLowerCase();
@@ -97,15 +135,165 @@ export function activate(context: vscode.ExtensionContext) {
 			}
 			return m;
 		};
+		// Update Git repo presence and set context for menus
+		hasGitRepo = detectGitRepo();
+		vscode.commands.executeCommand('setContext', 'gitCommitGenie.hasGitRepo', hasGitRepo);
+
+		// Determine if repo analysis markdown exists (only when enabled and when git repo exists)
+		try {
+			if (isRepoAnalysisEnabled() && hasGitRepo) {
+				const wf = vscode.workspace.workspaceFolders;
+				if (wf && wf.length > 0) {
+					const repoPath = wf[0].uri.fsPath;
+					const mdPath = analysisService.getAnalysisMarkdownFilePath(repoPath);
+					repoAnalysisMissing = !fs.existsSync(mdPath);
+				} else {
+					repoAnalysisMissing = false;
+				}
+			} else {
+				repoAnalysisMissing = false;
+			}
+		} catch {
+			repoAnalysisMissing = false;
+		}
+
 		const modelLabel = model && model.trim() ? shortenModelName(model.trim()) : vscode.l10n.t(I18N.statusBar.selectModel);
-		statusBarItem.text = `$(chat-sparkle) Genie: ${modelLabel}${chainBadge}`;
-		statusBarItem.tooltip = model && model.trim()
+		const analysisIcon = isRepoAnalysisEnabled() ? (!hasGitRepo ? '$(search-stop)' : (repoAnalysisRunning ? '$(sync~spin)' : (repoAnalysisMissing ? '$(refresh)' : '$(check)'))) : '';
+		statusBarItem.text = `$(chat-sparkle) Genie: ${modelLabel}${chainBadge} ${analysisIcon}`;
+		const baseTooltip = model && model.trim()
 			? vscode.l10n.t(I18N.statusBar.tooltipConfigured, providerLabel, model)
 			: vscode.l10n.t(I18N.statusBar.tooltipNeedConfig, providerLabel);
+		const repoTooltip = isRepoAnalysisEnabled()
+			? (!hasGitRepo
+				? vscode.l10n.t(I18N.repoAnalysis.initGitToEnable)
+				: (repoAnalysisRunning ? vscode.l10n.t(I18N.repoAnalysis.running) : (repoAnalysisMissing ? vscode.l10n.t(I18N.repoAnalysis.missing) : vscode.l10n.t(I18N.repoAnalysis.idle))))
+			: '';
+		statusBarItem.tooltip = repoTooltip ? `${baseTooltip}\n${repoTooltip}` : baseTooltip;
+		// Click action: when no Git repo, jump to official initialize command; otherwise open Genie menu
+		statusBarItem.command = !hasGitRepo ? 'git.init' : 'git-commit-genie.genieMenu';
 		statusBarItem.show();
 	};
 	updateStatusBar();
 	context.subscriptions.push(statusBarItem);
+
+	// Watch for repository-analysis.md changes to refresh the status icon (only when enabled)
+	try {
+		if (isRepoAnalysisEnabled()) {
+			// Specific file watcher
+			const mdWatcher = vscode.workspace.createFileSystemWatcher('**/.gitgenie/repository-analysis.md');
+			const repoFromMdUri = (uri: vscode.Uri): string | null => {
+				try {
+					const mdPath = uri.fsPath;
+					const dir = path.dirname(mdPath); // .../.gitgenie
+					const repo = path.dirname(dir);
+					return repo;
+				} catch {
+					return null;
+				}
+			};
+			mdWatcher.onDidCreate(async (uri) => {
+				const repo = repoFromMdUri(uri);
+				if (repo) { await analysisService.syncAnalysisFromMarkdown(repo).catch(() => { }); }
+				updateStatusBar();
+			});
+			mdWatcher.onDidChange(async (uri) => {
+				const repo = repoFromMdUri(uri);
+				if (repo) { await analysisService.syncAnalysisFromMarkdown(repo).catch(() => { }); }
+				updateStatusBar();
+			});
+			mdWatcher.onDidDelete(async (uri) => {
+				const repo = repoFromMdUri(uri);
+				if (repo) { await analysisService.clearAnalysis(repo).catch(() => { }); }
+				updateStatusBar();
+			});
+			context.subscriptions.push(mdWatcher);
+
+			// Directory-level watchers to handle full folder deletion/creation and any changes inside
+			const dirWatcher = vscode.workspace.createFileSystemWatcher('**/.gitgenie');
+			dirWatcher.onDidCreate(() => updateStatusBar());
+			dirWatcher.onDidDelete(async (uri) => {
+				// If the whole .gitgenie folder is deleted, clear the JSON too
+				try { const repo = path.dirname(uri.fsPath); await analysisService.clearAnalysis(repo); } catch { }
+				updateStatusBar();
+			});
+			context.subscriptions.push(dirWatcher);
+
+			const anyInDirWatcher = vscode.workspace.createFileSystemWatcher('**/.gitgenie/**');
+			anyInDirWatcher.onDidCreate(() => updateStatusBar());
+			anyInDirWatcher.onDidDelete(() => updateStatusBar());
+			anyInDirWatcher.onDidChange(() => updateStatusBar());
+			context.subscriptions.push(anyInDirWatcher);
+		}
+	} catch { }
+
+	// Toggle via menu only (single layout)
+
+	// Single-layout menu for combined item
+	context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.genieMenu', async () => {
+		const wf = vscode.workspace.workspaceFolders;
+		const items: Array<vscode.QuickPickItem & { action: string }> = [];
+		items.push({ label: vscode.l10n.t(I18N.genieMenu.manageModels), action: 'models' });
+		if (isRepoAnalysisEnabled() && hasGitRepo) {
+			if (repoAnalysisRunning) {
+				items.push({ label: vscode.l10n.t(I18N.genieMenu.cancelAnalysis), action: 'cancel' });
+			} else {
+				items.push({ label: vscode.l10n.t(I18N.genieMenu.refreshAnalysis), action: 'refresh' });
+			}
+			items.push({ label: vscode.l10n.t(I18N.genieMenu.openMarkdown), action: 'open' });
+		}
+		const pick = await vscode.window.showQuickPick(items, { placeHolder: vscode.l10n.t(I18N.genieMenu.placeholder) });
+		if (!pick) { return; }
+		if (pick.action === 'models') {
+			vscode.commands.executeCommand('git-commit-genie.manageModels');
+			return;
+		}
+		if (!wf || wf.length === 0) { return; }
+		const repositoryPath = wf[0].uri.fsPath;
+		if (pick.action === 'cancel') {
+			analysisService.cancelCurrentAnalysis();
+			setRepoAnalysisRunning(false);
+			return;
+		}
+		if (pick.action === 'refresh') {
+			vscode.commands.executeCommand('git-commit-genie.refreshRepositoryAnalysis');
+			return;
+		}
+		if (pick.action === 'open') {
+			const mdPath = analysisService.getAnalysisMarkdownFilePath(repositoryPath);
+			if (fs.existsSync(mdPath)) {
+				const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(mdPath));
+				await vscode.window.showTextDocument(doc);
+			} else {
+				vscode.window.showInformationMessage(vscode.l10n.t(I18N.repoAnalysis.mdNotFound));
+			}
+		}
+	}));
+
+	// Developer: view internal analysis JSON (from VS Code storage)
+	context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.openAnalysisJson', async () => {
+		const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
+		const dev = cfg.get<boolean>('developerMode', false);
+		if (!dev) {
+			const choice = await vscode.window.showInformationMessage('Developer mode required.', vscode.l10n.t(I18N.actions.openSettings));
+			if (choice === vscode.l10n.t(I18N.actions.openSettings)) {
+				vscode.commands.executeCommand('workbench.action.openSettings', 'gitCommitGenie.developerMode');
+			}
+			return;
+		}
+		const wf = vscode.workspace.workspaceFolders;
+		if (!wf || wf.length === 0) {
+			vscode.window.showErrorMessage(vscode.l10n.t(I18N.common.noWorkspace));
+			return;
+		}
+		const repositoryPath = wf[0].uri.fsPath;
+		const analysis = await analysisService.getAnalysis(repositoryPath);
+		if (!analysis) {
+			vscode.window.showInformationMessage('No analysis data found.');
+			return;
+		}
+		const doc = await vscode.workspace.openTextDocument({ language: 'json', content: JSON.stringify(analysis, null, 2) });
+		await vscode.window.showTextDocument(doc, { preview: false });
+	}));
 
 	// Manage Models: provider -> API key -> model selection
 	context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.manageModels', async () => {
@@ -229,19 +417,24 @@ export function activate(context: vscode.ExtensionContext) {
 			if (providerPick.value === 'openai') {
 				await openAIService.setApiKey(apiKeyToUse!);
 				llmService = openAIService;
+				analysisService.setLLMService(llmService);
 			} else if (providerPick.value === 'deepseek') {
 				await deepseekService.setApiKey(apiKeyToUse!);
 				llmService = deepseekService;
+				analysisService.setLLMService(llmService);
 			} else if (providerPick.value === 'anthropic') {
 				await anthropicService.setApiKey(apiKeyToUse!);
 				llmService = anthropicService;
+				analysisService.setLLMService(llmService);
 			} else {
 				await geminiService.setApiKey(apiKeyToUse!);
 				llmService = geminiService;
+				analysisService.setLLMService(llmService);
 			}
 		} else {
 			// Key unchanged: just switch active provider/model reference
 			llmService = pickService();
+			analysisService.setLLMService(llmService);
 		}
 
 		await context.globalState.update(modelStateKey, modelPick.value);
@@ -374,11 +567,204 @@ export function activate(context: vscode.ExtensionContext) {
 		);
 	}));
 
-	// Listen to configuration changes for useChainPrompts to refresh UI
-	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
-		if (e.affectsConfiguration('gitCommitGenie.useChainPrompts') || e.affectsConfiguration('gitCommitGenie.chain.enabled')) {
-			updateStatusBar();
+	// Repository Analysis Commands
+	// Expose a dedicated Cancel command while analysis is running
+	context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.cancelRepositoryAnalysis', async () => {
+		try {
+			analysisService.cancelCurrentAnalysis();
+			setRepoAnalysisRunning(false);
+			logger.warn('[Genie][RepoAnalysis] Refresh cancelled by user.');
+		} catch { /* ignore */ }
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.viewRepositoryAnalysis', async () => {
+		if (!isRepoAnalysisEnabled()) { return; }
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (!workspaceFolders || workspaceFolders.length === 0) {
+			vscode.window.showErrorMessage(vscode.l10n.t(I18N.common.noWorkspace));
+			return;
 		}
+
+		try {
+			const repositoryPath = workspaceFolders[0].uri.fsPath;
+			const analysis = await analysisService.getAnalysis(repositoryPath);
+
+			if (!analysis) {
+				const initialize = await vscode.window.showInformationMessage(
+					vscode.l10n.t(I18N.repoAnalysis.promptInitialize),
+					vscode.l10n.t(I18N.repoAnalysis.initialize),
+					vscode.l10n.t(I18N.manageModels.cancel)
+				);
+				if (initialize === 'Initialize') {
+					await vscode.window.withProgress({
+						location: vscode.ProgressLocation.Notification,
+						title: vscode.l10n.t(I18N.repoAnalysis.initializingTitle),
+						cancellable: false
+					}, async () => {
+						setRepoAnalysisRunning(true);
+						try {
+							await analysisService.initializeRepository(repositoryPath);
+						} finally {
+							setRepoAnalysisRunning(false);
+						}
+					});
+
+					// After initialization, ensure markdown exists and open it for editing
+					const newAnalysis = await analysisService.getAnalysis(repositoryPath);
+					if (newAnalysis) {
+						const mdPath = await analysisService.saveAnalysisMarkdown(repositoryPath, newAnalysis, { overwrite: false });
+						const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(mdPath));
+						await vscode.window.showTextDocument(doc);
+					}
+				}
+				return;
+			}
+
+			// Ensure markdown exists and open it for editing
+			const mdPath = await analysisService.saveAnalysisMarkdown(repositoryPath, analysis, { overwrite: false });
+			const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(mdPath));
+			await vscode.window.showTextDocument(doc);
+		} catch (error) {
+			vscode.window.showErrorMessage(`Failed to view repository analysis: ${error}`);
+		}
+	}));
+
+	context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.refreshRepositoryAnalysis', async () => {
+		if (!isRepoAnalysisEnabled()) { return; }
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (!workspaceFolders || workspaceFolders.length === 0) {
+			vscode.window.showErrorMessage(vscode.l10n.t(I18N.common.noWorkspace));
+			return;
+		}
+
+		try {
+			const repositoryPath = workspaceFolders[0].uri.fsPath;
+
+			await vscode.window.withProgress({
+				location: vscode.ProgressLocation.Notification,
+				title: vscode.l10n.t(I18N.repoAnalysis.refreshingTitle),
+				cancellable: false
+			}, async () => {
+				setRepoAnalysisRunning(true);
+				try {
+					await analysisService.updateAnalysis(repositoryPath);
+				} finally {
+					setRepoAnalysisRunning(false);
+				}
+			});
+
+			vscode.window.showInformationMessage(vscode.l10n.t(I18N.repoAnalysis.refreshed));
+		} catch (error: any) {
+			const msg = String(error?.message || error || '');
+			const cancelled = /abort|cancel/i.test(msg);
+			if (cancelled) {
+				logger.warn('[Genie][RepoAnalysis] Refresh cancelled by user.');
+			} else {
+				logger.error('[Genie][RepoAnalysis] Failed to refresh repository analysis', error);
+			}
+		}
+	}));
+
+
+
+	// Initialize repository analysis when workspace opens
+	const initializeRepositoryAnalysis = async () => {
+		const enabled = isRepoAnalysisEnabled();
+		if (!enabled) { return; }
+
+		const workspaceFolders = vscode.workspace.workspaceFolders;
+		if (workspaceFolders && workspaceFolders.length > 0) {
+			try {
+				const repositoryPath = workspaceFolders[0].uri.fsPath;
+				// If no Git repository yet, do nothing now; a watcher will trigger once initialized
+				if (!fs.existsSync(path.join(repositoryPath, '.git'))) {
+					logger.info('[Genie][RepoAnalysis] Git repository not initialized. Skipping analysis init.');
+					return;
+				}
+
+				// Check if analysis already exists
+				const existingAnalysis = await analysisService.getAnalysis(repositoryPath);
+				if (!existingAnalysis) {
+					logger.info('Initializing repository analysis for new workspace...');
+					// Initialize in the background
+					setRepoAnalysisRunning(true);
+					analysisService.initializeRepository(repositoryPath).catch(error => {
+						logger.error('Failed to initialize repository analysis:', error);
+					}).finally(() => {
+						setRepoAnalysisRunning(false);
+					});
+				}
+			} catch (error) {
+				logger.error('Error during repository analysis initialization:', error);
+			}
+		}
+	};
+
+	// Initialize analysis on startup
+	setTimeout(initializeRepositoryAnalysis, 2000); // Delay to let workspace fully load
+
+	// Hook into real Git commits to drive analysis updates
+	try {
+		const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+		if (gitExtension) {
+			const api = gitExtension.getAPI(1);
+			const attachCommitListener = (repo: Repository) => {
+				const d = repo.onDidCommit(async () => {
+					try {
+						if (!isRepoAnalysisEnabled()) { return; }
+						const repositoryPath = repo.rootUri?.fsPath;
+						if (!repositoryPath) { return; }
+						const should = await analysisService.shouldUpdateAnalysis(repositoryPath);
+						if (should) {
+							setRepoAnalysisRunning(true);
+							analysisService.updateAnalysis(repositoryPath).catch(err => {
+								logger.error('Failed to update repository analysis on commit:', err);
+							}).finally(() => setRepoAnalysisRunning(false));
+						}
+					} catch (err) {
+						logger.error('Error handling commit event:', err);
+					}
+				});
+				context.subscriptions.push(d);
+			};
+			for (const r of api.repositories) { attachCommitListener(r); }
+			api.onDidOpenRepository((repo: Repository) => attachCommitListener(repo));
+		}
+	} catch { }
+
+	// Watch for Git repository initialization (creation/deletion of .git)
+	try {
+		const gitFolderWatcher = vscode.workspace.createFileSystemWatcher('**/.git');
+		gitFolderWatcher.onDidCreate(async (uri) => {
+			updateStatusBar();
+			// Trigger analysis automatically once Git repo is initialized
+			await initializeRepositoryAnalysis();
+		});
+		gitFolderWatcher.onDidDelete(() => {
+			updateStatusBar();
+		});
+		context.subscriptions.push(gitFolderWatcher);
+	} catch { }
+
+	// Listen to configuration changes to refresh UI and contexts
+	context.subscriptions.push(vscode.workspace.onDidChangeConfiguration(e => {
+		const chainChanged = e.affectsConfiguration('gitCommitGenie.useChainPrompts') || e.affectsConfiguration('gitCommitGenie.chain.enabled');
+		const repoAnalysisChanged = e.affectsConfiguration('gitCommitGenie.repositoryAnalysis.enabled');
+		const logLevelChanged = e.affectsConfiguration('gitCommitGenie.logLevel');
+
+		if (logLevelChanged) {
+			try {
+				const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
+				const logLevel = (cfg.get<string>('logLevel', 'info') || 'info').toLowerCase();
+				const level = logLevel === 'debug' ? LogLevel.Debug : logLevel === 'warn' ? LogLevel.Warning : logLevel === 'error' ? LogLevel.Error : LogLevel.Info;
+				logger.setLogLevel(level);
+				logger.info(`Log level changed to ${logLevel}`);
+			} catch { }
+		}
+		if (repoAnalysisChanged) {
+			vscode.commands.executeCommand('setContext', 'gitCommitGenie.repositoryAnalysisEnabled', isRepoAnalysisEnabled());
+		}
+		if (chainChanged || repoAnalysisChanged) { updateStatusBar(); }
 	}));
 }
 

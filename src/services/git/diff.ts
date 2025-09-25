@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { DiffData, DiffHunk, DiffStatus } from './gitTypes';
-import { API, Change, GitExtension, Repository, Status } from "../git/git";
+import { API, Change, GitExtension, Repository, Status, Commit, LogOptions } from "../git/git";
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { logger } from '../logger';
@@ -51,6 +51,73 @@ async function getRepository(api: API): Promise<Repository | null> {
 	}
 
 	return null;
+}
+
+/**
+ * Gets the Git commit message lo for the repository.
+ * @param api The Git API instance.
+ * @param repo The Repository object.
+ * @returns A promise that resolves to an array of commit log entries.
+ */
+
+export async function getRepositoryGitMessageLog(repositoryPath?: string): Promise<string[]> {
+	try {
+		const api = await getGitApi();
+		if (!api) { return []; }
+		let repo: Repository | null = null;
+		if (repositoryPath) {
+			try {
+				const uri = vscode.Uri.file(repositoryPath);
+				repo = api.getRepository(uri);
+				if (!repo) {
+					const root = await api.getRepositoryRoot(uri);
+					if (root) { repo = api.getRepository(root) as Repository | null; }
+				}
+			} catch { repo = null; }
+		}
+		if (!repo) {
+			repo = await getRepository(api as API) as Repository | null;
+		}
+		if (!repo) {
+			return [];
+		}
+		const commits: Commit[] = await repo.log();
+		return commits.map(commit => commit.message.trim());
+	} catch (error) {
+		logger.error('Failed to get git commit log:', error);
+		return [];
+	}
+}
+
+/**
+ * Get recent commits (hash, message, dates) from the active repository.
+ * @param options Optional log options such as maxEntries.
+ */
+export async function getRepositoryCommits(options?: LogOptions, repositoryPath?: string): Promise<Commit[]> {
+    try {
+        const api = await getGitApi();
+        if (!api) { return []; }
+        let repo: Repository | null = null;
+        if (repositoryPath) {
+            try {
+                const uri = vscode.Uri.file(repositoryPath);
+                repo = api.getRepository(uri);
+                if (!repo) {
+                    const root = await api.getRepositoryRoot(uri);
+                    if (root) { repo = api.getRepository(root) as Repository | null; }
+                }
+            } catch { repo = null; }
+        }
+        if (!repo) {
+            repo = await getRepository(api);
+        }
+        if (!repo) { return []; }
+        const commits: Commit[] = await repo.log(options);
+        return commits || [];
+    } catch (error) {
+        logger.error('Failed to get git commits:', error);
+        return [];
+    }
 }
 
 /**

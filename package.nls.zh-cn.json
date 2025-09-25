@@ -10,12 +10,16 @@
   "command.manageModels": "Git Commit Genie: 管理模型",
   "command.toggleChain": "Git Commit Genie: 切换链式思考模式",
   "command.selectTemplate": "Git Commit Genie: 选择/新建模板",
+  "command.viewRepositoryAnalysis": "Git Commit Genie: 查看仓库分析",
+  "command.refreshRepositoryAnalysis": "Git Commit Genie: 刷新仓库分析",
+  "command.cancelRepositoryAnalysis": "Git Commit Genie: 停止仓库分析",
   "config.autoStageAllForDiff.desc": "仅当暂存区为空时：临时将所有更改加入暂存用于生成 diff，生成后会自动还原暂存状态。谨慎使用，可能会把无关更改包含进提示。",
   "config.chain.enabled.desc": "启用链式多步提示生成提交信息（使得生成的提交信息更加详准确，且可以更加贴合用户模版，但将增加延迟与 Token 消耗）",
   "config.chain.maxParallelNew.desc": "链式提示并行 LLM 调用最大数量。谨慎增大以避免触发速率限制。",
-  "config.workspaceFiles.enabled.desc": "在提示中包含工作区文件名列表。如果超出Token限制，可关闭此项。",
-  "config.workspaceFiles.maxFiles.desc": "要传递的文件名数量上限。超过该上限将进行硬截断。",
-  "config.workspaceFiles.excludePatterns.desc": "附加的 gitignore 风格排除规则",
+  "config.repositoryAnalysis.enabled.desc": "启用仓库分析以提供更好的提交信息生成上下文。",
+  "config.repositoryAnalysis.excludePatterns.desc": "仓库分析扫描时要排除的文件模式。",
+  "config.repositoryAnalysis.updateThreshold.desc": "更新仓库分析的提交次数阈值。",
+  "config.developerMode.desc": "启用开发者功能（例如打开内部历史记录文件）。",
   "config.commitLanguage.desc": "生成的提交信息目标语言。",
   "config.commitLanguage.auto": "自动（跟随 VS Code 显示语言）",
   "config.commitLanguage.en": "英文",
@@ -52,4 +56,6 @@
   "templates.renameExists": "已存在同名模板。",
   "templates.renameFailed": "重命名失败：{0}",
   "templates.openFailed": "打开模板失败：{0}"
+  ,
+  
 }

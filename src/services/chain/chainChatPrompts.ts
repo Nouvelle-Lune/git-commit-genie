@@ -1,6 +1,6 @@
 import { DiffData } from "../git/gitTypes";
 import { ChatMessage } from "./chainTypes";
-import { ChainInputs, FileSummary, TemplatePolicy } from "./chainTypes";
+import { ChainInputs, FileSummary, TemplatePolicy, RepositoryAnalysis } from "./chainTypes";
 
 // Centralized builders for chat prompt messages used in chainThinking
 
@@ -181,7 +181,7 @@ export function buildClassifyAndDraftMessages(
     inputs: ChainInputs,
     templatePolicyJson: string
 ): ChatMessage[] {
-    const { baseRulesMarkdown, userTemplate, workspaceFilesTree, currentTime, targetLanguage } = inputs;
+    const { baseRulesMarkdown, userTemplate, currentTime, targetLanguage, repositoryAnalysis } = inputs;
 
     const system: ChatMessage = {
         role: 'system',
@@ -205,16 +205,22 @@ export function buildClassifyAndDraftMessages(
         ].join('\n')
     };
 
+    // Process repository analysis - include complete data in payload only
+    let repoAnalysisForPayload: string | object = '';
+
+    if (repositoryAnalysis) {
+        // Include complete repository analysis in payload for LLM processing
+        repoAnalysisForPayload = repositoryAnalysis;
+    }
+
     const payload = {
         now: currentTime ?? new Date().toISOString(),
         file_summaries: summaries,
-        workspace_files: workspaceFilesTree ?? '',
         template: userTemplate ?? '',
         template_policy: templatePolicyJson || '',
-        target_language: targetLanguage || ''
-    };
-
-    // Parse template policy to extract allowed types and other configuration
+        target_language: targetLanguage || '',
+        repo_analysis: repoAnalysisForPayload
+    };    // Parse template policy to extract allowed types and other configuration
     let policy: TemplatePolicy | null = null;
     const standardTypes = ['feat', 'fix', 'docs', 'style', 'refactor', 'perf', 'test', 'build', 'ci', 'chore'];
     let allowedTypes = standardTypes.join(', '); // default to standard types
@@ -241,6 +247,17 @@ export function buildClassifyAndDraftMessages(
         'Inputs (JSON):',
         JSON.stringify(payload, null, 2),
         '</input>',
+        '',
+        '<context>',
+        'Context-aware commit message generation guidelines:',
+        '• **Commit Types**: Select appropriate types based on the nature of changes (feat, fix, docs, etc.)',
+        '• **Scopes**: Use meaningful scopes derived from file paths, component names, or functional areas',
+        '• **Terminology**: Apply consistent technical language appropriate to the codebase',
+        '• **Change Impact**: Describe changes clearly, considering their scope and significance',
+        '• **Repository Context**: If repo_analysis is available in input, use it as background context to understand the project better, but base decisions primarily on the actual file changes',
+        '  - repo_analysis structure: { summary: string (project overview), projectType: string (e.g., "Desktop Application"), technologies: string[] (tech stack array), insights: string[] (architectural patterns), importantFiles: string[] (key project files) }',
+        '  - Use this context to inform terminology, scope selection, and change significance assessment',
+        '</context>',
         '',
         '<rules>',
         'Rules and examples (Markdown):',

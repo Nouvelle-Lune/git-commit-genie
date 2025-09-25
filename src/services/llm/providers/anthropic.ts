@@ -15,8 +15,8 @@ export class AnthropicService extends BaseLLMService {
     private client: any | null = null;
     protected context: vscode.ExtensionContext;
 
-    constructor(context: vscode.ExtensionContext, templateService: TemplateService) {
-        super(context, templateService);
+    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: any) {
+        super(context, templateService, analysisService);
         this.context = context;
         this.refreshFromSettings();
     }
@@ -67,6 +67,22 @@ export class AnthropicService extends BaseLLMService {
     public async clearApiKey(): Promise<void> {
         await this.context.secrets.delete(SECRET_ANTHROPIC_API_KEY);
         this.client = null;
+    }
+
+    public async getChatFn(options?: { token?: vscode.CancellationToken }): Promise<ChatFn | LLMError> {
+        if (!this.client) { return { message: 'Anthropic API key is not set or SDK unavailable.', statusCode: 401 }; }
+        const model = this.context.globalState.get<string>('gitCommitGenie.anthropicModel', '');
+        if (!model) { return { message: 'Anthropic model is not selected. Please configure it via Manage Models.', statusCode: 400 }; }
+        const chat: ChatFn = async (messages, _opts) => {
+            const controller = new AbortController();
+            options?.token?.onCancellationRequested(() => controller.abort());
+            const systemText = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n');
+            const conversation = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content }));
+            const resp = await this.client!.messages.create({ model, max_tokens: 4096, temperature: 0, system: systemText || undefined, messages: conversation }, { signal: (controller as any).signal });
+            if (Array.isArray(resp?.content)) { return resp.content.map((b: any) => b?.text || '').filter(Boolean).join('\n'); }
+            return '';
+        };
+        return chat;
     }
 
     private async sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -242,10 +258,10 @@ export class AnthropicService extends BaseLLMService {
                     diffs,
                     baseRulesMarkdown: baseRule,
                     currentTime: parsed?.["current-time"],
-                    workspaceFilesTree: parsed?.["workspace-files"],
                     userTemplate: parsed?.["user-template"],
                     targetLanguage: parsed?.["target-language"],
-                    validationChecklist: checklistText
+                    validationChecklist: checklistText,
+                    repositoryAnalysis: parsed?.["repository-analysis"]
                 }, chat, { maxParallel: chainMaxParallel });
                 if (usages.length) {
                     const sum = usages.reduce((acc, u) => ({

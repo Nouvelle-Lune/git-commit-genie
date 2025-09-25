@@ -55,8 +55,8 @@ export class OpenAIService extends BaseLLMService {
     private openai: OpenAI | null = null;
     protected context: vscode.ExtensionContext;
 
-    constructor(context: vscode.ExtensionContext, templateService: TemplateService) {
-        super(context, templateService);
+    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: any) {
+        super(context, templateService, analysisService);
         this.context = context;
         this.refreshFromSettings();
     }
@@ -102,6 +102,25 @@ export class OpenAIService extends BaseLLMService {
     public async clearApiKey(): Promise<void> {
         await this.context.secrets.delete(SECRET_OPENAI_API_KEY);
         this.openai = null;
+    }
+
+    public async getChatFn(options?: { token?: vscode.CancellationToken }): Promise<ChatFn | LLMError> {
+        if (!this.openai) {
+            return { message: 'OpenAI API key is not set. Please set it in the settings.', statusCode: 401 };
+        }
+        const model = this.context.globalState.get<string>('gitCommitGenie.openaiModel', '');
+        if (!model) {
+            return { message: 'OpenAI model is not selected. Please configure it via Manage Models.', statusCode: 400 };
+        }
+        const chat: ChatFn = async (messages, _opts) => {
+            const controller = new AbortController();
+            options?.token?.onCancellationRequested(() => controller.abort());
+            const input = messages.map(m => ({ role: m.role === 'system' ? 'developer' : 'user', content: m.content }));
+            const resp = await this.openai!.responses.create({ model, input } as any, { signal: controller.signal });
+            const text = (resp as any)?.output_text || (resp as any)?.choices?.[0]?.message?.content || '';
+            return text || '';
+        };
+        return chat;
     }
 
     private async sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -308,10 +327,10 @@ export class OpenAIService extends BaseLLMService {
                         diffs,
                         baseRulesMarkdown: baseRule,
                         currentTime: parsed?.["current-time"],
-                        workspaceFilesTree: parsed?.["workspace-files"],
                         userTemplate: parsed?.["user-template"],
                         targetLanguage: parsed?.["target-language"],
-                        validationChecklist: checklistText
+                        validationChecklist: checklistText,
+                        repositoryAnalysis: parsed?.["repository-analysis"]
                     },
                     chat,
                     { maxParallel: chainMaxParallel }
