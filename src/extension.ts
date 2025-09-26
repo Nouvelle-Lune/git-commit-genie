@@ -703,32 +703,57 @@ export function activate(context: vscode.ExtensionContext) {
 	// Initialize analysis on startup
 	setTimeout(initializeRepositoryAnalysis, 2000); // Delay to let workspace fully load
 
-	// Hook into real Git commits to drive analysis updates
+	// Hook into Git changes to drive analysis updates
 	try {
 		const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
 		if (gitExtension) {
 			const api = gitExtension.getAPI(1);
-			const attachCommitListener = (repo: Repository) => {
-				const d = repo.onDidCommit(async () => {
-					try {
-						if (!isRepoAnalysisEnabled()) { return; }
-						const repositoryPath = repo.rootUri?.fsPath;
-						if (!repositoryPath) { return; }
-						const should = await analysisService.shouldUpdateAnalysis(repositoryPath);
-						if (should) {
-							setRepoAnalysisRunning(true);
-							analysisService.updateAnalysis(repositoryPath).catch(err => {
-								logger.error('Failed to update repository analysis on commit:', err);
-							}).finally(() => setRepoAnalysisRunning(false));
-						}
-					} catch (err) {
-						logger.error('Error handling commit event:', err);
+			// Track last seen HEAD per repository to detect external commits
+			const lastHeadByRepo = new Map<string, string | undefined>();
+
+			const runCheck = async (repo: Repository, reason: string) => {
+				try {
+					const repoPath = repo.rootUri?.fsPath;
+					if (!repoPath) { return; }
+					if (!isRepoAnalysisEnabled()) { return; }
+					const should = await analysisService.shouldUpdateAnalysis(repoPath);
+					if (should) {
+						logger.info(`[Genie][RepoAnalysis] Triggered by ${reason}; updating analysis...`);
+						setRepoAnalysisRunning(true);
+						analysisService.updateAnalysis(repoPath).catch(err => {
+							logger.error('Failed to update repository analysis on Git change:', err);
+						}).finally(() => setRepoAnalysisRunning(false));
 					}
+				} catch (err) {
+					logger.error('Error handling Git change:', err);
+				}
+			};
+
+			const attachRepoListeners = (repo: Repository) => {
+				// Seed last known HEAD
+				const repoPath = repo.rootUri?.fsPath;
+				if (repoPath) {
+					lastHeadByRepo.set(repoPath, repo.state.HEAD?.commit);
+				}
+
+				// Any repository state change (detect HEAD commit changes from all sources)
+				const d = repo.state.onDidChange(() => {
+					try {
+						if (!repoPath) { return; }
+						const prev = lastHeadByRepo.get(repoPath);
+						const next = repo.state.HEAD?.commit;
+						if (next && next !== prev) {
+							lastHeadByRepo.set(repoPath, next);
+							runCheck(repo, 'HEADChanged');
+						}
+					} catch { /* noop */ }
 				});
 				context.subscriptions.push(d);
 			};
-			for (const r of api.repositories) { attachCommitListener(r); }
-			api.onDidOpenRepository((repo: Repository) => attachCommitListener(repo));
+
+			// Attach to existing and future repositories
+			for (const r of api.repositories) { attachRepoListeners(r); }
+			api.onDidOpenRepository((repo: Repository) => attachRepoListeners(repo));
 		}
 	} catch { }
 
