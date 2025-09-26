@@ -10,7 +10,27 @@
   },
   "icon": "media/Genie.png",
   "categories": [
-    "Other"
+    "SCM Providers",
+    "Linters"
+  ],
+  "keywords": [
+    "git",
+    "commit",
+    "ai",
+    "llm",
+    "automation",
+    "gpt",
+    "claude",
+    "gemini",
+    "deepseek",
+    "commit message",
+    "git workflow",
+    "productivity",
+    "developer tools",
+    "source control",
+    "commit message generater",
+    "版本控制",
+    "提交信息"
   ],
   "activationEvents": [
     "onStartupFinished"
