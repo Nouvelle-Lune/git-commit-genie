@@ -1,26 +1,29 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 import { LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from "../llmTypes";
 import { TemplateService } from '../../../template/templateService';
-import { L10N_KEYS as I18N } from '../../../i18n/keys';
 import { DiffData } from '../../git/gitTypes';
 import OpenAI from 'openai';
 import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { ChatFn } from "../../chain/chainTypes";
 import { logger } from '../../logger';
+import { OpenAICompatibleUtils } from './utils';
 
 const DEEPSEEK_API_URL = 'https://api.deepseek.com';
 const SECRET_DEEPSEEK_API_KEY = 'gitCommitGenie.secret.deepseekApiKey';
 
+/**
+ * DeepSeek LLM service implementation using OpenAI-compatible API
+ */
 export class DeepSeekService extends BaseLLMService {
     protected context: vscode.ExtensionContext;
     private openai: OpenAI | null = null;
+    private utils: OpenAICompatibleUtils;
 
     constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: any) {
         super(context, templateService, analysisService);
         this.context = context;
+        this.utils = new OpenAICompatibleUtils(context);
         this.refreshFromSettings();
     }
 
@@ -40,22 +43,7 @@ export class DeepSeekService extends BaseLLMService {
         ];
         try {
             const client = new OpenAI({ apiKey, baseURL: DEEPSEEK_API_URL });
-            // Many OpenAI-compatible providers implement models.list; if not, we will
-            // still consider the key valid if a lightweight request succeeds.
-            try {
-                const list = await client.models.list();
-                const ids = list.data?.map(m => (m as any).id) || [];
-                const available = preferred.filter(id => ids.includes(id));
-                return available.length ? available : preferred;
-            } catch (inner: any) {
-                // If listing models isn't supported, attempt a trivial request to validate.
-                await client.chat.completions.create({
-                    model: 'deepseek-chat',
-                    messages: [{ role: 'user', content: 'ping' }],
-                    max_tokens: 1,
-                });
-                return preferred;
-            }
+            return await this.utils.tryListModels(client, preferred, 'DeepSeek');
         } catch (err: any) {
             throw new Error(err?.message || 'Failed to validate DeepSeek API key.');
         }
@@ -73,45 +61,35 @@ export class DeepSeekService extends BaseLLMService {
 
     public async getChatFn(options?: { token?: vscode.CancellationToken }): Promise<ChatFn | LLMError> {
         if (!this.openai) {
-            return { message: 'DeepSeek API key is not set. Please set it in the settings.', statusCode: 401 };
+            return { message: 'DeepSeek API key is not set. Please set it in the settings.', statusCode: 401 } satisfies LLMError;
         }
-        const model = this.context.globalState.get<string>('gitCommitGenie.deepseekModel', '');
-        if (!model) { return { message: 'DeepSeek model is not selected. Please configure it via Manage Models.', statusCode: 400 }; }
+
+        const config = this.getConfig();
+        if (!config.model) {
+            return { message: 'DeepSeek model is not selected. Please configure it via Manage Models.', statusCode: 400 } satisfies LLMError;
+        }
+
         const chat: ChatFn = async (messages, _opts) => {
-            const controller = new AbortController();
-            options?.token?.onCancellationRequested(() => controller.abort());
-            const res = await this.openai!.chat.completions.create({ model, messages, temperature: 0 }, { signal: controller.signal });
-            return res.choices?.[0]?.message?.content ?? '';
+            const result = await this.utils.callChatCompletion(this.openai!, messages, {
+                model: config.model,
+                provider: 'DeepSeek',
+                token: options?.token
+            });
+            return result.content;
         };
-        return chat;
+
+        return chat satisfies ChatFn;
     }
 
-    private async sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
-    private getRetryDelayMs(err: any): number {
-        const def = 2000;
-        const msg: string = err?.message || '';
-        const m = msg.match(/retry in\s+([0-9.]+)s/i);
-        if (m) {
-            const sec = parseFloat(m[1]);
-            if (!isNaN(sec)) { return Math.max(1000, Math.floor(sec * 1000)); }
-        }
-        return def;
-    }
-
-    private async maybeWarnRateLimit(provider: string, model: string) {
-        const key = 'gitCommitGenie.rateLimitWarned';
-        const last = this.context.globalState.get<number>(key, 0) ?? 0;
-        const now = Date.now();
-        if (now - last < 60_000) { return; }
-        await this.context.globalState.update(key, now);
-        const choice = await vscode.window.showWarningMessage(
-            vscode.l10n.t(I18N.rateLimit.hit, provider, model, vscode.l10n.t(I18N.settings.chainMaxParallelLabel)),
-            vscode.l10n.t(I18N.actions.openSettings),
-            vscode.l10n.t(I18N.actions.dismiss)
-        );
-        if (choice === vscode.l10n.t(I18N.actions.openSettings)) {
-            vscode.commands.executeCommand('workbench.action.openSettings', 'gitCommitGenie.chain.maxParallel');
-        }
+    /**
+     * Get DeepSeek-specific configuration
+     */
+    private getConfig() {
+        const commonConfig = this.utils.getCommonConfig();
+        return {
+            ...commonConfig,
+            model: this.context.globalState.get<string>('gitCommitGenie.deepseekModel', '')
+        };
     }
 
     async generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError> {
@@ -123,145 +101,19 @@ export class DeepSeekService extends BaseLLMService {
         }
 
         try {
-            const cfg = vscode.workspace.getConfiguration();
-            const useChain = ((): boolean => {
-                const v = cfg.get<boolean>('gitCommitGenie.chain.enabled');
-                if (typeof v === 'boolean') { return v; }
-                return cfg.get<boolean>('gitCommitGenie.useChainPrompts', false);
-            })();
-            const rulesPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'baseRules.md'));
-            const baseRule = fs.readFileSync(rulesPath, 'utf-8');
-            const model = this.context.globalState.get<string>('gitCommitGenie.deepseekModel', '');
-            if (!model) {
+            const config = this.getConfig();
+            const rules = this.utils.getRules();
+
+            if (!config.model) {
                 return { message: 'DeepSeek model is not selected. Please configure it via Manage Models.', statusCode: 400 };
             }
 
-
-            if (useChain) {
-                const jsonMessage = await this.buildJsonMessage(diffs);
-                const parsed = JSON.parse(jsonMessage);
-                const usages: Array<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }> = [];
-                let callCount = 0;
-                const chat: ChatFn = async (messages, _options) => {
-                    if (options?.token?.isCancellationRequested) { throw new Error('Cancelled'); }
-                    const controller = new AbortController();
-                    options?.token?.onCancellationRequested(() => controller.abort());
-                    let lastErr: any;
-                    for (let attempt = 0; attempt < 2; attempt++) {
-                        try {
-                            const res = await this.openai!.chat.completions.create({
-                                model,
-                                messages,
-                                temperature: 0
-                            }, { signal: controller.signal });
-                            callCount += 1;
-                            const u: any = (res as any).usage;
-                            if (u) {
-                                usages.push(u);
-                                logger.info(`[Genie][DeepSeek] Chain call #${callCount} tokens: prompt=${u.prompt_tokens ?? 0}, completion=${u.completion_tokens ?? 0}, total=${u.total_tokens ?? 0}`);
-                            } else {
-                                logger.info(`[Genie][DeepSeek] Chain call #${callCount} tokens: (usage not provided)`);
-                            }
-                            return res.choices[0]?.message?.content ?? '';
-                        } catch (e: any) {
-                            lastErr = e;
-                            const code = e?.status || e?.code;
-                            if (controller.signal.aborted) { throw new Error('Cancelled'); }
-                            if (code === 429) {
-                                await this.maybeWarnRateLimit('DeepSeek', model);
-                                const wait = this.getRetryDelayMs(e);
-                                logger.warn(`[Genie][DeepSeek] 429 rate-limited. Retrying in ${wait}ms (attempt ${attempt + 1}/2).`);
-                                await this.sleep(wait);
-                                continue;
-                            }
-                            throw e;
-                        }
-                    }
-                    throw lastErr || new Error('DeepSeek chain chat failed after retries');
-                };
-
-                const chainMaxParallel = Math.max(1, ((): number => {
-                    const v = cfg.get<number>('gitCommitGenie.chain.maxParallel');
-                    if (typeof v === 'number' && !isNaN(v)) { return v; }
-                    return cfg.get<number>('gitCommitGenie.chainMaxParallel', 4);
-                })());
-                const rulesPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'baseRules.md'));
-                const baseRule = fs.readFileSync(rulesPath, 'utf-8');
-                const checklistPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'validationChecklist.md'));
-                const checklistText = fs.existsSync(checklistPath) ? fs.readFileSync(checklistPath, 'utf-8') : '';
-
-                const out = await generateCommitMessageChain(
-                    {
-                        diffs,
-                        baseRulesMarkdown: baseRule,
-                        currentTime: parsed?.["current-time"],
-                        userTemplate: parsed?.["user-template"], // now actual content
-                        targetLanguage: parsed?.["target-language"],
-                        validationChecklist: checklistText,
-                        repositoryAnalysis: parsed?.["repository-analysis"]
-                    },
-                    chat,
-                    { maxParallel: chainMaxParallel }
-                );
-                if (usages.length) {
-                    const sum = usages.reduce((acc, u) => ({
-                        prompt: acc.prompt + (u.prompt_tokens || 0),
-                        completion: acc.completion + (u.completion_tokens || 0),
-                        total: acc.total + (u.total_tokens || 0)
-                    }), { prompt: 0, completion: 0, total: 0 });
-                    logger.info(`[Genie][DeepSeek] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
-                }
-                return { content: out.commitMessage };
-            }
-
-            // Legacy single-shot prompt (system: rules, user: json data)
             const jsonMessage = await this.buildJsonMessage(diffs);
-            if (options?.token?.isCancellationRequested) { return { message: 'Cancelled', statusCode: 499 }; }
-            const controller = new AbortController();
-            options?.token?.onCancellationRequested(() => controller.abort());
-            let response: any;
-            // attempt twice
-            for (let attempt = 0; attempt < 2; attempt++) {
-                try {
-                    response = await this.openai.chat.completions.create({
-                        model,
-                        messages: [
-                            { role: 'system', content: baseRule },
-                            { role: 'user', content: jsonMessage }
-                        ],
-                        temperature: 0.0,
-                        response_format: { "type": "json_object" }
-                    }, { signal: controller.signal });
-                    break;
-                } catch (e: any) {
-                    const code = e?.status || e?.code;
-                    if (controller.signal.aborted) { return { message: 'Cancelled', statusCode: 499 }; }
-                    if (code === 429) {
-                        await this.maybeWarnRateLimit('DeepSeek', model);
-                        const wait = this.getRetryDelayMs(e);
-                        logger.warn(`[Genie][DeepSeek] Legacy 429 rate-limited. Retrying in ${wait}ms.`);
-                        await this.sleep(wait);
-                        continue;
-                    }
-                    throw e;
-                }
-            }
-            const usageLegacy: any = (response as any).usage;
-            if (usageLegacy) {
-                logger.info(`[Genie][DeepSeek] Legacy call tokens: prompt=${usageLegacy.prompt_tokens ?? 0}, completion=${usageLegacy.completion_tokens ?? 0}, total=${usageLegacy.total_tokens ?? 0}`);
-            } else {
-                logger.info('[Genie][DeepSeek] Legacy call tokens: (usage not provided)');
-            }
 
-            const content: string = response.choices[0]?.message?.content;
-            if (content) {
-                const jsonResponse = JSON.parse(content.trim());
-                if (jsonResponse?.commit_message) {
-                    return { content: jsonResponse.commit_message };
-                }
-                return { content };
+            if (config.useChain) {
+                return await this.generateWithChain(diffs, jsonMessage, config, rules, options);
             } else {
-                return { message: 'Failed to generate commit message from DeepSeek.', statusCode: 500 };
+                return await this.generateLegacy(jsonMessage, config, rules, options);
             }
         } catch (error: any) {
             return {
@@ -271,6 +123,95 @@ export class DeepSeekService extends BaseLLMService {
         }
     }
 
+    /**
+     * Generate commit message using chain approach
+     */
+    private async generateWithChain(
+        diffs: DiffData[],
+        jsonMessage: string,
+        config: any,
+        rules: any,
+        options?: { token?: vscode.CancellationToken }
+    ): Promise<LLMResponse | LLMError> {
+        const parsed = JSON.parse(jsonMessage);
+        const usages: Array<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }> = [];
+        let callCount = 0;
 
+        const chat: ChatFn = async (messages, _options) => {
+            const result = await this.utils.callChatCompletion(this.openai!, messages, {
+                model: config.model,
+                provider: 'DeepSeek',
+                token: options?.token,
+                trackUsage: true
+            });
 
+            callCount += 1;
+            if (result.usage) {
+                usages.push(result.usage);
+                this.utils.logTokenUsage('DeepSeek', result.usage, 'Chain', callCount);
+            } else {
+                this.utils.logTokenUsage('DeepSeek', undefined, 'Chain', callCount);
+            }
+
+            return result.content;
+        };
+
+        const out = await generateCommitMessageChain(
+            {
+                diffs,
+                baseRulesMarkdown: rules.baseRule,
+                currentTime: parsed?.["current-time"],
+                userTemplate: parsed?.["user-template"],
+                targetLanguage: parsed?.["target-language"],
+                validationChecklist: rules.checklistText,
+                repositoryAnalysis: parsed?.["repository-analysis"]
+            },
+            chat,
+            { maxParallel: config.chainMaxParallel }
+        );
+
+        if (usages.length) {
+            const sum = this.utils.sumTokenUsage(usages);
+            logger.info(`[Genie][DeepSeek] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
+        }
+
+        return { content: out.commitMessage };
+    }
+
+    /**
+     * Generate commit message using legacy single-shot approach
+     */
+    private async generateLegacy(
+        jsonMessage: string,
+        config: any,
+        rules: any,
+        options?: { token?: vscode.CancellationToken }
+    ): Promise<LLMResponse | LLMError> {
+        const result = await this.utils.callChatCompletion(
+            this.openai!,
+            [
+                { role: 'system', content: rules.baseRule },
+                { role: 'user', content: jsonMessage }
+            ],
+            {
+                model: config.model,
+                provider: 'DeepSeek',
+                token: options?.token,
+                responseFormat: { "type": "json_object" },
+                trackUsage: true
+            }
+        );
+
+        this.utils.logTokenUsage('DeepSeek', result.usage, 'Legacy');
+
+        if (result.content) {
+            const jsonResponse = JSON.parse(result.content.trim());
+            if (jsonResponse?.commit_message) {
+                return { content: jsonResponse.commit_message };
+            }
+            return { content: result.content };
+        } else {
+            return { message: 'Failed to generate commit message from DeepSeek.', statusCode: 500 };
+        }
+    }
 }

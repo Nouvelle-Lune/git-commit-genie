@@ -2,6 +2,10 @@ import * as vscode from 'vscode';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 
+/**
+ * This class handles the registration of commands related to generating commit messages.
+ * It includes commands for generating commit messages and cancelling ongoing generation.
+ */
 export class GenerateCommands {
     private currentCancelSource: vscode.CancellationTokenSource | undefined;
 
@@ -44,6 +48,7 @@ export class GenerateCommands {
         }
 
         await vscode.commands.executeCommand('setContext', 'gitCommitGenie.generating', true);
+
         const cts = new vscode.CancellationTokenSource();
         this.currentCancelSource = cts;
 
