@@ -1,10 +1,110 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as path from 'path';
+import { z } from "zod";
 import { DiffData } from '../git/gitTypes';
-import { ChatFn } from '../chain/chainTypes';
 import { TemplateService } from '../../template/templateService';
 import { IRepositoryAnalysisService } from '../analysis/analysisTypes';
+import { LLMAnalysisResponse, AnalysisPromptParts } from '../analysis/analysisTypes';
+
+
+/**
+ * The following schema is to support strict JSON output validation from LLMs.
+ */
+
+export const commitMessageSchema = z.object({
+	commitMessage: z.string().min(1)
+});
+
+export const fileSummarySchema = z.object({
+	file: z.string().min(1),
+	status: z.enum(['added', 'modified', 'deleted', 'renamed', 'untracked', 'ignored']),
+	summary: z.string().min(1).max(200),
+	breaking: z.boolean()
+});
+
+export const templatePolicySchema = z.object({
+	header: z.object({
+		requireScope: z.boolean(),
+		scopeDerivation: z.enum(['directory', 'repo', 'none']),
+		preferBangForBreaking: z.boolean(),
+		alsoRequireBreakingFooter: z.boolean()
+	}),
+	types: z.object({
+		allowed: z.array(z.string().min(1)),
+		preferred: z.string().min(1).nullable(),
+		useStandardTypes: z.boolean()
+	}),
+	body: z.object({
+		alwaysInclude: z.boolean(),
+		orderedSections: z.array(z.string().min(1)),
+		bulletRules: z.array(z.object({
+			section: z.string().min(1),
+			maxBullets: z.number().min(1).optional(),
+			style: z.enum(['dash', 'asterisk']).optional()
+		})),
+		bulletContentMode: z.enum(['plain', 'file-prefixed', 'type-prefixed']).optional()
+	}),
+	footers: z.object({
+		required: z.array(z.string().min(1)).nullable(),
+		defaults: z.array(z.object({
+			token: z.string().min(1),
+			value: z.string().min(1)
+		}).nullable()),
+	}),
+	lexicon: z.object({
+		prefer: z.array(z.string().min(1)),
+		avoid: z.array(z.string().min(1)),
+		tone: z.enum(['imperative', 'neutral', 'friendly'])
+	})
+});
+
+export const classifyAndDraftResponseSchema = z.object({
+	type: z.string().min(1),
+	scope: z.string().min(1).nullable(),
+	breaking: z.boolean(),
+	description: z.string().min(1),
+	body: z.string().min(1).nullable(),
+	footers: z.array(z.object({
+		token: z.string().min(1),
+		value: z.string().min(1)
+	})),
+	commitMessage: z.string().min(1),
+	notes: z.string().min(1)
+});
+
+export const validateAndFixResponseSchema = z.object({
+	status: z.enum(['valid', 'fixed']),
+	commitMessage: z.string().min(1),
+	violations: z.array(z.string()),
+	notes: z.string().nullable()
+});
+
+
+
+export const repoAnalysisResponseSchema = z.object({
+	summary: z.string().min(1).describe("Brief but comprehensive summary of the repository purpose and architecture"),
+	projectType: z.string().min(1).describe("Main project type (e.g., Web App, Library, CLI Tool, etc.)"),
+	technologies: z.array(z.string().min(1)).describe("Array of main technologies used"),
+	insights: z.array(z.string().min(1)).describe("Key architectural insights about the project")
+});
+
+export type ChatRole = 'system' | 'user' | 'assistant' | 'developer';
+
+export interface ChatMessage {
+	role: ChatRole;
+	content: string;
+}
+
+export type RequestType = 'commitMessage' | 'summary' | 'templatePolicy' | 'draft' | 'fix' | 'repoAnalysis';
+
+export type ChatFn = (
+	messages: ChatMessage[],
+	options?: {
+		model?: string
+		temperature?: number
+		requestType: RequestType
+	}
+) => Promise<any>;
 
 /**
  * Represents the response from the LLM service.
@@ -36,12 +136,7 @@ export interface LLMService {
 
 	generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
 
-	/**
-	 * Provide a generic chat function compatible with chainThinking's ChatFn.
-	 * Implementations should respect the optional cancellation token.
-	 */
-	getChatFn(options?: { token?: vscode.CancellationToken }): Promise<ChatFn | LLMError>;
-
+	generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options?: { token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError>;
 }
 
 export abstract class BaseLLMService implements LLMService {
@@ -60,7 +155,7 @@ export abstract class BaseLLMService implements LLMService {
 	abstract setApiKey(apiKey: string): Promise<void>;
 	abstract clearApiKey(): Promise<void>;
 	abstract generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
-	abstract getChatFn(options?: { token?: vscode.CancellationToken }): Promise<ChatFn | LLMError>;
+	abstract generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options?: { token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError>;
 
 	protected async buildJsonMessage(diffs: DiffData[]): Promise<string> {
 		const time = new Date().toISOString();

@@ -1,5 +1,3 @@
-import { Change, Status } from "./git";
-
 /**
  * Represents the status of a file in the diff.
  */

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
+import { L10N_KEYS as I18N } from '../i18n/keys';
 import { ModelCommands } from './ModelCommands';
 import { GenerateCommands } from './GenerateCommands';
 import { RepoAnalysisCommands } from './RepoAnalysisCommands';
@@ -65,8 +66,8 @@ export class CommandManager {
                 this.statusBarManager.updateStatusBar();
                 vscode.window.showInformationMessage(
                     vscode.l10n.t(
-                        'chain.toggled',
-                        !current ? vscode.l10n.t('chain.enabled') : vscode.l10n.t('chain.disabled')
+                        I18N.chain.toggled,
+                        !current ? vscode.l10n.t(I18N.chain.enabled) : vscode.l10n.t(I18N.chain.disabled)
                     )
                 );
             })

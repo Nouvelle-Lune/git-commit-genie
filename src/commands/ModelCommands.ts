@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
@@ -157,11 +159,15 @@ export class ModelCommands {
         const activeProvider = this.serviceRegistry.getProvider().toLowerCase();
         const isActiveProvider = providerPick.value.toLowerCase() === activeProvider;
 
+        const secretName = this.getSecretName(providerPick.value);
+        const hasKey = !!(await this.context.secrets.get(secretName));
+        const showCurrent = isActiveProvider && hasKey;
+
         const modelItems: Array<vscode.QuickPickItem & { value: string }> = models.map(m => ({
             label: m,
             value: m,
-            description: isActiveProvider && m === currentModel ? vscode.l10n.t(I18N.manageModels.currentLabel) : undefined,
-            picked: isActiveProvider && m === currentModel
+            description: showCurrent && m === currentModel ? vscode.l10n.t(I18N.manageModels.currentLabel) : undefined,
+            picked: showCurrent && m === currentModel
         }));
 
         return await vscode.window.showQuickPick(
@@ -185,5 +191,23 @@ export class ModelCommands {
         this.serviceRegistry.updateCurrentLLMService();
 
         await this.context.globalState.update(modelStateKey, modelPick.value);
+
+        // If repository analysis is enabled and missing, try initializing now
+        try {
+            const enabled = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis').get<boolean>('enabled', true);
+            if (!enabled) { return; }
+            const wf = vscode.workspace.workspaceFolders;
+            if (!wf || wf.length === 0) { return; }
+            const repositoryPath = wf[0].uri.fsPath;
+            if (!fs.existsSync(path.join(repositoryPath, '.git'))) { return; }
+            const analysisService = this.serviceRegistry.getAnalysisService();
+            const existing = await analysisService.getAnalysis(repositoryPath);
+            if (!existing) {
+                this.statusBarManager.setRepoAnalysisRunning(true);
+                analysisService.initializeRepository(repositoryPath).finally(() => this.statusBarManager.setRepoAnalysisRunning(false));
+            }
+        } catch {
+            // best-effort only
+        }
     }
 }
