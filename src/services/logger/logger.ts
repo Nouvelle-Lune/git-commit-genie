@@ -92,6 +92,14 @@ export class Logger {
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
+            if (provider === 'Anthropic') {
+                inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+                outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
+                cachedTokens = usage.cached_tokens ?? usage.input_tokens_details?.cached_tokens ?? 0;
+                totalTokens = usage.total_tokens ?? (inputTokens + outputTokens);
+                cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+                cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
+            }
         } catch (e) {
             this.warn(`Failed to parse token usage for ${modelName}: ${e}`);
             return;

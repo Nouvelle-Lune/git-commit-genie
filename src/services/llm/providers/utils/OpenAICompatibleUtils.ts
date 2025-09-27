@@ -6,7 +6,7 @@ import { logger } from '../../../logger';
 
 import { ChatMessage, RequestType } from "../../llmTypes";
 
-import { commitMessageSchema, fileSummarySchema, templatePolicySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, repoAnalysisResponseSchema } from "../../llmTypes";
+import { commitMessageSchema, fileSummarySchema, templatePolicySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, repoAnalysisResponseSchema } from "../schemas/common";
 
 
 interface OpenAIRequestOptions {

@@ -1,67 +1,69 @@
+import Anthropic from '@anthropic-ai/sdk';
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
-import { BaseLLMService, LLMError, LLMResponse } from "../llmTypes";
+
 import { TemplateService } from '../../../template/templateService';
-import { L10N_KEYS as I18N } from '../../../i18n/keys';
-import { DiffData } from "../../git/gitTypes";
-import { generateCommitMessageChain } from "../../chain/chainThinking";
-import { ChatFn } from "../../chain/chainTypes";
+import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysisTypes';
+import { generateCommitMessageChain } from '../../chain/chainThinking';
+import { DiffData } from '../../git/gitTypes';
 import { logger } from '../../logger';
+import { AnthropicUtils } from './utils/AnthropicUtils';
+import { BaseLLMService, ChatFn, LLMError, LLMResponse } from '../llmTypes';
+import {
+    commitMessageSchema as AnthropicCommitSchema,
+    repoAnalysisResponseSchema as AnthropicRepoAnalysisSchema,
+} from './schemas/common';
+import { AnthropicCommitMessageTool, AnthropicRepoAnalysisTool, AnthropicFileSummaryTool, AnthropicTemplatePolicyTool, AnthropicClassifyAndDraftTool, AnthropicValidateAndFixTool } from './schemas/anthropicSchemas';
+import { fileSummarySchema, templatePolicySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema } from './schemas/common';
 
 const SECRET_ANTHROPIC_API_KEY = 'gitCommitGenie.secret.anthropicApiKey';
 
+/**
+ * Anthropic Claude service implementation
+ */
 export class AnthropicService extends BaseLLMService {
-    private client: any | null = null;
+    private client: Anthropic | null = null;
     protected context: vscode.ExtensionContext;
+    private utils: AnthropicUtils;
 
     constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: any) {
         super(context, templateService, analysisService);
         this.context = context;
+        this.utils = new AnthropicUtils(context);
         this.refreshFromSettings();
     }
 
     public async refreshFromSettings(): Promise<void> {
         const apiKey = await this.context.secrets.get(SECRET_ANTHROPIC_API_KEY);
-        this.client = null;
-        if (apiKey) {
-            try {
-                let AnthropicSdk: any;
-                try { AnthropicSdk = require('@anthropic-ai/sdk').default || require('@anthropic-ai/sdk'); }
-                catch { AnthropicSdk = require('anthropic').default || require('anthropic'); }
-                this.client = new AnthropicSdk({ apiKey });
-            } catch (e) {
-                logger.warn('Anthropic SDK not available. Please install @anthropic-ai/sdk.');
-                this.client = null;
-            }
-        }
+        this.client = apiKey ? new Anthropic({ apiKey }) : null;
     }
 
+    /**
+     * Validate an API key by calling Anthropic and, if successful, return a curated list
+     * of available chat models (intersecting with our supported set).
+     */
     public async validateApiKeyAndListModels(apiKey: string): Promise<string[]> {
-        const stableModels = [
-            // Ordered from newest / most capable to older
-            'claude-opus-4-1-20250805',
-            'claude-opus-4-20250514',
+        const preferred = [
+            'claude-3-5-haiku-20241022',
             'claude-sonnet-4-20250514',
             'claude-3-7-sonnet-20250219',
             'claude-3-5-sonnet-20241022',
-            'claude-3-5-sonnet-20240620'
+            'claude-3-5-sonnet-20240620',
+            'claude-opus-4-1-20250805',
+            'claude-opus-4-20250514'
         ];
+
         try {
-            let AnthropicSdk: any;
-            try { AnthropicSdk = require('@anthropic-ai/sdk').default || require('@anthropic-ai/sdk'); }
-            catch { AnthropicSdk = require('anthropic').default || require('anthropic'); }
-            const c = new AnthropicSdk({ apiKey });
-            await c.messages.create({ model: stableModels[0], max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] });
-            return stableModels;
-        } catch (e: any) {
-            throw new Error(e?.message || 'Failed to validate Anthropic API key.');
+            const client = new Anthropic({ apiKey });
+            await this.utils.validateApiKey(client, preferred[0], 'Anthropic');
+            return preferred;
+        } catch (err: any) {
+            throw new Error(err?.message || 'Failed to validate Anthropic API key.');
         }
     }
 
     public async setApiKey(apiKey: string): Promise<void> {
         await this.context.secrets.store(SECRET_ANTHROPIC_API_KEY, apiKey);
-        await this.refreshFromSettings();
+        this.client = apiKey ? new Anthropic({ apiKey }) : null;
     }
 
     public async clearApiKey(): Promise<void> {
@@ -69,263 +71,243 @@ export class AnthropicService extends BaseLLMService {
         this.client = null;
     }
 
-    public async getChatFn(options?: { token?: vscode.CancellationToken }): Promise<ChatFn | LLMError> {
-        if (!this.client) { return { message: 'Anthropic API key is not set or SDK unavailable.', statusCode: 401 }; }
-        const model = this.context.globalState.get<string>('gitCommitGenie.anthropicModel', '');
-        if (!model) { return { message: 'Anthropic model is not selected. Please configure it via Manage Models.', statusCode: 400 }; }
-        const chat: ChatFn = async (messages, _opts) => {
-            const controller = new AbortController();
-            options?.token?.onCancellationRequested(() => controller.abort());
-            const systemText = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n');
-            const conversation = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content }));
-            const resp = await this.client!.messages.create({ model, max_tokens: 4096, temperature: 0, system: systemText || undefined, messages: conversation }, { signal: (controller as any).signal });
-            if (Array.isArray(resp?.content)) { return resp.content.map((b: any) => b?.text || '').filter(Boolean).join('\n'); }
-            return '';
+    /**
+     * Get Anthropic-specific configuration
+     */
+    private getConfig() {
+        const commonConfig = this.utils.getCommonConfig();
+        return {
+            ...commonConfig,
+            model: this.context.globalState.get<string>('gitCommitGenie.anthropicModel', '')
         };
-        return chat;
     }
 
-    private async sleep(ms: number) { return new Promise(resolve => setTimeout(resolve, ms)); }
-    private getRetryDelayMs(err: any): number {
-        const def = 2500;
-        const headers: any = (err as any)?.response?.headers || (err as any)?.headers;
-        const retryAfter = headers?.['retry-after'] || headers?.['Retry-After'];
-        if (retryAfter) {
-            const asSeconds = parseFloat(String(retryAfter));
-            if (!isNaN(asSeconds)) {
-                return Math.max(500, Math.floor(asSeconds * 1000));
-            }
-        }
-        const msg: string = err?.message || '';
-        const m = msg.match(/retry in\s+([0-9.]+)s/i);
-        if (m) {
-            const sec = parseFloat(m[1]);
-            if (!isNaN(sec)) {
-                return Math.max(1000, Math.floor(sec * 1000));
-            }
-        }
-        // Analyze Anthropic structured error RetryInfo
-        const details = err?.error?.details;
-        const retry = Array.isArray(details) ? details.find((d: any) => d['@type']?.includes('RetryInfo')) : undefined;
-        const nanos = retry?.retryDelay?.nanos ?? 0;
-        const seconds = retry?.retryDelay?.seconds ?? 0;
-        if (seconds || nanos) {
-            return Math.max(1000, seconds * 1000 + Math.floor(nanos / 1e6));
-        }
-        return def;
-    }
+    // Note: token usage normalization is handled centrally in logger.usage/usageSummary
 
-    private getResponseUsage(resp: any): { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined {
-        const u = resp?.usage;
-        if (!u) {
-            return undefined;
-        }
-        const prompt_tokens = u.input_tokens;
-        const completion_tokens = u.output_tokens;
-        const total_tokens = (prompt_tokens || 0) + (completion_tokens || 0);
-        return { prompt_tokens, completion_tokens, total_tokens };
-    }
+    // safeExtractJson and parseChainResponse removed: we rely on tool_use + local Zod validation
 
-    private extractText(resp: any): string {
-        if (!resp) {
-            return '';
-        }
-        if (Array.isArray(resp.content)) {
-            return resp.content.map((b: any) => (b?.text || '')).filter(Boolean).join('\n');
-        }
-        return '';
-    }
+    /**
+     * This function requests a chat completion from Anthropic and expects a structured JSON response
+     */
+    async generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options?: { token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError> {
+        const config = this.getConfig();
 
-    private safeExtractJson<T = any>(text: string): T | null {
-        if (!text) {
-            return null;
+        if (!config.model) {
+            return { message: 'Anthropic model is not selected. Please configure it via Manage Models.', statusCode: 400 };
         }
-        let trimmed = text.trim();
-        const fenceMatch = trimmed.match(/```[a-zA-Z]*\n([\s\S]*?)```/);
-        if (fenceMatch && fenceMatch[1]) {
-            trimmed = fenceMatch[1].trim();
-        }
-        try { return JSON.parse(trimmed) as T; } catch { }
-        const start = trimmed.indexOf('{');
-        const end = trimmed.lastIndexOf('}');
-        if (start !== -1 && end !== -1 && end > start) {
-            const slice = trimmed.slice(start, end + 1);
-            try { return JSON.parse(slice) as T; } catch { }
-        }
-        return null;
-    }
 
-    private async maybeWarnRateLimit(provider: string, model: string) {
-        const key = 'gitCommitGenie.rateLimitWarned';
-        const last = this.context.globalState.get<number>(key, 0) ?? 0;
-        const now = Date.now();
-        if (now - last < 60_000) {
-            return;
-        }
-        await this.context.globalState.update(key, now);
-        const choice = await vscode.window.showWarningMessage(
-            vscode.l10n.t(I18N.rateLimit.hit, provider, model, vscode.l10n.t(I18N.settings.chainMaxParallelLabel)),
-            vscode.l10n.t(I18N.actions.openSettings),
-            vscode.l10n.t(I18N.actions.dismiss)
-        );
-        if (choice === vscode.l10n.t(I18N.actions.openSettings)) {
-            vscode.commands.executeCommand('workbench.action.openSettings', 'gitCommitGenie.chain.maxParallel');
-        }
-    }
-
-    async generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError> {
         if (!this.client) {
-            return { message: 'Anthropic API key is not set or SDK unavailable.', statusCode: 401 };
+            return { message: 'Anthropic API key is not set. Please set it in the settings.', statusCode: 401 };
         }
+
         try {
-
-            const rulesPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'baseRules.md'));
-            const baseRule = fs.readFileSync(rulesPath, 'utf-8');
-            const checklistPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'validationChecklist.md'));
-            const checklistText = fs.existsSync(checklistPath) ? fs.readFileSync(checklistPath, 'utf-8') : '';
-            const model = this.context.globalState.get<string>('gitCommitGenie.anthropicModel', '');
-            if (!model) {
-                return { message: 'Anthropic model is not selected. Please configure it via Manage Models.', statusCode: 400 };
-            }
-            const cfg = vscode.workspace.getConfiguration();
-            const useChain = ((): boolean => {
-                const v = cfg.get<boolean>('gitCommitGenie.chain.enabled');
-                if (typeof v === 'boolean') { return v; }
-                return cfg.get<boolean>('gitCommitGenie.useChainPrompts', false);
-            })();
-
-            if (useChain) {
-                const jsonMessage = await this.buildJsonMessage(diffs);
-                const parsed = JSON.parse(jsonMessage);
-                const usages: Array<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }> = [];
-                let callCount = 0;
-                const chat: ChatFn = async (messages, _o) => {
-                    if (options?.token?.isCancellationRequested) {
-                        throw new Error('Cancelled');
-                    }
-                    const controller = new AbortController();
-                    options?.token?.onCancellationRequested(() => controller.abort());
-                    const systemText = messages.filter(m => m.role === 'system').map(m => m.content).join('\n\n');
-                    const conversation = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content }));
-                    let lastErr: any;
-                    for (let attempt = 0; attempt < 4; attempt++) {
-                        try {
-                            const resp = await this.client.messages.create({
-                                model,
-                                max_tokens: 4096,
-                                temperature: 0,
-                                system: systemText || undefined,
-                                messages: conversation
-                            }, { signal: (controller as any).signal });
-                            callCount += 1;
-                            const usage = this.getResponseUsage(resp);
-                            if (usage) {
-                                usages.push(usage);
-                                logger.info(`[Genie][Anthropic] Chain call #${callCount} tokens: prompt=${usage.prompt_tokens ?? 0}, completion=${usage.completion_tokens ?? 0}, total=${usage.total_tokens ?? 0}`);
-                            } else {
-                                logger.info(`[Genie][Anthropic] Chain call #${callCount} tokens: (usage not provided)`);
-                            }
-                            return this.extractText(resp) || '';
-                        } catch (e: any) {
-                            lastErr = e;
-                            const code = e?.status || e?.code || e?.error?.status;
-                            if (controller.signal.aborted) {
-                                throw new Error('Cancelled');
-                            }
-                            if (code === 429) {
-                                await this.maybeWarnRateLimit('Anthropic', model);
-                                const base = this.getRetryDelayMs(e) || 1000;
-                                const factor = Math.pow(2, attempt);
-                                const jitter = Math.floor(Math.random() * 300);
-                                const wait = Math.min(60_000, base * factor + jitter);
-                                logger.warn(`[Genie][Anthropic] 429 rate-limited. Retrying in ${wait}ms (attempt ${attempt + 1}/4).`);
-                                await this.sleep(wait);
-                                continue;
-                            }
-                            throw e;
-                        }
-                    }
-                    throw lastErr || new Error('Anthropic chain chat failed after retries');
-                };
-                const chainMaxParallel = Math.max(1, ((): number => {
-                    const v = cfg.get<number>('gitCommitGenie.chain.maxParallel');
-                    if (typeof v === 'number' && !isNaN(v)) {
-                        return v;
-                    }
-                    return cfg.get<number>('gitCommitGenie.chainMaxParallel', 4);
-                })());
-                const out = await generateCommitMessageChain({
-                    diffs,
-                    baseRulesMarkdown: baseRule,
-                    currentTime: parsed?.["current-time"],
-                    userTemplate: parsed?.["user-template"],
-                    targetLanguage: parsed?.["target-language"],
-                    validationChecklist: checklistText,
-                    repositoryAnalysis: parsed?.["repository-analysis"]
-                }, chat, { maxParallel: chainMaxParallel });
-                if (usages.length) {
-                    const sum = usages.reduce((acc, u) => ({
-                        prompt: acc.prompt + (u.prompt_tokens || 0),
-                        completion: acc.completion + (u.completion_tokens || 0),
-                        total: acc.total + (u.total_tokens || 0)
-                    }), { prompt: 0, completion: 0, total: 0 });
-                    logger.info(`[Genie][Anthropic] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
+            const response = await this.utils.callChatCompletion(
+                this.client,
+                [analysisPromptParts.system, analysisPromptParts.user],
+                {
+                    model: config.model,
+                    provider: 'Anthropic',
+                    token: options?.token,
+                    maxTokens: 2048,
+                    trackUsage: true,
+                    tools: [AnthropicRepoAnalysisTool],
+                    toolChoice: { type: 'tool', name: AnthropicRepoAnalysisTool.name }
                 }
-                return { content: out.commitMessage };
-            }
+            );
 
-            // Legacy single-shot prompt
-            const jsonMessage = await this.buildJsonMessage(diffs);
-            if (options?.token?.isCancellationRequested) {
-                return { message: 'Cancelled', statusCode: 499 };
-            }
-            let resp: any;
-            for (let attempt = 0; attempt < 4; attempt++) {
-                try {
-                    resp = await this.client.messages.create({
-                        model,
-                        max_tokens: 1024,
-                        system: baseRule,
-                        messages: [{ role: 'user', content: jsonMessage }],
-                        temperature: 0
-                    });
-                    break;
-                } catch (e: any) {
-                    const code = e?.status || e?.code || e?.error?.status;
-                    if (options?.token?.isCancellationRequested) {
-                        return { message: 'Cancelled', statusCode: 499 };
-                    }
-                    if (code === 429) {
-                        await this.maybeWarnRateLimit('Anthropic', model);
-                        const base = this.getRetryDelayMs(e) || 1000;
-                        const factor = Math.pow(2, attempt);
-                        const jitter = Math.floor(Math.random() * 300);
-                        const wait = Math.min(60_000, base * factor + jitter);
-                        logger.warn(`[Genie][Anthropic] Legacy 429 rate-limited. Retrying in ${wait}ms.`);
-                        await this.sleep(wait);
-                        continue;
-                    }
-                    throw e;
-                }
-            }
-            const usage = this.getResponseUsage(resp);
-            if (usage) {
-                logger.info(`[Genie][Anthropic] Legacy call tokens: prompt=${usage.prompt_tokens ?? 0}, completion=${usage.completion_tokens ?? 0}, total=${usage.total_tokens ?? 0}`);
+            if (response.usage) {
+                logger.usage('Anthropic', response.usage, config.model, 'RepoAnalysis');
             } else {
-                logger.info('[Genie][Anthropic] Legacy call tokens: (usage not provided)');
+                logger.usage('Anthropic', undefined, config.model, 'RepoAnalysis');
             }
-            const text = this.extractText(resp);
-            if (text) {
-                const json = this.safeExtractJson<any>(text);
-                if (json?.commit_message) { return { content: json.commit_message }; }
-                return { content: text };
+
+            const safe = AnthropicRepoAnalysisSchema.safeParse(response.parsedResponse);
+            if (!safe.success) {
+                return { message: 'Failed to validate structured response from Anthropic.', statusCode: 500 };
             }
-            return { message: 'Failed to generate commit message from Anthropic.', statusCode: 500 };
+
+            return {
+                summary: safe.data.summary,
+                projectType: safe.data.projectType,
+                technologies: safe.data.technologies,
+                insights: safe.data.insights,
+                usage: response.usage
+            };
         } catch (error: any) {
             return {
                 message: error?.message || 'An unknown error occurred with the Anthropic API.',
                 statusCode: error?.status,
             };
         }
+    }
+
+    async generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError> {
+        if (!this.client) {
+            return { message: 'Anthropic API key is not set. Please set it in the settings.', statusCode: 401 };
+        }
+
+        try {
+            const config = this.getConfig();
+            const rules = this.utils.getRules();
+
+            if (!config.model) {
+                return { message: 'Anthropic model is not selected. Please configure it via Manage Models.', statusCode: 400 };
+            }
+
+            const jsonMessage = await this.buildJsonMessage(diffs);
+
+            if (config.useChain) {
+                return await this.generateThinking(diffs, jsonMessage, config, rules, options);
+            }
+
+            return await this.generateDefault(jsonMessage, config, rules, options);
+        } catch (error: any) {
+            return {
+                message: error?.message || 'An unknown error occurred with the Anthropic API.',
+                statusCode: error?.status,
+            };
+        }
+    }
+
+    /**
+     * Generate commit message using chain approach
+     */
+    private async generateThinking(
+        diffs: DiffData[],
+        jsonMessage: string,
+        config: any,
+        rules: any,
+        options?: { token?: vscode.CancellationToken }
+    ): Promise<LLMResponse | LLMError> {
+        const parsedInput = JSON.parse(jsonMessage);
+        const usages: Array<any> = [];
+        let callCount = 0;
+
+        const chat: ChatFn = async (messages, chainOptions) => {
+            const reqType = chainOptions?.requestType;
+            // Map request type to tool and schema
+            const toolMap: Record<string, { tool: any, schema: any }> = {
+                summary: { tool: AnthropicFileSummaryTool, schema: fileSummarySchema },
+                templatePolicy: { tool: AnthropicTemplatePolicyTool, schema: templatePolicySchema },
+                draft: { tool: AnthropicClassifyAndDraftTool, schema: classifyAndDraftResponseSchema },
+                fix: { tool: AnthropicValidateAndFixTool, schema: validateAndFixResponseSchema },
+                commitMessage: { tool: AnthropicCommitMessageTool, schema: AnthropicCommitSchema },
+            };
+
+            const mapping = reqType ? toolMap[reqType] : undefined;
+            const maxRetries = 2;
+
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                const result = await this.utils.callChatCompletion(this.client!, messages, {
+                    model: config.model,
+                    provider: 'Anthropic',
+                    token: options?.token,
+                    trackUsage: true,
+                    tools: mapping ? [mapping.tool] : undefined,
+                    toolChoice: mapping ? { type: 'tool', name: mapping.tool.name } : undefined
+                });
+
+                callCount += 1;
+                if (result.usage) {
+                    usages.push(result.usage);
+                    logger.usage('Anthropic', result.usage, config.model, 'Thinking', callCount);
+                } else {
+                    logger.usage('Anthropic', undefined, config.model, 'Thinking', callCount);
+                }
+
+                if (mapping) {
+                    const safe = mapping.schema.safeParse(result.parsedResponse);
+                    if (safe.success) {
+                        return safe.data;
+                    }
+
+                    if (attempt < maxRetries - 1) {
+                        logger.warn(`[Genie][Anthropic] Schema validation failed for ${reqType} (attempt ${attempt + 1}/${maxRetries}). Retrying...`);
+
+                        const systemMessages = messages.filter(m => m.role === 'system');
+                        if (systemMessages.length > 0) {
+                            const schemaInstruction = `CRITICAL: You MUST strictly follow the tool schema format. Your previous response failed schema validation. Please ensure your response exactly matches the required structure for the ${mapping.tool.name} tool.`;
+                            systemMessages[0].content = schemaInstruction + '\n\n' + systemMessages[0].content;
+                        }
+
+                        continue;
+                    }
+
+                    throw new Error(`Anthropic tool result failed local validation for ${reqType} after ${maxRetries} attempts`);
+                }
+
+                // Fallback: return raw content text (should not happen in our chain)
+                return result.parsedResponse;
+            }
+        };
+
+        const out = await generateCommitMessageChain(
+            {
+                diffs,
+                baseRulesMarkdown: rules.baseRule,
+                currentTime: parsedInput?.['current-time'],
+                userTemplate: parsedInput?.['user-template'],
+                targetLanguage: parsedInput?.['target-language'],
+                validationChecklist: rules.checklistText,
+                repositoryAnalysis: parsedInput?.['repository-analysis']
+            },
+            chat,
+            { maxParallel: config.chainMaxParallel }
+        );
+
+        if (usages.length) {
+            logger.usageSummary('Anthropic', usages, config.model, 'Thinking');
+        }
+
+        return { content: out.commitMessage };
+    }
+
+    /**
+     * Generate commit message using single-shot approach
+     */
+    private async generateDefault(
+        jsonMessage: string,
+        config: any,
+        rules: any,
+        options?: { token?: vscode.CancellationToken }
+    ): Promise<LLMResponse | LLMError> {
+        const maxRetries = 2;
+        let lastError: any;
+
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            const result = await this.utils.callChatCompletion(
+                this.client!,
+                [
+                    { role: 'system', content: rules.baseRule },
+                    { role: 'user', content: jsonMessage }
+                ],
+                {
+                    model: config.model,
+                    provider: 'Anthropic',
+                    token: options?.token,
+                    trackUsage: true,
+                    tools: [AnthropicCommitMessageTool],
+                    toolChoice: { type: 'tool', name: AnthropicCommitMessageTool.name }
+                }
+            );
+
+            if (result.usage) {
+                logger.usage('Anthropic', result.usage, config.model, 'default');
+            } else {
+                logger.usage('Anthropic', undefined, config.model, 'default');
+            }
+
+            const safe = AnthropicCommitSchema.safeParse(result.parsedResponse);
+            if (safe.success) {
+                return { content: safe.data.commitMessage };
+            }
+
+            lastError = safe.error;
+            if (attempt < maxRetries - 1) {
+                logger.warn(`[Genie][Anthropic] Schema validation failed (attempt ${attempt + 1}/${maxRetries}). Retrying...`);
+            }
+        }
+
+        return { message: 'Failed to validate structured commit message from Anthropic.', statusCode: 500 };
     }
 }
