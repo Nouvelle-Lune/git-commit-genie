@@ -27,7 +27,7 @@ JSON-Structured-You-will-Receive:
 
 JSON-Structured-You-Must-Respond-With:
 	{
-	"commit_message": "string (the generated commit message)"
+	"commitMessage": "string (the generated commit message)"
 	}
 ```
 
@@ -96,7 +96,7 @@ Follow these steps to generate the commit message:
 	- Return ONLY a valid JSON object (no markdown, no code fences, no extra commentary).
 	- Keys:
 		{
-			"commit_message": "string",
+			"commitMessage": "string",
 		}
 6. Type constraints:
 	- If User template specifies a type, use that. Otherwise, otherwise, the commit <type> MUST be one of: feat, fix, docs, style, refactor, perf, test, build, ci, chore. 
@@ -173,7 +173,7 @@ Refs: #123
 
 ```
 {
-  "commit_message": "fix(parser): handle empty tokens safely\n\nParser: avoid throwing on empty arrays when input is empty.\n\nTests: add boundary cases for empty tokens and null inputs.\n\nRefs: #123",
+  "commitMessage": "fix(parser): handle empty tokens safely\n\nParser: avoid throwing on empty arrays when input is empty.\n\nTests: add boundary cases for empty tokens and null inputs.\n\nRefs: #123",
 }
 ```
 
