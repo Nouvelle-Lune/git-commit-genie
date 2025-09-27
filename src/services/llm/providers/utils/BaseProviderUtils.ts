@@ -112,29 +112,4 @@ export class BaseProviderUtils {
         token?.onCancellationRequested(() => controller.abort());
         return controller;
     }
-
-    /**
-     * Log token usage information
-     */
-    public logTokenUsage(provider: string, usage: any, callType: string = '', callCount?: number): void {
-        const callInfo = callCount ? ` #${callCount}` : '';
-        const typeInfo = callType ? ` ${callType}` : '';
-
-        if (usage) {
-            logger.info(`[Genie][${provider}]${typeInfo} call${callInfo} tokens: prompt=${usage.prompt_tokens ?? 0}, completion=${usage.completion_tokens ?? 0}, total=${usage.total_tokens ?? 0}`);
-        } else {
-            logger.info(`[Genie][${provider}]${typeInfo} call${callInfo} tokens: (usage not provided)`);
-        }
-    }
-
-    /**
-     * Sum up token usage from multiple calls
-     */
-    public sumTokenUsage(usages: any[]): { prompt: number; completion: number; total: number } {
-        return usages.reduce((acc, u) => ({
-            prompt: acc.prompt + (u.prompt_tokens || 0),
-            completion: acc.completion + (u.completion_tokens || 0),
-            total: acc.total + (u.total_tokens || 0)
-        }), { prompt: 0, completion: 0, total: 0 });
-    }
 }

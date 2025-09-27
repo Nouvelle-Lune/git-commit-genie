@@ -40,7 +40,8 @@ export const L10N_KEYS = {
   },
   actions: {
     openSettings: 'Open Settings',
-    dismiss: 'Dismiss'
+    dismiss: 'Dismiss',
+    manageModels: 'Manage Models'
   },
   rateLimit: {
     hit: 'Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.'
@@ -68,7 +69,9 @@ export const L10N_KEYS = {
     initializingTitle: 'Initializing repository analysis...',
     refreshingTitle: 'Refreshing repository analysis...',
     refreshed: 'Repository analysis refreshed successfully.',
-    mdNotFound: 'repository-analysis.md not found. Use Refresh Analysis to generate it.'
+    mdNotFound: 'repository-analysis.md not found. Use Refresh Analysis to generate it.',
+    missingApiKey: 'LLM API key not set. Configure models to enable repository analysis.',
+    missingModel: 'LLM model not selected. Configure models to enable repository analysis.'
   },
   templates: {
     pickWorkspaceFolder: 'Pick a workspace folder',

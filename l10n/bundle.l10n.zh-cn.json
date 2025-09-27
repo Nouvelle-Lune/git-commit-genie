@@ -46,5 +46,8 @@
   "Refreshing repository analysis...": "正在刷新仓库分析…",
   "Repository analysis refreshed successfully.": "仓库分析刷新成功。",
   "repository-analysis.md not found. Use Refresh Analysis to generate it.": "未找到 repository-analysis.md。请使用“刷新仓库分析”生成。",
-  "Commit history file not found.": "未找到历史记录文件。"
+  "Commit history file not found.": "未找到历史记录文件。",
+  "Manage Models": "管理模型",
+  "LLM API key not set. Configure models to enable repository analysis.": "未设置 LLM API Key。请先配置模型以启用仓库分析。",
+  "LLM model not selected. Configure models to enable repository analysis.": "未选择 LLM 模型。请先配置模型以启用仓库分析。"
 }

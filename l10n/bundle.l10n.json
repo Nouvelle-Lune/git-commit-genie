@@ -46,5 +46,8 @@
   "Refreshing repository analysis...": "Refreshing repository analysis...",
   "Repository analysis refreshed successfully.": "Repository analysis refreshed successfully.",
   "repository-analysis.md not found. Use Refresh Analysis to generate it.": "repository-analysis.md not found. Use Refresh Analysis to generate it.",
-  "Commit history file not found.": "Commit history file not found."
+  "Commit history file not found.": "Commit history file not found.",
+  "Manage Models": "Manage Models",
+  "LLM API key not set. Configure models to enable repository analysis.": "LLM API key not set. Configure models to enable repository analysis.",
+  "LLM model not selected. Configure models to enable repository analysis.": "LLM model not selected. Configure models to enable repository analysis."
 }
