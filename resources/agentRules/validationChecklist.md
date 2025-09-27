@@ -13,3 +13,4 @@
 - Required footers from template must be present; if unavailable, use a sensible placeholder (e.g., `Refs: N/A`)
 - Do not translate footer tokens (e.g., BREAKING CHANGE, Refs)
 - Output must be valid JSON only; no markdown fences or extra commentary
+- Output must follow the target language if specified
