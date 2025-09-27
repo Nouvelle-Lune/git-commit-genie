@@ -1,8 +1,15 @@
-import * as vscode from 'vscode';
-
 /**
  * Repository analysis data structure
  */
+import { ChatMessage } from "../llm/llmTypes";
+
+export interface AnalysisPromptParts {
+    system: ChatMessage;
+    user: ChatMessage;
+}
+
+export type RepoAnalysisRunResult = 'success' | 'skipped';
+
 export interface RepositoryAnalysis {
     /** Repository root path */
     repositoryPath: string;
@@ -77,7 +84,7 @@ export interface IRepositoryAnalysisService {
     /**
      * Initialize analysis for a repository
      */
-    initializeRepository(repositoryPath: string): Promise<void>;
+    initializeRepository(repositoryPath: string): Promise<RepoAnalysisRunResult>;
 
     /**
      * Get current repository analysis
@@ -87,7 +94,7 @@ export interface IRepositoryAnalysisService {
     /**
      * Update repository analysis
      */
-    updateAnalysis(repositoryPath: string, commitMessage?: string): Promise<void>;
+    updateAnalysis(repositoryPath: string, commitMessage?: string): Promise<RepoAnalysisRunResult>;
 
     /**
      * Get commit history for analysis updates
@@ -151,4 +158,6 @@ export interface LLMAnalysisResponse {
     technologies: string[];
     /** Key insights */
     insights: string[];
+    /** Token usage */
+    usage?: any;
 }

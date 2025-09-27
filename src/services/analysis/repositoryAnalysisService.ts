@@ -8,14 +8,15 @@ import {
     CommitHistoryEntry,
     AnalysisConfig,
     LLMAnalysisRequest,
-    LLMAnalysisResponse
+    LLMAnalysisResponse,
+    RepoAnalysisRunResult
 } from './analysisTypes';
 import { getRepositoryGitMessageLog, getRepositoryCommits } from "../git/diff";
 import { RepositoryScanner } from './repositoryScanner';
 import { LLMService, LLMError } from '../llm/llmTypes';
-import { ChatMessage, ChatFn } from '../chain/chainTypes';
-import { buildRepositoryAnalysisPromptParts } from './analysisChatPrompts';
+import { buildRepositoryAnalysisPromptParts } from './analysisChatPrompts';;
 import { logger } from '../logger';
+import { L10N_KEYS as I18N } from '../../i18n/keys';
 
 /**
  * Repository analysis service implementation
@@ -28,6 +29,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private llmService: LLMService | null;
     private context: vscode.ExtensionContext;
     private currentCancelSource?: vscode.CancellationTokenSource;
+    private apiKeyWaiters: Map<string, vscode.Disposable> = new Map();
 
     constructor(context: vscode.ExtensionContext, llmService: LLMService | null) {
         this.context = context;
@@ -48,18 +50,21 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         };
     }
 
-    async initializeRepository(repositoryPath: string): Promise<void> {
+    async initializeRepository(repositoryPath: string): Promise<RepoAnalysisRunResult> {
         // Always use latest config
         const cfg = this.getConfig();
+        this.currentCancelSource = new vscode.CancellationTokenSource();
+
+
         if (!cfg.enabled) {
-            return;
+            return 'skipped';
         }
 
         try {
             const existingAnalysis = await this.getAnalysis(repositoryPath);
             if (existingAnalysis) {
                 logger.info('[Genie][RepoAnalysis] Analysis exists, skip init.');
-                return;
+                return 'skipped';
             }
 
             logger.info(`[Genie][RepoAnalysis] Initializing for: ${repositoryPath}`);
@@ -77,7 +82,66 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 recentCommits: commitMessageLog.slice(0, cfg.updateThreshold) || []
             };
 
-            const llmResponse = await this.requestLLMAnalysis(analysisRequest);
+            const messages = buildRepositoryAnalysisPromptParts(analysisRequest);
+            const llmResponse = await this.llmService?.generateRepoAnalysis(messages, { token: this.currentCancelSource.token });
+            if (!llmResponse || (llmResponse as LLMError).statusCode) {
+                // If missing API key (401), attach a one-time listener to secrets change
+                const err = (llmResponse as LLMError);
+                if (err?.statusCode === 401) {
+                    if (!this.apiKeyWaiters.has(repositoryPath)) {
+                        const disp = this.context.secrets.onDidChange(async (e) => {
+                            try {
+                                // Only react to our extension's secrets
+                                if (!e?.key || !e.key.startsWith('gitCommitGenie.secret.')) { return; }
+                                // Refresh provider from settings and retry init once
+                                try { await this.llmService?.refreshFromSettings(); } catch { /* ignore */ }
+                                const d = this.apiKeyWaiters.get(repositoryPath);
+                                if (d) { try { d.dispose(); } catch { } this.apiKeyWaiters.delete(repositoryPath); }
+                                await this.initializeRepository(repositoryPath);
+                            } catch { /* ignore retry errors */ }
+                        });
+                        this.apiKeyWaiters.set(repositoryPath, disp);
+                        try { this.context.subscriptions.push(disp); } catch { /* best-effort */ }
+                    }
+                    // Prompt user to configure models
+                    try {
+                        const picked = await vscode.window.showWarningMessage(
+                            vscode.l10n.t(I18N.repoAnalysis.missingApiKey),
+                            vscode.l10n.t(I18N.actions.manageModels),
+                            vscode.l10n.t(I18N.actions.dismiss)
+                        );
+                        if (picked === vscode.l10n.t(I18N.actions.manageModels)) {
+                            void vscode.commands.executeCommand('git-commit-genie.manageModels');
+                        }
+                    } catch { /* ignore UI errors */ }
+                    return 'skipped';
+                }
+                // If model not selected (400), prompt to configure
+                if (err?.statusCode === 400) {
+                    try {
+                        const picked = await vscode.window.showWarningMessage(
+                            vscode.l10n.t(I18N.repoAnalysis.missingModel),
+                            vscode.l10n.t(I18N.actions.manageModels),
+                            vscode.l10n.t(I18N.actions.dismiss)
+                        );
+                        if (picked === vscode.l10n.t(I18N.actions.manageModels)) {
+                            void vscode.commands.executeCommand('git-commit-genie.manageModels');
+                        }
+                    } catch { /* ignore UI errors */ }
+                    return 'skipped';
+                }
+                const errorMsg = err?.message || 'Failed to generate repository analysis';
+                logger.error('[Genie][RepoAnalysis] LLM analysis failed', errorMsg);
+                throw new Error(errorMsg);
+            }
+
+            if (this.currentCancelSource?.token.isCancellationRequested) {
+                logger.warn('[Genie][RepoAnalysis] Initialization cancelled after LLM response; aborting save.');
+                return 'skipped';
+            }
+
+            // Type assertion to ensure llmResponse is LLMAnalysisResponse
+            const analysisResponse = llmResponse as LLMAnalysisResponse;
 
             // Create analysis object
             const historyAtInit = await this.getCommitHistory(repositoryPath);
@@ -86,10 +150,10 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 repositoryPath,
                 timestamp: new Date().toISOString(),
                 lastAnalyzedStateHash: lastHashAtInit,
-                summary: llmResponse.summary,
-                insights: llmResponse.insights,
-                projectType: llmResponse.projectType,
-                technologies: llmResponse.technologies,
+                summary: analysisResponse.summary,
+                insights: analysisResponse.insights,
+                projectType: analysisResponse.projectType,
+                technologies: analysisResponse.technologies,
                 keyDirectories: scanResult.keyDirectories,
                 importantFiles: scanResult.importantFiles.map(f => f.path),
                 readmeContent: scanResult.readmeContent,
@@ -102,12 +166,13 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             await this.saveAnalysisMarkdown(repositoryPath, analysis);
 
             logger.info('[Genie][RepoAnalysis] Initialization completed.');
+            return 'success';
         } catch (error: any) {
             const msg = String(error?.message || error || '');
             const cancelled = /abort|cancel/i.test(msg);
             if (cancelled) {
                 logger.warn('[Genie][RepoAnalysis] Initialization cancelled by user.');
-                return; // swallow cancellation as non-error
+                return 'skipped'; // swallow cancellation as non-error
             }
             logger.error('Failed to initialize repository analysis', error as any);
             throw error;
@@ -125,19 +190,20 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         }
     }
 
-    async updateAnalysis(repositoryPath: string, commitMessage?: string): Promise<void> {
+    async updateAnalysis(repositoryPath: string, commitMessage?: string): Promise<RepoAnalysisRunResult> {
         // Always use latest config
         const cfg = this.getConfig();
         if (!cfg.enabled) {
-            return;
+            return 'skipped';
         }
+
+        this.currentCancelSource = new vscode.CancellationTokenSource();
 
         try {
             const existingAnalysis = await this.getAnalysis(repositoryPath);
             if (!existingAnalysis) {
                 // Initialize if no analysis exists
-                await this.initializeRepository(repositoryPath);
-                return;
+                return await this.initializeRepository(repositoryPath);
             }
 
             // Get recent commit history
@@ -158,7 +224,56 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 repositoryPath
             };
 
-            const llmResponse = await this.requestLLMAnalysis(analysisRequest);
+            const messages = buildRepositoryAnalysisPromptParts(analysisRequest);
+            const llmResponse = await this.llmService?.generateRepoAnalysis(messages, { token: this.currentCancelSource?.token });
+            if (!llmResponse || (llmResponse as LLMError).statusCode) {
+                const err = (llmResponse as LLMError);
+                if (err?.statusCode === 401) {
+                    if (!this.apiKeyWaiters.has(repositoryPath)) {
+                        const disp = this.context.secrets.onDidChange(async (e) => {
+                            try {
+                                if (!e?.key || !e.key.startsWith('gitCommitGenie.secret.')) { return; }
+                                try { await this.llmService?.refreshFromSettings(); } catch { }
+                                const d = this.apiKeyWaiters.get(repositoryPath);
+                                if (d) { try { d.dispose(); } catch { } this.apiKeyWaiters.delete(repositoryPath); }
+                                await this.initializeRepository(repositoryPath);
+                            } catch { }
+                        });
+                        this.apiKeyWaiters.set(repositoryPath, disp);
+                        try { this.context.subscriptions.push(disp); } catch { }
+                    }
+                    try {
+                        const picked = await vscode.window.showWarningMessage(
+                            vscode.l10n.t(I18N.repoAnalysis.missingApiKey),
+                            vscode.l10n.t(I18N.actions.manageModels),
+                            vscode.l10n.t(I18N.actions.dismiss)
+                        );
+                        if (picked === vscode.l10n.t(I18N.actions.manageModels)) {
+                            void vscode.commands.executeCommand('git-commit-genie.manageModels');
+                        }
+                    } catch { }
+                    return 'skipped';
+                }
+                if (err?.statusCode === 400) {
+                    try {
+                        const picked = await vscode.window.showWarningMessage(
+                            vscode.l10n.t(I18N.repoAnalysis.missingModel),
+                            vscode.l10n.t(I18N.actions.manageModels),
+                            vscode.l10n.t(I18N.actions.dismiss)
+                        );
+                        if (picked === vscode.l10n.t(I18N.actions.manageModels)) {
+                            void vscode.commands.executeCommand('git-commit-genie.manageModels');
+                        }
+                    } catch { }
+                    return 'skipped';
+                }
+                const errorMsg = err?.message || 'Failed to update repository analysis';
+                logger.error('[Genie][RepoAnalysis] LLM analysis update failed', errorMsg);
+                throw new Error(errorMsg);
+            }
+
+            // Type assertion to ensure llmResponse is LLMAnalysisResponse
+            const analysisResponse = llmResponse as LLMAnalysisResponse;
 
             // Create updated analysis
             const lastHashNow = commitHistory.length > 0 ? commitHistory[0].stateHash : existingAnalysis.lastAnalyzedStateHash;
@@ -166,15 +281,20 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 ...existingAnalysis,
                 timestamp: new Date().toISOString(),
                 lastAnalyzedStateHash: lastHashNow,
-                summary: llmResponse.summary,
-                insights: llmResponse.insights,
-                projectType: llmResponse.projectType,
-                technologies: llmResponse.technologies,
+                summary: analysisResponse.summary,
+                insights: analysisResponse.insights,
+                projectType: analysisResponse.projectType,
+                technologies: analysisResponse.technologies,
                 keyDirectories: scanResult.keyDirectories,
                 importantFiles: scanResult.importantFiles.map(f => f.path),
                 readmeContent: scanResult.readmeContent,
                 configFiles: scanResult.configFiles
             };
+
+            if (this.currentCancelSource?.token.isCancellationRequested) {
+                logger.warn('[Genie][RepoAnalysis] Update cancelled after LLM response; aborting save.');
+                return 'skipped';
+            }
 
             // Save updated analysis
             await this.saveAnalysis(repositoryPath, updatedAnalysis);
@@ -182,12 +302,13 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             await this.saveAnalysisMarkdown(repositoryPath, updatedAnalysis);
 
             logger.info('[Genie][RepoAnalysis] Update completed.');
+            return 'success';
         } catch (error: any) {
             const msg = String(error?.message || error || '');
             const cancelled = /abort|cancel/i.test(msg);
             if (cancelled) {
                 logger.warn('[Genie][RepoAnalysis] Update cancelled by user.');
-                return; // swallow cancellation as non-error
+                return 'skipped'; // swallow cancellation as non-error
             }
             logger.error('[Genie][RepoAnalysis] Failed to update repository analysis', error as any);
             throw error;
@@ -261,46 +382,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             return '';
         }
     }
-
-    private async requestLLMAnalysis(request: LLMAnalysisRequest): Promise<LLMAnalysisResponse> {
-        // Build prompt parts for LLM
-        const promptParts = buildRepositoryAnalysisPromptParts(request);
-
-        const cts = new vscode.CancellationTokenSource();
-        this.currentCancelSource = cts;
-        try {
-            if (!this.llmService) { throw new Error('LLM service not configured'); }
-            const chatOrErr = await this.llmService.getChatFn({ token: cts.token });
-            if (typeof chatOrErr !== 'function') {
-                const err = chatOrErr as LLMError;
-                throw new Error(err?.message || 'Failed to get chat function');
-            }
-            const chat = chatOrErr as ChatFn;
-            const combinedPrompt = `${promptParts.system}\n\n${promptParts.user}`;
-            const estTokens = Math.ceil(combinedPrompt.length / 4);
-            logger.info(`[Genie][RepoAnalysis] Sending prompt to LLM. ~tokens=${estTokens}`);
-            const text = await chat([
-                { role: 'system', content: promptParts.system } as ChatMessage,
-                { role: 'user', content: promptParts.user } as ChatMessage
-            ], { temperature: 0 });
-            cts.dispose();
-            if (this.currentCancelSource === cts) { this.currentCancelSource = undefined; }
-            const parsed = this.parseLLMAnalysisResponse(text);
-            if (parsed && parsed.summary && String(parsed.summary).trim().length > 0) { return parsed; }
-            throw new Error('Invalid LLM response: failed to parse valid JSON with non-empty summary');
-        } catch (e) {
-            const wasCancelled = !!cts.token.isCancellationRequested || /cancel/i.test(String((e as any)?.message || ''));
-            cts.dispose();
-            if (this.currentCancelSource === cts) { this.currentCancelSource = undefined; }
-            if (wasCancelled) {
-                logger.warn('[Genie][RepoAnalysis] LLM analysis cancelled by user. No fallback applied.');
-            } else {
-                logger.warn(`[Genie][RepoAnalysis] LLM analysis failed. No analysis update will be made. ${(e as any)?.message || e}`);
-            }
-            throw e;
-        }
-    }
-
 
     public cancelCurrentAnalysis(): void {
         try { this.currentCancelSource?.cancel(); } catch { }

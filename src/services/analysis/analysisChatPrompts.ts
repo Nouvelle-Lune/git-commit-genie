@@ -1,9 +1,4 @@
-import { LLMAnalysisRequest } from './analysisTypes';
-
-export interface AnalysisPromptParts {
-    system: string;
-    user: string;
-}
+import { LLMAnalysisRequest, AnalysisPromptParts, RepositoryScanResult } from './analysisTypes';
 
 export function buildRepositoryAnalysisPromptParts(request: LLMAnalysisRequest): AnalysisPromptParts {
     return buildPromptPartsWithTokenLimit(request);
@@ -30,7 +25,10 @@ function buildPromptPartsWithTokenLimit(request: LLMAnalysisRequest): AnalysisPr
 
 
 function buildFullPromptParts(request: LLMAnalysisRequest): AnalysisPromptParts {
-    const { scanResult, previousAnalysis, recentCommits, repositoryPath } = request;
+    const scanResult = normalizeScanResult(request.scanResult);
+    const previousAnalysis = request.previousAnalysis;
+    const recentCommits = request.recentCommits || [];
+    const repositoryPath = request.repositoryPath;
 
     const system = [
         '<role>',
@@ -129,15 +127,19 @@ function buildFullPromptParts(request: LLMAnalysisRequest): AnalysisPromptParts 
     );
 
     return {
-        system,
-        user: userParts.join('\n')
+        system: { role: 'system', content: system },
+        user: { role: 'user', content: userParts.join('\n') }
     };
+
 }
 
 
 
 function buildReducedPromptParts(request: LLMAnalysisRequest): AnalysisPromptParts {
-    const { scanResult, previousAnalysis, recentCommits, repositoryPath } = request;
+    const scanResult = normalizeScanResult(request.scanResult);
+    const previousAnalysis = request.previousAnalysis;
+    const recentCommits = request.recentCommits || [];
+    const repositoryPath = request.repositoryPath;
 
     const system = [
         '<role>',
@@ -160,10 +162,10 @@ function buildReducedPromptParts(request: LLMAnalysisRequest): AnalysisPromptPar
         '',
         '<schema>',
         '{',
-        '  "summary": "Brief summary of the repository purpose and architecture",',
-        '  "projectType": "Main project type",',
-        '  "technologies": ["main", "technologies", "used"],',
-        '  "insights": ["key", "insights"]',
+        '  "summary": "Brief but comprehensive summary of the repository purpose and architecture",',
+        '  "projectType": "Main project type (e.g., Web App, Library, CLI Tool, etc.)",',
+        '  "technologies": ["array", "of", "main", "technologies", "used"],',
+        '  "insights": ["key", "architectural", "insights", "about", "the", "project"]',
         '}',
         '</schema>'
     ].join('\n');
@@ -229,15 +231,72 @@ function buildReducedPromptParts(request: LLMAnalysisRequest): AnalysisPromptPar
     );
 
     return {
-        system,
-        user: userParts.join('\n')
+        system: { role: 'system', content: system },
+        user: { role: 'user', content: userParts.join('\n') }
     };
+}
+
+function normalizeScanResult(raw: LLMAnalysisRequest['scanResult']): RepositoryScanResult {
+    if (!raw) {
+        return {
+            keyDirectories: [],
+            importantFiles: [],
+            configFiles: {},
+            scannedFileCount: 0,
+            scanDuration: 0,
+        } as RepositoryScanResult;
+    }
+    const keyDirectories = Array.isArray(raw.keyDirectories)
+        ? raw.keyDirectories.filter((dir): dir is string => typeof dir === 'string' && dir.length > 0)
+        : [];
+    const importantFiles = Array.isArray(raw.importantFiles)
+        ? raw.importantFiles.map((entry: any) => {
+            if (entry && typeof entry.path === 'string') {
+                return { path: entry.path, content: typeof entry.content === 'string' ? entry.content : undefined };
+            }
+            if (typeof entry === 'string') {
+                return { path: entry };
+            }
+            return null;
+        }).filter((entry): entry is { path: string; content?: string } => !!(entry && entry.path))
+        : [];
+    const configFiles: Record<string, string> = {};
+    if (raw.configFiles && typeof raw.configFiles === 'object') {
+        for (const [filename, content] of Object.entries(raw.configFiles)) {
+            if (typeof filename !== 'string' || filename.length === 0) {
+                continue;
+            }
+            if (typeof content === 'string') {
+                configFiles[filename] = content;
+            } else if (content != null) {
+                try {
+                    configFiles[filename] = JSON.stringify(content);
+                } catch {
+                    configFiles[filename] = String(content);
+                }
+            }
+        }
+    }
+    const scannedFileCount = typeof raw.scannedFileCount === 'number' ? raw.scannedFileCount : 0;
+    const scanDuration = typeof raw.scanDuration === 'number' ? raw.scanDuration : 0;
+    const readmeContent = typeof raw.readmeContent === 'string' ? raw.readmeContent : undefined;
+    return {
+        keyDirectories,
+        importantFiles,
+        configFiles,
+        scannedFileCount,
+        scanDuration,
+        readmeContent,
+    } as RepositoryScanResult;
 }
 
 
 
 function buildMinimalPromptParts(request: LLMAnalysisRequest): AnalysisPromptParts {
-    const { scanResult, previousAnalysis, recentCommits, repositoryPath } = request;
+    const scanResult = normalizeScanResult(request.scanResult);
+    const previousAnalysis = request.previousAnalysis;
+    const recentCommits = request.recentCommits || [];
+    const repositoryPath = request.repositoryPath;
 
     const system = [
         '<role>',
@@ -255,10 +314,10 @@ function buildMinimalPromptParts(request: LLMAnalysisRequest): AnalysisPromptPar
         '',
         '<schema>',
         '{',
-        '  "summary": "Brief summary",',
-        '  "projectType": "Project type",',
-        '  "technologies": ["technologies"],',
-        '  "insights": ["insights"]',
+        '  "summary": "Brief but comprehensive summary of the repository purpose and architecture",',
+        '  "projectType": "Main project type (e.g., Web App, Library, CLI Tool, etc.)",',
+        '  "technologies": ["array", "of", "main", "technologies", "used"],',
+        '  "insights": ["key", "architectural", "insights", "about", "the", "project"]',
         '}',
         '</schema>'
     ].join('\n');
@@ -318,8 +377,8 @@ function buildMinimalPromptParts(request: LLMAnalysisRequest): AnalysisPromptPar
     );
 
     return {
-        system,
-        user: userParts.join('\n')
+        system: { role: 'system', content: system },
+        user: { role: 'user', content: userParts.join('\n') }
     };
 }
 
