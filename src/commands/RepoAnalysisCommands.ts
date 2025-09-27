@@ -59,7 +59,7 @@ export class RepoAnalysisCommands {
                 );
 
                 if (initialize === 'Initialize') {
-                    let initResult: RepoAnalysisRunResult = 'skipped';
+                    let initResult;
                     await vscode.window.withProgress({
                         location: vscode.ProgressLocation.Notification,
                         title: vscode.l10n.t(I18N.repoAnalysis.initializingTitle),
@@ -112,7 +112,7 @@ export class RepoAnalysisCommands {
             const repositoryPath = workspaceFolders[0].uri.fsPath;
             const analysisService = this.serviceRegistry.getAnalysisService();
 
-            let updateResult: RepoAnalysisRunResult = 'skipped';
+            let updateResult = 'skipped';
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
                 title: vscode.l10n.t(I18N.repoAnalysis.refreshingTitle),

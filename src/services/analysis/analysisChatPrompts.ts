@@ -268,7 +268,7 @@ function normalizeScanResult(raw: LLMAnalysisRequest['scanResult']): RepositoryS
             }
             if (typeof content === 'string') {
                 configFiles[filename] = content;
-            } else if (content != null) {
+            } else if (content !== null) {
                 try {
                     configFiles[filename] = JSON.stringify(content);
                 } catch {
