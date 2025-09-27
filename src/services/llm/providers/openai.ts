@@ -111,6 +111,11 @@ export class OpenAIService extends BaseLLMService {
             if (!prased.parsedResponse) {
                 return { message: 'Failed to parse response from OpenAI.', statusCode: 500 };
             }
+
+            if (prased.usage) {
+                logger.usage('OpenAI', prased.usage, modle, 'RepoAnalysis');
+            }
+
             return {
                 summary: prased.parsedResponse.summary,
                 projectType: prased.parsedResponse.projectType,
@@ -217,7 +222,7 @@ export class OpenAIService extends BaseLLMService {
     }
 
     /**
-     * Generate commit message using legacy single-shot approach
+     * Generate commit message using single-shot approach
      */
     private async generateDefault(
         jsonMessage: string,

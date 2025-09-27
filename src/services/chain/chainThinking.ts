@@ -1,5 +1,5 @@
 import { DiffData } from "../git/gitTypes";
-import { ChatFn } from "./chainTypes";
+import { ChatFn } from "../llm/llmTypes";
 import { ChainInputs, FileSummary, ChainOutputs } from "./chainTypes";
 import {
 	buildPolicyExtractionMessages,
@@ -24,7 +24,7 @@ function isValidPolicyShape(obj: any): boolean {
 async function extractTemplatePolicy(userTemplate: string, chat: ChatFn): Promise<string> {
 	if (!userTemplate || !userTemplate.trim()) { return ''; }
 	const messages = buildPolicyExtractionMessages(userTemplate);
-	const reply = await chat(messages, { temperature: 0 });
+	const reply = await chat(messages, { temperature: 0, requestType: 'templatePolicy' });
 	const text = reply?.trim() || '';
 	try {
 		const parsed = JSON.parse(text);
@@ -57,8 +57,8 @@ function extractJson<T = any>(text: string): T | null {
 
 async function summarizeSingleFile(diff: DiffData, chat: ChatFn): Promise<FileSummary> {
 	const messages = buildSummarizeFileMessages(diff);
-	const reply = await chat(messages, { temperature: 0 });
-	const parsed = extractJson<FileSummary>(reply);
+	const parsed = await chat(messages, { temperature: 0, requestType: 'summary' });
+
 	if (!parsed || !parsed.file || !parsed.summary) {
 		return {
 			file: diff.fileName,
@@ -89,19 +89,9 @@ async function classifyAndDraft(
 }> {
 	const templatePolicyJson = opts?.templatePolicyJson ?? '';
 	const messages = buildClassifyAndDraftMessages(summaries, inputs, templatePolicyJson);
-	const reply = await chat(messages, { temperature: 0 });
-	const parsed = extractJson<{
-		type?: string;
-		scope?: string | null;
-		breaking?: boolean;
-		description?: string;
-		body?: string | null;
-		footers?: { token: string; value: string }[];
-		commit_message?: string;
-		notes?: string;
-	}>(reply);
+	const parsed = await chat(messages, { temperature: 0, requestType: 'draft' });
 
-	let draft = parsed?.commit_message || '';
+	let draft = parsed?.commitMessage || '';
 	// Fallback: assemble from structured fields if provided
 	if (!draft && parsed?.type && parsed?.description) {
 		const type = parsed.type.trim();
@@ -153,10 +143,10 @@ async function validateAndFix(
 	opts?: { templatePolicyJson?: string }
 ): Promise<{ validMessage: string; notes?: string; violations?: string[] }> {
 	const messages = buildValidateAndFixMessages(commitMessage, checklistText, opts?.templatePolicyJson);
-	const reply = await chat(messages, { temperature: 0 });
-	const parsed = extractJson<{ status?: string; commit_message?: string; notes?: string; violations?: string[] }>(reply);
-	if (parsed?.commit_message) {
-		return { validMessage: parsed.commit_message, notes: parsed.notes, violations: parsed.violations };
+	const parsed = await chat(messages, { temperature: 0, requestType: 'fix' });
+
+	if (parsed?.status === 'fixed') {
+		return { validMessage: parsed.commitMessage, notes: parsed.notes, violations: parsed.violations };
 	}
 	return { validMessage: commitMessage };
 }
@@ -190,9 +180,8 @@ async function enforceStrictWithLLM(
 	chat: ChatFn
 ): Promise<string> {
 	const messages = buildEnforceStrictFixMessages(current, problems, baseRulesMarkdown);
-	const reply = await chat(messages, { temperature: 0 });
-	const parsed = extractJson<{ commit_message?: string }>(reply);
-	return parsed?.commit_message || current;
+	const parsed = await chat(messages, { temperature: 0, requestType: 'commitMessage' });
+	return parsed?.commitMessage || current;
 }
 
 
@@ -204,21 +193,47 @@ async function enforceTargetLanguageForCommit(
 	const lang = (targetLanguage || '').trim();
 	if (!lang) { return commitMessage; }
 
-	// 1) Quick heuristic: if the narrative text already matches target language, skip LLM
+	// 1) Quick heuristic: check if the commit message matches target language
 	const normalized = normalizeLanguageCode(lang);
 	if (normalized !== 'other') {
-		const narrative = extractNarrativeTextForLanguageCheck(commitMessage);
-		const verdict = isLikelyTargetLanguage(narrative, normalized);
-		if (verdict === 'yes') {
-			return commitMessage;
+		// Extract header description and body separately for more precise language checking
+		const lines = commitMessage.split('\n');
+		const header = lines[0] || '';
+		const colonIdx = header.indexOf(':');
+		const headerDescription = colonIdx !== -1 ? header.slice(colonIdx + 1).trim() : header.trim();
+
+		// Find body content (skip empty lines after header)
+		let bodyStartIdx = 1;
+		while (bodyStartIdx < lines.length && lines[bodyStartIdx].trim() === '') {
+			bodyStartIdx++;
 		}
-		// If verdict is 'no' or 'uncertain', fall through to model-based enforcement.
+		const bodyLines = lines.slice(bodyStartIdx);
+		const bodyContent = bodyLines.join(' ').trim();
+
+		// Priority check: header description must match target language
+		const headerVerdict = isLikelyTargetLanguage(headerDescription, normalized);
+		if (headerVerdict === 'no') {
+			// Header doesn't match target language, force conversion
+		} else if (headerVerdict === 'yes') {
+			// Header matches, check body if exists
+			if (!bodyContent) {
+				// No body, header is good
+				return commitMessage;
+			}
+			const bodyVerdict = isLikelyTargetLanguage(bodyContent, normalized);
+			if (bodyVerdict === 'yes') {
+				// Both header and body match target language
+				return commitMessage;
+			}
+			// Body doesn't match, fall through to LLM enforcement
+		}
+		// If header is 'uncertain' or body check failed, fall through to model-based enforcement
 	}
+
 	try {
 		const messages = buildEnforceLanguageMessages(commitMessage, lang);
-		const reply = await chat(messages, { temperature: 0 });
-		const parsed = extractJson<{ commit_message?: string }>(reply);
-		return parsed?.commit_message?.trim() || commitMessage;
+		const parsed = await chat(messages, { temperature: 0, requestType: 'commitMessage' });
+		return parsed?.commitMessage?.trim() || commitMessage;
 	} catch {
 		return commitMessage;
 	}

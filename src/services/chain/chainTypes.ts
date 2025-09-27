@@ -2,22 +2,12 @@
 
 import { DiffData } from "../git/gitTypes";
 
-export type ChatRole = 'system' | 'user';
 
 export type NormalizedLang =
     | 'en' | 'zh' | 'ja' | 'ko'
     | 'de' | 'fr' | 'es' | 'pt' | 'ru' | 'it'
     | 'other';
 
-export interface ChatMessage {
-    role: ChatRole;
-    content: string;
-}
-
-export type ChatFn = (
-    messages: ChatMessage[],
-    options?: { model?: string; temperature?: number }
-) => Promise<string>;
 
 // Extracted constraints from a user template (template-first policy)
 export interface TemplatePolicy {

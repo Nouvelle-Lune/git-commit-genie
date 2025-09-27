@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
+import { RepoAnalysisRunResult } from '../services/analysis/analysisTypes';
 import { logger } from '../services/logger';
 
 export class RepoAnalysisCommands {
@@ -58,6 +59,7 @@ export class RepoAnalysisCommands {
                 );
 
                 if (initialize === 'Initialize') {
+                    let initResult: RepoAnalysisRunResult = 'skipped';
                     await vscode.window.withProgress({
                         location: vscode.ProgressLocation.Notification,
                         title: vscode.l10n.t(I18N.repoAnalysis.initializingTitle),
@@ -65,11 +67,15 @@ export class RepoAnalysisCommands {
                     }, async () => {
                         this.statusBarManager.setRepoAnalysisRunning(true);
                         try {
-                            await analysisService.initializeRepository(repositoryPath);
+                            initResult = await analysisService.initializeRepository(repositoryPath);
                         } finally {
                             this.statusBarManager.setRepoAnalysisRunning(false);
                         }
                     });
+
+                    if (initResult !== 'success') {
+                        return;
+                    }
 
                     // After initialization, ensure markdown exists and open it for editing
                     const newAnalysis = await analysisService.getAnalysis(repositoryPath);
@@ -106,6 +112,7 @@ export class RepoAnalysisCommands {
             const repositoryPath = workspaceFolders[0].uri.fsPath;
             const analysisService = this.serviceRegistry.getAnalysisService();
 
+            let updateResult: RepoAnalysisRunResult = 'skipped';
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
                 title: vscode.l10n.t(I18N.repoAnalysis.refreshingTitle),
@@ -113,13 +120,14 @@ export class RepoAnalysisCommands {
             }, async () => {
                 this.statusBarManager.setRepoAnalysisRunning(true);
                 try {
-                    await analysisService.updateAnalysis(repositoryPath);
+                    updateResult = await analysisService.updateAnalysis(repositoryPath);
                 } finally {
                     this.statusBarManager.setRepoAnalysisRunning(false);
                 }
             });
-
-            vscode.window.showInformationMessage(vscode.l10n.t(I18N.repoAnalysis.refreshed));
+            if (updateResult === 'success') {
+                vscode.window.showInformationMessage(vscode.l10n.t(I18N.repoAnalysis.refreshed));
+            }
         } catch (error: any) {
             const msg = String(error?.message || error || '');
             const cancelled = /abort|cancel/i.test(msg);
@@ -184,5 +192,13 @@ export class RepoAnalysisCommands {
         } catch {
             return true;
         }
+    }
+
+
+    private async handleError(result: any): Promise<void> {
+        if (result.statusCode === 401) {
+            return;
+        }
+        //TODO: handle other errors
     }
 }

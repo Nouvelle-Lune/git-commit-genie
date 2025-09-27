@@ -1,7 +1,25 @@
 import * as vscode from 'vscode';
 import OpenAI from 'openai';
+import { zodTextFormat } from './openAiZodPatch';
 import { BaseProviderUtils } from './BaseProviderUtils';
 import { logger } from '../../../logger';
+
+import { ChatMessage, RequestType } from "../../llmTypes";
+
+import { commitMessageSchema, fileSummarySchema, templatePolicySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, repoAnalysisResponseSchema } from "../../llmTypes";
+
+
+interface OpenAIRequestOptions {
+    model: string;
+    instructions?: string;
+    input: string;
+    max_output_tokens?: number;
+    temperature?: number;
+    text?: any;
+    response_format?: any;
+    requestType: RequestType;
+}
+
 
 /**
  * Utilities for OpenAI-compatible API providers (OpenAI, DeepSeek, etc.)
@@ -13,7 +31,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
      */
     async callChatCompletion(
         client: OpenAI,
-        messages: any[],
+        messages: ChatMessage[],
         options: {
             model: string;
             provider: string;
@@ -22,8 +40,9 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             responseFormat?: any;
             trackUsage?: boolean;
             maxTokens?: number;
+            requestType: RequestType;
         }
-    ): Promise<{ content: string; usage?: any }> {
+    ): Promise<{ parsedResponse?: any; usage?: any }> {
         if (!client) {
             throw new Error(`${options.provider} client is not initialized`);
         }
@@ -38,30 +57,42 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
         let lastErr: any;
         for (let attempt = 0; attempt < 2; attempt++) {
             try {
-                const requestOptions: any = {
-                    model: options.model,
-                    messages,
-                    temperature: options.temperature ?? 0
-                };
+                const requestOptions = this.buildRequestOptions(options, messages);
 
-                if (options.responseFormat) {
-                    requestOptions.response_format = options.responseFormat;
+                if (options.provider === 'OpenAI') {
+                    const response = await client.responses.parse(requestOptions, {
+                        signal: controller.signal
+                    });
+                    const parsedResponse = response.output_parsed;
+                    const usage = options.trackUsage ? response.usage : undefined;
+
+                    return { parsedResponse, usage };
+
+                }
+                if (options.provider === 'DeepSeek') {
+                    const response = await client.chat.completions.create(
+                        requestOptions,
+                        {
+                            signal: controller.signal
+                        }
+                    );
+                    const content = response.choices[0]?.message?.content ?? '';
+                    const usage = options.trackUsage ? (response as any).usage : undefined;
+
+                    // Token usage logging is handled at provider level to avoid duplication
+                    const parsedResponse = content ? JSON.parse(content.trim()) : undefined;
+                    return { parsedResponse, usage };
+
                 }
 
-                if (options.maxTokens) {
-                    requestOptions.max_tokens = options.maxTokens;
-                }
 
-                const response = await client.chat.completions.create(requestOptions, {
-                    signal: controller.signal
-                });
-
-                const content = response.choices[0]?.message?.content ?? '';
-                const usage = options.trackUsage ? (response as any).usage : undefined;
+                //const content = response.choices[0]?.message?.content ?? '';
+                //const usage = options.trackUsage ? (response as any).usage : undefined;
 
                 // Token usage logging is handled at provider level to avoid duplication
-
-                return { content, usage };
+                const parsedResponse = { 'any': '' }; // Placeholder
+                const usage = undefined; // Placeholder
+                return { parsedResponse, usage };
             } catch (e: any) {
                 lastErr = e;
                 const code = e?.status || e?.code;
@@ -83,6 +114,86 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
         }
 
         throw lastErr || new Error(`${options.provider} chat failed after retries`);
+    }
+
+
+    buildRequestOptions(
+        options: {
+            provider: string;
+            model: string;
+            temperature?: number;
+            maxTokens?: number;
+            requestType: RequestType;
+        },
+        messages: ChatMessage[]
+    ) {
+        if (options.provider === 'OpenAI') {
+
+            const baseOptions = {
+                model: options.model,
+                instructions: messages.find(m => m.role === 'system')?.content || '',
+                input: messages.find(m => m.role === 'user')?.content || '',
+                max_output_tokens: options.maxTokens,
+            };
+
+            // gpt-5 models do not support temperature
+            if (!options.model.includes('gpt-5')) {
+                (baseOptions as OpenAIRequestOptions).temperature = options.temperature ?? 0.2;
+            }
+
+            if (options.requestType === 'commitMessage') {
+                (baseOptions as OpenAIRequestOptions).text = {
+                    format: zodTextFormat(commitMessageSchema, 'commitMessage')
+                };
+            }
+
+            if (options.requestType === 'summary') {
+                (baseOptions as OpenAIRequestOptions).text = {
+                    format: zodTextFormat(fileSummarySchema, 'fileSummary')
+                };
+            }
+
+            if (options.requestType === 'templatePolicy') {
+                (baseOptions as OpenAIRequestOptions).text = {
+                    format: zodTextFormat(templatePolicySchema, 'templatePolicy')
+                };
+            }
+
+            if (options.requestType === 'draft') {
+                (baseOptions as OpenAIRequestOptions).text = {
+                    format: zodTextFormat(classifyAndDraftResponseSchema, 'classifyAndDraftResponse')
+                };
+            }
+
+            if (options.requestType === 'fix') {
+                (baseOptions as OpenAIRequestOptions).text = {
+                    format: zodTextFormat(validateAndFixResponseSchema, 'validateAndFixResponse')
+                };
+            }
+
+            if (options.requestType === 'repoAnalysis') {
+                (baseOptions as OpenAIRequestOptions).text = {
+                    format: zodTextFormat(repoAnalysisResponseSchema, 'repoAnalysisResponse')
+                };
+            }
+
+            return baseOptions;
+        }
+
+        if (options.provider === 'DeepSeek') {
+            const baseOptions: any = {
+                model: options.model,
+                messages: messages,
+                temperature: options.temperature ?? 0.2,
+                response_format: {
+                    'type': 'json_object'
+                }
+            };
+
+            return baseOptions;
+        }
+
+        throw new Error(`Unsupported provider: ${options.provider}`);
     }
 
     /**
@@ -123,4 +234,6 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             return preferredModels;
         }
     }
+
+
 }

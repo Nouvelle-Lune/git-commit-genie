@@ -84,6 +84,14 @@ export class Logger {
                 totalTokens = usage.total_tokens || (inputTokens + outputTokens);
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens);
             }
+            if (provider === 'DeepSeek') {
+                inputTokens = usage.prompt_tokens || 0;
+                outputTokens = usage.completion_tokens || 0;
+                cachedTokens = usage.prompt_cache_hit_tokens || 0;
+                totalTokens = inputTokens + outputTokens;
+                cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+                cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
+            }
         } catch (e) {
             this.warn(`Failed to parse token usage for ${modelName}: ${e}`);
             return;
@@ -91,7 +99,7 @@ export class Logger {
 
         // Format output
         const formattedCost = cost.toFixed(6);
-        const formattedCachePercentage = cachePercentage.toFixed(5);
+        const formattedCachePercentage = cachePercentage.toFixed(2);
         const contextInfo = callType ? ` [${callType}${callCount ? `-${callCount}` : ''}]` : '';
         const currency = provider === 'DeepSeek' ? '¥' : '$';
         const message = `[${provider}]${contextInfo} Token Usage: input ${inputTokens} | output ${outputTokens} | total ${totalTokens} | Cache: ${formattedCachePercentage}% | Cost: ${formattedCost}${currency}`;
@@ -177,8 +185,12 @@ export class Logger {
                     inputTokens = usage.input_tokens || 0;
                     outputTokens = usage.output_tokens || 0;
                     cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
+                } else if (provider === 'DeepSeek') {
+                    inputTokens = usage.prompt_tokens || 0;
+                    outputTokens = usage.completion_tokens || 0;
+                    cachedTokens = usage.prompt_cache_hit_tokens || 0;
                 } else {
-                    // Fallback to legacy format for other providers or older OpenAI format
+                    // Fallback to legacy format for other providers
                     inputTokens = usage.prompt_tokens || usage.input_tokens || 0;
                     outputTokens = usage.completion_tokens || usage.output_tokens || 0;
                     cachedTokens = usage.cached_tokens || usage.input_tokens_details?.cached_tokens || 0;

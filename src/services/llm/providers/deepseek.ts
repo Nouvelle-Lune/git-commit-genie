@@ -5,9 +5,10 @@ import { TemplateService } from '../../../template/templateService';
 import { DiffData } from '../../git/gitTypes';
 import OpenAI from 'openai';
 import { generateCommitMessageChain } from "../../chain/chainThinking";
-import { ChatFn } from "../../chain/chainTypes";
+import { ChatFn } from "../llmTypes";
 import { logger } from '../../logger';
 import { OpenAICompatibleUtils } from './utils';
+import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysisTypes';
 
 const DEEPSEEK_API_URL = 'https://api.deepseek.com';
 const SECRET_DEEPSEEK_API_KEY = 'gitCommitGenie.secret.deepseekApiKey';
@@ -59,28 +60,6 @@ export class DeepSeekService extends BaseLLMService {
         this.openai = null;
     }
 
-    public async getChatFn(options?: { token?: vscode.CancellationToken }): Promise<ChatFn | LLMError> {
-        if (!this.openai) {
-            return { message: 'DeepSeek API key is not set. Please set it in the settings.', statusCode: 401 } satisfies LLMError;
-        }
-
-        const config = this.getConfig();
-        if (!config.model) {
-            return { message: 'DeepSeek model is not selected. Please configure it via Manage Models.', statusCode: 400 } satisfies LLMError;
-        }
-
-        const chat: ChatFn = async (messages, _opts) => {
-            const result = await this.utils.callChatCompletion(this.openai!, messages, {
-                model: config.model,
-                provider: 'DeepSeek',
-                token: options?.token
-            });
-            return result.content;
-        };
-
-        return chat satisfies ChatFn;
-    }
-
     /**
      * Get DeepSeek-specific configuration
      */
@@ -91,6 +70,63 @@ export class DeepSeekService extends BaseLLMService {
             model: this.context.globalState.get<string>('gitCommitGenie.deepseekModel', '')
         };
     }
+
+    /**
+     * This function requests a chat completion from DeepSeek and expects a structured JSON response
+     * @param analysisPromptParts an ChatMessage[] containing keys system and user prompt parts
+     * @param options 
+     */
+    async generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options?: { token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError> {
+        const systemMessage = analysisPromptParts.system;
+        const userMessage = analysisPromptParts.user;
+
+        const modle = this.getConfig().model;
+
+        if (!modle) {
+            return { message: 'DeepSeek model is not selected. Please configure it via Manage Models.', statusCode: 400 };
+        }
+        if (!this.openai) {
+            return { message: 'DeepSeek API key is not set. Please set it in the settings.', statusCode: 401 };
+        }
+        try {
+            const prased = await this.utils.callChatCompletion(
+                this.openai,
+                [systemMessage, userMessage],
+                {
+                    model: modle,
+                    provider: 'DeepSeek',
+                    token: options?.token,
+                    trackUsage: true,
+                    requestType: 'repoAnalysis'
+                }
+            );
+
+            if (!prased.parsedResponse) {
+                return { message: 'Failed to parse response from DeepSeek.', statusCode: 500 };
+            }
+
+            if (prased.usage) {
+                logger.usage('DeepSeek', prased.usage, modle, 'RepoAnalysis');
+            }
+
+            return {
+                summary: prased.parsedResponse.summary,
+                projectType: prased.parsedResponse.projectType,
+                technologies: prased.parsedResponse.technologies,
+                insights: prased.parsedResponse.insights,
+                usage: prased.usage
+            };
+        } catch (error: any) {
+            return {
+                message: error.message || 'An unknown error occurred with the DeepSeek API.',
+                statusCode: error.status,
+            };
+        }
+
+
+    }
+
+
 
     async generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError> {
         if (!this.openai) {
@@ -111,9 +147,9 @@ export class DeepSeekService extends BaseLLMService {
             const jsonMessage = await this.buildJsonMessage(diffs);
 
             if (config.useChain) {
-                return await this.generateWithChain(diffs, jsonMessage, config, rules, options);
+                return await this.generateThinking(diffs, jsonMessage, config, rules, options);
             } else {
-                return await this.generateLegacy(jsonMessage, config, rules, options);
+                return await this.generateDefault(jsonMessage, config, rules, options);
             }
         } catch (error: any) {
             return {
@@ -126,7 +162,7 @@ export class DeepSeekService extends BaseLLMService {
     /**
      * Generate commit message using chain approach
      */
-    private async generateWithChain(
+    private async generateThinking(
         diffs: DiffData[],
         jsonMessage: string,
         config: any,
@@ -142,18 +178,20 @@ export class DeepSeekService extends BaseLLMService {
                 model: config.model,
                 provider: 'DeepSeek',
                 token: options?.token,
-                trackUsage: true
+                trackUsage: true,
+                requestType: _options!.requestType
             });
 
             callCount += 1;
             if (result.usage) {
                 usages.push(result.usage);
-                this.utils.logTokenUsage('DeepSeek', result.usage, 'Chain', callCount);
+                result.usage.model = config.model;
+                logger.usage('DeepSeek', result.usage, result.usage.model, 'Thinking');
             } else {
-                this.utils.logTokenUsage('DeepSeek', undefined, 'Chain', callCount);
+                logger.usage('DeepSeek', undefined, result.usage.model, 'Thinking', callCount);
             }
 
-            return result.content;
+            return result.parsedResponse;
         };
 
         const out = await generateCommitMessageChain(
@@ -171,8 +209,7 @@ export class DeepSeekService extends BaseLLMService {
         );
 
         if (usages.length) {
-            const sum = this.utils.sumTokenUsage(usages);
-            logger.info(`[Genie][DeepSeek] Chain total tokens: prompt=${sum.prompt}, completion=${sum.completion}, total=${sum.total}`);
+            logger.usageSummary('DeepSeek', usages, config.model, 'Thinking');
         }
 
         return { content: out.commitMessage };
@@ -181,7 +218,7 @@ export class DeepSeekService extends BaseLLMService {
     /**
      * Generate commit message using legacy single-shot approach
      */
-    private async generateLegacy(
+    private async generateDefault(
         jsonMessage: string,
         config: any,
         rules: any,
@@ -198,18 +235,19 @@ export class DeepSeekService extends BaseLLMService {
                 provider: 'DeepSeek',
                 token: options?.token,
                 responseFormat: { "type": "json_object" },
-                trackUsage: true
+                trackUsage: true,
+                requestType: 'commitMessage'
             }
         );
 
-        this.utils.logTokenUsage('DeepSeek', result.usage, 'Legacy');
+        if (result.usage) {
+            result.usage.model = config.model;
+        }
 
-        if (result.content) {
-            const jsonResponse = JSON.parse(result.content.trim());
-            if (jsonResponse?.commit_message) {
-                return { content: jsonResponse.commit_message };
-            }
-            return { content: result.content };
+        logger.usage('DeepSeek', result.usage, config.model, 'default');
+
+        if (result.parsedResponse) {
+            return { content: result.parsedResponse.commitMessage };
         } else {
             return { message: 'Failed to generate commit message from DeepSeek.', statusCode: 500 };
         }

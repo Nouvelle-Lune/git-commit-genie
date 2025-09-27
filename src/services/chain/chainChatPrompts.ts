@@ -1,6 +1,6 @@
 import { DiffData } from "../git/gitTypes";
-import { ChatMessage } from "./chainTypes";
-import { ChainInputs, FileSummary, TemplatePolicy, RepositoryAnalysis } from "./chainTypes";
+import { ChatMessage } from "../llm/llmTypes";
+import { ChainInputs, FileSummary, TemplatePolicy } from "./chainTypes";
 
 // Centralized builders for chat prompt messages used in chainThinking
 
@@ -273,7 +273,7 @@ export function buildClassifyAndDraftMessages(
         '  "description": "string",',
         '  "body": "string|null",',
         '  "footers": "Array<{token:string,value:string}>",',
-        '  "commit_message": "string",',
+        '  "commitMessage": "string",',
         '  "notes": "string"',
         '}',
         '</schema>',
@@ -433,10 +433,10 @@ export function buildValidateAndFixMessages(commitMessage: string, checklistText
             '',
             '<output_options>',
             'If valid, return:',
-            '{"status":"valid","commit_message": string,"violations":[]}',
+            '{"status":"valid","commitMessage": string,"violations":[]}',
             '',
             'If invalid, minimally edit to fix and return:',
-            '{"status":"fixed","commit_message": string, "violations": string[], "notes": string}',
+            '{"status":"fixed","commitMessage": string, "violations": string[], "notes": string}',
             '</output_options>',
             '',
             '<constraints>',
@@ -474,7 +474,7 @@ export function buildEnforceStrictFixMessages(current: string, problems: string[
             '',
             '<schema>',
             'Output only:',
-            '{"commit_message": string}',
+            '{"commitMessage": string}',
             '</schema>',
             '',
             '<input>',
@@ -528,7 +528,7 @@ export function buildEnforceLanguageMessages(commitMessage: string, lang: string
             '</target_language>',
             '',
             '<schema>',
-            'Return only JSON: {"commit_message": string}',
+            'Return only JSON: {"commitMessage": string}',
             '</schema>',
             '',
             '<input>',
