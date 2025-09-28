@@ -268,8 +268,11 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.63.0",
-    "@google/genai": "^0.3.1",
+    "@google/genai": "^1.16.0",
     "openai": "^5.23.0",
+    "zod": "^4.1.11"
+  },
+  "overrides": {
     "zod": "^4.1.11"
   },
   "extensionDependencies": [
