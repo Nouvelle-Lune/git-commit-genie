@@ -100,6 +100,14 @@ export class Logger {
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
+            if (provider === 'Gemini') {
+                inputTokens = usage.prompt_tokens ?? 0;
+                outputTokens = usage.completion_tokens ?? 0;
+                totalTokens = usage.total_tokens ?? (inputTokens + outputTokens);
+                cachedTokens = usage.cached_content_tokens ?? 0;
+                cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+                cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
+            }
         } catch (e) {
             this.warn(`Failed to parse token usage for ${modelName}: ${e}`);
             return;
@@ -139,6 +147,7 @@ export class Logger {
         'claude-3-5-haiku-20241022': { input: 0.8, output: 4.0, cached: 0.08 },
 
         // Google Gemini (USD) — based on screenshots
+        'gemini-2.0-flash-exp': { input: 0.075, output: 0.30, cached: 0.0375 },
         'gemini-2.5-pro': { input: 1.25, output: 10.0, cached: 0.31 },
         'gemini-2.5-flash': { input: 0.30, output: 2.50, cached: 0.075 },
 
