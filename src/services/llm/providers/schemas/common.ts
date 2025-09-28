@@ -24,7 +24,7 @@ export const templatePolicySchema = z.object({
   }),
   types: z.object({
     allowed: z.array(z.string().min(1)),
-    preferred: z.string().min(1).nullable(),
+    preferred: z.string().nullable(),
     useStandardTypes: z.boolean()
   }),
   body: z.object({
@@ -32,7 +32,7 @@ export const templatePolicySchema = z.object({
     orderedSections: z.array(z.string().min(1)),
     bulletRules: z.array(z.object({
       section: z.string().min(1),
-      maxBullets: z.number().min(1).optional(),
+      maxBullets: z.number().optional(),
       style: z.enum(['dash', 'asterisk']).optional()
     })),
     bulletContentMode: z.enum(['plain', 'file-prefixed', 'type-prefixed']).optional()
@@ -53,29 +53,29 @@ export const templatePolicySchema = z.object({
 
 export const classifyAndDraftResponseSchema = z.object({
   type: z.string().min(1),
-  scope: z.string().min(1).nullable(),
+  scope: z.string().nullable().optional(),
   breaking: z.boolean(),
   description: z.string().min(1),
-  body: z.string().min(1).nullable(),
+  body: z.string().nullable().optional(),
   footers: z.array(z.object({
-    token: z.string().min(1).nullable(),
-    value: z.string().min(1).nullable()
-  })).nullable(),
+    token: z.string().nullable().optional(),
+    value: z.string().nullable().optional()
+  })),
   commitMessage: z.string().min(1),
-  notes: z.string().min(1).nullable()
+  notes: z.string().min(1).nullable().optional()
 } as const);
 
 export const validateAndFixResponseSchema = z.object({
   status: z.enum(['valid', 'fixed']),
   commitMessage: z.string().min(1),
   violations: z.array(z.string().nullable()),
-  notes: z.string().nullable()
+  notes: z.string().nullable().optional()
 } as const);
 
 export const repoAnalysisResponseSchema = z.object({
   summary: z.string().min(1).describe("Brief but comprehensive summary of the repository purpose and architecture"),
-  projectType: z.string().min(1).describe("Main project type (e.g., Web App, Library, CLI Tool, etc.)"),
-  technologies: z.array(z.string().min(1)).describe("Array of main technologies used"),
-  insights: z.array(z.string().min(1)).describe("Key architectural insights about the project")
+  projectType: z.string().min(1).default('').describe("Main project type (e.g., Web App, Library, CLI Tool, etc.)"),
+  technologies: z.array(z.string().min(1)).default([]).describe("Array of main technologies used"),
+  insights: z.array(z.string().min(1)).optional().default([]).describe("Key architectural insights about the project")
 } as const);
 

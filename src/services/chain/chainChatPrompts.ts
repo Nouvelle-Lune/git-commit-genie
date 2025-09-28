@@ -272,9 +272,9 @@ export function buildClassifyAndDraftMessages(
         '  "breaking": "boolean",',
         '  "description": "string",',
         '  "body": "string|null",',
-        '  "footers": "Array<{token:string,value:string}>",',
+        '  "footers": "Array<{token:string|null,value:string|null}>",',
         '  "commitMessage": "string",',
-        '  "notes": "string"',
+        '  "notes": "string|null"',
         '}',
         '</schema>',
     ];
