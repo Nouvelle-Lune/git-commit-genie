@@ -7,7 +7,7 @@ import OpenAI from 'openai';
 import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { ChatFn } from "../llmTypes";
 import { logger } from '../../logger';
-import { OpenAICompatibleUtils } from './utils';
+import { OpenAICompatibleUtils } from './utils/index.js';
 import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysisTypes';
 
 const DEEPSEEK_API_URL = 'https://api.deepseek.com';

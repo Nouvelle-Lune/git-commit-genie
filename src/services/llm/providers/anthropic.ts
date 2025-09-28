@@ -82,10 +82,6 @@ export class AnthropicService extends BaseLLMService {
         };
     }
 
-    // Note: token usage normalization is handled centrally in logger.usage/usageSummary
-
-    // safeExtractJson and parseChainResponse removed: we rely on tool_use + local Zod validation
-
     /**
      * This function requests a chat completion from Anthropic and expects a structured JSON response
      */

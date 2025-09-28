@@ -63,7 +63,7 @@ export const TemplatePolicyJSONSchema = {
       type: 'object',
       properties: {
         requireScope: { type: 'boolean' },
-        scopeDerivation: { type: 'string', enum: ['directory', 'repo', 'none'] },
+        scopeDerivation: { type: ['string', 'null'], enum: ['directory', 'repo', 'none'] },
         preferBangForBreaking: { type: 'boolean' },
         alsoRequireBreakingFooter: { type: 'boolean' }
       },
@@ -143,14 +143,14 @@ export const ClassifyAndDraftJSONSchema = {
       items: {
         type: 'object',
         properties: {
-          token: { type: 'string', minLength: 1 },
-          value: { type: 'string', minLength: 1 }
+          token: { type: ['string', 'null'] },
+          value: { type: ['string', 'null'] }
         },
         required: ['token', 'value']
       }
     },
     commitMessage: { type: 'string', minLength: 1 },
-    notes: { type: 'string', minLength: 1 }
+    notes: { type: ['string', 'null'] }
   },
   required: ['type', 'scope', 'breaking', 'description', 'body', 'footers', 'commitMessage', 'notes']
 } as const;
@@ -160,7 +160,7 @@ export const ValidateAndFixJSONSchema = {
   properties: {
     status: { type: 'string', enum: ['valid', 'fixed'] },
     commitMessage: { type: 'string', minLength: 1 },
-    violations: { type: 'array', items: { type: 'string' } },
+    violations: { type: 'array', items: { type: ['string', 'null'] } },
     notes: { type: ['string', 'null'] }
   },
   required: ['status', 'commitMessage', 'violations', 'notes']

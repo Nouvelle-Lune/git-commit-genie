@@ -1,4 +1,4 @@
-export { BaseProviderUtils } from './BaseProviderUtils';
-export { OpenAICompatibleUtils } from './OpenAICompatibleUtils';
-export { AnthropicUtils } from './AnthropicUtils';
-export { GeminiUtils } from './GeminiUtils';
+export { BaseProviderUtils } from './BaseProviderUtils.js';
+export { OpenAICompatibleUtils } from './OpenAICompatibleUtils.js';
+export { AnthropicUtils } from './AnthropicUtils.js';
+export { GeminiUtils } from './GeminiUtils.js';
