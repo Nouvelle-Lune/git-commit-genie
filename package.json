@@ -217,7 +217,7 @@
       {
         "command": "git-commit-genie.cancelGeneration",
         "title": "%command.cancel%",
-        "icon": "$(genie-kill)",
+        "icon": "$(debug-stop)",
         "category": "%category.title%"
       },
       {

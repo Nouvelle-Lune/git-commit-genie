@@ -152,8 +152,8 @@ export class Logger {
         'gemini-2.5-flash': { input: 0.30, output: 2.50, cached: 0.075 },
 
         // DeepSeek (CNY/RMB)
-        'deepseek-chat': { input: 4.0, output: 12.0, cached: 0.5 },
-        'deepseek-reasoner': { input: 4.0, output: 12.0, cached: 0.5 },
+        'deepseek-chat': { input: 2.0, output: 3.0, cached: 0.2 },
+        'deepseek-reasoner': { input: 2.0, output: 3.0, cached: 0.2 },
     };
 
     /**
