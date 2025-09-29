@@ -175,20 +175,20 @@ export class StatusBarManager {
             return '';
         }
         if (!this.hasGitRepo) {
-            return '$(genie-noRepo)';
+            return '$(search-stop)';
         }
         // If not properly configured, warn instead of showing check
         if (!this.hasApiKey || !this.hasModel) {
-            return '$(genie-warning)';
+            return '$(warning)';
         }
         if (this.repoAnalysisRunning) {
             return '$(sync~spin)';
         }
         if (this.repoAnalysisMissing) {
-            return '$(genie-reload)'; // Needs refresh
+            return '$(refresh)';
         }
 
-        return '$(genie-check)'; // All good
+        return '$(check)';
     }
 
     private getRepoTooltip(): string {
