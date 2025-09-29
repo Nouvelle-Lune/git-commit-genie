@@ -39,7 +39,7 @@
   "$(gear) Manage Models": "$(gear) 管理模型",
   "$(stop-circle) Cancel Analysis": "$(stop-circle) 取消分析",
   "$(refresh) Refresh Analysis": "$(refresh) 刷新仓库分析",
-  "$(file) Open repository-analysis.md": "$(file) 打开 repository-analysis.md",
+  "$(file) Open repository-analysis.md": "$(go-to-file) 打开 repository-analysis.md",
   "Repository analysis not found. Would you like to initialize it?": "未找到仓库分析。是否现在初始化？",
   "Initialize": "初始化",
   "Initializing repository analysis...": "正在初始化仓库分析…",

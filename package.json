@@ -38,6 +38,57 @@
   "main": "./dist/extension.js",
   "l10n": "./l10n",
   "contributes": {
+    "icons": {
+      "genie-base": {
+        "description": "Genie base icon",
+        "default": {
+          "fontPath": "./media/genie.woff",
+          "fontCharacter": "\\e000"
+        }
+      },
+      "genie-check": {
+        "description": "Genie check icon",
+        "default": {
+          "fontPath": "./media/genie.woff",
+          "fontCharacter": "\\e001"
+        }
+      },
+      "genie-block": {
+        "description": "Genie block icon",
+        "default": {
+          "fontPath": "./media/genie.woff",
+          "fontCharacter": "\\e002"
+        }
+      },
+      "genie-warning": {
+        "description": "Genie warning icon",
+        "default": {
+          "fontPath": "./media/genie.woff",
+          "fontCharacter": "\\e003"
+        }
+      },
+      "genie-reload": {
+        "description": "Genie reload icon",
+        "default": {
+          "fontPath": "./media/genie.woff",
+          "fontCharacter": "\\e004"
+        }
+      },
+      "genie-noRope": {
+        "description": "Genie no rope icon",
+        "default": {
+          "fontPath": "./media/genie.woff",
+          "fontCharacter": "\\e005"
+        }
+      },
+      "genie-kill": {
+        "description": "Genie kill icon",
+        "default": {
+          "fontPath": "./media/genie.woff",
+          "fontCharacter": "\\e006"
+        }
+      }
+    },
     "configuration": {
       "title": "Git Commit Genie",
       "properties": {
@@ -154,7 +205,7 @@
       {
         "command": "git-commit-genie.generateCommitMessage",
         "title": "%command.generate%",
-        "icon": "media/Genie.svg"
+        "icon": "$(genie-base)"
       },
       {
         "command": "git-commit-genie.cancelRepositoryAnalysis",
@@ -166,7 +217,7 @@
       {
         "command": "git-commit-genie.cancelGeneration",
         "title": "%command.cancel%",
-        "icon": "$(stop-circle)",
+        "icon": "$(genie-kill)",
         "category": "%category.title%"
       },
       {

@@ -80,7 +80,7 @@ export class StatusBarManager {
             : vscode.l10n.t(I18N.statusBar.selectModel);
         const analysisIcon = this.getAnalysisIcon();
 
-        this.statusBarItem.text = `$(chat-sparkle) Genie: ${modelLabel}${chainBadge} ${analysisIcon}`;
+        this.statusBarItem.text = `$(genie-base) Genie: ${modelLabel}${chainBadge} ${analysisIcon}`;
 
         const baseTooltip = (this.hasApiKey && this.hasModel)
             ? vscode.l10n.t(I18N.statusBar.tooltipConfigured, providerLabel, model)
@@ -175,19 +175,20 @@ export class StatusBarManager {
             return '';
         }
         if (!this.hasGitRepo) {
-            return '$(search-stop)';
+            return '$(genie-noRepo)';
         }
         // If not properly configured, warn instead of showing check
         if (!this.hasApiKey || !this.hasModel) {
-            return '$(warning)';
+            return '$(genie-warning)';
         }
         if (this.repoAnalysisRunning) {
             return '$(sync~spin)';
         }
         if (this.repoAnalysisMissing) {
-            return '$(refresh)';
+            return '$(genie-reload)'; // Needs refresh
         }
-        return '$(check)';
+
+        return '$(genie-check)'; // All good
     }
 
     private getRepoTooltip(): string {
