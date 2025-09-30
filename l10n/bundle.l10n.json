@@ -50,4 +50,8 @@
   "Manage Models": "Manage Models",
   "LLM API key not set. Configure models to enable repository analysis.": "LLM API key not set. Configure models to enable repository analysis.",
   "LLM model not selected. Configure models to enable repository analysis.": "LLM model not selected. Configure models to enable repository analysis."
+  ,
+  "Replace Key": "Replace Key",
+  "{0} API key appears invalid or revoked.": "{0} API key appears invalid or revoked.",
+  "{0} API key updated. Please retry.": "{0} API key updated. Please retry."
 }

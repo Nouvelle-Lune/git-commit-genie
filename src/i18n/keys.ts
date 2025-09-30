@@ -41,16 +41,21 @@ export const L10N_KEYS = {
   actions: {
     openSettings: 'Open Settings',
     dismiss: 'Dismiss',
-    manageModels: 'Manage Models'
+    manageModels: 'Manage Models',
+    replaceKey: 'Replace Key'
+  },
+  errors: {
+    invalidApiKey: '{0} API key appears invalid or revoked.'
+  },
+  common: {
+    noWorkspace: 'No workspace folder is open.',
+    apiKeyUpdated: '{0} API key updated. Please retry.'
   },
   rateLimit: {
     hit: 'Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.'
   },
   settings: {
     chainMaxParallelLabel: 'Max Parallel Chains'
-  },
-  common: {
-    noWorkspace: 'No workspace folder is open.'
   },
   genieMenu: {
     placeholder: 'Git Commit Genie',
