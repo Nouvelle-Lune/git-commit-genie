@@ -206,11 +206,17 @@ export class Logger {
                     inputTokens = usage.prompt_tokens || 0;
                     outputTokens = usage.completion_tokens || 0;
                     cachedTokens = usage.prompt_cache_hit_tokens || 0;
+                } else if (provider === 'Anthropic') {
+                    inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
+                    outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
+                    cachedTokens = usage.cached_tokens ?? usage.input_tokens_details?.cached_tokens ?? 0;
+                } else if (provider === 'Gemini') {
+                    inputTokens = usage.prompt_tokens ?? 0;
+                    outputTokens = usage.completion_tokens ?? 0;
+                    cachedTokens = usage.cached_content_tokens ?? 0;
                 } else {
-                    // Fallback to legacy format for other providers
-                    inputTokens = usage.prompt_tokens || usage.input_tokens || 0;
-                    outputTokens = usage.completion_tokens || usage.output_tokens || 0;
-                    cachedTokens = usage.cached_tokens || usage.input_tokens_details?.cached_tokens || 0;
+                    this.warn(`Unknown model for usage summary: ${modelName}`);
+                    continue;
                 }
 
                 // Accumulate totals
