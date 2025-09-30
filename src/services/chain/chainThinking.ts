@@ -14,7 +14,7 @@ import { normalizeLanguageCode, extractNarrativeTextForLanguageCheck, isLikelyTa
 
 async function summarizeSingleFile(diff: DiffData, chat: ChatFn): Promise<FileSummary> {
 	const messages = buildSummarizeFileMessages(diff);
-	const parsed = await chat(messages, { temperature: 0, requestType: 'summary' });
+    const parsed = await chat(messages, { requestType: 'summary' });
 
 	if (!parsed || !parsed.file || !parsed.summary) {
 		return {
@@ -44,7 +44,7 @@ async function classifyAndDraft(
 	}
 }> {
 	const messages = buildClassifyAndDraftMessages(summaries, inputs);
-	const parsed = await chat(messages, { temperature: 0, requestType: 'draft' });
+    const parsed = await chat(messages, { requestType: 'draft' });
 
 	let draft = parsed?.commitMessage || '';
 	// Fallback: assemble from structured fields if provided
@@ -98,7 +98,7 @@ async function validateAndFix(
 	userTemplate?: string
 ): Promise<{ validMessage: string; notes?: string; violations?: string[] }> {
 	const messages = buildValidateAndFixMessages(commitMessage, checklistText, userTemplate);
-	const parsed = await chat(messages, { temperature: 0, requestType: 'fix' });
+    const parsed = await chat(messages, { requestType: 'fix' });
 
 	if (parsed?.status === 'fixed') {
 		return { validMessage: parsed.commitMessage, notes: parsed.notes, violations: parsed.violations };
@@ -136,7 +136,7 @@ async function enforceStrictWithLLM(
 	userTemplate?: string
 ): Promise<string> {
 	const messages = buildEnforceStrictFixMessages(current, problems, baseRulesMarkdown, userTemplate);
-	const parsed = await chat(messages, { temperature: 0, requestType: 'commitMessage' });
+    const parsed = await chat(messages, { requestType: 'commitMessage' });
 	return parsed?.commitMessage || current;
 }
 
@@ -189,7 +189,7 @@ async function enforceTargetLanguageForCommit(
 
 	try {
 		const messages = buildEnforceLanguageMessages(commitMessage, lang, userTemplate);
-		const parsed = await chat(messages, { temperature: 0, requestType: 'commitMessage' });
+        const parsed = await chat(messages, { requestType: 'commitMessage' });
 		return parsed?.commitMessage?.trim() || commitMessage;
 	} catch (error) {
 		return commitMessage;

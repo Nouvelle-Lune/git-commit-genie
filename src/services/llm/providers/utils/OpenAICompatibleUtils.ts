@@ -138,7 +138,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
 
             // gpt-5 models do not support temperature
             if (!options.model.includes('gpt-5')) {
-                (baseOptions as OpenAIRequestOptions).temperature = options.temperature ?? 0.2;
+                (baseOptions as OpenAIRequestOptions).temperature = options.temperature ?? this.getTemperature();
             }
 
             const schemaConfig = requestTypeSchemaMap.get(options.requestType);
@@ -155,7 +155,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             const baseOptions: any = {
                 model: options.model,
                 messages: messages,
-                temperature: options.temperature ?? 0.2,
+                temperature: options.temperature ?? this.getTemperature(),
                 response_format: {
                     'type': 'json_object'
                 }

@@ -71,7 +71,7 @@ export class GeminiUtils extends BaseProviderUtils {
                 const chatContents: GeminiChatContents = this.convertMessagesToGeminiFormat(messages, options.systemInstruction);
 
                 const config: GenerateContentConfig = {
-                    temperature: options.temperature ?? 0
+                    temperature: options.temperature ?? this.getTemperature()
                 };
 
                 if (options.maxTokens) {

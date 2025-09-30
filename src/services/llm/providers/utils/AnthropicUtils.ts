@@ -44,7 +44,7 @@ export class AnthropicUtils extends BaseProviderUtils {
                 const requestOptions: any = {
                     model: options.model,
                     messages,
-                    temperature: options.temperature ?? 0,
+                    temperature: options.temperature ?? this.getTemperature(),
                     max_tokens: options.maxTokens ?? 2048,
                 };
 

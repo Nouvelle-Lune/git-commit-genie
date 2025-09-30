@@ -19,6 +19,7 @@
   "config.chain.enabled.desc": "啟用鏈式多步提示生成提交資訊（可使生成的提交資訊更詳盡且更貼合使用者模板，但會增加延遲與 Token 消耗）",
   "config.chain.maxParallelNew.desc": "鏈式提示的並行 LLM 呼叫最大數量。請謹慎增大以避免觸發速率限制。",
   "config.llm.maxRetries.desc": "API 請求失敗最大重試次數",
+  "config.llm.temperature.desc": "Temperature（0-2），預設為 0.2。",
   "config.commitLanguage.desc": "產生的提交資訊目標語言。",
   "config.commitLanguage.auto": "自動（跟隨 VS Code 顯示語言）",
   "config.commitLanguage.en": "英文",

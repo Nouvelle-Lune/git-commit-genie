@@ -99,6 +99,18 @@ export class BaseProviderUtils {
     }
 
     /**
+     * Read global temperature for provider calls
+     */
+    public getTemperature(): number {
+        const cfg = vscode.workspace.getConfiguration();
+        const v = cfg.get<number>('gitCommitGenie.llm.temperature');
+        if (typeof v === 'number' && !isNaN(v)) {
+            return v;
+        }
+        return 0.2;
+    }
+
+    /**
      * Get rules file content
      */
     public getRules() {

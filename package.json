@@ -124,6 +124,14 @@
           "minimum": 1,
           "markdownDescription": "%config.llm.maxRetries.desc%"
         },
+        "gitCommitGenie.llm.temperature": {
+          "order": 4,
+          "type": "number",
+          "default": 0.2,
+          "minimum": 0,
+          "maximum": 2,
+          "markdownDescription": "%config.llm.temperature.desc%"
+        },
         "gitCommitGenie.developerMode": {
           "order": 2,
           "type": "boolean",
