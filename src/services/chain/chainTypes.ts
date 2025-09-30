@@ -9,40 +9,6 @@ export type NormalizedLang =
     | 'other';
 
 
-// Extracted constraints from a user template (template-first policy)
-export interface TemplatePolicy {
-    header?: {
-        requireScope?: boolean;
-        scopeDerivation?: 'directory' | 'repo' | 'none';
-        preferBangForBreaking?: boolean;
-        alsoRequireBreakingFooter?: boolean;
-    };
-    types?: {
-        allowed?: string[];
-        preferred?: string | null;
-        useStandardTypes?: boolean;
-    };
-    body?: {
-        alwaysInclude?: boolean;
-        orderedSections?: string[]; // e.g., ["Summary", "Changes", "Impact", "Risk", "Notes"]
-        bulletRules?: Array<{ section: string; maxBullets?: number; style?: 'dash' | 'asterisk' }>;
-        // Simplified single-switch for bullet content style
-        // - 'plain': no special prefixes in bullets
-        // - 'file-prefixed': bullets start with file/scope label
-        // - 'type-prefixed': bullets start with commit type token (feat|fix|...)
-        bulletContentMode?: 'plain' | 'file-prefixed' | 'type-prefixed';
-    };
-    footers?: {
-        required?: string[]; // e.g., ["Refs"]
-        defaults?: Array<{ token: string; value: string }>;
-    };
-    lexicon?: {
-        prefer?: string[];
-        avoid?: string[];
-        tone?: 'imperative' | 'neutral' | 'friendly';
-    };
-}
-
 
 // Structured repository analysis type
 export interface RepositoryAnalysis {
@@ -78,6 +44,5 @@ export interface ChainOutputs {
         draft?: string;
         classificationNotes?: string;
         validationNotes?: string;
-        templatePolicy?: string;
     };
 }

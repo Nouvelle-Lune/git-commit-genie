@@ -2,7 +2,6 @@ import { DiffData } from "../git/gitTypes";
 import { ChatFn } from "../llm/llmTypes";
 import { ChainInputs, FileSummary, ChainOutputs } from "./chainTypes";
 import {
-	buildPolicyExtractionMessages,
 	buildSummarizeFileMessages,
 	buildClassifyAndDraftMessages,
 	buildValidateAndFixMessages,
@@ -12,48 +11,6 @@ import {
 
 import { normalizeLanguageCode, extractNarrativeTextForLanguageCheck, isLikelyTargetLanguage } from "./langDetector";
 
-function isValidPolicyShape(obj: any): boolean {
-	if (!obj || typeof obj !== 'object') { return false; }
-	const keys = Object.keys(obj);
-	if (!keys.length) { return false; }
-	// Accept if any known section exists or if it has at least one key with object/array value
-	if (['header', 'body', 'footers', 'lexicon'].some(k => k in obj)) { return true; }
-	return keys.some(k => typeof (obj as any)[k] === 'object');
-}
-
-async function extractTemplatePolicy(userTemplate: string, chat: ChatFn): Promise<string> {
-	if (!userTemplate || !userTemplate.trim()) { return ''; }
-	const messages = buildPolicyExtractionMessages(userTemplate);
-	const reply = await chat(messages, { temperature: 0, requestType: 'templatePolicy' });
-	const text = reply?.trim() || '';
-	try {
-		const parsed = JSON.parse(text);
-		if (isValidPolicyShape(parsed)) {
-			// Return a canonical minified JSON string as policy
-			return JSON.stringify(parsed);
-		}
-	} catch {
-		// ignore parse error
-	}
-	return '';
-}
-
-function extractJson<T = any>(text: string): T | null {
-	if (!text) { return null; }
-	const trimmed = text.trim();
-	try {
-		return JSON.parse(trimmed) as T;
-	} catch { }
-	const start = trimmed.indexOf('{');
-	const end = trimmed.lastIndexOf('}');
-	if (start !== -1 && end !== -1 && end > start) {
-		const slice = trimmed.slice(start, end + 1);
-		try {
-			return JSON.parse(slice) as T;
-		} catch { }
-	}
-	return null;
-}
 
 async function summarizeSingleFile(diff: DiffData, chat: ChatFn): Promise<FileSummary> {
 	const messages = buildSummarizeFileMessages(diff);
@@ -73,8 +30,7 @@ async function summarizeSingleFile(diff: DiffData, chat: ChatFn): Promise<FileSu
 async function classifyAndDraft(
 	summaries: FileSummary[],
 	inputs: ChainInputs,
-	chat: ChatFn,
-	opts?: { templatePolicyJson?: string }
+	chat: ChatFn
 ): Promise<{
 	draft: string;
 	notes?: string;
@@ -87,8 +43,7 @@ async function classifyAndDraft(
 		footers?: { token: string; value: string }[];
 	}
 }> {
-	const templatePolicyJson = opts?.templatePolicyJson ?? '';
-	const messages = buildClassifyAndDraftMessages(summaries, inputs, templatePolicyJson);
+	const messages = buildClassifyAndDraftMessages(summaries, inputs);
 	const parsed = await chat(messages, { temperature: 0, requestType: 'draft' });
 
 	let draft = parsed?.commitMessage || '';
@@ -135,14 +90,14 @@ async function classifyAndDraft(
 	};
 }
 
-// Validate and fix the draft commit message according to base rules and optional template policy
+// Validate and fix the draft commit message according to base rules and optional user template
 async function validateAndFix(
 	commitMessage: string,
 	checklistText: string,
 	chat: ChatFn,
-	opts?: { templatePolicyJson?: string }
+	userTemplate?: string
 ): Promise<{ validMessage: string; notes?: string; violations?: string[] }> {
-	const messages = buildValidateAndFixMessages(commitMessage, checklistText, opts?.templatePolicyJson);
+	const messages = buildValidateAndFixMessages(commitMessage, checklistText, userTemplate);
 	const parsed = await chat(messages, { temperature: 0, requestType: 'fix' });
 
 	if (parsed?.status === 'fixed') {
@@ -177,9 +132,10 @@ async function enforceStrictWithLLM(
 	current: string,
 	problems: string[],
 	baseRulesMarkdown: string,
-	chat: ChatFn
+	chat: ChatFn,
+	userTemplate?: string
 ): Promise<string> {
-	const messages = buildEnforceStrictFixMessages(current, problems, baseRulesMarkdown);
+	const messages = buildEnforceStrictFixMessages(current, problems, baseRulesMarkdown, userTemplate);
 	const parsed = await chat(messages, { temperature: 0, requestType: 'commitMessage' });
 	return parsed?.commitMessage || current;
 }
@@ -188,7 +144,8 @@ async function enforceStrictWithLLM(
 async function enforceTargetLanguageForCommit(
 	commitMessage: string,
 	targetLanguage: string | undefined,
-	chat: ChatFn
+	chat: ChatFn,
+	userTemplate?: string
 ): Promise<string> {
 	const lang = (targetLanguage || '').trim();
 	if (!lang) { return commitMessage; }
@@ -231,10 +188,10 @@ async function enforceTargetLanguageForCommit(
 	}
 
 	try {
-		const messages = buildEnforceLanguageMessages(commitMessage, lang);
+		const messages = buildEnforceLanguageMessages(commitMessage, lang, userTemplate);
 		const parsed = await chat(messages, { temperature: 0, requestType: 'commitMessage' });
 		return parsed?.commitMessage?.trim() || commitMessage;
-	} catch {
+	} catch (error) {
 		return commitMessage;
 	}
 }
@@ -265,30 +222,20 @@ export async function generateCommitMessageChain(
 	// Waiting for all workers to complete
 	await Promise.all(workers);
 
-	// If user provided a template, extract a template policy first (template-first precedence)
-	let templatePolicyJson = '';
-	if (inputs.userTemplate && inputs.userTemplate.trim()) {
-		try {
-			templatePolicyJson = await extractTemplatePolicy(inputs.userTemplate, chat);
-		} catch {
-			templatePolicyJson = '';
-		}
-	}
-
-	const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat, { templatePolicyJson });
-	const { validMessage, notes: validationNotes } = await validateAndFix(draft, inputs.validationChecklist ?? '', chat, { templatePolicyJson });
+	const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat);
+	const { validMessage, notes: validationNotes } = await validateAndFix(draft, inputs.validationChecklist ?? '', chat, inputs.userTemplate);
 
 	// Local strict check; if still not conforming, ask LLM for a minimal strict fix
 	let finalMessage = validMessage;
 	const check = localStrictCheck(finalMessage);
 	if (!check.ok) {
-		finalMessage = await enforceStrictWithLLM(finalMessage, check.problems, baseRulesMarkdown, chat);
+		finalMessage = await enforceStrictWithLLM(finalMessage, check.problems, baseRulesMarkdown, chat, inputs.userTemplate);
 	}
 
 	// Enforce target language strictly while preserving tokens/structure
 	try {
-		finalMessage = await enforceTargetLanguageForCommit(finalMessage, inputs.targetLanguage, chat);
-	} catch {
+		finalMessage = await enforceTargetLanguageForCommit(finalMessage, inputs.targetLanguage, chat, inputs.userTemplate);
+	} catch (error) {
 		// ignore
 	}
 
@@ -298,8 +245,7 @@ export async function generateCommitMessageChain(
 		raw: {
 			draft,
 			classificationNotes: classificationNotes ?? '',
-			validationNotes: validationNotes ?? '',
-			templatePolicy: templatePolicyJson
+			validationNotes: validationNotes ?? ''
 		}
 	};
 }

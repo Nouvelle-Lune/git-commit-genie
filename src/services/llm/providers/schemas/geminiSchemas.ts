@@ -75,77 +75,7 @@ export const GeminiFileSummarySchema = {
     propertyOrdering: ['file', 'status', 'summary', 'breaking']
 };
 
-/**
- * Schema for template policy analysis
- */
-export const GeminiTemplatePolicySchema = {
-    type: Type.OBJECT,
-    properties: {
-        header: {
-            type: Type.OBJECT,
-            properties: {
-                requireScope: createBooleanType('Whether scope is required in commit header'),
-                scopeDerivation: createEnumType(['directory', 'repo', 'none'], 'How to derive the scope'),
-                preferBangForBreaking: createBooleanType('Whether to use ! for breaking changes'),
-                alsoRequireBreakingFooter: createBooleanType('Whether breaking footer is also required')
-            },
-            required: ['requireScope', 'scopeDerivation', 'preferBangForBreaking', 'alsoRequireBreakingFooter']
-        },
-        types: {
-            type: Type.OBJECT,
-            properties: {
-                allowed: createArrayType(createStringType(), 'List of allowed commit types'),
-                preferred: createStringType('Preferred commit type for this change (can be null)'),
-                useStandardTypes: createBooleanType('Whether to use standard conventional commit types')
-            },
-            required: ['allowed', 'preferred', 'useStandardTypes']
-        },
-        body: {
-            type: Type.OBJECT,
-            properties: {
-                alwaysInclude: createBooleanType('Whether body should always be included'),
-                orderedSections: createArrayType(createStringType(), 'Ordered list of body sections'),
-                bulletRules: createArrayType({
-                    type: Type.OBJECT,
-                    properties: {
-                        section: createStringType('Section name for this bullet rule'),
-                        maxBullets: createNumberType('Maximum bullets for this section', 1),
-                        style: createEnumType(['dash', 'asterisk'], 'Bullet style preference')
-                    },
-                    required: ['section']
-                }, 'Rules for bullet formatting in body sections'),
-                bulletContentMode: createEnumType(['plain', 'file-prefixed', 'type-prefixed'], 'How to format bullet content')
-            },
-            required: ['alwaysInclude', 'orderedSections', 'bulletRules']
-        },
-        footers: {
-            type: Type.OBJECT,
-            properties: {
-                required: createArrayType(createStringType(), 'List of required footer tokens'),
-                defaults: createArrayType({
-                    type: Type.OBJECT,
-                    properties: {
-                        token: createStringType('Footer token name'),
-                        value: createStringType('Default value for this footer')
-                    },
-                    required: ['token', 'value']
-                }, 'Default footer values')
-            },
-            required: ['required', 'defaults']
-        },
-        lexicon: {
-            type: Type.OBJECT,
-            properties: {
-                prefer: createArrayType(createStringType(), 'Preferred words and phrases'),
-                avoid: createArrayType(createStringType(), 'Words and phrases to avoid'),
-                tone: createEnumType(['imperative', 'neutral', 'friendly'], 'Overall tone for commit messages')
-            },
-            required: ['prefer', 'avoid', 'tone']
-        }
-    },
-    required: ['header', 'types', 'body', 'footers', 'lexicon'],
-    propertyOrdering: ['header', 'types', 'body', 'footers', 'lexicon']
-};
+
 
 /**
  * Schema for classify and draft response

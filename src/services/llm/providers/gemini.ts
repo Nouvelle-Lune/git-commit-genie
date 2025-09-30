@@ -12,7 +12,6 @@ import {
     GeminiCommitMessageSchema,
     GeminiRepoAnalysisSchema,
     GeminiFileSummarySchema,
-    GeminiTemplatePolicySchema,
     GeminiClassifyAndDraftSchema,
     GeminiValidateAndFixSchema,
 } from './schemas/geminiSchemas';
@@ -22,7 +21,6 @@ import {
     commitMessageSchema,
     repoAnalysisResponseSchema,
     fileSummarySchema,
-    templatePolicySchema,
     classifyAndDraftResponseSchema,
     validateAndFixResponseSchema
 } from "./schemas/common";
@@ -190,7 +188,6 @@ export class GeminiService extends BaseLLMService {
             // Map request type to schema
             const schemaMap: Record<string, any> = {
                 summary: GeminiFileSummarySchema,
-                templatePolicy: GeminiTemplatePolicySchema,
                 draft: GeminiClassifyAndDraftSchema,
                 fix: GeminiValidateAndFixSchema,
                 commitMessage: GeminiCommitMessageSchema,
@@ -198,7 +195,6 @@ export class GeminiService extends BaseLLMService {
 
             const schemaMapValidation: Record<string, any> = {
                 summary: fileSummarySchema,
-                templatePolicy: templatePolicySchema,
                 draft: classifyAndDraftResponseSchema,
                 fix: validateAndFixResponseSchema,
                 commitMessage: commitMessageSchema,

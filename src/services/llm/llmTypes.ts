@@ -12,7 +12,7 @@ export interface ChatMessage {
     content: string;
 }
 
-export type RequestType = 'commitMessage' | 'summary' | 'templatePolicy' | 'draft' | 'fix' | 'repoAnalysis';
+export type RequestType = 'commitMessage' | 'summary' | 'draft' | 'fix' | 'repoAnalysis';
 
 export type ChatFn = (
     messages: ChatMessage[],
