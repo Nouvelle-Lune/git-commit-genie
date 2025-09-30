@@ -126,7 +126,10 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 ['summary', { schema: fileSummarySchema, name: 'fileSummary' }],
                 ['draft', { schema: classifyAndDraftResponseSchema, name: 'classifyAndDraftResponse' }],
                 ['fix', { schema: validateAndFixResponseSchema, name: 'validateAndFixResponse' }],
-                ['repoAnalysis', { schema: repoAnalysisResponseSchema, name: 'repoAnalysisResponse' }]
+                ['repoAnalysis', { schema: repoAnalysisResponseSchema, name: 'repoAnalysisResponse' }],
+                // Treat strictFix and enforceLanguage like commitMessage for schema purposes
+                ['strictFix', { schema: commitMessageSchema, name: 'commitMessage' }],
+                ['enforceLanguage', { schema: commitMessageSchema, name: 'commitMessage' }],
             ]);
 
             const baseOptions = {

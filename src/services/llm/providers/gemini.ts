@@ -189,12 +189,25 @@ export class GeminiService extends BaseLLMService {
 
         const chat: ChatFn = async (messages, chainOptions) => {
             const reqType = chainOptions?.requestType;
+            const labelFor = (t?: string) => {
+                switch (t) {
+                    case 'summary': return 'summarize';
+                    case 'draft': return 'draft';
+                    case 'fix': return 'validate-fix';
+                    case 'strictFix': return 'strict-fix';
+                    case 'enforceLanguage': return 'lang-fix';
+                    case 'commitMessage': return 'build-commit-msg';
+                    default: return 'thinking';
+                }
+            };
             // Map request type to schema
             const schemaMap: Record<string, any> = {
                 summary: GeminiFileSummarySchema,
                 draft: GeminiClassifyAndDraftSchema,
                 fix: GeminiValidateAndFixSchema,
                 commitMessage: GeminiCommitMessageSchema,
+                strictFix: GeminiCommitMessageSchema,
+                enforceLanguage: GeminiCommitMessageSchema,
             };
 
             const schemaMapValidation: Record<string, any> = {
@@ -202,6 +215,8 @@ export class GeminiService extends BaseLLMService {
                 draft: classifyAndDraftResponseSchema,
                 fix: validateAndFixResponseSchema,
                 commitMessage: commitMessageSchema,
+                strictFix: commitMessageSchema,
+                enforceLanguage: commitMessageSchema,
             };
 
             const schema = reqType ? schemaMap[reqType] : undefined;
@@ -220,9 +235,9 @@ export class GeminiService extends BaseLLMService {
                 callCount += 1;
                 if (result.usage) {
                     usages.push(result.usage);
-                    logger.usage('Gemini', result.usage, config.model, 'Thinking', callCount);
+                    logger.usage('Gemini', result.usage, config.model, labelFor(reqType), callCount);
                 } else {
-                    logger.usage('Gemini', undefined, config.model, 'Thinking', callCount);
+                    logger.usage('Gemini', undefined, config.model, labelFor(reqType), callCount);
                 }
 
                 // Validate structured output if schema is defined
@@ -262,7 +277,7 @@ export class GeminiService extends BaseLLMService {
         );
 
         if (usages.length) {
-            logger.usageSummary('Gemini', usages, config.model, 'Thinking');
+            logger.usageSummary('Gemini', usages, config.model, 'thinking');
         }
 
         return { content: out.commitMessage };

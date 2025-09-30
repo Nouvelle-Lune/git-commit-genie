@@ -187,11 +187,24 @@ export class DeepSeekService extends BaseLLMService {
 
         const chat: ChatFn = async (messages, _options) => {
             const reqType = _options?.requestType;
+            const labelFor = (t?: string) => {
+                switch (t) {
+                    case 'summary': return 'summarize';
+                    case 'draft': return 'draft';
+                    case 'fix': return 'validate-fix';
+                    case 'strictFix': return 'strict-fix';
+                    case 'enforceLanguage': return 'lang-fix';
+                    case 'commitMessage': return 'build-commit-msg';
+                    default: return 'thinking';
+                }
+            };
             const schemaMap: Record<string, any> = {
                 summary: fileSummarySchema,
                 draft: classifyAndDraftResponseSchema,
                 fix: validateAndFixResponseSchema,
                 commitMessage: commitMessageSchema,
+                strictFix: commitMessageSchema,
+                enforceLanguage: commitMessageSchema,
             };
 
             const validationSchema = reqType ? schemaMap[reqType] : undefined;
@@ -211,9 +224,9 @@ export class DeepSeekService extends BaseLLMService {
                 if (result.usage) {
                     usages.push(result.usage);
                     result.usage.model = config.model;
-                    logger.usage('DeepSeek', result.usage, result.usage.model, 'Thinking', callCount);
+                    logger.usage('DeepSeek', result.usage, result.usage.model, labelFor(reqType), callCount);
                 } else {
-                    logger.usage('DeepSeek', undefined, config.model, 'Thinking', callCount);
+                    logger.usage('DeepSeek', undefined, config.model, labelFor(reqType), callCount);
                 }
 
                 if (validationSchema) {
@@ -247,7 +260,7 @@ export class DeepSeekService extends BaseLLMService {
         );
 
         if (usages.length) {
-            logger.usageSummary('DeepSeek', usages, config.model, 'Thinking');
+            logger.usageSummary('DeepSeek', usages, config.model, 'thinking');
         }
 
         return { content: out.commitMessage };

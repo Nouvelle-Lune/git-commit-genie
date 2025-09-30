@@ -13,6 +13,8 @@ export class Logger {
     private logLevel: LogLevel = LogLevel.Info;
     private readonly prefix = '[Git Commit Genie]';
 
+    private lastCallType: string = '';
+
     private constructor() { }
 
     public static getInstance(): Logger {
@@ -114,11 +116,22 @@ export class Logger {
         }
 
         // Format output
+        const name = modelName.replace(/-\d{8,}/, "");
         const formattedCost = cost.toFixed(6);
         const formattedCachePercentage = cachePercentage.toFixed(2);
-        const contextInfo = callType ? ` [${callType}${callCount ? `-${callCount}` : ''}]` : '';
+
+        let contextInfo = '';
+        if (callType !== '') {
+            if (callType === 'summarize' && callCount !== undefined) {
+                contextInfo = `[${callType}-${callCount}]`;
+            } else {
+                contextInfo = `[${callType}]`;
+            }
+            this.lastCallType = callType;
+        }
+
         const currency = provider === 'DeepSeek' ? '¥' : '$';
-        const message = `[${provider}]${contextInfo} Token Usage: input ${inputTokens} | output ${outputTokens} | total ${totalTokens} | Cache: ${formattedCachePercentage}% | Cost: ${formattedCost}${currency}`;
+        const message = `[${provider}] [${name}] ${contextInfo} Token Usage: input ${inputTokens} | output ${outputTokens} | total ${totalTokens} | Cache: ${formattedCachePercentage}% | Cost: ${formattedCost}${currency}`;
 
         this.info(message);
     }
@@ -239,9 +252,9 @@ export class Logger {
         // Format output
         const formattedCost = totalCost.toFixed(6);
         const formattedCachePercentage = cachePercentage.toFixed(2);
-        const contextInfo = callType ? ` [${callType}${callCount ? `-${callCount}` : ''}]` : '';
+        const contextInfo = callType ? `[${callType}${callCount ? `-${callCount}` : ''}]` : '';
         const currency = provider === 'DeepSeek' ? '¥' : '$';
-        const message = `[${provider}]${contextInfo} Total Token Usage: input ${totalInputTokens} | output ${totalOutputTokens} | total ${totalTokens} | Cache: ${formattedCachePercentage}% | Cost: ${formattedCost}${currency} (${usages.length} calls)`;
+        const message = `[${provider}] [${modelName}] ${contextInfo} Total Token Usage: input ${totalInputTokens} | output ${totalOutputTokens} | total ${totalTokens} | Cache: ${formattedCachePercentage}% | Cost: ${formattedCost}${currency} (${usages.length} calls)`;
 
         this.info(message);
     }
@@ -251,7 +264,7 @@ export class Logger {
             return;
         }
 
-        const timestamp = new Date().toISOString();
+        const timestamp = this.getLocalTimestamp();
         const levelStr = this.getLevelString(level);
         const formattedMessage = args.length > 0
             ? `${this.prefix} [${timestamp}] ${levelStr}: ${message} ${args.map(arg => String(arg)).join(' ')}`
@@ -277,6 +290,18 @@ export class Logger {
         if (this.outputChannel) {
             this.outputChannel.appendLine(formattedMessage);
         }
+    }
+
+    private getLocalTimestamp(): string {
+        const d = new Date();
+        const pad = (n: number) => n.toString().padStart(2, '0');
+        const yyyy = d.getFullYear();
+        const MM = pad(d.getMonth() + 1);
+        const dd = pad(d.getDate());
+        const hh = pad(d.getHours());
+        const mm = pad(d.getMinutes());
+        const ss = pad(d.getSeconds());
+        return `${yyyy}-${MM}-${dd} ${hh}:${mm}:${ss}`;
     }
 
     private getLevelString(level: LogLevel): string {

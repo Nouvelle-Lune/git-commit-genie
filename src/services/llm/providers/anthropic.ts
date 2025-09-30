@@ -184,12 +184,25 @@ export class AnthropicService extends BaseLLMService {
 
         const chat: ChatFn = async (messages, chainOptions) => {
             const reqType = chainOptions?.requestType;
+            const labelFor = (t?: string) => {
+                switch (t) {
+                    case 'summary': return 'summarize';
+                    case 'draft': return 'draft';
+                    case 'fix': return 'validate-fix';
+                    case 'strictFix': return 'strict-fix';
+                    case 'enforceLanguage': return 'lang-fix';
+                    case 'commitMessage': return 'build-commit-msg';
+                    default: return 'thinking';
+                }
+            };
             // Map request type to tool and schema
             const toolMap: Record<string, { tool: any, schema: any }> = {
                 summary: { tool: AnthropicFileSummaryTool, schema: fileSummarySchema },
                 draft: { tool: AnthropicClassifyAndDraftTool, schema: classifyAndDraftResponseSchema },
                 fix: { tool: AnthropicValidateAndFixTool, schema: validateAndFixResponseSchema },
                 commitMessage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
+                strictFix: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
+                enforceLanguage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
             };
 
             const mapping = reqType ? toolMap[reqType] : undefined;
@@ -209,9 +222,9 @@ export class AnthropicService extends BaseLLMService {
                 callCount += 1;
                 if (result.usage) {
                     usages.push(result.usage);
-                    logger.usage('Anthropic', result.usage, config.model, 'Thinking', callCount);
+                    logger.usage('Anthropic', result.usage, config.model, labelFor(reqType), callCount);
                 } else {
-                    logger.usage('Anthropic', undefined, config.model, 'Thinking', callCount);
+                    logger.usage('Anthropic', undefined, config.model, labelFor(reqType), callCount);
                 }
 
                 if (mapping) {
@@ -255,7 +268,7 @@ export class AnthropicService extends BaseLLMService {
         );
 
         if (usages.length) {
-            logger.usageSummary('Anthropic', usages, config.model, 'Thinking');
+            logger.usageSummary('Anthropic', usages, config.model, 'thinking');
         }
 
         return { content: out.commitMessage };
