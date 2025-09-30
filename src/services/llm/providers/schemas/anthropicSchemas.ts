@@ -56,90 +56,16 @@ export const FileSummaryJSONSchema = {
   required: ['file', 'status', 'summary', 'breaking']
 } as const;
 
-export const TemplatePolicyJSONSchema = {
-  type: 'object',
-  properties: {
-    header: {
-      type: 'object',
-      properties: {
-        requireScope: { type: 'boolean' },
-        scopeDerivation: { type: ['string', 'null'], enum: ['directory', 'repo', 'none'] },
-        preferBangForBreaking: { type: 'boolean' },
-        alsoRequireBreakingFooter: { type: 'boolean' }
-      },
-      required: ['requireScope', 'scopeDerivation', 'preferBangForBreaking', 'alsoRequireBreakingFooter']
-    },
-    types: {
-      type: 'object',
-      properties: {
-        allowed: { type: 'array', items: { type: 'string', minLength: 1 } },
-        preferred: { type: ['string', 'null'] },
-        useStandardTypes: { type: 'boolean' }
-      },
-      required: ['allowed', 'preferred', 'useStandardTypes']
-    },
-    body: {
-      type: 'object',
-      properties: {
-        alwaysInclude: { type: 'boolean' },
-        orderedSections: { type: 'array', items: { type: 'string', minLength: 1 } },
-        bulletRules: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              section: { type: 'string', minLength: 1 },
-              maxBullets: { type: 'number', minimum: 1 },
-              style: { type: 'string', enum: ['dash', 'asterisk'] }
-            },
-            required: ['section']
-          }
-        },
-        bulletContentMode: { type: 'string', enum: ['plain', 'file-prefixed', 'type-prefixed'] }
-      },
-      required: ['alwaysInclude', 'orderedSections', 'bulletRules']
-    },
-    footers: {
-      type: 'object',
-      properties: {
-        required: { type: ['array', 'null'], items: { type: 'string', minLength: 1 } },
-        defaults: {
-          type: 'array',
-          items: {
-            type: ['object', 'null'],
-            properties: {
-              token: { type: 'string', minLength: 1 },
-              value: { type: 'string', minLength: 1 }
-            },
-            required: ['token', 'value']
-          }
-        }
-      },
-      required: ['required', 'defaults']
-    },
-    lexicon: {
-      type: 'object',
-      properties: {
-        prefer: { type: 'array', items: { type: 'string', minLength: 1 } },
-        avoid: { type: 'array', items: { type: 'string', minLength: 1 } },
-        tone: { type: 'string', enum: ['imperative', 'neutral', 'friendly'] }
-      },
-      required: ['prefer', 'avoid', 'tone']
-    }
-  },
-  required: ['header', 'types', 'body', 'footers', 'lexicon']
-} as const;
-
 export const ClassifyAndDraftJSONSchema = {
   type: 'object',
   properties: {
     type: { type: 'string', minLength: 1 },
     scope: { type: ['string', 'null'] },
     breaking: { type: 'boolean' },
-    description: { type: 'string', minLength: 1 },
+    description: { type: ['string', 'null'], minLength: 1 },
     body: { type: ['string', 'null'] },
     footers: {
-      type: 'array',
+      type: ['array', 'null'],
       items: {
         type: 'object',
         properties: {
@@ -170,12 +96,6 @@ export const AnthropicFileSummaryTool = {
   name: 'file_summary',
   description: 'Return a structured summary for a single file diff.',
   input_schema: FileSummaryJSONSchema
-} as const;
-
-export const AnthropicTemplatePolicyTool = {
-  name: 'template_policy',
-  description: 'Return a template policy JSON object.',
-  input_schema: TemplatePolicyJSONSchema
 } as const;
 
 export const AnthropicClassifyAndDraftTool = {

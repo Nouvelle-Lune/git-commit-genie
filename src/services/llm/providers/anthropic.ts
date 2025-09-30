@@ -8,12 +8,11 @@ import { DiffData } from '../../git/gitTypes';
 import { logger } from '../../logger';
 import { AnthropicUtils } from './utils/AnthropicUtils';
 import { BaseLLMService, ChatFn, LLMError, LLMResponse } from '../llmTypes';
+import { AnthropicCommitMessageTool, AnthropicRepoAnalysisTool, AnthropicFileSummaryTool, AnthropicClassifyAndDraftTool, AnthropicValidateAndFixTool } from './schemas/anthropicSchemas';
 import {
-    commitMessageSchema as AnthropicCommitSchema,
-    repoAnalysisResponseSchema as AnthropicRepoAnalysisSchema,
+    fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema, repoAnalysisResponseSchema,
+    commitMessageSchema
 } from './schemas/common';
-import { AnthropicCommitMessageTool, AnthropicRepoAnalysisTool, AnthropicFileSummaryTool, AnthropicTemplatePolicyTool, AnthropicClassifyAndDraftTool, AnthropicValidateAndFixTool } from './schemas/anthropicSchemas';
-import { fileSummarySchema, templatePolicySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema } from './schemas/common';
 
 const SECRET_ANTHROPIC_API_KEY = 'gitCommitGenie.secret.anthropicApiKey';
 
@@ -117,7 +116,7 @@ export class AnthropicService extends BaseLLMService {
                 logger.usage('Anthropic', undefined, config.model, 'RepoAnalysis');
             }
 
-            const safe = AnthropicRepoAnalysisSchema.safeParse(response.parsedResponse);
+            const safe = repoAnalysisResponseSchema.safeParse(response.parsedResponse);
             if (!safe.success) {
                 return { message: 'Failed to validate structured response from Anthropic.', statusCode: 500 };
             }
@@ -184,10 +183,9 @@ export class AnthropicService extends BaseLLMService {
             // Map request type to tool and schema
             const toolMap: Record<string, { tool: any, schema: any }> = {
                 summary: { tool: AnthropicFileSummaryTool, schema: fileSummarySchema },
-                templatePolicy: { tool: AnthropicTemplatePolicyTool, schema: templatePolicySchema },
                 draft: { tool: AnthropicClassifyAndDraftTool, schema: classifyAndDraftResponseSchema },
                 fix: { tool: AnthropicValidateAndFixTool, schema: validateAndFixResponseSchema },
-                commitMessage: { tool: AnthropicCommitMessageTool, schema: AnthropicCommitSchema },
+                commitMessage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
             };
 
             const mapping = reqType ? toolMap[reqType] : undefined;
@@ -293,7 +291,7 @@ export class AnthropicService extends BaseLLMService {
                 logger.usage('Anthropic', undefined, config.model, 'default');
             }
 
-            const safe = AnthropicCommitSchema.safeParse(result.parsedResponse);
+            const safe = commitMessageSchema.safeParse(result.parsedResponse);
             if (safe.success) {
                 return { content: safe.data.commitMessage };
             }

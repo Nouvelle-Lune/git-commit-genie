@@ -6,7 +6,7 @@ import { logger } from '../../../logger';
 
 import { ChatMessage, RequestType } from "../../llmTypes";
 
-import { commitMessageSchema, fileSummarySchema, templatePolicySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, repoAnalysisResponseSchema } from "../schemas/common";
+import { commitMessageSchema, fileSummarySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, repoAnalysisResponseSchema } from "../schemas/common";
 
 
 interface OpenAIRequestOptions {
@@ -84,15 +84,6 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                     return { parsedResponse, usage };
 
                 }
-
-
-                //const content = response.choices[0]?.message?.content ?? '';
-                //const usage = options.trackUsage ? (response as any).usage : undefined;
-
-                // Token usage logging is handled at provider level to avoid duplication
-                const parsedResponse = { 'any': '' }; // Placeholder
-                const usage = undefined; // Placeholder
-                return { parsedResponse, usage };
             } catch (e: any) {
                 lastErr = e;
                 const code = e?.status || e?.code;
@@ -128,6 +119,13 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
         messages: ChatMessage[]
     ) {
         if (options.provider === 'OpenAI') {
+            const requestTypeSchemaMap = new Map<RequestType, { schema: any; name: string }>([
+                ['commitMessage', { schema: commitMessageSchema, name: 'commitMessage' }],
+                ['summary', { schema: fileSummarySchema, name: 'fileSummary' }],
+                ['draft', { schema: classifyAndDraftResponseSchema, name: 'classifyAndDraftResponse' }],
+                ['fix', { schema: validateAndFixResponseSchema, name: 'validateAndFixResponse' }],
+                ['repoAnalysis', { schema: repoAnalysisResponseSchema, name: 'repoAnalysisResponse' }]
+            ]);
 
             const baseOptions = {
                 model: options.model,
@@ -141,39 +139,10 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 (baseOptions as OpenAIRequestOptions).temperature = options.temperature ?? 0.2;
             }
 
-            if (options.requestType === 'commitMessage') {
+            const schemaConfig = requestTypeSchemaMap.get(options.requestType);
+            if (schemaConfig) {
                 (baseOptions as OpenAIRequestOptions).text = {
-                    format: zodTextFormat(commitMessageSchema, 'commitMessage')
-                };
-            }
-
-            if (options.requestType === 'summary') {
-                (baseOptions as OpenAIRequestOptions).text = {
-                    format: zodTextFormat(fileSummarySchema, 'fileSummary')
-                };
-            }
-
-            if (options.requestType === 'templatePolicy') {
-                (baseOptions as OpenAIRequestOptions).text = {
-                    format: zodTextFormat(templatePolicySchema, 'templatePolicy')
-                };
-            }
-
-            if (options.requestType === 'draft') {
-                (baseOptions as OpenAIRequestOptions).text = {
-                    format: zodTextFormat(classifyAndDraftResponseSchema, 'classifyAndDraftResponse')
-                };
-            }
-
-            if (options.requestType === 'fix') {
-                (baseOptions as OpenAIRequestOptions).text = {
-                    format: zodTextFormat(validateAndFixResponseSchema, 'validateAndFixResponse')
-                };
-            }
-
-            if (options.requestType === 'repoAnalysis') {
-                (baseOptions as OpenAIRequestOptions).text = {
-                    format: zodTextFormat(repoAnalysisResponseSchema, 'repoAnalysisResponse')
+                    format: zodTextFormat(schemaConfig.schema, schemaConfig.name)
                 };
             }
 
