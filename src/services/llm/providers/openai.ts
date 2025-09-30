@@ -44,7 +44,18 @@ export class OpenAIService extends BaseLLMService {
      * of available chat models (intersecting with our supported set).
      */
     public async validateApiKeyAndListModels(apiKey: string): Promise<string[]> {
-        const preferred = [
+        const preferred = this.listSupportedModels();
+
+        try {
+            const client = new OpenAI({ apiKey });
+            return await this.utils.tryListModels(client, preferred, 'OpenAI');
+        } catch (err: any) {
+            throw new Error(err?.message || 'Failed to validate OpenAI API key.');
+        }
+    }
+
+    public listSupportedModels(): string[] {
+        return [
             'gpt-5',
             'gpt-5-mini',
             'gpt-5-nano',
@@ -54,13 +65,6 @@ export class OpenAIService extends BaseLLMService {
             'gpt-4o-mini',
             'o4-mini'
         ];
-
-        try {
-            const client = new OpenAI({ apiKey });
-            return await this.utils.tryListModels(client, preferred, 'OpenAI');
-        } catch (err: any) {
-            throw new Error(err?.message || 'Failed to validate OpenAI API key.');
-        }
     }
 
     public async setApiKey(apiKey: string): Promise<void> {

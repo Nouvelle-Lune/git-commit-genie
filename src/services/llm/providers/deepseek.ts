@@ -45,16 +45,20 @@ export class DeepSeekService extends BaseLLMService {
      * Returns a curated list intersected with our supported DeepSeek models.
      */
     public async validateApiKeyAndListModels(apiKey: string): Promise<string[]> {
-        const preferred = [
-            'deepseek-chat',
-            'deepseek-reasoner'
-        ];
+        const preferred = this.listSupportedModels();
         try {
             const client = new OpenAI({ apiKey, baseURL: DEEPSEEK_API_URL });
             return await this.utils.tryListModels(client, preferred, 'DeepSeek');
         } catch (err: any) {
             throw new Error(err?.message || 'Failed to validate DeepSeek API key.');
         }
+    }
+
+    public listSupportedModels(): string[] {
+        return [
+            'deepseek-chat',
+            'deepseek-reasoner'
+        ];
     }
 
     public async setApiKey(apiKey: string): Promise<void> {

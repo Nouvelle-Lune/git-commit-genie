@@ -103,17 +103,10 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         this.apiKeyWaiters.set(repositoryPath, disp);
                         try { this.context.subscriptions.push(disp); } catch { /* best-effort */ }
                     }
-                    // Prompt user to configure models
-                    try {
-                        const picked = await vscode.window.showWarningMessage(
-                            vscode.l10n.t(I18N.repoAnalysis.missingApiKey),
-                            vscode.l10n.t(I18N.actions.manageModels),
-                            vscode.l10n.t(I18N.actions.dismiss)
-                        );
-                        if (picked === vscode.l10n.t(I18N.actions.manageModels)) {
-                            void vscode.commands.executeCommand('git-commit-genie.manageModels');
-                        }
-                    } catch { /* ignore UI errors */ }
+                    // Prompt user to fix API key (detached from this task to end progress quickly)
+                    const provider = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
+                    const providerLabel = this.getProviderLabel(provider);
+                    this.promptReplaceKeyOrManage(providerLabel).catch(() => { /* ignore UI errors */ });
                     return 'skipped';
                 }
                 // If model not selected (400), prompt to configure
@@ -242,16 +235,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         this.apiKeyWaiters.set(repositoryPath, disp);
                         try { this.context.subscriptions.push(disp); } catch { }
                     }
-                    try {
-                        const picked = await vscode.window.showWarningMessage(
-                            vscode.l10n.t(I18N.repoAnalysis.missingApiKey),
-                            vscode.l10n.t(I18N.actions.manageModels),
-                            vscode.l10n.t(I18N.actions.dismiss)
-                        );
-                        if (picked === vscode.l10n.t(I18N.actions.manageModels)) {
-                            void vscode.commands.executeCommand('git-commit-genie.manageModels');
-                        }
-                    } catch { }
+                    const provider = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
+                    const providerLabel = this.getProviderLabel(provider);
+                    this.promptReplaceKeyOrManage(providerLabel).catch(() => { /* ignore UI errors */ });
                     return 'skipped';
                 }
                 if (err?.statusCode === 400) {
@@ -508,6 +494,40 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     }
 
     // Commit history is derived directly from Git log
+
+    private getProviderLabel(provider: string): string {
+        switch (provider) {
+            case 'deepseek': return 'DeepSeek';
+            case 'anthropic': return 'Anthropic';
+            case 'gemini': return 'Gemini';
+            default: return 'OpenAI';
+        }
+    }
+
+    // Fire-and-forget UI to let user replace key or open Manage Models
+    private async promptReplaceKeyOrManage(providerLabel: string): Promise<void> {
+        const picked = await vscode.window.showWarningMessage(
+            vscode.l10n.t(I18N.errors.invalidApiKey, providerLabel),
+            vscode.l10n.t(I18N.actions.replaceKey),
+            vscode.l10n.t(I18N.actions.manageModels),
+            vscode.l10n.t(I18N.actions.dismiss)
+        );
+        if (picked === vscode.l10n.t(I18N.actions.replaceKey)) {
+            const newKey = await vscode.window.showInputBox({
+                title: vscode.l10n.t(I18N.manageModels.enterNewKeyTitle, providerLabel),
+                prompt: `${providerLabel} API Key`,
+                placeHolder: `${providerLabel} API Key`,
+                password: true,
+                ignoreFocusOut: true,
+            });
+            if (newKey && newKey.trim()) {
+                await this.llmService?.setApiKey(newKey.trim());
+                await vscode.window.showInformationMessage(vscode.l10n.t(I18N.common.apiKeyUpdated, providerLabel));
+            }
+        } else if (picked === vscode.l10n.t(I18N.actions.manageModels)) {
+            void vscode.commands.executeCommand('git-commit-genie.manageModels');
+        }
+    }
 
     private hashPath(filePath: string): string {
         return crypto.createHash('md5').update(filePath).digest('hex');

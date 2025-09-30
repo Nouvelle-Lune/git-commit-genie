@@ -48,6 +48,9 @@ export interface LLMService {
 
     validateApiKeyAndListModels(apiKey: string): Promise<string[]>;
 
+    // Return supported/known models without network calls
+    listSupportedModels(): string[];
+
     setApiKey(apiKey: string): Promise<void>;
 
     clearApiKey(): Promise<void>;
@@ -70,6 +73,7 @@ export abstract class BaseLLMService implements LLMService {
 
     abstract refreshFromSettings(): Promise<void>;
     abstract validateApiKeyAndListModels(apiKey: string): Promise<string[]>;
+    abstract listSupportedModels(): string[];
     abstract setApiKey(apiKey: string): Promise<void>;
     abstract clearApiKey(): Promise<void>;
     abstract generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
@@ -150,4 +154,3 @@ export abstract class BaseLLMService implements LLMService {
         return JSON.stringify(data, null, 2);
     }
 }
-

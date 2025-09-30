@@ -48,10 +48,7 @@ export class GeminiService extends BaseLLMService {
     }
 
     public async validateApiKeyAndListModels(apiKey: string): Promise<string[]> {
-        const preferred = [
-            'gemini-2.5-flash',
-            'gemini-2.5-pro'
-        ];
+        const preferred = this.listSupportedModels();
         try {
             const client = new GoogleGenAI({ apiKey });
             await this.utils.validateApiKey(client, preferred[0], 'Gemini');
@@ -59,6 +56,13 @@ export class GeminiService extends BaseLLMService {
         } catch (err: any) {
             throw new Error(err?.message || 'Failed to validate Gemini API key.');
         }
+    }
+
+    public listSupportedModels(): string[] {
+        return [
+            'gemini-2.5-flash',
+            'gemini-2.5-pro'
+        ];
     }
 
     public async setApiKey(apiKey: string): Promise<void> {

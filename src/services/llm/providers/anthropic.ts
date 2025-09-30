@@ -41,15 +41,7 @@ export class AnthropicService extends BaseLLMService {
      * of available chat models (intersecting with our supported set).
      */
     public async validateApiKeyAndListModels(apiKey: string): Promise<string[]> {
-        const preferred = [
-            'claude-3-5-haiku-20241022',
-            'claude-sonnet-4-20250514',
-            'claude-3-7-sonnet-20250219',
-            'claude-3-5-sonnet-20241022',
-            'claude-3-5-sonnet-20240620',
-            'claude-opus-4-1-20250805',
-            'claude-opus-4-20250514'
-        ];
+        const preferred = this.listSupportedModels();
 
         try {
             const client = new Anthropic({ apiKey });
@@ -58,6 +50,18 @@ export class AnthropicService extends BaseLLMService {
         } catch (err: any) {
             throw new Error(err?.message || 'Failed to validate Anthropic API key.');
         }
+    }
+
+    public listSupportedModels(): string[] {
+        return [
+            'claude-3-5-haiku-20241022',
+            'claude-sonnet-4-20250514',
+            'claude-3-7-sonnet-20250219',
+            'claude-3-5-sonnet-20241022',
+            'claude-3-5-sonnet-20240620',
+            'claude-opus-4-1-20250805',
+            'claude-opus-4-20250514'
+        ];
     }
 
     public async setApiKey(apiKey: string): Promise<void> {

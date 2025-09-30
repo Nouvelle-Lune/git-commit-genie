@@ -54,15 +54,21 @@ export class ModelCommands {
         }
 
         let models: string[] = [];
+        const sameKey = !!existingKey && apiKeyToUse === existingKey;
         try {
             await vscode.window.withProgress({
                 location: vscode.ProgressLocation.Notification,
-                title: existingKey && apiKeyToUse === existingKey
+                title: sameKey
                     ? vscode.l10n.t(I18N.manageModels.listingModels, providerPick.label)
                     : vscode.l10n.t(I18N.manageModels.validatingKey, providerPick.label),
             }, async () => {
                 const service = this.serviceRegistry.getLLMService(providerPick.value);
-                if (service) {
+                if (!service) { return; }
+
+                if (sameKey) {
+                    // Avoid token-wasting pings when API key is unchanged
+                    models = service.listSupportedModels();
+                } else {
                     models = await service.validateApiKeyAndListModels(apiKeyToUse!);
                 }
             });

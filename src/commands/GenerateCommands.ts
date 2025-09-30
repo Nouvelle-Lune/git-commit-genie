@@ -130,7 +130,34 @@ export class GenerateCommands {
 
     private async handleError(result: any): Promise<void> {
         if (result.statusCode === 401) {
-            await vscode.commands.executeCommand('git-commit-genie.manageModels');
+            const provider = this.serviceRegistry.getProvider().toLowerCase();
+            const providerLabel = this.getProviderLabel(provider);
+
+            // Detach UI prompts so the withProgress can end immediately
+            void (async () => {
+                const choice = await vscode.window.showWarningMessage(
+                    vscode.l10n.t(I18N.errors.invalidApiKey, providerLabel),
+                    vscode.l10n.t(I18N.actions.replaceKey),
+                    vscode.l10n.t(I18N.actions.manageModels),
+                    vscode.l10n.t(I18N.actions.dismiss)
+                );
+                if (choice === vscode.l10n.t(I18N.actions.replaceKey)) {
+                    const newKey = await vscode.window.showInputBox({
+                        title: vscode.l10n.t(I18N.manageModels.enterNewKeyTitle, providerLabel),
+                        prompt: `${providerLabel} API Key`,
+                        placeHolder: `${providerLabel} API Key`,
+                        password: true,
+                        ignoreFocusOut: true,
+                    });
+                    if (newKey && newKey.trim()) {
+                        const service = this.serviceRegistry.getLLMService(provider);
+                        await service?.setApiKey(newKey.trim());
+                        await vscode.window.showInformationMessage(vscode.l10n.t(I18N.common.apiKeyUpdated, providerLabel));
+                    }
+                } else if (choice === vscode.l10n.t(I18N.actions.manageModels)) {
+                    await vscode.commands.executeCommand('git-commit-genie.manageModels');
+                }
+            })();
             return;
         }
 
@@ -138,6 +165,15 @@ export class GenerateCommands {
             vscode.window.showInformationMessage(vscode.l10n.t(I18N.generation.cancelled));
         } else {
             vscode.window.showErrorMessage(vscode.l10n.t(I18N.generation.errorGenerating, result.message));
+        }
+    }
+
+    private getProviderLabel(provider: string): string {
+        switch (provider) {
+            case 'deepseek': return 'DeepSeek';
+            case 'anthropic': return 'Anthropic';
+            case 'gemini': return 'Gemini';
+            default: return 'OpenAI';
         }
     }
 }
