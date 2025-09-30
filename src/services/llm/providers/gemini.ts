@@ -201,9 +201,10 @@ export class GeminiService extends BaseLLMService {
             };
 
             const schema = reqType ? schemaMap[reqType] : undefined;
-            const maxRetries = 2;
+            const retries = config.maxRetries ?? 2;
+            const totalAttempts = Math.max(1, retries + 1);
 
-            for (let attempt = 0; attempt < maxRetries; attempt++) {
+            for (let attempt = 0; attempt < totalAttempts; attempt++) {
                 const result = await this.utils.callChatCompletion(this.client!, messages, {
                     model: config.model,
                     provider: 'Gemini',
@@ -229,12 +230,12 @@ export class GeminiService extends BaseLLMService {
                         return safe.data;
                     }
 
-                    if (attempt < maxRetries - 1) {
-                        logger.warn(`[Genie][Gemini] Schema validation failed for ${reqType} (attempt ${attempt + 1}/${maxRetries}). Retrying...`);
+                    if (attempt < totalAttempts - 1) {
+                        logger.warn(`[Genie][Gemini] Schema validation failed for ${reqType} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
                         continue;
                     }
 
-                    throw new Error(`Gemini structured result failed local validation for ${reqType} after ${maxRetries} attempts`);
+                    throw new Error(`Gemini structured result failed local validation for ${reqType} after ${totalAttempts} attempts`);
                 }
 
                 // Fallback: return raw data
@@ -272,10 +273,11 @@ export class GeminiService extends BaseLLMService {
         rules: any,
         options?: { token?: vscode.CancellationToken }
     ): Promise<LLMResponse | LLMError> {
-        const maxRetries = 2;
+        const retries = config.maxRetries ?? 2;
+        const totalAttempts = Math.max(1, retries + 1);
         let lastError: any;
 
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
             const result = await this.utils.callChatCompletion(
                 this.client!,
                 [
@@ -303,8 +305,8 @@ export class GeminiService extends BaseLLMService {
             }
 
             lastError = safe.error;
-            if (attempt < maxRetries - 1) {
-                logger.warn(`[Genie][Gemini] Schema validation failed (attempt ${attempt + 1}/${maxRetries}). Retrying...`);
+            if (attempt < totalAttempts - 1) {
+                logger.warn(`[Genie][Gemini] Schema validation failed (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
             }
         }
 

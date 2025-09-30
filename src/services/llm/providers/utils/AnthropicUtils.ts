@@ -37,7 +37,9 @@ export class AnthropicUtils extends BaseProviderUtils {
         this.checkCancellation(options.token);
 
         let lastErr: any;
-        for (let attempt = 0; attempt < 2; attempt++) {
+        const retries = this.getMaxRetries();
+        const totalAttempts = Math.max(1, retries + 1);
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
             try {
                 const requestOptions: any = {
                     model: options.model,
@@ -89,7 +91,7 @@ export class AnthropicUtils extends BaseProviderUtils {
                 if (code === 429) {
                     await this.maybeWarnRateLimit(options.provider, options.model);
                     const wait = this.getRetryDelayMs(e);
-                    logger.warn(`[Genie][${options.provider}] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/2)`);
+                    logger.warn(`[Genie][${options.provider}] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
                     await this.sleep(wait);
                     continue;
                 }

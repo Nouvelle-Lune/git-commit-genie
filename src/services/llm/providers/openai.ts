@@ -9,6 +9,13 @@ import { logger } from '../../logger';
 import { ChatFn } from "../llmTypes";
 import { LLMAnalysisResponse, AnalysisPromptParts } from "../../analysis/analysisTypes";
 import { OpenAICompatibleUtils } from './utils/OpenAICompatibleUtils';
+import {
+    fileSummarySchema,
+    classifyAndDraftResponseSchema,
+    validateAndFixResponseSchema,
+    repoAnalysisResponseSchema,
+    commitMessageSchema
+} from './schemas/common';
 
 const SECRET_OPENAI_API_KEY = 'gitCommitGenie.secret.openaiApiKey';
 
@@ -108,19 +115,20 @@ export class OpenAIService extends BaseLLMService {
                 }
             );
 
-            if (!prased.parsedResponse) {
-                return { message: 'Failed to parse response from OpenAI.', statusCode: 500 };
-            }
-
             if (prased.usage) {
                 logger.usage('OpenAI', prased.usage, modle, 'RepoAnalysis');
             }
 
+            const safe = repoAnalysisResponseSchema.safeParse(prased.parsedResponse);
+            if (!safe.success) {
+                return { message: 'Failed to validate structured response from OpenAI.', statusCode: 500 };
+            }
+
             return {
-                summary: prased.parsedResponse.summary,
-                projectType: prased.parsedResponse.projectType,
-                technologies: prased.parsedResponse.technologies,
-                insights: prased.parsedResponse.insights,
+                summary: safe.data.summary,
+                projectType: safe.data.projectType,
+                technologies: safe.data.technologies,
+                insights: safe.data.insights,
                 usage: prased.usage
             };
         } catch (error: any) {
@@ -179,25 +187,51 @@ export class OpenAIService extends BaseLLMService {
         let callCount = 0;
 
         const chat: ChatFn = async (messages, _options) => {
-            const result = await this.utils.callChatCompletion(this.openai!, messages, {
-                model: config.model,
-                provider: 'OpenAI',
-                token: options?.token,
-                trackUsage: true,
-                requestType: _options!.requestType
-            });
+            const reqType = _options?.requestType;
+            const schemaMap: Record<string, any> = {
+                summary: fileSummarySchema,
+                draft: classifyAndDraftResponseSchema,
+                fix: validateAndFixResponseSchema,
+                commitMessage: commitMessageSchema,
+            };
 
-            callCount += 1;
-            if (result.usage) {
-                usages.push(result.usage);
-                // Add model info to usage for cost calculation
-                result.usage.model = config.model;
-                logger.usage('OpenAI', result.usage, result.usage.model, 'Thinking', callCount);
-            } else {
-                logger.usage('OpenAI', undefined, result.usage.model, 'Thinking', callCount);
+            const validationSchema = reqType ? schemaMap[reqType] : undefined;
+            const retries = config.maxRetries ?? 2;
+            const totalAttempts = Math.max(1, retries + 1);
+
+            for (let attempt = 0; attempt < totalAttempts; attempt++) {
+                const result = await this.utils.callChatCompletion(this.openai!, messages, {
+                    model: config.model,
+                    provider: 'OpenAI',
+                    token: options?.token,
+                    trackUsage: true,
+                    requestType: _options!.requestType
+                });
+
+                callCount += 1;
+                if (result.usage) {
+                    usages.push(result.usage);
+                    // Add model info to usage for cost calculation
+                    result.usage.model = config.model;
+                    logger.usage('OpenAI', result.usage, result.usage.model, 'Thinking', callCount);
+                } else {
+                    logger.usage('OpenAI', undefined, config.model, 'Thinking', callCount);
+                }
+
+                if (validationSchema) {
+                    const safe = validationSchema.safeParse(result.parsedResponse);
+                    if (safe.success) {
+                        return safe.data;
+                    }
+                    if (attempt < totalAttempts - 1) {
+                        logger.warn(`[Genie][OpenAI] Schema validation failed for ${reqType} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
+                        continue;
+                    }
+                    throw new Error(`OpenAI structured result failed local validation for ${reqType} after ${totalAttempts} attempts`);
+                }
+
+                return result.parsedResponse;
             }
-
-            return result.parsedResponse;
         };
 
         const out = await generateCommitMessageChain(
@@ -230,33 +264,42 @@ export class OpenAIService extends BaseLLMService {
         rules: any,
         options?: { token?: vscode.CancellationToken }
     ): Promise<LLMResponse | LLMError> {
-        const result = await this.utils.callChatCompletion(
-            this.openai!,
-            [
-                { role: 'system', content: rules.baseRule },
-                { role: 'user', content: jsonMessage }
-            ],
-            {
-                model: config.model,
-                provider: 'OpenAI',
-                token: options?.token,
-                trackUsage: true,
-                requestType: 'commitMessage'
+        const retries = config.maxRetries ?? 2;
+        const totalAttempts = Math.max(1, retries + 1);
+        let lastError: any;
+
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            const result = await this.utils.callChatCompletion(
+                this.openai!,
+                [
+                    { role: 'system', content: rules.baseRule },
+                    { role: 'user', content: jsonMessage }
+                ],
+                {
+                    model: config.model,
+                    provider: 'OpenAI',
+                    token: options?.token,
+                    trackUsage: true,
+                    requestType: 'commitMessage'
+                }
+            );
+
+            if (result.usage) {
+                result.usage.model = config.model;
             }
-        );
+            logger.usage('OpenAI', result.usage, config.model, 'default');
 
-        // Add model info to usage for cost calculation
-        if (result.usage) {
-            result.usage.model = config.model;
+            const safe = commitMessageSchema.safeParse(result.parsedResponse);
+            if (safe.success) {
+                return { content: safe.data.commitMessage };
+            }
+            lastError = safe.error;
+            if (attempt < totalAttempts - 1) {
+                logger.warn(`[Genie][OpenAI] Schema validation failed (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
+            }
         }
-        logger.usage('OpenAI', result.usage, result.usage.model, 'default');
 
-        if (result.parsedResponse) {
-            // OpenAI structured returns parsed JSON content
-            return { content: result.parsedResponse.commitMessage };
-        } else {
-            return { message: 'Failed to generate commit message from OpenAI.', statusCode: 500 };
-        }
+        return { message: 'Failed to validate structured commit message from OpenAI.', statusCode: 500 };
     }
 
 }

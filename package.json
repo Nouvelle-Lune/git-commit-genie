@@ -117,6 +117,13 @@
           "minimum": 1,
           "markdownDescription": "%config.chain.maxParallelNew.desc%"
         },
+        "gitCommitGenie.llm.maxRetries": {
+          "order": 3,
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "markdownDescription": "%config.llm.maxRetries.desc%"
+        },
         "gitCommitGenie.developerMode": {
           "order": 2,
           "type": "boolean",

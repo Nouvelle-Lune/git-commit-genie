@@ -79,8 +79,23 @@ export class BaseProviderUtils {
                 const v = cfg.get<number>('gitCommitGenie.chain.maxParallel');
                 if (typeof v === 'number' && !isNaN(v)) { return v; }
                 return cfg.get<number>('gitCommitGenie.chainMaxParallel', 4);
+            })()),
+            maxRetries: Math.max(1, ((): number => {
+                const v = cfg.get<number>('gitCommitGenie.llm.maxRetries');
+                if (typeof v === 'number' && !isNaN(v)) { return v; }
+                return 2;
             })())
         };
+    }
+
+    /**
+     * Read global max retries for provider calls
+     */
+    public getMaxRetries(): number {
+        const cfg = vscode.workspace.getConfiguration();
+        const v = cfg.get<number>('gitCommitGenie.llm.maxRetries');
+        if (typeof v === 'number' && !isNaN(v) && v >= 1) { return v; }
+        return 2;
     }
 
     /**

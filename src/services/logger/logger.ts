@@ -238,7 +238,7 @@ export class Logger {
 
         // Format output
         const formattedCost = totalCost.toFixed(6);
-        const formattedCachePercentage = cachePercentage.toFixed(5);
+        const formattedCachePercentage = cachePercentage.toFixed(2);
         const contextInfo = callType ? ` [${callType}${callCount ? `-${callCount}` : ''}]` : '';
         const currency = provider === 'DeepSeek' ? '¥' : '$';
         const message = `[${provider}]${contextInfo} Total Token Usage: input ${totalInputTokens} | output ${totalOutputTokens} | total ${totalTokens} | Cache: ${formattedCachePercentage}% | Cost: ${formattedCost}${currency} (${usages.length} calls)`;

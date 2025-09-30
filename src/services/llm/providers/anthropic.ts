@@ -189,9 +189,10 @@ export class AnthropicService extends BaseLLMService {
             };
 
             const mapping = reqType ? toolMap[reqType] : undefined;
-            const maxRetries = 2;
+            const retries = config.maxRetries ?? 2;
+            const totalAttempts = Math.max(1, retries + 1);
 
-            for (let attempt = 0; attempt < maxRetries; attempt++) {
+            for (let attempt = 0; attempt < totalAttempts; attempt++) {
                 const result = await this.utils.callChatCompletion(this.client!, messages, {
                     model: config.model,
                     provider: 'Anthropic',
@@ -215,8 +216,8 @@ export class AnthropicService extends BaseLLMService {
                         return safe.data;
                     }
 
-                    if (attempt < maxRetries - 1) {
-                        logger.warn(`[Genie][Anthropic] Schema validation failed for ${reqType} (attempt ${attempt + 1}/${maxRetries}). Retrying...`);
+                    if (attempt < totalAttempts - 1) {
+                        logger.warn(`[Genie][Anthropic] Schema validation failed for ${reqType} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
 
                         const systemMessages = messages.filter(m => m.role === 'system');
                         if (systemMessages.length > 0) {
@@ -227,7 +228,7 @@ export class AnthropicService extends BaseLLMService {
                         continue;
                     }
 
-                    throw new Error(`Anthropic tool result failed local validation for ${reqType} after ${maxRetries} attempts`);
+                    throw new Error(`Anthropic tool result failed local validation for ${reqType} after ${totalAttempts} attempts`);
                 }
 
                 // Fallback: return raw content text (should not happen in our chain)
@@ -265,10 +266,11 @@ export class AnthropicService extends BaseLLMService {
         rules: any,
         options?: { token?: vscode.CancellationToken }
     ): Promise<LLMResponse | LLMError> {
-        const maxRetries = 2;
+        const retries = config.maxRetries ?? 2;
+        const totalAttempts = Math.max(1, retries + 1);
         let lastError: any;
 
-        for (let attempt = 0; attempt < maxRetries; attempt++) {
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
             const result = await this.utils.callChatCompletion(
                 this.client!,
                 [
@@ -297,8 +299,8 @@ export class AnthropicService extends BaseLLMService {
             }
 
             lastError = safe.error;
-            if (attempt < maxRetries - 1) {
-                logger.warn(`[Genie][Anthropic] Schema validation failed (attempt ${attempt + 1}/${maxRetries}). Retrying...`);
+            if (attempt < totalAttempts - 1) {
+                logger.warn(`[Genie][Anthropic] Schema validation failed (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
             }
         }
 
