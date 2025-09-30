@@ -4,6 +4,7 @@ import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { ConfigurationManager } from '../config/ConfigurationManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
+import { API, GitExtension } from '../services/git/git';
 
 export class StatusBarManager {
     private statusBarItem!: vscode.StatusBarItem;
@@ -36,6 +37,15 @@ export class StatusBarManager {
             } catch { /* ignore */ }
         });
         this.context.subscriptions.push(disp);
+
+        // Watch for workspace folder changes
+        const workspaceDisp = vscode.workspace.onDidChangeWorkspaceFolders(() => {
+            this.updateStatusBar();
+        });
+        this.context.subscriptions.push(workspaceDisp);
+
+        // Setup Git repository change listeners
+        this.setupGitRepositoryListeners();
 
         // Seed API key availability
         await this.refreshApiKeyState();
@@ -139,26 +149,63 @@ export class StatusBarManager {
 
     private detectGitRepo(): boolean {
         try {
-            const wf = vscode.workspace.workspaceFolders;
-            if (!wf || wf.length === 0) {
-                return false;
+            // Use VS Code Git API to detect any repository
+            const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
+            if (gitExtension) {
+                const api = gitExtension.getAPI(1);
+                return api && api.repositories.length > 0;
             }
-            const repoPath = wf[0].uri.fsPath;
-            // Simple and reliable: check for .git folder at root
-            return fs.existsSync(path.join(repoPath, '.git'));
+            return false;
         } catch {
             return false;
+        }
+    }
+
+
+
+    private setupGitRepositoryListeners(): void {
+        try {
+            const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
+            if (!gitExtension) {
+                return;
+            }
+
+            const api = gitExtension.getAPI(1);
+
+            // Listen for repository changes
+            const repoDisp = api.onDidOpenRepository(() => {
+                this.updateStatusBar();
+            });
+            this.context.subscriptions.push(repoDisp);
+
+            const repoCloseDisp = api.onDidCloseRepository(() => {
+                this.updateStatusBar();
+            });
+            this.context.subscriptions.push(repoCloseDisp);
+
+        } catch {
+            // ignore errors in git listener setup
         }
     }
 
     private updateRepoAnalysisStatus(): void {
         try {
             if (this.configManager.isRepoAnalysisEnabled() && this.hasGitRepo) {
-                const wf = vscode.workspace.workspaceFolders;
-                if (wf && wf.length > 0) {
-                    const repoPath = wf[0].uri.fsPath;
-                    const mdPath = this.serviceRegistry.getAnalysisService().getAnalysisMarkdownFilePath(repoPath);
-                    this.repoAnalysisMissing = !fs.existsSync(mdPath);
+                // Use VS Code Git API to get repository path
+                const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
+                if (gitExtension) {
+                    const api = gitExtension.getAPI(1);
+                    if (api && api.repositories.length > 0) {
+                        const repoPath = api.repositories[0].rootUri?.fsPath;
+                        if (repoPath) {
+                            const mdPath = this.serviceRegistry.getAnalysisService().getAnalysisMarkdownFilePath(repoPath);
+                            this.repoAnalysisMissing = !fs.existsSync(mdPath);
+                        } else {
+                            this.repoAnalysisMissing = false;
+                        }
+                    } else {
+                        this.repoAnalysisMissing = false;
+                    }
                 } else {
                     this.repoAnalysisMissing = false;
                 }

@@ -4,6 +4,7 @@ import { DiffData } from '../git/gitTypes';
 import { TemplateService } from '../../template/templateService';
 import { IRepositoryAnalysisService } from '../analysis/analysisTypes';
 import { LLMAnalysisResponse, AnalysisPromptParts } from '../analysis/analysisTypes';
+import { GitExtension } from '../git/git';
 
 export type ChatRole = 'system' | 'user' | 'assistant' | 'developer';
 
@@ -74,6 +75,22 @@ export abstract class BaseLLMService implements LLMService {
     abstract generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
     abstract generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options?: { token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError>;
 
+    protected getRepositoryPath(): string | null {
+        try {
+            // Use VS Code Git API to get repository path safely
+            const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
+            if (gitExtension) {
+                const api = gitExtension.getAPI(1);
+                if (api && api.repositories.length > 0) {
+                    return api.repositories[0].rootUri?.fsPath || null;
+                }
+            }
+            return null;
+        } catch {
+            return null;
+        }
+    }
+
     protected async buildJsonMessage(diffs: DiffData[]): Promise<string> {
         const time = new Date().toISOString();
 
@@ -85,9 +102,8 @@ export abstract class BaseLLMService implements LLMService {
         let repositoryAnalysis = '';
         if (this.analysisService) {
             try {
-                const workspaceFolders = vscode.workspace.workspaceFolders;
-                if (workspaceFolders && workspaceFolders.length > 0) {
-                    const repositoryPath = workspaceFolders[0].uri.fsPath;
+                const repositoryPath = this.getRepositoryPath();
+                if (repositoryPath) {
                     repositoryAnalysis = await this.analysisService.getAnalysisForPrompt(repositoryPath);
                     repositoryAnalysis = JSON.parse(repositoryAnalysis);
                 }

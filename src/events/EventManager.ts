@@ -175,6 +175,20 @@ export class EventManager {
 
     private repoFromMdUri(uri: vscode.Uri): string | null {
         try {
+            // Use Git API to find the actual repository for this file
+            const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+            if (gitExtension) {
+                const api = gitExtension.getAPI(1);
+                for (const repo of api.repositories) {
+                    // Check if this URI is within this repository
+                    const repoRoot = repo.rootUri?.fsPath;
+                    if (repoRoot && uri.fsPath.startsWith(repoRoot)) {
+                        return repoRoot;
+                    }
+                }
+            }
+
+            // Fallback: assume .gitgenie is in repo root
             const mdPath = uri.fsPath;
             const dir = path.dirname(mdPath); // .../.gitgenie
             const repo = path.dirname(dir);
@@ -190,32 +204,41 @@ export class EventManager {
             return;
         }
 
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (workspaceFolders && workspaceFolders.length > 0) {
-            try {
-                const repositoryPath = workspaceFolders[0].uri.fsPath;
-                // If no Git repository yet, do nothing now; a watcher will trigger once initialized
-                if (!fs.existsSync(path.join(repositoryPath, '.git'))) {
-                    logger.info('[Genie][RepoAnalysis] Git repository not initialized. Skipping analysis init.');
-                    return;
-                }
-
-                // Check if analysis already exists
-                const analysisService = this.serviceRegistry.getAnalysisService();
-                const existingAnalysis = await analysisService.getAnalysis(repositoryPath);
-                if (!existingAnalysis) {
-                    logger.info('Initializing repository analysis for new workspace...');
-                    // Initialize in the background
-                    this.statusBarManager.setRepoAnalysisRunning(true);
-                    analysisService.initializeRepository(repositoryPath).catch(error => {
-                        logger.error('Failed to initialize repository analysis:', error);
-                    }).finally(() => {
-                        this.statusBarManager.setRepoAnalysisRunning(false);
-                    });
-                }
-            } catch (error) {
-                logger.error('Error during repository analysis initialization:', error);
+        try {
+            // Use VS Code Git API to detect repository
+            const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+            if (!gitExtension) {
+                logger.info('[Genie][RepoAnalysis] VS Code Git extension not found. Skipping analysis init.');
+                return;
             }
+
+            const api = gitExtension.getAPI(1);
+            if (!api || api.repositories.length === 0) {
+                logger.info('[Genie][RepoAnalysis] No Git repository found. Skipping analysis init.');
+                return;
+            }
+
+            const repositoryPath = api.repositories[0].rootUri?.fsPath;
+            if (!repositoryPath) {
+                logger.info('[Genie][RepoAnalysis] Could not get repository path. Skipping analysis init.');
+                return;
+            }
+
+            // Check if analysis already exists
+            const analysisService = this.serviceRegistry.getAnalysisService();
+            const existingAnalysis = await analysisService.getAnalysis(repositoryPath);
+            if (!existingAnalysis) {
+                logger.info('Initializing repository analysis for new workspace...');
+                // Initialize in the background
+                this.statusBarManager.setRepoAnalysisRunning(true);
+                analysisService.initializeRepository(repositoryPath).catch(error => {
+                    logger.error('Failed to initialize repository analysis:', error);
+                }).finally(() => {
+                    this.statusBarManager.setRepoAnalysisRunning(false);
+                });
+            }
+        } catch (error) {
+            logger.error('Error during repository analysis initialization:', error);
         }
     }
 

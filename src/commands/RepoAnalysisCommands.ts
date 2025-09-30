@@ -5,6 +5,7 @@ import { StatusBarManager } from '../ui/StatusBarManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { RepoAnalysisRunResult } from '../services/analysis/analysisTypes';
 import { logger } from '../services/logger';
+import { GitExtension } from '../services/git/git';
 
 export class RepoAnalysisCommands {
     constructor(
@@ -35,19 +36,34 @@ export class RepoAnalysisCommands {
         );
     }
 
+    private getRepositoryPath(): string | null {
+        try {
+            // Use VS Code Git API to get repository path safely
+            const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
+            if (gitExtension) {
+                const api = gitExtension.getAPI(1);
+                if (api && api.repositories.length > 0) {
+                    return api.repositories[0].rootUri?.fsPath || null;
+                }
+            }
+            return null;
+        } catch {
+            return null;
+        }
+    }
+
     private async viewRepositoryAnalysis(): Promise<void> {
         if (!this.isRepoAnalysisEnabled()) {
             return;
         }
 
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) {
-            vscode.window.showErrorMessage(vscode.l10n.t(I18N.common.noWorkspace));
+        const repositoryPath = this.getRepositoryPath();
+        if (!repositoryPath) {
+            vscode.window.showErrorMessage('No Git repository found.');
             return;
         }
 
         try {
-            const repositoryPath = workspaceFolders[0].uri.fsPath;
             const analysisService = this.serviceRegistry.getAnalysisService();
             const analysis = await analysisService.getAnalysis(repositoryPath);
 
@@ -102,14 +118,13 @@ export class RepoAnalysisCommands {
             return;
         }
 
-        const workspaceFolders = vscode.workspace.workspaceFolders;
-        if (!workspaceFolders || workspaceFolders.length === 0) {
-            vscode.window.showErrorMessage(vscode.l10n.t(I18N.common.noWorkspace));
+        const repositoryPath = this.getRepositoryPath();
+        if (!repositoryPath) {
+            vscode.window.showErrorMessage('No Git repository found.');
             return;
         }
 
         try {
-            const repositoryPath = workspaceFolders[0].uri.fsPath;
             const analysisService = this.serviceRegistry.getAnalysisService();
 
             let updateResult = 'skipped';
