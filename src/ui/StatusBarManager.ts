@@ -5,6 +5,7 @@ import { ServiceRegistry } from '../core/ServiceRegistry';
 import { ConfigurationManager } from '../config/ConfigurationManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { API, GitExtension } from '../services/git/git';
+import { costTracker } from '../services/cost';
 
 export class StatusBarManager {
     private statusBarItem!: vscode.StatusBarItem;
@@ -97,11 +98,35 @@ export class StatusBarManager {
             : vscode.l10n.t(I18N.statusBar.tooltipNeedConfig, providerLabel);
 
         const repoTooltip = this.getRepoTooltip();
+        // Set a baseline tooltip immediately, then enrich with cost info asynchronously
         this.statusBarItem.tooltip = repoTooltip ? `${baseTooltip}\n${repoTooltip}` : baseTooltip;
+        void this.enrichTooltipWithCost(baseTooltip, repoTooltip);
 
         // Click action: when no Git repo, jump to official initialize command; otherwise open Genie menu
         this.statusBarItem.command = !this.hasGitRepo ? 'git.init' : 'git-commit-genie.genieMenu';
         this.statusBarItem.show();
+    }
+
+    private async enrichTooltipWithCost(baseTooltip: string, repoTooltip: string): Promise<void> {
+        try {
+
+            const cost = await costTracker.getRepositoryCost();
+            const parts: string[] = [baseTooltip];
+            if (repoTooltip) { parts.push(repoTooltip); }
+
+            // Prepare cost line (use i18n messages)
+            if (cost > 0) {
+                const formatted = cost.toFixed(6);
+                parts.push(vscode.l10n.t(I18N.cost.totalCost, formatted));
+            } else {
+                parts.push(vscode.l10n.t(I18N.cost.noCostRecorded));
+            }
+
+            // Only update if tooltip still corresponds to current provider/model state
+            this.statusBarItem.tooltip = parts.join('\n');
+        } catch {
+            // Silently ignore; keep baseline tooltip
+        }
     }
 
     private secretNameFor(provider: string): string {
