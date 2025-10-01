@@ -101,6 +101,20 @@ export const L10N_KEYS = {
     renameExists: 'A template with that name already exists.',
     renameFailed: 'Rename failed: {0}',
     openFailed: 'Failed to open template: {0}'
+  },
+  costNotification: {
+    commitMessageGeneration: 'Commit message generation: ${0} | Cache hit: {1}%',
+    repositoryAnalysis: 'Repository analysis: ${0} | Cache hit: {1}%'
+  },
+  cost: {
+    noCostRecorded: 'No AI usage cost recorded for this repository yet.',
+    totalCost: 'Total AI usage cost for this repository: ${0}',
+    failedToGetCost: 'Failed to get repository cost: {0}',
+    resetConfirmation: 'Are you sure you want to reset the cost tracking for this repository? This action cannot be undone.',
+    reset: 'Reset',
+    cancel: 'Cancel',
+    resetSuccess: 'Repository cost has been reset to $0.00',
+    failedToReset: 'Failed to reset repository cost: {0}'
   }
 } as const;
 

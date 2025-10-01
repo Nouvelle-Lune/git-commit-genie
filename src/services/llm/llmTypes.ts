@@ -13,7 +13,15 @@ export interface ChatMessage {
     content: string;
 }
 
-export type RequestType = 'commitMessage' | 'summary' | 'draft' | 'fix' | 'repoAnalysis';
+export type RequestType =
+    | 'commitMessage'
+    | 'summary'
+    | 'draft'
+    | 'fix'
+    | 'repoAnalysis'
+    // More granular chain stages for clearer logging
+    | 'strictFix'
+    | 'enforceLanguage';
 
 export type ChatFn = (
     messages: ChatMessage[],

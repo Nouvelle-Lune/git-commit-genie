@@ -120,7 +120,9 @@ export class OpenAIService extends BaseLLMService {
             );
 
             if (prased.usage) {
-                logger.usage('OpenAI', prased.usage, modle, 'RepoAnalysis');
+                logger.usageSummary('OpenAI', [prased.usage], modle, 'RepoAnalysis');
+            } else {
+                logger.usageSummary('OpenAI', [], modle, 'RepoAnalysis');
             }
 
             const safe = repoAnalysisResponseSchema.safeParse(prased.parsedResponse);
@@ -303,8 +305,10 @@ export class OpenAIService extends BaseLLMService {
 
             if (result.usage) {
                 result.usage.model = config.model;
+                logger.usageSummary('OpenAI', [result.usage], config.model, 'default');
+            } else {
+                logger.usageSummary('OpenAI', [], config.model, 'default');
             }
-            logger.usage('OpenAI', result.usage, config.model, 'default');
 
             const safe = commitMessageSchema.safeParse(result.parsedResponse);
             if (safe.success) {

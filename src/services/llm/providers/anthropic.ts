@@ -115,9 +115,9 @@ export class AnthropicService extends BaseLLMService {
             );
 
             if (response.usage) {
-                logger.usage('Anthropic', response.usage, config.model, 'RepoAnalysis');
+                logger.usageSummary('Anthropic', [response.usage], config.model, 'RepoAnalysis');
             } else {
-                logger.usage('Anthropic', undefined, config.model, 'RepoAnalysis');
+                logger.usageSummary('Anthropic', [], config.model, 'RepoAnalysis');
             }
 
             const safe = repoAnalysisResponseSchema.safeParse(response.parsedResponse);
@@ -305,9 +305,9 @@ export class AnthropicService extends BaseLLMService {
             );
 
             if (result.usage) {
-                logger.usage('Anthropic', result.usage, config.model, 'default');
+                logger.usageSummary('Anthropic', [result.usage], config.model, 'default');
             } else {
-                logger.usage('Anthropic', undefined, config.model, 'default');
+                logger.usageSummary('Anthropic', [], config.model, 'default');
             }
 
             const safe = commitMessageSchema.safeParse(result.parsedResponse);

@@ -113,7 +113,9 @@ export class DeepSeekService extends BaseLLMService {
             );
 
             if (prased.usage) {
-                logger.usage('DeepSeek', prased.usage, modle, 'RepoAnalysis');
+                logger.usageSummary('DeepSeek', [prased.usage], modle, 'RepoAnalysis');
+            } else {
+                logger.usageSummary('DeepSeek', [], modle, 'RepoAnalysis');
             }
 
             const safe = repoAnalysisResponseSchema.safeParse(prased.parsedResponse);
@@ -298,9 +300,10 @@ export class DeepSeekService extends BaseLLMService {
 
             if (result.usage) {
                 result.usage.model = config.model;
+                logger.usageSummary('DeepSeek', [result.usage], config.model, 'default');
+            } else {
+                logger.usageSummary('DeepSeek', [], config.model, 'default');
             }
-
-            logger.usage('DeepSeek', result.usage, config.model, 'default');
 
             const safe = commitMessageSchema.safeParse(result.parsedResponse);
             if (safe.success) {

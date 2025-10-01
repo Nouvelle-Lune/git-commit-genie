@@ -43,7 +43,7 @@ function generateUniqueFileName(targetDir: string, baseName: string): string {
 }
 
 export class TemplateService {
-	constructor(private readonly context: vscode.ExtensionContext) { }
+    constructor(private readonly context: vscode.ExtensionContext) { }
 
 	private getGlobalTemplatesDir(): string {
 		const base = this.context.globalStorageUri.fsPath;
@@ -86,13 +86,16 @@ export class TemplateService {
 		return pick?.value;
 	}
 
-	private async getWorkspaceTemplatesDir(
-		chosenFolder?: vscode.WorkspaceFolder,
-		createIfMissing: boolean = true
-	): Promise<string | undefined> {
-		const folder = chosenFolder ?? await this.pickWorkspaceFolder();
-		if (!folder) { return undefined; }
-		const dir = path.join(folder.uri.fsPath, '.gitgenie', 'templates');
+    private async getWorkspaceTemplatesDir(
+        chosenFolder?: vscode.WorkspaceFolder,
+        createIfMissing: boolean = true
+    ): Promise<string | undefined> {
+        const folder = chosenFolder ?? await this.pickWorkspaceFolder();
+        if (!folder) { return undefined; }
+        // Prefer repository root (safer for nested workspaces or multi-root); fallback to workspace folder
+        const repoRoot = await this.getRepoRootPath(folder);
+        const baseDir = repoRoot ?? folder.uri.fsPath;
+        const dir = path.join(baseDir, '.gitgenie', 'templates');
 
 		if (!createIfMissing) {
 			return ensureDir(dir, true) ? dir : undefined;
@@ -103,15 +106,48 @@ export class TemplateService {
 			return dir;
 		}
 
-		// Create directory
-		if (!ensureDir(dir)) {
-			return undefined;
-		}
+        // Create directory
+        if (!ensureDir(dir)) {
+            return undefined;
+        }
 
 		// Update .gitignore only when creating directory for the first time
 		await this.updateGitignoreForTemplates(folder);
-		return dir;
-	}
+        return dir;
+    }
+
+    /**
+     * Get the Git repository root for a given workspace folder using VS Code Git API (safe access).
+     * Falls back to the workspace folder path when Git is unavailable or no repo is detected.
+     */
+    private async getRepoRootPath(targetFolder?: vscode.WorkspaceFolder): Promise<string | undefined> {
+        const gitExtension: any = vscode.extensions.getExtension('vscode.git');
+        if (!gitExtension) {
+            return targetFolder?.uri.fsPath;
+        }
+
+        // Ensure extension is activated to access exports safely
+        if (!gitExtension.isActive) {
+            try { await gitExtension.activate(); } catch { /* ignore */ }
+        }
+
+        const gitExports = gitExtension.exports;
+        const api = gitExports?.getAPI?.(1);
+        if (!api || !api.repositories?.length) {
+            return targetFolder?.uri.fsPath;
+        }
+
+        let repo = api.repositories[0];
+        if (targetFolder) {
+            const folderPath = targetFolder.uri.fsPath;
+            const matched = api.repositories.find((r: any) =>
+                folderPath === r.rootUri.fsPath || folderPath.startsWith(r.rootUri.fsPath + path.sep)
+            );
+            if (matched) { repo = matched; }
+        }
+
+        return repo?.rootUri?.fsPath ?? targetFolder?.uri.fsPath;
+    }
 
 	private async updateGitignoreForTemplates(folder: vscode.WorkspaceFolder): Promise<void> {
 		const gitignorePath = await this.getRepoIgnoreFilePath(folder);
@@ -380,4 +416,3 @@ export class TemplateService {
 		qp.show();
 	}
 }
-

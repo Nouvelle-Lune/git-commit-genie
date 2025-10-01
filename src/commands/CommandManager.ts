@@ -6,12 +6,14 @@ import { ModelCommands } from './ModelCommands';
 import { GenerateCommands } from './GenerateCommands';
 import { RepoAnalysisCommands } from './RepoAnalysisCommands';
 import { MenuCommands } from './MenuCommands';
+import { CostCommands } from './CostCommands';
 
 export class CommandManager {
     private modelCommands!: ModelCommands;
     private generateCommands!: GenerateCommands;
     private repoAnalysisCommands!: RepoAnalysisCommands;
     private menuCommands!: MenuCommands;
+    private costCommands!: CostCommands;
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -25,6 +27,7 @@ export class CommandManager {
         this.generateCommands = new GenerateCommands(this.context, this.serviceRegistry);
         this.repoAnalysisCommands = new RepoAnalysisCommands(this.context, this.serviceRegistry, this.statusBarManager);
         this.menuCommands = new MenuCommands(this.context, this.serviceRegistry, this.statusBarManager);
+        this.costCommands = new CostCommands(this.context, this.serviceRegistry);
 
         // Register all commands
         await this.registerAllCommands();
@@ -39,6 +42,7 @@ export class CommandManager {
         await this.generateCommands.register();
         await this.repoAnalysisCommands.register();
         await this.menuCommands.register();
+        this.costCommands.registerCommands();
 
         // Register global commands
         this.registerGlobalCommands();

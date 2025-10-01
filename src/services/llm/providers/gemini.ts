@@ -118,9 +118,9 @@ export class GeminiService extends BaseLLMService {
             );
 
             if (response.usage) {
-                logger.usage('Gemini', response.usage, config.model, 'RepoAnalysis');
+                logger.usageSummary('Gemini', [response.usage], config.model, 'RepoAnalysis');
             } else {
-                logger.usage('Gemini', undefined, config.model, 'RepoAnalysis');
+                logger.usageSummary('Gemini', [], config.model, 'RepoAnalysis');
             }
 
             const safe = repoAnalysisResponseSchema.safeParse(response.parsedResponse);
@@ -313,9 +313,9 @@ export class GeminiService extends BaseLLMService {
             );
 
             if (result.usage) {
-                logger.usage('Gemini', result.usage, config.model, 'default');
+                logger.usageSummary('Gemini', [result.usage], config.model, 'default');
             } else {
-                logger.usage('Gemini', undefined, config.model, 'default');
+                logger.usageSummary('Gemini', [], config.model, 'default');
             }
 
             const safe = commitMessageSchema.safeParse(result.parsedResponse);

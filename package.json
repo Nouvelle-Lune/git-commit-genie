@@ -213,6 +213,12 @@
           "minimum": -1,
           "maximum": 100,
           "markdownDescription": "%config.typingAnimationSpeed.desc%"
+        },
+        "gitCommitGenie.showUsageCost": {
+          "order": 9,
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.showUsageCost.desc%"
         }
       }
     },
@@ -279,6 +285,18 @@
         "category": "%category.title%",
         "icon": "$(file-code)",
         "enablement": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && config.gitCommitGenie.developerMode"
+      },
+      {
+        "command": "git-commit-genie.showRepositoryCost",
+        "title": "%command.showRepositoryCost%",
+        "category": "%category.title%",
+        "icon": "$(info)"
+      },
+      {
+        "command": "git-commit-genie.resetRepositoryCost",
+        "title": "%command.resetRepositoryCost%",
+        "category": "%category.title%",
+        "icon": "$(trash)"
       }
     ],
     "menus": {

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { costTracker } from '../cost';
 
 export enum LogLevel {
     Debug = 0,
@@ -12,7 +13,6 @@ export class Logger {
     private outputChannel: vscode.OutputChannel | null = null;
     private logLevel: LogLevel = LogLevel.Info;
     private readonly prefix = '[Git Commit Genie]';
-
     private lastCallType: string = '';
 
     private constructor() { }
@@ -27,11 +27,19 @@ export class Logger {
     public initialize(outputChannel: vscode.OutputChannel, logLevel: LogLevel = LogLevel.Info): void {
         this.outputChannel = outputChannel;
         this.logLevel = logLevel;
+
         this.info('Logger initialized');
     }
 
     public setLogLevel(level: LogLevel): void {
         this.logLevel = level;
+    }
+
+    /**
+     * Add cost to repository total using cost tracking service
+     */
+    private async addCost(cost: number): Promise<void> {
+        await costTracker.addToRepositoryCost(cost);
     }
 
     public debug(message: string, ...args: any[]): void {
@@ -63,7 +71,6 @@ export class Logger {
      * Log token usage information with cost calculation and formatting
      * Consolidates token usage, cache percentage, and cost into a single line
      */
-    //TODO: finish this usage calculation function 
     public usage(provider: string, usage: any, modelName: string, callType: string = '', callCount?: number): void {
         if (!usage) {
             this.info(`[${provider}]${callType ? ` [${callType}${callCount ? `-${callCount}` : ''}]` : ''} Token usage information not available`);
@@ -130,8 +137,11 @@ export class Logger {
             this.lastCallType = callType;
         }
 
-        const currency = provider === 'DeepSeek' ? '¥' : '$';
+        const currency = '$';
         const message = `[${provider}] [${name}] ${contextInfo} Token Usage: input ${inputTokens} | output ${outputTokens} | total ${totalTokens} | Cache: ${formattedCachePercentage}% | Cost: ${formattedCost}${currency}`;
+
+        // Add to repository cost
+        this.addCost(cost);
 
         this.info(message);
     }
@@ -164,9 +174,9 @@ export class Logger {
         'gemini-2.5-pro': { input: 1.25, output: 10.0, cached: 0.31 },
         'gemini-2.5-flash': { input: 0.30, output: 2.50, cached: 0.075 },
 
-        // DeepSeek (CNY/RMB)
-        'deepseek-chat': { input: 2.0, output: 3.0, cached: 0.2 },
-        'deepseek-reasoner': { input: 2.0, output: 3.0, cached: 0.2 },
+        // DeepSeek (USD) - converted from CNY
+        'deepseek-chat': { input: 0.274, output: 0.411, cached: 0.027 },
+        'deepseek-reasoner': { input: 0.274, output: 0.411, cached: 0.027 },
     };
 
     /**
@@ -253,10 +263,40 @@ export class Logger {
         const formattedCost = totalCost.toFixed(6);
         const formattedCachePercentage = cachePercentage.toFixed(2);
         const contextInfo = callType ? `[${callType}${callCount ? `-${callCount}` : ''}]` : '';
-        const currency = provider === 'DeepSeek' ? '¥' : '$';
+        const currency = '$';
         const message = `[${provider}] [${modelName}] ${contextInfo} Total Token Usage: input ${totalInputTokens} | output ${totalOutputTokens} | total ${totalTokens} | Cache: ${formattedCachePercentage}% | Cost: ${formattedCost}${currency} (${usages.length} calls)`;
 
         this.info(message);
+
+        // Add to repository cost
+        this.addCost(totalCost);
+
+        // Show notification for cost summary
+        const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
+        if (cfg.get('showUsageCost', false)) {
+            this.showCostNotification(callType, formattedCost, formattedCachePercentage);
+        }
+    }
+
+    /**
+     * Show cost notification popup
+     */
+    private showCostNotification(callType: string, cost: string, cachePercentage: string): void {
+        let messageKey: string;
+
+        // Determine operation type based on callType
+        if (callType === 'RepoAnalysis') {
+            messageKey = 'Repository analysis: ${0} | Cache hit: {1}%';
+        } else {
+            // All other cases are commit message generation related
+            messageKey = 'Commit message generation: ${0} | Cache hit: {1}%';
+        }
+
+        // Use vscode.l10n.t for internationalization
+        const message = vscode.l10n.t(messageKey, cost, cachePercentage);
+
+        // Show simple information message without buttons
+        vscode.window.showInformationMessage(message);
     }
 
     private log(level: LogLevel, message: string, ...args: any[]): void {
