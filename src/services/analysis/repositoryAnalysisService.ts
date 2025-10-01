@@ -374,60 +374,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         // Do not clear here; let the active request detect cancellation and clean up.
     }
 
-    // Heuristic/mock analysis removed as per requirement: do nothing on LLM failure
-
-
-
-    private parseLLMAnalysisResponse(content: string): LLMAnalysisResponse | null {
-        const extractFirstJsonObject = (text: string): any | null => {
-            // Try fenced code block first (```json ... ``` or ``` ... ```)
-            let m = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
-            if (m && m[1]) {
-                const inner = m[1].trim();
-                try { return JSON.parse(inner); } catch { /* fall through */ }
-            }
-            // Bracket-balanced scan
-            const s = text;
-            let depth = 0; let start = -1;
-            for (let i = 0; i < s.length; i++) {
-                const ch = s[i];
-                if (ch === '{') { if (depth === 0) { start = i; } depth++; }
-                else if (ch === '}') {
-                    depth--; if (depth === 0 && start !== -1) {
-                        const slice = s.slice(start, i + 1);
-                        try { return JSON.parse(slice); } catch { /* continue scan */ }
-                    }
-                }
-            }
-            // Raw attempt
-            try { return JSON.parse(text.trim()); } catch { return null; }
-        };
-
-        try {
-            const obj = extractFirstJsonObject(content);
-            if (!obj || typeof obj !== 'object') {
-                logger.warn('[Genie][RepoAnalysis] No JSON object could be extracted from LLM response.');
-                return null;
-            }
-            const summary = typeof obj.summary === 'string' ? obj.summary.trim() : '';
-            if (!summary) {
-                // Treat missing/empty summary as parse failure to avoid unintended updates
-                logger.warn('[Genie][RepoAnalysis] Parsed JSON missing required "summary" field.');
-                return null;
-            }
-            return {
-                summary,
-                projectType: typeof obj.projectType === 'string' && obj.projectType.trim() ? obj.projectType : 'Unknown',
-                technologies: Array.isArray(obj.technologies) ? obj.technologies : [],
-                insights: Array.isArray(obj.insights) ? obj.insights : []
-            };
-        } catch (error) {
-            logger.error('[Genie][RepoAnalysis] Failed to parse LLM analysis response', error as any);
-            // No fallback: signal failure so callers abort update
-            return null;
-        }
-    }
-
     private async saveAnalysis(repositoryPath: string, analysis: RepositoryAnalysis): Promise<void> {
         const key = this.getAnalysisStateKey(repositoryPath);
         await this.context.globalState.update(key, analysis);

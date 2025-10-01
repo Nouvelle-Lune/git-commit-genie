@@ -136,7 +136,7 @@ async function enforceStrictWithLLM(
 	userTemplate?: string
 ): Promise<string> {
 	const messages = buildEnforceStrictFixMessages(current, problems, baseRulesMarkdown, userTemplate);
-    const parsed = await chat(messages, { requestType: 'commitMessage' });
+    const parsed = await chat(messages, { requestType: 'strictFix' });
 	return parsed?.commitMessage || current;
 }
 
@@ -189,7 +189,7 @@ async function enforceTargetLanguageForCommit(
 
 	try {
 		const messages = buildEnforceLanguageMessages(commitMessage, lang, userTemplate);
-        const parsed = await chat(messages, { requestType: 'commitMessage' });
+        const parsed = await chat(messages, { requestType: 'enforceLanguage' });
 		return parsed?.commitMessage?.trim() || commitMessage;
 	} catch (error) {
 		return commitMessage;
