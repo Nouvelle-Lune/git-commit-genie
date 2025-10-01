@@ -71,7 +71,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 
 1. VS Code 市场搜索 “Git Commit Genie” 安装，或使用打包 `.vsix` 手动安装。
 2. 命令面板运行 `Git Commit Genie: Manage Models` 选择 Provider、输入/替换 API Key、选择模型。
-3. （可选）创建模板文件，并在设置中配置绝对路径 `gitCommitGenie.templatesPath`。
+3. （可选）使用命令 `Git Commit Genie: Select/Create Template` 选择或创建模板文件。
 
 ## 运行要求
 
@@ -82,7 +82,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | 网络访问 | 调用所选 LLM 提供商。       |
 | API Key  | 使用的每个提供商都需要。    |
 
-## 配置项（Settings）
+## 配置项
 
 所有设置位于：`Git Commit Genie`。
 
@@ -91,11 +91,14 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `gitCommitGenie.autoStageAllForDiff`                | boolean | false  | 仅当暂存区为空时：临时将所有更改加入暂存用于生成 diff，生成后会自动还原暂存状态。谨慎使用，可能会把无关更改包含进提示。 |
 | `gitCommitGenie.chain.enabled`                      | boolean | false  | 启用链式多步提示生成提交信息（使得生成的提交信息更加详准确，且可以更加贴合用户模版，但将增加延迟与 Token 消耗）         |
 | `gitCommitGenie.chain.maxParallel`                  | number  | 2      | 链式提示并行 LLM 调用最大数量。谨慎增大以避免触发速率限制。                                                             |
+| `gitCommitGenie.llm.maxRetries`                     | number  | 2      | API请求失败最大重试次数。                                                                                               |
+| `gitCommitGenie.llm.temperature`                    | number  | 0.2    | Temperature（0–2），默认为 0.2。                                                                                        |
 | `gitCommitGenie.repositoryAnalysis.enabled`         | boolean | true   | 启用仓库分析以提供更好的提交信息生成上下文。                                                                            |
 | `gitCommitGenie.repositoryAnalysis.excludePatterns` | array   | []     | 仓库分析扫描时要排除的文件模式（gitignore风格）。                                                                       |
 | `gitCommitGenie.repositoryAnalysis.updateThreshold` | number  | 10     | 更新仓库分析的提交次数阈值。                                                                                            |
 | `gitCommitGenie.commitLanguage`                     | string  | `auto` | 生成的提交信息目标语言。选项：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。          |
-| `gitCommitGenie.typingAnimationSpeed`               | number  | 15     | 提交信息框打字动画速度，单位为每字符毫秒。设置 -1 关闭动画。                                                            |
+| `gitCommitGenie.typingAnimationSpeed`               | number  | 15     | 提交信息框打字动画速度，单位为每字符毫秒。设置 -1 关闭动画。                                                            |  |
+| `gitCommitGenie.showUsageCost`                      | boolean | true   | 启用后在生成文本时弹出通知，显示本次生成的估计总费用。                                                                  |
 
 
 
@@ -112,6 +115,9 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `git-commit-genie.refreshRepositoryAnalysis` | Refresh Repository Analysis | 手动刷新仓库分析。                           |
 | `git-commit-genie.cancelRepositoryAnalysis`  | Stop Repository Analysis    | 停止正在进行的仓库分析。                     |
 | `git-commit-genie.genieMenu`                 | Menu                        | 打开Git Commit Genie功能菜单。               |
+| `git-commit-genie.openAnalysisJson`          | Open Analysis JSON          | （开发者模式）打开内部分析 JSON 文件。       |
+| `git-commit-genie.showRepositoryCost`        | Show Repository Cost        | 显示当前工作区累计消耗估算。                 |
+| `git-commit-genie.resetRepositoryCost`       | Reset Repository Cost       | 重置当前工作区累计消耗估算。                 |
 
 SCM 标题栏：根据状态显示“Generate commit message”或“Stop generate”按钮。
 
@@ -155,9 +161,9 @@ Minimal Template
 | 现象                      | 原因                | 解决                                    |
 | ------------------------- | ------------------- | --------------------------------------- |
 | "No staged changes found" | 未暂存任何文件      | 使用 Source Control 或 `git add` 暂存。 |
-| 生成内容空泛              | 模板不明确          | 加入 JSON Policy 提升可抽取性。         |
-| 频繁 429                  | 并行过高 / 模板过大 | 降低 `chain.maxParallel` 或精简模板。   |
-| 状态栏无“· Chain”         | 未启用链式          | 使用命令或设置开启。                    |
+| 生成内容空泛              | 模板不明确          | 尝试编写结构化的模版                    |
+| 频繁 429                  | 并行过高 / 模板过大 | 降低 `chain.maxParallel`。              |
+| 状态栏无“· Thinking”      | 未启用链式          | 使用命令或设置开启。                    |
 | 重复要求输入 API Key      | 秘钥被清除          | 重新运行 Manage Models。                |
 
 

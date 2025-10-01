@@ -85,11 +85,14 @@ All settings are under: `Git Commit Genie`.
 | `gitCommitGenie.autoStageAllForDiff`                | boolean | false   | Only when the staging area is empty: temporarily stage all changes to build the diff, then restore your staging state. Use with caution—this may include unrelated changes in the prompt.                                    |
 | `gitCommitGenie.chain.enabled`                      | boolean | false   | Enable multi-step chain prompting for commit generation (It makes the generated commit messages more detailed and accurate, and better aligns with the user's template, but it will increase latency and token consumption). |
 | `gitCommitGenie.chain.maxParallel`                  | number  | 2       | Maximum parallel LLM calls used by chain prompting across all providers. Increase carefully to avoid provider rate limits.                                                                                                   |
+| `gitCommitGenie.llm.maxRetries`                     | number  | 2       | Max retry attempts for API request failures.                                                                                                                                                                                 |
+| `gitCommitGenie.llm.temperature`                    | number  | 0.2     | Temperature (0–2). Default 0.2.                                                                                                                                                                                              |
 | `gitCommitGenie.repositoryAnalysis.enabled`         | boolean | true    | Enable repository analysis to provide better context for commit message generation.                                                                                                                                          |
 | `gitCommitGenie.repositoryAnalysis.excludePatterns` | array   | []      | File patterns to exclude from repository analysis scanning (gitignore-style).                                                                                                                                                |
 | `gitCommitGenie.repositoryAnalysis.updateThreshold` | number  | 10      | Number of commits after which to update the repository analysis.                                                                                                                                                             |
 | `gitCommitGenie.commitLanguage`                     | string  | `auto`  | Target language for generated commit messages. Options: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`.                                                                                      |
 | `gitCommitGenie.typingAnimationSpeed`               | number  | 15      | Speed of the commit message box typing animation in milliseconds per character. Set to -1 to disable the animation.                                                                                                          |
+| `gitCommitGenie.showUsageCost`                      | boolean | true    | When enabled, a brief notification displays the estimated total cost for the current generation.                                                                                                                             |
 
 
 ## Command List
@@ -105,6 +108,9 @@ All settings are under: `Git Commit Genie`.
 | `git-commit-genie.refreshRepositoryAnalysis` | Refresh Repository Analysis | Manually refresh repository analysis.                 |
 | `git-commit-genie.cancelRepositoryAnalysis`  | Stop Repository Analysis    | Cancel ongoing repository analysis.                   |
 | `git-commit-genie.genieMenu`                 | Menu                        | Open Git Commit Genie feature menu.                   |
+| `git-commit-genie.openAnalysisJson`          | Open Analysis JSON          | (Developer mode) Open internal analysis JSON file.    |
+| `git-commit-genie.showRepositoryCost`        | Show Repository Cost        | Show estimated total usage cost for this repository.  |
+| `git-commit-genie.resetRepositoryCost`       | Reset Repository Cost       | Reset the estimated usage cost for this repository.   |
 
 SCM Title Bar: shows "Generate commit message" or "Stop generate" depending on state.
 
@@ -146,13 +152,13 @@ Toggle via command or enable permanently in settings.
 
 ## Troubleshooting
 
-| Symptom                   | Cause                    | Fix                                              |
-| ------------------------- | ------------------------ | ------------------------------------------------ |
-| "No staged changes found" | You haven't staged files | Stage with Source Control view or `git add`.     |
-| Empty / generic output    | Template unclear         | Add JSON Policy block for clearer extraction.    |
-| Frequent 429 / rate limit | Parallelism too high     | Lower `chain.maxParallel`; reduce template size. |
-| Chain badge missing       | Chain disabled           | Toggle via command or setting.                   |
-| Asked for API key again   | Secret cleared           | Re‑enter via Manage Models.                      |
+| Symptom                   | Cause                    | Fix                                          |
+| ------------------------- | ------------------------ | -------------------------------------------- |
+| "No staged changes found" | You haven't staged files | Stage with Source Control view or `git add`. |
+| Empty / generic output    | Template unclear         | Attempt to write structured templates.       |
+| Frequent 429 / rate limit | Parallelism too high     | Lower `chain.maxParallel`.                   |
+| Thinking badge missing    | Thinking disabled        | Toggle via command or setting.               |
+| Asked for API key again   | Secret cleared           | Re‑enter via Manage Models.                  |
 
 ## License
 
