@@ -198,7 +198,14 @@ export class Logger {
      * Log summarized token usage from multiple API calls
      * Consolidates multiple usage objects into a single summary with total cost calculation
      */
-    public usageSummary(provider: string, usages: any[], modelName: string, callType: string = '', callCount?: number): void {
+    public usageSummary(
+        provider: string,
+        usages: any[],
+        modelName: string,
+        callType: string = '',
+        callCount?: number,
+        addToCost: boolean = true
+    ): void {
         if (!usages.length) {
             this.info(`[${provider}]${callType ? ` [${callType}${callCount ? `-${callCount}` : ''}]` : ''} No token usage data to summarize`);
             return;
@@ -268,8 +275,10 @@ export class Logger {
 
         this.info(message);
 
-        // Add to repository cost
-        this.addCost(totalCost);
+        // Add to repository cost unless caller indicates it was already counted per-step
+        if (addToCost) {
+            this.addCost(totalCost);
+        }
 
         // Show notification for cost summary
         const cfg = vscode.workspace.getConfiguration('gitCommitGenie');

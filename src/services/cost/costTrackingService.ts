@@ -7,6 +7,8 @@ import * as vscode from 'vscode';
 export class CostTrackingService {
     private static instance: CostTrackingService;
     private context: vscode.ExtensionContext | null = null;
+    private readonly _onCostChanged = new vscode.EventEmitter<void>();
+    public readonly onCostChanged = this._onCostChanged.event;
 
     private constructor() { }
 
@@ -49,6 +51,8 @@ export class CostTrackingService {
             await this.context.globalState.update(costKey, newTotalCost);
 
             console.debug(`[CostTrackingService] Repository cost updated: +$${cost.toFixed(6)} | Total: $${newTotalCost.toFixed(6)}`);
+            // Notify listeners so UI can refresh immediately
+            this._onCostChanged.fire();
         } catch (error) {
             console.warn(`[CostTrackingService] Failed to update repository cost: ${error}`);
         }
@@ -96,6 +100,8 @@ export class CostTrackingService {
             const costKey = `gitCommitGenie.repositoryCost.${Buffer.from(repositoryPath).toString('base64')}`;
 
             await this.context.globalState.update(costKey, 0);
+            // Notify listeners so UI can refresh immediately
+            this._onCostChanged.fire();
         } catch (error) {
             console.warn(`[CostTrackingService] Failed to reset repository cost: ${error}`);
         }

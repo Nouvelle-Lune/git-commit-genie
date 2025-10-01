@@ -268,7 +268,7 @@ export class AnthropicService extends BaseLLMService {
         );
 
         if (usages.length) {
-            logger.usageSummary('Anthropic', usages, config.model, 'thinking');
+            logger.usageSummary('Anthropic', usages, config.model, 'thinking', undefined, false);
         }
 
         return { content: out.commitMessage };

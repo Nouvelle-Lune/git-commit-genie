@@ -262,7 +262,7 @@ export class DeepSeekService extends BaseLLMService {
         );
 
         if (usages.length) {
-            logger.usageSummary('DeepSeek', usages, config.model, 'thinking');
+            logger.usageSummary('DeepSeek', usages, config.model, 'thinking', undefined, false);
         }
 
         return { content: out.commitMessage };

@@ -45,6 +45,10 @@ export class StatusBarManager {
         });
         this.context.subscriptions.push(workspaceDisp);
 
+        // Refresh immediately when repository cost changes
+        const costDisp = costTracker.onCostChanged(() => this.updateStatusBar());
+        this.context.subscriptions.push({ dispose: () => (costDisp as any)?.dispose?.() || undefined });
+
         // Setup Git repository change listeners
         this.setupGitRepositoryListeners();
 

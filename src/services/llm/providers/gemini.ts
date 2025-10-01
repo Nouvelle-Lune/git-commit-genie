@@ -277,7 +277,7 @@ export class GeminiService extends BaseLLMService {
         );
 
         if (usages.length) {
-            logger.usageSummary('Gemini', usages, config.model, 'thinking');
+            logger.usageSummary('Gemini', usages, config.model, 'thinking', undefined, false);
         }
 
         return { content: out.commitMessage };

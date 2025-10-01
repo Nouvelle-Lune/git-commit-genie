@@ -268,7 +268,8 @@ export class OpenAIService extends BaseLLMService {
         );
 
         if (usages.length) {
-            logger.usageSummary('OpenAI', usages, config.model, 'thinking');
+            // Per-step costs already added; summarize without re-adding cost
+            logger.usageSummary('OpenAI', usages, config.model, 'thinking', undefined, false);
         }
 
         return { content: out.commitMessage };
