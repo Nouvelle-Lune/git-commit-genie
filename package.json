@@ -3,13 +3,14 @@
   "displayName": "%displayName%",
   "publisher": "Lune-99",
   "description": "%description%",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "license": "MIT",
   "engines": {
     "vscode": "^1.103.0"
   },
   "icon": "media/Genie.png",
   "categories": [
+    "AI",
     "SCM Providers",
     "Linters"
   ],
@@ -320,7 +321,6 @@
         "category": "%category.title%",
         "icon": "$(menu)"
       },
-      
       {
         "command": "git-commit-genie.showRepositoryCost",
         "title": "%command.showRepositoryCost%",
