@@ -21,7 +21,6 @@ export interface RepositoryAnalysis {
 
 export interface ChainInputs {
     diffs: DiffData[];
-    baseRulesMarkdown: string;
     currentTime?: string;
     userTemplate?: string;
     targetLanguage?: string;

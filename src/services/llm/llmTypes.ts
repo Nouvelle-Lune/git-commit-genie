@@ -104,7 +104,7 @@ export abstract class BaseLLMService implements LLMService {
     }
 
     protected async buildJsonMessage(diffs: DiffData[]): Promise<string> {
-        const time = new Date().toISOString();
+        const time = new Date().toLocaleString();
 
         // Get repository analysis instead of workspace files
         const cfg = vscode.workspace.getConfiguration();

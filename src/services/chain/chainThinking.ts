@@ -90,12 +90,11 @@ async function classifyAndDraft(
 	};
 }
 
-// Validate and fix the draft commit message according to base rules and optional user template
 async function validateAndFix(
-	commitMessage: string,
-	checklistText: string,
-	chat: ChatFn,
-	userTemplate?: string
+    commitMessage: string,
+    checklistText: string,
+    chat: ChatFn,
+    userTemplate?: string
 ): Promise<{ validMessage: string; notes?: string; violations?: string[] }> {
 	const messages = buildValidateAndFixMessages(commitMessage, checklistText, userTemplate);
     const parsed = await chat(messages, { requestType: 'fix' });
@@ -129,15 +128,14 @@ function localStrictCheck(msg: string): { ok: boolean; problems: string[] } {
 }
 
 async function enforceStrictWithLLM(
-	current: string,
-	problems: string[],
-	baseRulesMarkdown: string,
-	chat: ChatFn,
-	userTemplate?: string
+    current: string,
+    problems: string[],
+    chat: ChatFn,
+    userTemplate?: string
 ): Promise<string> {
-	const messages = buildEnforceStrictFixMessages(current, problems, baseRulesMarkdown, userTemplate);
+    const messages = buildEnforceStrictFixMessages(current, problems, userTemplate);
     const parsed = await chat(messages, { requestType: 'strictFix' });
-	return parsed?.commitMessage || current;
+    return parsed?.commitMessage || current;
 }
 
 
@@ -198,11 +196,11 @@ async function enforceTargetLanguageForCommit(
 
 
 export async function generateCommitMessageChain(
-	inputs: ChainInputs,
-	chat: ChatFn,
-	options?: { maxParallel?: number }
+    inputs: ChainInputs,
+    chat: ChatFn,
+    options?: { maxParallel?: number }
 ): Promise<ChainOutputs> {
-	const { diffs, baseRulesMarkdown } = inputs;
+    const { diffs } = inputs;
 	const maxParallel = options?.maxParallel ?? Math.max(4, Math.min(8, diffs.length));
 
 	const queue = [...diffs];
@@ -228,9 +226,9 @@ export async function generateCommitMessageChain(
 	// Local strict check; if still not conforming, ask LLM for a minimal strict fix
 	let finalMessage = validMessage;
 	const check = localStrictCheck(finalMessage);
-	if (!check.ok) {
-		finalMessage = await enforceStrictWithLLM(finalMessage, check.problems, baseRulesMarkdown, chat, inputs.userTemplate);
-	}
+    if (!check.ok) {
+        finalMessage = await enforceStrictWithLLM(finalMessage, check.problems, chat, inputs.userTemplate);
+    }
 
 	// Enforce target language strictly while preserving tokens/structure
 	try {

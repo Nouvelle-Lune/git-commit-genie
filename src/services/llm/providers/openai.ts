@@ -256,7 +256,6 @@ export class OpenAIService extends BaseLLMService {
         const out = await generateCommitMessageChain(
             {
                 diffs,
-                baseRulesMarkdown: rules.baseRule,
                 currentTime: parsed?.["current-time"],
                 userTemplate: parsed?.["user-template"],
                 targetLanguage: parsed?.["target-language"],

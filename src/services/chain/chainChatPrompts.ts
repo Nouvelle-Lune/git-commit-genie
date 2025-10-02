@@ -57,7 +57,7 @@ export function buildClassifyAndDraftMessages(
     summaries: FileSummary[],
     inputs: ChainInputs
 ): ChatMessage[] {
-    const { baseRulesMarkdown, userTemplate, currentTime, targetLanguage, repositoryAnalysis } = inputs;
+    const { userTemplate, currentTime, targetLanguage, repositoryAnalysis } = inputs;
 
     const system: ChatMessage = {
         role: 'system',
@@ -106,11 +106,6 @@ export function buildClassifyAndDraftMessages(
         '  - repo_analysis structure: { summary: string (project overview), projectType: string (e.g., "Desktop Application"), technologies: string[] (tech stack array), insights: string[] (architectural patterns), importantFiles: string[] (key project files) }',
         '  - Use this context to inform terminology, scope selection, and change significance assessment',
         '</context>',
-        '',
-        '<rules>',
-        'Rules and examples (Markdown):',
-        baseRulesMarkdown,
-        '</rules>',
         '',
         '<schema>',
         'Output JSON schema (STRICT):',
@@ -161,7 +156,6 @@ export function buildClassifyAndDraftMessages(
         '<type_constraint>',
         'Available commit types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, and any other types provided by user template.',
         'Choose the most appropriate type based on change analysis.',
-        'Standard types: feat (new features), fix (bug fixes), docs (documentation), etc.',
         '</type_constraint>',
         '',
         '<language_requirement>',
@@ -269,7 +263,7 @@ export function buildValidateAndFixMessages(commitMessage: string, checklistText
     return [system, user];
 }
 
-export function buildEnforceStrictFixMessages(current: string, problems: string[], baseRulesMarkdown: string, userTemplate?: string): ChatMessage[] {
+export function buildEnforceStrictFixMessages(current: string, problems: string[], userTemplate?: string): ChatMessage[] {
     const system: ChatMessage = {
         role: 'system',
         content: [
@@ -317,12 +311,7 @@ export function buildEnforceStrictFixMessages(current: string, problems: string[
             'Detected problems:',
             JSON.stringify(problems),
             '</problems>',
-            templateSection,
-            '',
-            '<rules>',
-            'Rules (Markdown):',
-            baseRulesMarkdown,
-            '</rules>'
+            templateSection
         ].filter(Boolean).join('\n')
     };
     return [system, user];

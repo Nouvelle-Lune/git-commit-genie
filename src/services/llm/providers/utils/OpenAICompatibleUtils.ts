@@ -62,9 +62,12 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 const requestOptions = this.buildRequestOptions(options, messages);
 
                 if (options.provider === 'OpenAI') {
-                    const response = await client.responses.parse(requestOptions, {
-                        signal: controller.signal
-                    });
+                    const response = await client.responses.parse(
+                        requestOptions,
+                        {
+                            signal: controller.signal
+                        }
+                    );
                     const parsedResponse = response.output_parsed;
                     const usage = options.trackUsage ? response.usage : undefined;
 
@@ -79,6 +82,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                         }
                     );
                     const content = response.choices[0]?.message?.content ?? '';
+
                     const usage = options.trackUsage ? (response as any).usage : undefined;
 
                     // Token usage logging is handled at provider level to avoid duplication

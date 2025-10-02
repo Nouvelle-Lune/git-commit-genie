@@ -265,7 +265,6 @@ export class GeminiService extends BaseLLMService {
         const out = await generateCommitMessageChain(
             {
                 diffs,
-                baseRulesMarkdown: rules.baseRule,
                 currentTime: parsedInput?.['current-time'],
                 userTemplate: parsedInput?.['user-template'],
                 targetLanguage: parsedInput?.['target-language'],
