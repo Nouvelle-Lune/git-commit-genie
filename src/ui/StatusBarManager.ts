@@ -132,9 +132,9 @@ export class StatusBarManager {
 
         const repoTooltip = this.getRepoTooltip();
         const analysisTooltip = this.getAnalysisTooltipLine();
-        // Order: base -> repo status -> repository analysis model -> cost
-        const baseWithRepo = repoTooltip ? `${baseTooltip}\n${repoTooltip}` : baseTooltip;
-        const fullBase = analysisTooltip ? `${baseWithRepo}\n${analysisTooltip}` : baseWithRepo;
+        // Order: base -> repository analysis model -> repo status -> cost
+        const baseWithAnalysis = analysisTooltip ? `${baseTooltip}\n${analysisTooltip}` : baseTooltip;
+        const fullBase = repoTooltip ? `${baseWithAnalysis}\n${repoTooltip}` : baseWithAnalysis;
         this.statusBarItem.tooltip = fullBase;
         void this.enrichTooltipWithCost(fullBase, '');
 
