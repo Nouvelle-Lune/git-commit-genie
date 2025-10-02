@@ -132,15 +132,6 @@
           "maximum": 2,
           "markdownDescription": "%config.llm.temperature.desc%"
         },
-        "gitCommitGenie.developerMode": {
-          "order": 2,
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "%config.developerMode.desc%",
-          "tags": [
-            "advanced"
-          ]
-        },
         "gitCommitGenie.chainMaxParallel": {
           "order": 2,
           "type": "number",
@@ -329,13 +320,7 @@
         "category": "%category.title%",
         "icon": "$(menu)"
       },
-      {
-        "command": "git-commit-genie.openAnalysisJson",
-        "title": "Git Commit Genie: Open Analysis JSON",
-        "category": "%category.title%",
-        "icon": "$(file-code)",
-        "enablement": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && config.gitCommitGenie.developerMode"
-      },
+      
       {
         "command": "git-commit-genie.showRepositoryCost",
         "title": "%command.showRepositoryCost%",

@@ -116,7 +116,6 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `git-commit-genie.refreshRepositoryAnalysis` | Refresh Repository Analysis | 手动刷新仓库分析。                           |
 | `git-commit-genie.cancelRepositoryAnalysis`  | Stop Repository Analysis    | 停止正在进行的仓库分析。                     |
 | `git-commit-genie.genieMenu`                 | Menu                        | 打开Git Commit Genie功能菜单。               |
-| `git-commit-genie.openAnalysisJson`          | Open Analysis JSON          | （开发者模式）打开内部分析 JSON 文件。       |
 | `git-commit-genie.showRepositoryCost`        | Show Repository Cost        | 显示当前工作区累计消耗估算。                 |
 | `git-commit-genie.resetRepositoryCost`       | Reset Repository Cost       | 重置当前工作区累计消耗估算。                 |
 

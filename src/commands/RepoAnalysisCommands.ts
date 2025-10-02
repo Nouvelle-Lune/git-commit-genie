@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
@@ -30,11 +29,8 @@ export class RepoAnalysisCommands {
             vscode.commands.registerCommand('git-commit-genie.cancelRepositoryAnalysis', this.cancelRepositoryAnalysis.bind(this))
         );
 
-        // Developer: view internal analysis JSON
-        this.context.subscriptions.push(
-            vscode.commands.registerCommand('git-commit-genie.openAnalysisJson', this.openAnalysisJson.bind(this))
-        );
-    }
+        // Developer command removed
+        }
 
     private getRepositoryPath(): string | null {
         try {
@@ -164,42 +160,7 @@ export class RepoAnalysisCommands {
         }
     }
 
-    private async openAnalysisJson(): Promise<void> {
-        const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
-        const dev = cfg.get<boolean>('developerMode', false);
-
-        if (!dev) {
-            const choice = await vscode.window.showInformationMessage(
-                'Developer mode required.',
-                vscode.l10n.t(I18N.actions.openSettings)
-            );
-            if (choice === vscode.l10n.t(I18N.actions.openSettings)) {
-                vscode.commands.executeCommand('workbench.action.openSettings', 'gitCommitGenie.developerMode');
-            }
-            return;
-        }
-
-        const wf = vscode.workspace.workspaceFolders;
-        if (!wf || wf.length === 0) {
-            vscode.window.showErrorMessage(vscode.l10n.t(I18N.common.noWorkspace));
-            return;
-        }
-
-        const repositoryPath = wf[0].uri.fsPath;
-        const analysisService = this.serviceRegistry.getAnalysisService();
-        const analysis = await analysisService.getAnalysis(repositoryPath);
-
-        if (!analysis) {
-            vscode.window.showInformationMessage('No analysis data found.');
-            return;
-        }
-
-        const doc = await vscode.workspace.openTextDocument({
-            language: 'json',
-            content: JSON.stringify(analysis, null, 2)
-        });
-        await vscode.window.showTextDocument(doc, { preview: false });
-    }
+    // openAnalysisJson command removed with developer mode
 
     private isRepoAnalysisEnabled(): boolean {
         try {

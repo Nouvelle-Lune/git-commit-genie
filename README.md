@@ -109,7 +109,6 @@ All settings are under: `Git Commit Genie`.
 | `git-commit-genie.refreshRepositoryAnalysis` | Refresh Repository Analysis | Manually refresh repository analysis.                 |
 | `git-commit-genie.cancelRepositoryAnalysis`  | Stop Repository Analysis    | Cancel ongoing repository analysis.                   |
 | `git-commit-genie.genieMenu`                 | Menu                        | Open Git Commit Genie feature menu.                   |
-| `git-commit-genie.openAnalysisJson`          | Open Analysis JSON          | (Developer mode) Open internal analysis JSON file.    |
 | `git-commit-genie.showRepositoryCost`        | Show Repository Cost        | Show estimated total usage cost for this repository.  |
 | `git-commit-genie.resetRepositoryCost`       | Reset Repository Cost       | Reset the estimated usage cost for this repository.   |
 
