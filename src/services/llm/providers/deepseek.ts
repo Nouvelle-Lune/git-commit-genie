@@ -82,6 +82,17 @@ export class DeepSeekService extends BaseLLMService {
         };
     }
 
+    private getRepoAnalysisOverrideModel(): string | null {
+        try {
+            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+            const value = (cfg.get<string>('model', 'general') || 'general').trim();
+            if (!value || value === 'general') { return null; }
+            return this.listSupportedModels().includes(value) ? value : null;
+        } catch {
+            return null;
+        }
+    }
+
     /**
      * This function requests a chat completion from DeepSeek and expects a structured JSON response
      * @param analysisPromptParts an ChatMessage[] containing keys system and user prompt parts
@@ -91,7 +102,7 @@ export class DeepSeekService extends BaseLLMService {
         const systemMessage = analysisPromptParts.system;
         const userMessage = analysisPromptParts.user;
 
-        const modle = this.getConfig().model;
+        const modle = this.getRepoAnalysisOverrideModel() || this.getConfig().model;
 
         if (!modle) {
             return { message: 'DeepSeek model is not selected. Please configure it via Manage Models.', statusCode: 400 };

@@ -152,7 +152,8 @@ export class GenerateCommands {
                     if (newKey && newKey.trim()) {
                         const service = this.serviceRegistry.getLLMService(provider);
                         await service?.setApiKey(newKey.trim());
-                        await vscode.window.showInformationMessage(vscode.l10n.t(I18N.common.apiKeyUpdated, providerLabel));
+                        try { await service?.refreshFromSettings(); } catch { }
+                        await vscode.commands.executeCommand('git-commit-genie.updateStatusBar');
                     }
                 } else if (choice === vscode.l10n.t(I18N.actions.manageModels)) {
                     await vscode.commands.executeCommand('git-commit-genie.manageModels');

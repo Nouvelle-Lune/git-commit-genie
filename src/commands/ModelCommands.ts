@@ -90,6 +90,8 @@ export class ModelCommands {
         // Update provider and model
         await this.updateProviderAndModel(providerPick, modelPick, modelStateKey, apiKeyToUse!, existingKey);
 
+        // Notify status bar that general provider/model changed so 'general' analysis selection follows
+        this.statusBarManager.onProviderModelChanged(providerPick.value);
         this.statusBarManager.updateStatusBar();
         vscode.window.showInformationMessage(
             vscode.l10n.t(I18N.manageModels.configured, providerPick.label, modelPick.value)
@@ -216,4 +218,6 @@ export class ModelCommands {
             // best-effort only
         }
     }
+
+
 }

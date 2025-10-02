@@ -23,6 +23,11 @@ export class MenuCommands {
         const items: Array<vscode.QuickPickItem & { action: string }> = [];
 
         items.push({
+            label: vscode.l10n.t(I18N.genieMenu.toggleThingking),
+            action: 'toggle'
+        });
+
+        items.push({
             label: vscode.l10n.t(I18N.genieMenu.manageModels),
             action: 'models'
         });
@@ -65,6 +70,8 @@ export class MenuCommands {
         const repositoryPath = wf[0].uri.fsPath;
 
         switch (pick.action) {
+            case 'toggle':
+                vscode.commands.executeCommand('git-commit-genie.toggleChainMode');
             case 'cancel':
                 vscode.commands.executeCommand('git-commit-genie.cancelRepositoryAnalysis');
                 break;

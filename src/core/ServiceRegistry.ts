@@ -50,6 +50,25 @@ export class ServiceRegistry {
             // Set initial LLM service
             this.currentLLMService = this.pickService();
             this.analysisService.setLLMService(this.currentLLMService);
+            // Provide resolver so analysis can pick provider based on setting
+            this.analysisService.setLLMResolver((provider: string) => this.llmServices.get(provider));
+
+            // Keep in-memory provider clients in sync with SecretStorage changes
+            const secretDisp = this.context.secrets.onDidChange(async (e) => {
+                try {
+                    const key = e?.key || '';
+                    if (!key.startsWith('gitCommitGenie.secret.')) { return; }
+                    const provider = this.secretKeyToProvider(key);
+                    if (!provider) { return; }
+                    const svc = this.llmServices.get(provider);
+                    await svc?.refreshFromSettings();
+                    // Update current service mapping (no provider switch here)
+                    this.updateCurrentLLMService();
+                    // Refresh status bar
+                    await (vscode.commands.executeCommand('git-commit-genie.updateStatusBar'));
+                } catch { /* ignore */ }
+            });
+            try { (this.context.subscriptions || []).push(secretDisp); } catch { /* ignore */ }
 
             logger.info('Services initialized successfully');
         } catch (error) {
@@ -110,5 +129,13 @@ export class ServiceRegistry {
     updateCurrentLLMService(): void {
         this.currentLLMService = this.pickService();
         this.analysisService.setLLMService(this.currentLLMService);
+    }
+
+    private secretKeyToProvider(secretKey: string): string | null {
+        if (secretKey.endsWith('.openaiApiKey')) { return 'openai'; }
+        if (secretKey.endsWith('.deepseekApiKey')) { return 'deepseek'; }
+        if (secretKey.endsWith('.anthropicApiKey')) { return 'anthropic'; }
+        if (secretKey.endsWith('.geminiApiKey')) { return 'gemini'; }
+        return null;
     }
 }

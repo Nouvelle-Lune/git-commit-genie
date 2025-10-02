@@ -88,6 +88,18 @@ export class OpenAIService extends BaseLLMService {
         };
     }
 
+    private getRepoAnalysisOverrideModel(): string | null {
+        try {
+            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+            const value = (cfg.get<string>('model', 'general') || 'general').trim();
+            if (!value || value === 'general') { return null; }
+            // Only apply override if the selected model belongs to this provider
+            return this.listSupportedModels().includes(value) ? value : null;
+        } catch {
+            return null;
+        }
+    }
+
 
     /**
      * This function requests a chat completion from OpenAI and expects a structured JSON response
@@ -98,7 +110,7 @@ export class OpenAIService extends BaseLLMService {
         const systemMessage = analysisPromptParts.system;
         const userMessage = analysisPromptParts.user;
 
-        const modle = this.getConfig().model;
+        const modle = this.getRepoAnalysisOverrideModel() || this.getConfig().model;
 
         if (!modle) {
             return { message: 'OpenAI model is not selected. Please configure it via Manage Models.', statusCode: 400 };

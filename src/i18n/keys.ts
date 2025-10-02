@@ -7,7 +7,8 @@ export const L10N_KEYS = {
     tooltipConfigured: 'Git Commit Genie: {0} / {1}',
     tooltipNeedConfig: 'Git Commit Genie: {0} — click to configure models',
     selectModel: 'Select Model',
-    chainBadge: ' · Chain'
+    chainBadge: ' · Chain',
+    analysisModel: 'Repository Analysis Model: {0} / {1}'
   },
   manageModels: {
     selectProvider: 'Select a provider…',
@@ -42,14 +43,15 @@ export const L10N_KEYS = {
     openSettings: 'Open Settings',
     dismiss: 'Dismiss',
     manageModels: 'Manage Models',
-    replaceKey: 'Replace Key'
+    replaceKey: 'Replace Key',
+    enterKey: 'Enter Key'
   },
   errors: {
     invalidApiKey: '{0} API key appears invalid or revoked.'
   },
   common: {
     noWorkspace: 'No workspace folder is open.',
-    apiKeyUpdated: '{0} API key updated. Please retry.'
+    apiKeyUpdated: '{0} API key updated.'
   },
   rateLimit: {
     hit: 'Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.'
@@ -62,7 +64,8 @@ export const L10N_KEYS = {
     manageModels: '$(gear) Manage Models',
     cancelAnalysis: '$(stop-circle) Cancel Analysis',
     refreshAnalysis: '$(refresh) Refresh Analysis',
-    openMarkdown: '$(file) Open repository-analysis.md'
+    openMarkdown: '$(file) Open repository-analysis.md',
+    toggleThingking: '$(thinking) Enable / Disable thinking mode',
   },
   repoAnalysis: {
     running: 'Repository analysis in progress…',

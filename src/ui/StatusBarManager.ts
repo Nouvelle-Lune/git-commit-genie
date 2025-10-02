@@ -15,6 +15,11 @@ export class StatusBarManager {
     private hasApiKey = false;
     private lastProviderChecked: string | null = null;
     private hasModel = false;
+    // Repository analysis selection state (provider/model may differ from generation)
+    private analysisProvider: string | null = null;
+    private analysisModel: string | null = null;
+    private analysisHasApiKey: boolean = false;
+    private lastAnalysisKey: string | null = null;
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -30,11 +35,14 @@ export class StatusBarManager {
         this.context.subscriptions.push(this.statusBarItem);
 
         // Watch secret changes to refresh API key availability state
-        const disp = this.context.secrets.onDidChange((e) => {
+        const disp = this.context.secrets.onDidChange(async (e) => {
             try {
                 if (!e?.key || !e.key.startsWith('gitCommitGenie.secret.')) { return; }
-                // Provider may not change; recheck for current provider
-                void this.refreshApiKeyState();
+                // Refresh both general provider and analysis selection; then validate with prompt
+                await this.refreshApiKeyState();
+                await this.refreshAnalysisSelectionState();
+                await this.validateAnalysisModelApiKey(true);
+                this.updateStatusBar();
             } catch { /* ignore */ }
         });
         this.context.subscriptions.push(disp);
@@ -45,6 +53,16 @@ export class StatusBarManager {
         });
         this.context.subscriptions.push(workspaceDisp);
 
+        // React to repository analysis model setting changes
+        const cfgDisp = vscode.workspace.onDidChangeConfiguration((e) => {
+            if (e.affectsConfiguration('gitCommitGenie.repositoryAnalysis.model')) {
+                // Warn if selected analysis model provider has no API key
+                this.validateAnalysisModelApiKey(true).catch(() => { /* ignore */ });
+                void this.refreshAnalysisSelectionState();
+            }
+        });
+        this.context.subscriptions.push(cfgDisp);
+
         // Refresh immediately when repository cost changes
         const costDisp = costTracker.onCostChanged(() => this.updateStatusBar());
         this.context.subscriptions.push({ dispose: () => (costDisp as any)?.dispose?.() || undefined });
@@ -54,6 +72,9 @@ export class StatusBarManager {
 
         // Seed API key availability
         await this.refreshApiKeyState();
+        await this.refreshAnalysisSelectionState();
+        // One-time validation on activation
+        await this.validateAnalysisModelApiKey(true);
 
         // Initial update
         this.updateStatusBar();
@@ -61,6 +82,14 @@ export class StatusBarManager {
 
     async dispose(): Promise<void> {
         this.statusBarItem?.dispose();
+    }
+
+    // Notify status bar that provider/model for general usage changed
+    onProviderModelChanged(provider?: string): void {
+        try {
+            void this.refreshApiKeyState(provider);
+            void this.refreshAnalysisSelectionState();
+        } catch { /* ignore */ }
     }
 
     setRepoAnalysisRunning(running: boolean): void {
@@ -102,21 +131,23 @@ export class StatusBarManager {
             : vscode.l10n.t(I18N.statusBar.tooltipNeedConfig, providerLabel);
 
         const repoTooltip = this.getRepoTooltip();
-        // Set a baseline tooltip immediately, then enrich with cost info asynchronously
-        this.statusBarItem.tooltip = repoTooltip ? `${baseTooltip}\n${repoTooltip}` : baseTooltip;
-        void this.enrichTooltipWithCost(baseTooltip, repoTooltip);
+        const analysisTooltip = this.getAnalysisTooltipLine();
+        // Order: base -> repo status -> repository analysis model -> cost
+        const baseWithRepo = repoTooltip ? `${baseTooltip}\n${repoTooltip}` : baseTooltip;
+        const fullBase = analysisTooltip ? `${baseWithRepo}\n${analysisTooltip}` : baseWithRepo;
+        this.statusBarItem.tooltip = fullBase;
+        void this.enrichTooltipWithCost(fullBase, '');
 
         // Click action: when no Git repo, jump to official initialize command; otherwise open Genie menu
         this.statusBarItem.command = !this.hasGitRepo ? 'git.init' : 'git-commit-genie.genieMenu';
         this.statusBarItem.show();
     }
 
-    private async enrichTooltipWithCost(baseTooltip: string, repoTooltip: string): Promise<void> {
+    private async enrichTooltipWithCost(baseTooltip: string, _unused: string): Promise<void> {
         try {
 
             const cost = await costTracker.getRepositoryCost();
             const parts: string[] = [baseTooltip];
-            if (repoTooltip) { parts.push(repoTooltip); }
 
             // Prepare cost line (use i18n messages)
             if (cost > 0) {
@@ -254,7 +285,10 @@ export class StatusBarManager {
             return '$(search-stop)';
         }
         // If not properly configured, warn instead of showing check
-        if (!this.hasApiKey || !this.hasModel) {
+        const usingGeneral = !this.analysisProvider || this.analysisProvider === this.serviceRegistry.getProvider().toLowerCase();
+        const okKey = usingGeneral ? this.hasApiKey : this.analysisHasApiKey;
+        const okModel = !!(this.analysisModel && this.analysisModel.trim());
+        if (!okKey || !okModel) {
             return '$(warning)';
         }
         if (this.repoAnalysisRunning) {
@@ -274,12 +308,11 @@ export class StatusBarManager {
         if (!this.hasGitRepo) {
             return vscode.l10n.t(I18N.repoAnalysis.initGitToEnable);
         }
-        if (!this.hasApiKey) {
-            return vscode.l10n.t(I18N.repoAnalysis.missingApiKey);
-        }
-        if (!this.hasModel) {
-            return vscode.l10n.t(I18N.repoAnalysis.missingModel);
-        }
+        const usingGeneral = !this.analysisProvider || this.analysisProvider === this.serviceRegistry.getProvider().toLowerCase();
+        const okKey = usingGeneral ? this.hasApiKey : this.analysisHasApiKey;
+        const okModel = !!(this.analysisModel && this.analysisModel.trim());
+        if (!okKey) { return vscode.l10n.t(I18N.repoAnalysis.missingApiKey); }
+        if (!okModel) { return vscode.l10n.t(I18N.repoAnalysis.missingModel); }
         if (this.repoAnalysisRunning) {
             return vscode.l10n.t(I18N.repoAnalysis.running);
         }
@@ -287,6 +320,105 @@ export class StatusBarManager {
             return vscode.l10n.t(I18N.repoAnalysis.missing);
         }
         return vscode.l10n.t(I18N.repoAnalysis.idle);
+    }
+
+    private async refreshAnalysisSelectionState(): Promise<void> {
+        try {
+            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+            const selected = (cfg.get<string>('model', 'general') || 'general').trim();
+
+            let provider = this.serviceRegistry.getProvider().toLowerCase();
+            let model = this.serviceRegistry.getModel(provider);
+            if (selected && selected !== 'general') {
+                const candidates = ['openai', 'deepseek', 'anthropic', 'gemini'];
+                for (const p of candidates) {
+                    const svc = this.serviceRegistry.getLLMService(p);
+                    if (svc && svc.listSupportedModels().includes(selected)) {
+                        provider = p;
+                        model = selected;
+                        break;
+                    }
+                }
+            }
+
+            // Resolve API key for the analysis provider
+            const key = await this.context.secrets.get(this.secretNameFor(provider));
+            const hasKey = !!(key && key.trim());
+
+            const newKey = `${provider}:${model || ''}:${hasKey ? 1 : 0}`;
+            const changed = newKey !== this.lastAnalysisKey;
+            this.analysisProvider = provider;
+            this.analysisModel = model || '';
+            this.analysisHasApiKey = hasKey;
+            this.lastAnalysisKey = newKey;
+            if (changed) {
+                this.updateStatusBar();
+            }
+        } catch {
+            // ignore
+        }
+    }
+
+    private getAnalysisTooltipLine(): string {
+        try {
+            const provider = (this.analysisProvider || this.serviceRegistry.getProvider() || 'openai').toLowerCase();
+            const model = this.analysisModel || this.serviceRegistry.getModel(provider) || '';
+            const providerLabel = this.getProviderLabel(provider);
+            const modelLabel = this.shortenModelName(model);
+            if (!providerLabel && !modelLabel) { return ''; }
+            return vscode.l10n.t(I18N.statusBar.analysisModel, providerLabel, modelLabel || '');
+        } catch {
+            return '';
+        }
+    }
+
+    private async validateAnalysisModelApiKey(showPrompt: boolean): Promise<void> {
+        try {
+            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+            const selected = (cfg.get<string>('model', 'general') || 'general').trim();
+            const candidates = ['openai', 'deepseek', 'anthropic', 'gemini'];
+            let provider: string | null = null;
+            if (!selected || selected === 'general') {
+                provider = (this.serviceRegistry.getProvider() || 'openai').toLowerCase();
+            } else {
+                for (const p of candidates) {
+                    const svc = this.serviceRegistry.getLLMService(p);
+                    if (svc && svc.listSupportedModels().includes(selected)) { provider = p; break; }
+                }
+            }
+            if (!provider) { return; }
+            const key = await this.context.secrets.get(this.secretNameFor(provider));
+            if (!key || !key.trim()) {
+                if (showPrompt) {
+                    const providerLabel = this.getProviderLabel(provider);
+                    const choice = await vscode.window.showWarningMessage(
+                        vscode.l10n.t(I18N.repoAnalysis.missingApiKey),
+                        vscode.l10n.t(I18N.actions.enterKey),
+                        vscode.l10n.t(I18N.actions.manageModels),
+                        vscode.l10n.t(I18N.actions.dismiss)
+                    );
+                    if (choice === vscode.l10n.t(I18N.actions.enterKey)) {
+                        const newKey = await vscode.window.showInputBox({
+                            title: vscode.l10n.t(I18N.manageModels.enterKeyTitle, providerLabel),
+                            prompt: `${providerLabel} API Key`,
+                            placeHolder: `${providerLabel} API Key`,
+                            password: true,
+                            ignoreFocusOut: true,
+                        });
+                        if (newKey && newKey.trim()) {
+                            await this.serviceRegistry.getLLMService(provider)?.setApiKey(newKey.trim());
+                            await this.refreshApiKeyState(provider);
+                            await this.refreshAnalysisSelectionState();
+                            this.updateStatusBar();
+                        }
+                    } else if (choice === vscode.l10n.t(I18N.actions.manageModels)) {
+                        await vscode.commands.executeCommand('git-commit-genie.manageModels');
+                    }
+                }
+            }
+        } catch {
+            // ignore
+        }
     }
 
     // Getters for external access

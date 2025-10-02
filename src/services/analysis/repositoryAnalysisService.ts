@@ -27,6 +27,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private static readonly ANALYSIS_STATE_KEY_PREFIX = 'gitCommitGenie.analysis.';
 
     private llmService: LLMService | null;
+    private resolveLLMService?: (provider: string) => (LLMService | undefined);
     private context: vscode.ExtensionContext;
     private currentCancelSource?: vscode.CancellationTokenSource;
     private apiKeyWaiters: Map<string, vscode.Disposable> = new Map();
@@ -38,6 +39,11 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
     public setLLMService(service: LLMService) {
         this.llmService = service;
+    }
+
+    // Allow ServiceRegistry to provide a resolver so we can pick provider per analysis
+    public setLLMResolver(resolver: (provider: string) => (LLMService | undefined)) {
+        this.resolveLLMService = resolver;
     }
 
     private getConfig(): AnalysisConfig {
@@ -83,7 +89,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             };
 
             const messages = buildRepositoryAnalysisPromptParts(analysisRequest);
-            const llmResponse = await this.llmService?.generateRepoAnalysis(messages, { token: this.currentCancelSource.token });
+            const selected = this.pickRepoAnalysisService();
+            try { await selected.service?.refreshFromSettings(); } catch { }
+            const llmResponse = await selected.service?.generateRepoAnalysis(messages, { token: this.currentCancelSource.token });
             if (!llmResponse || (llmResponse as LLMError).statusCode) {
                 // If missing API key (401), attach a one-time listener to secrets change
                 const err = (llmResponse as LLMError);
@@ -94,7 +102,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                                 // Only react to our extension's secrets
                                 if (!e?.key || !e.key.startsWith('gitCommitGenie.secret.')) { return; }
                                 // Refresh provider from settings and retry init once
-                                try { await this.llmService?.refreshFromSettings(); } catch { /* ignore */ }
+                                try { await selected.service?.refreshFromSettings(); } catch { /* ignore */ }
                                 const d = this.apiKeyWaiters.get(repositoryPath);
                                 if (d) { try { d.dispose(); } catch { } this.apiKeyWaiters.delete(repositoryPath); }
                                 await this.initializeRepository(repositoryPath);
@@ -104,9 +112,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         try { this.context.subscriptions.push(disp); } catch { /* best-effort */ }
                     }
                     // Prompt user to fix API key (detached from this task to end progress quickly)
-                    const provider = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
-                    const providerLabel = this.getProviderLabel(provider);
-                    this.promptReplaceKeyOrManage(providerLabel).catch(() => { /* ignore UI errors */ });
+                    const providerLabel = this.getProviderLabel(selected.provider);
+                    this.promptReplaceKeyOrManage(selected.provider, providerLabel).catch(() => { /* ignore UI errors */ });
                     return 'skipped';
                 }
                 // If model not selected (400), prompt to configure
@@ -120,6 +127,39 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         if (picked === vscode.l10n.t(I18N.actions.manageModels)) {
                             void vscode.commands.executeCommand('git-commit-genie.manageModels');
                         }
+                    } catch { /* ignore UI errors */ }
+                    return 'skipped';
+                }
+                // Forbidden (403) – likely key revoked or plan restriction
+                if (err?.statusCode === 403) {
+                    try {
+                        const providerLabel = this.getProviderLabel(selected.provider);
+                        const choice = await vscode.window.showWarningMessage(
+                            `${providerLabel} access denied. Check your API key permissions or plan.`,
+                            vscode.l10n.t(I18N.actions.manageModels),
+                            vscode.l10n.t(I18N.actions.dismiss)
+                        );
+                        if (choice === vscode.l10n.t(I18N.actions.manageModels)) {
+                            void vscode.commands.executeCommand('git-commit-genie.manageModels');
+                        }
+                    } catch { /* ignore UI errors */ }
+                    return 'skipped';
+                }
+                // Rate limited (429) – surface helpful guidance
+                if (err?.statusCode === 429) {
+                    try {
+                        const provider = selected.provider;
+                        const model = this.getActiveModelForProvider(provider);
+                        // Reuse centralized rate-limit hint copy
+                        await vscode.window.showWarningMessage(
+                            vscode.l10n.t(I18N.rateLimit.hit, this.getProviderLabel(provider), model || 'model', vscode.l10n.t(I18N.settings.chainMaxParallelLabel)),
+                            vscode.l10n.t(I18N.actions.openSettings),
+                            vscode.l10n.t(I18N.actions.dismiss)
+                        ).then(choice => {
+                            if (choice === vscode.l10n.t(I18N.actions.openSettings)) {
+                                void vscode.commands.executeCommand('workbench.action.openSettings', 'gitCommitGenie.chain.maxParallel');
+                            }
+                        });
                     } catch { /* ignore UI errors */ }
                     return 'skipped';
                 }
@@ -218,7 +258,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             };
 
             const messages = buildRepositoryAnalysisPromptParts(analysisRequest);
-            const llmResponse = await this.llmService?.generateRepoAnalysis(messages, { token: this.currentCancelSource?.token });
+            const selected = this.pickRepoAnalysisService();
+            try { await selected.service?.refreshFromSettings(); } catch { }
+            const llmResponse = await selected.service?.generateRepoAnalysis(messages, { token: this.currentCancelSource?.token });
             if (!llmResponse || (llmResponse as LLMError).statusCode) {
                 const err = (llmResponse as LLMError);
                 if (err?.statusCode === 401) {
@@ -226,7 +268,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         const disp = this.context.secrets.onDidChange(async (e) => {
                             try {
                                 if (!e?.key || !e.key.startsWith('gitCommitGenie.secret.')) { return; }
-                                try { await this.llmService?.refreshFromSettings(); } catch { }
+                                try { await selected.service?.refreshFromSettings(); } catch { }
                                 const d = this.apiKeyWaiters.get(repositoryPath);
                                 if (d) { try { d.dispose(); } catch { } this.apiKeyWaiters.delete(repositoryPath); }
                                 await this.initializeRepository(repositoryPath);
@@ -235,9 +277,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         this.apiKeyWaiters.set(repositoryPath, disp);
                         try { this.context.subscriptions.push(disp); } catch { }
                     }
-                    const provider = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
-                    const providerLabel = this.getProviderLabel(provider);
-                    this.promptReplaceKeyOrManage(providerLabel).catch(() => { /* ignore UI errors */ });
+                    const providerLabel = this.getProviderLabel(selected.provider);
+                    this.promptReplaceKeyOrManage(selected.provider, providerLabel).catch(() => { /* ignore UI errors */ });
                     return 'skipped';
                 }
                 if (err?.statusCode === 400) {
@@ -250,6 +291,36 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         if (picked === vscode.l10n.t(I18N.actions.manageModels)) {
                             void vscode.commands.executeCommand('git-commit-genie.manageModels');
                         }
+                    } catch { }
+                    return 'skipped';
+                }
+                if (err?.statusCode === 403) {
+                    try {
+                        const providerLabel = this.getProviderLabel(selected.provider);
+                        const choice = await vscode.window.showWarningMessage(
+                            `${providerLabel} access denied. Check your API key permissions or plan.`,
+                            vscode.l10n.t(I18N.actions.manageModels),
+                            vscode.l10n.t(I18N.actions.dismiss)
+                        );
+                        if (choice === vscode.l10n.t(I18N.actions.manageModels)) {
+                            void vscode.commands.executeCommand('git-commit-genie.manageModels');
+                        }
+                    } catch { }
+                    return 'skipped';
+                }
+                if (err?.statusCode === 429) {
+                    try {
+                        const provider = selected.provider;
+                        const model = this.getActiveModelForProvider(provider);
+                        await vscode.window.showWarningMessage(
+                            vscode.l10n.t(I18N.rateLimit.hit, this.getProviderLabel(provider), model || 'model', vscode.l10n.t(I18N.settings.chainMaxParallelLabel)),
+                            vscode.l10n.t(I18N.actions.openSettings),
+                            vscode.l10n.t(I18N.actions.dismiss)
+                        ).then(choice => {
+                            if (choice === vscode.l10n.t(I18N.actions.openSettings)) {
+                                void vscode.commands.executeCommand('workbench.action.openSettings', 'gitCommitGenie.chain.maxParallel');
+                            }
+                        });
                     } catch { }
                     return 'skipped';
                 }
@@ -450,8 +521,54 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         }
     }
 
+    // Choose provider for repository analysis based on the configured model
+    private pickRepoAnalysisService(): { provider: string, service: LLMService | null } {
+        try {
+            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+            const selectedModel = (cfg.get<string>('model', 'general') || 'general').trim();
+            if (!selectedModel || selectedModel === 'general') {
+                const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
+                return { provider: p, service: this.llmService };
+            }
+
+            const candidates = ['openai', 'deepseek', 'anthropic', 'gemini'];
+            for (const p of candidates) {
+                const svc = this.resolveLLMService?.(p);
+                try {
+                    if (svc && svc.listSupportedModels().includes(selectedModel)) {
+                        return { provider: p, service: svc };
+                    }
+                } catch { /* ignore */ }
+            }
+
+            // Fallback to current
+            const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
+            return { provider: p, service: this.llmService };
+        } catch {
+            const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
+            return { provider: p, service: this.llmService };
+        }
+    }
+
+    // Resolve the active model string, respecting repository-analysis selection when set
+    private getActiveModelForProvider(provider: string): string | undefined {
+        try {
+            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+            const selected = (cfg.get<string>('model', 'general') || 'general').trim();
+            if (selected && selected !== 'general') { return selected; }
+            switch (provider) {
+                case 'deepseek': return this.context.globalState.get<string>('gitCommitGenie.deepseekModel', '');
+                case 'anthropic': return this.context.globalState.get<string>('gitCommitGenie.anthropicModel', '');
+                case 'gemini': return this.context.globalState.get<string>('gitCommitGenie.geminiModel', '');
+                default: return this.context.globalState.get<string>('gitCommitGenie.openaiModel', '');
+            }
+        } catch {
+            return undefined;
+        }
+    }
+
     // Fire-and-forget UI to let user replace key or open Manage Models
-    private async promptReplaceKeyOrManage(providerLabel: string): Promise<void> {
+    private async promptReplaceKeyOrManage(provider: string, providerLabel: string): Promise<void> {
         const picked = await vscode.window.showWarningMessage(
             vscode.l10n.t(I18N.errors.invalidApiKey, providerLabel),
             vscode.l10n.t(I18N.actions.replaceKey),
@@ -467,8 +584,10 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 ignoreFocusOut: true,
             });
             if (newKey && newKey.trim()) {
-                await this.llmService?.setApiKey(newKey.trim());
-                await vscode.window.showInformationMessage(vscode.l10n.t(I18N.common.apiKeyUpdated, providerLabel));
+                const service = this.resolveLLMService?.(provider) || this.llmService;
+                await service?.setApiKey(newKey.trim());
+                try { await service?.refreshFromSettings(); } catch { }
+                try { await vscode.commands.executeCommand('git-commit-genie.updateStatusBar'); } catch { }
             }
         } else if (picked === vscode.l10n.t(I18N.actions.manageModels)) {
             void vscode.commands.executeCommand('git-commit-genie.manageModels');

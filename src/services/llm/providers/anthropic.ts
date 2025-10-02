@@ -85,11 +85,22 @@ export class AnthropicService extends BaseLLMService {
         };
     }
 
+    private getRepoAnalysisOverrideModel(): string | null {
+        try {
+            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+            const value = (cfg.get<string>('model', 'general') || 'general').trim();
+            if (!value || value === 'general') { return null; }
+            return this.listSupportedModels().includes(value) ? value : null;
+        } catch {
+            return null;
+        }
+    }
+
     /**
      * This function requests a chat completion from Anthropic and expects a structured JSON response
      */
     async generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options?: { token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError> {
-        const config = this.getConfig();
+        const config = { ...this.getConfig(), model: this.getRepoAnalysisOverrideModel() || this.getConfig().model };
 
         if (!config.model) {
             return { message: 'Anthropic model is not selected. Please configure it via Manage Models.', statusCode: 400 };

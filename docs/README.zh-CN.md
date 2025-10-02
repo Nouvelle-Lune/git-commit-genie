@@ -96,6 +96,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `gitCommitGenie.repositoryAnalysis.enabled`         | boolean | true   | 启用仓库分析以提供更好的提交信息生成上下文。                                                                            |
 | `gitCommitGenie.repositoryAnalysis.excludePatterns` | array   | []     | 仓库分析扫描时要排除的文件模式（gitignore风格）。                                                                       |
 | `gitCommitGenie.repositoryAnalysis.updateThreshold` | number  | 10     | 更新仓库分析的提交次数阈值。                                                                                            |
+| `gitCommitGenie.repositoryAnalysis.model`           | enum    | general | 用于仓库分析的模型。可选择所有供应商支持的模型，系统将自动切换到该模型所属的服务商；或选择“使用与commit message生成相同的模型”以复用主模型。 |
 | `gitCommitGenie.commitLanguage`                     | string  | `auto` | 生成的提交信息目标语言。选项：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。          |
 | `gitCommitGenie.typingAnimationSpeed`               | number  | 15     | 提交信息框打字动画速度，单位为每字符毫秒。设置 -1 关闭动画。                                                            |  |
 | `gitCommitGenie.showUsageCost`                      | boolean | true   | 启用后在生成文本时弹出通知，显示本次生成的估计总费用。                                                                  |
