@@ -291,7 +291,7 @@ export class RepositoryScanner implements IRepositoryScanner {
             const readmePath = path.join(repositoryPath, readmeFile);
             if (fs.existsSync(readmePath)) {
                 try {
-                    const content = fs.readFileSync(readmePath, 'utf-8');
+                    const content = fs.readFileSync(readmePath, 'utf-8').replace(/\s/g, '');;
                     return content;
                 } catch (error) {
                     logger.warn(`[Genie][RepoScan] Failed to read README ${readmeFile}`, error as any);
@@ -309,7 +309,7 @@ export class RepositoryScanner implements IRepositoryScanner {
         for (const relPath of filePaths.slice(0, maxRead)) {
             try {
                 const filePath = path.join(repositoryPath, relPath);
-                const content = fs.readFileSync(filePath, 'utf-8');
+                const content = fs.readFileSync(filePath, 'utf-8').replace(/\s/g, '');
                 // Always store full relative path
                 configFiles[relPath] = content.substring(0, 2000);
                 // Also store by base name for known config files (helps detection heuristics)
