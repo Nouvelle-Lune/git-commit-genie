@@ -42,7 +42,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             maxTokens?: number;
             requestType: RequestType;
         }
-    ): Promise<{ parsedResponse?: any; usage?: any }> {
+    ): Promise<{ parsedResponse?: any; usage?: any; parsedAssistantResponse?: any }> {
         if (!client) {
             throw new Error(`${options.provider} client is not initialized`);
         }
@@ -83,11 +83,13 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                     );
                     const content = response.choices[0]?.message?.content ?? '';
 
+
                     const usage = options.trackUsage ? (response as any).usage : undefined;
 
                     // Token usage logging is handled at provider level to avoid duplication
                     const parsedResponse = content ? JSON.parse(content.trim()) : undefined;
-                    return { parsedResponse, usage };
+                    const parsedAssistantResponse = response.choices[0]?.message;
+                    return { parsedResponse, usage, parsedAssistantResponse };
 
                 }
             } catch (e: any) {

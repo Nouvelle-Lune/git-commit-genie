@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { LLMError, LLMResponse } from '../llmTypes';
+import { ChatMessage, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from "../llmTypes";
 import { TemplateService } from '../../../template/templateService';
 import { DiffData } from '../../git/gitTypes';
@@ -9,6 +9,7 @@ import { ChatFn } from "../llmTypes";
 import { logger } from '../../logger';
 import { OpenAICompatibleUtils } from './utils/index.js';
 import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysisTypes';
+import { z } from "zod";
 import {
     fileSummarySchema,
     classifyAndDraftResponseSchema,
@@ -249,6 +250,17 @@ export class DeepSeekService extends BaseLLMService {
                     }
                     if (attempt < totalAttempts - 1) {
                         logger.warn(`[Genie][DeepSeek] Schema validation failed for ${reqType} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
+
+                        const jsonSchemaString = JSON.stringify(z.toJSONSchema(validationSchema), null, 2);
+
+                        messages = [
+                            ...messages,
+                            result.parsedAssistantResponse || { role: 'assistant', content: result.parsedResponse ? JSON.stringify(result.parsedResponse) : '' },
+                            {
+                                role: 'user',
+                                content: `The previous response did not conform to the required format, the zod error is ${safe.error}. Please try again and ensure the response matches the specified JSON format: ${jsonSchemaString}.`
+                            }
+                        ];
                         continue;
                     }
                     throw new Error(`DeepSeek structured result failed local validation for ${reqType} after ${totalAttempts} attempts`);
@@ -291,13 +303,15 @@ export class DeepSeekService extends BaseLLMService {
         const totalAttempts = Math.max(1, retries + 1);
         let lastError: any;
 
+        let messages: ChatMessage[] = [
+            { role: 'system', content: rules.baseRule },
+            { role: 'user', content: jsonMessage }
+        ];
+
         for (let attempt = 0; attempt < totalAttempts; attempt++) {
             const result = await this.utils.callChatCompletion(
                 this.openai!,
-                [
-                    { role: 'system', content: rules.baseRule },
-                    { role: 'user', content: jsonMessage }
-                ],
+                messages,
                 {
                     model: config.model,
                     provider: 'DeepSeek',
@@ -323,6 +337,15 @@ export class DeepSeekService extends BaseLLMService {
             lastError = safe.error;
             if (attempt < totalAttempts - 1) {
                 logger.warn(`[Genie][DeepSeek] Schema validation failed (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
+
+                messages = [
+                    ...messages,
+                    result.parsedAssistantResponse || { role: 'assistant', content: result.parsedResponse ? JSON.stringify(result.parsedResponse) : '' },
+                    {
+                        role: 'user',
+                        content: `The previous response did not conform to the required format, the zod error is ${lastError}. Please try again and ensure the response matches the specified JSON format exactly.`
+                    }
+                ];
             }
         }
 

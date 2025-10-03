@@ -103,6 +103,13 @@ export abstract class BaseLLMService implements LLMService {
         }
     }
 
+    protected getRepoInputBoxValue(): string {
+        const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
+        const api = gitExtension.getAPI(1);
+        const repo = api.repositories[0];
+        return repo.inputBox.value || '';
+    }
+
     protected async buildJsonMessage(diffs: DiffData[]): Promise<string> {
         const time = new Date().toLocaleString();
 
