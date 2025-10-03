@@ -1,5 +1,8 @@
 # Changelog
 
+## [2.1.0]
+- feat: Now genie will show stage notifications when using thinking mode.
+
 ## [2.0.0]
 - feat: Now can use different modle for repository analysis and commit message generation.
 - feat: Add LLM cost tracking for this plugin, and display cost details in the VS Code output channel.
