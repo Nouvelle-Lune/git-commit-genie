@@ -6,6 +6,7 @@ import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysi
 import { generateCommitMessageChain } from '../../chain/chainThinking';
 import { DiffData } from '../../git/gitTypes';
 import { logger } from '../../logger';
+import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { AnthropicUtils } from './utils/AnthropicUtils';
 import { BaseLLMService, ChatFn, LLMError, LLMResponse } from '../llmTypes';
 import { AnthropicCommitMessageTool, AnthropicRepoAnalysisTool, AnthropicFileSummaryTool, AnthropicClassifyAndDraftTool, AnthropicValidateAndFixTool } from './schemas/anthropicSchemas';
@@ -264,7 +265,11 @@ export class AnthropicService extends BaseLLMService {
             }
         };
 
-        const out = await generateCommitMessageChain(
+        // Start bottom-right stage notifications
+        try { stageNotifications.begin(); } catch { /* ignore */ }
+        let out;
+        try {
+        out = await generateCommitMessageChain(
             {
                 diffs,
                 currentTime: parsedInput?.['current-time'],
@@ -274,8 +279,16 @@ export class AnthropicService extends BaseLLMService {
                 repositoryAnalysis: parsedInput?.['repository-analysis']
             },
             chat,
-            { maxParallel: config.chainMaxParallel }
+            {
+                maxParallel: config.chainMaxParallel,
+                onStage: (event) => {
+                    try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+                }
+            }
         );
+        } finally {
+            try { stageNotifications.end(); } catch { /* ignore */ }
+        }
 
         if (usages.length) {
             logger.usageSummary('Anthropic', usages, config.model, 'thinking', undefined, false);

@@ -41,6 +41,7 @@
   "config.repositoryAnalysis.updateThreshold.desc": "更新倉庫分析的提交次數閾值。",
   "config.typingAnimationSpeed.desc": "提交資訊框打字動畫速度，單位為每字元毫秒。設定 -1 關閉動畫。",
   "config.showUsageCost.desc": "啟用後在產生文字時彈出通知，顯示本次產生的估計總費用。",
+  "config.ui.stageNotifications.enabled.desc": "在鏈式思考過程中於右下角顯示階段通知。",
   "templates.pickWorkspaceFolder": "選擇工作區資料夾",
   "templates.quickPickPlaceholder": "選擇 / 管理模板",
   "templates.createNew": "$(add) 新建模板…",

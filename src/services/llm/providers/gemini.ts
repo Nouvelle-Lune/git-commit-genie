@@ -6,6 +6,7 @@ import { DiffData } from '../../git/gitTypes';
 import { generateCommitMessageChain } from '../../chain/chainThinking';
 
 import { logger } from '../../logger';
+import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { GeminiUtils } from './utils/GeminiUtils.js';
 import { LLMAnalysisResponse, AnalysisPromptParts } from '../../analysis/analysisTypes';
 import {
@@ -273,7 +274,11 @@ export class GeminiService extends BaseLLMService {
             }
         };
 
-        const out = await generateCommitMessageChain(
+        // Start bottom-right stage notifications
+        try { stageNotifications.begin(); } catch { /* ignore */ }
+        let out;
+        try {
+        out = await generateCommitMessageChain(
             {
                 diffs,
                 currentTime: parsedInput?.['current-time'],
@@ -283,8 +288,16 @@ export class GeminiService extends BaseLLMService {
                 repositoryAnalysis: parsedInput?.['repository-analysis']
             },
             chat,
-            { maxParallel: config.chainMaxParallel }
+            {
+                maxParallel: config.chainMaxParallel,
+                onStage: (event) => {
+                    try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+                }
+            }
         );
+        } finally {
+            try { stageNotifications.end(); } catch { /* ignore */ }
+        }
 
         if (usages.length) {
             logger.usageSummary('Gemini', usages, config.model, 'thinking', undefined, false);

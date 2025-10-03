@@ -47,6 +47,7 @@ Basic format:
 | Cancellation                    | Cancel in‑progress generation directly from the SCM title bar button.                                                                                                                                     |
 | Secure Secret Storage           | API keys stored in VS Code secret storage (not in settings JSON).                                                                                                                                         |
 | Internationalization            | Built‑in English, Simplified Chinese, Traditional Chinese, and more.                                                                                                                                      |
+| Stage Notifications             | Bottom‑right, progress notifications that show thinking stages.                                                                                                                                           |
 
 ## How It Works
 
@@ -90,10 +91,11 @@ All settings are under: `Git Commit Genie`.
 | `gitCommitGenie.repositoryAnalysis.enabled`         | boolean | true    | Enable repository analysis to provide better context for commit message generation.                                                                                                                                          |
 | `gitCommitGenie.repositoryAnalysis.excludePatterns` | array   | []      | File patterns to exclude from repository analysis scanning (gitignore-style).                                                                                                                                                |
 | `gitCommitGenie.repositoryAnalysis.updateThreshold` | number  | 10      | Number of commits after which to update the repository analysis.                                                                                                                                                             |
-| `gitCommitGenie.repositoryAnalysis.model`             | enum    | general | Model used for repository analysis. Pick any supported model across providers; the provider automatically switches to match your selection. Choose “Use general provider model” to reuse your main commit message model.      |
+| `gitCommitGenie.repositoryAnalysis.model`           | enum    | general | Model used for repository analysis. Pick any supported model across providers; the provider automatically switches to match your selection. Choose “Use general provider model” to reuse your main commit message model.     |
 | `gitCommitGenie.commitLanguage`                     | string  | `auto`  | Target language for generated commit messages. Options: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`.                                                                                      |
 | `gitCommitGenie.typingAnimationSpeed`               | number  | 15      | Speed of the commit message box typing animation in milliseconds per character. Set to -1 to disable the animation.                                                                                                          |
 | `gitCommitGenie.showUsageCost`                      | boolean | true    | When enabled, a brief notification displays the estimated total cost for the current generation.                                                                                                                             |
+| `gitCommitGenie.ui.stageNotifications.enabled`      | boolean | true    | Show bottom‑right stage notifications during chain prompting. Title‑less minimal bubble.                                                                                                                                     |
 
 
 ## Command List

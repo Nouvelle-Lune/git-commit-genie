@@ -8,6 +8,7 @@ import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { logger } from '../../logger';
 import { ChatFn } from "../llmTypes";
 import { LLMAnalysisResponse, AnalysisPromptParts } from "../../analysis/analysisTypes";
+import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { OpenAICompatibleUtils } from './utils/OpenAICompatibleUtils';
 import {
     fileSummarySchema,
@@ -265,7 +266,11 @@ export class OpenAIService extends BaseLLMService {
             }
         };
 
-        const out = await generateCommitMessageChain(
+        // Start bottom-right stage notifications
+        try { stageNotifications.begin(); } catch { /* ignore */ }
+        let out;
+        try {
+        out = await generateCommitMessageChain(
             {
                 diffs,
                 currentTime: parsed?.["current-time"],
@@ -275,8 +280,16 @@ export class OpenAIService extends BaseLLMService {
                 repositoryAnalysis: parsed?.["repository-analysis"]
             },
             chat,
-            { maxParallel: config.chainMaxParallel }
+            {
+                maxParallel: config.chainMaxParallel,
+                onStage: (event) => {
+                    try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+                }
+            }
         );
+        } finally {
+            try { stageNotifications.end(); } catch { /* ignore */ }
+        }
 
         if (usages.length) {
             // Per-step costs already added; summarize without re-adding cost

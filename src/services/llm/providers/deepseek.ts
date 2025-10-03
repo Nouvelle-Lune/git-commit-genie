@@ -9,6 +9,7 @@ import { ChatFn } from "../llmTypes";
 import { logger } from '../../logger';
 import { OpenAICompatibleUtils } from './utils/index.js';
 import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysisTypes';
+import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { z } from "zod";
 import {
     fileSummarySchema,
@@ -270,7 +271,11 @@ export class DeepSeekService extends BaseLLMService {
             }
         };
 
-        const out = await generateCommitMessageChain(
+        // Start bottom-right stage notifications
+        try { stageNotifications.begin(); } catch { /* ignore */ }
+        let out;
+        try {
+        out = await generateCommitMessageChain(
             {
                 diffs,
                 currentTime: parsed?.["current-time"],
@@ -280,8 +285,16 @@ export class DeepSeekService extends BaseLLMService {
                 repositoryAnalysis: parsed?.["repository-analysis"]
             },
             chat,
-            { maxParallel: config.chainMaxParallel }
+            {
+                maxParallel: config.chainMaxParallel,
+                onStage: (event) => {
+                    try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+                }
+            }
         );
+        } finally {
+            try { stageNotifications.end(); } catch { /* ignore */ }
+        }
 
         if (usages.length) {
             logger.usageSummary('DeepSeek', usages, config.model, 'thinking', undefined, false);

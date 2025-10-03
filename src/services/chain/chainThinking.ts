@@ -198,7 +198,7 @@ async function enforceTargetLanguageForCommit(
 export async function generateCommitMessageChain(
     inputs: ChainInputs,
     chat: ChatFn,
-    options?: { maxParallel?: number }
+    options?: { maxParallel?: number; onStage?: (event: { type: string; data?: any }) => void }
 ): Promise<ChainOutputs> {
     const { diffs } = inputs;
 	const maxParallel = options?.maxParallel ?? Math.max(4, Math.min(8, diffs.length));
@@ -206,12 +206,17 @@ export async function generateCommitMessageChain(
 	const queue = [...diffs];
 	const results: FileSummary[] = [];
 
+    // Notify: summarizing has started
+    try { options?.onStage?.({ type: 'summarizeStart' }); } catch { /* ignore */ }
+
 	async function worker() {
 		while (queue.length) {
 			const item = queue.shift();
 			if (!item) { break; };
 			const summary = await summarizeSingleFile(item, chat);
 			results.push(summary);
+            // progress update
+            try { options?.onStage?.({ type: 'summarizeProgress', data: { current: results.length, total: diffs.length } }); } catch { /* ignore */ }
 		}
 	}
 
@@ -221,21 +226,29 @@ export async function generateCommitMessageChain(
 	await Promise.all(workers);
 
 	const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat);
+    try { options?.onStage?.({ type: 'classifyDraft' }); } catch { /* ignore */ }
 	const { validMessage, notes: validationNotes } = await validateAndFix(draft, inputs.validationChecklist ?? '', chat, inputs.userTemplate);
+    try { options?.onStage?.({ type: 'validateFix' }); } catch { /* ignore */ }
 
 	// Local strict check; if still not conforming, ask LLM for a minimal strict fix
 	let finalMessage = validMessage;
 	const check = localStrictCheck(finalMessage);
     if (!check.ok) {
+        try { options?.onStage?.({ type: 'strictFix' }); } catch { /* ignore */ }
         finalMessage = await enforceStrictWithLLM(finalMessage, check.problems, chat, inputs.userTemplate);
     }
 
 	// Enforce target language strictly while preserving tokens/structure
-	try {
+    try {
+        if ((inputs.targetLanguage || '').trim()) {
+            try { options?.onStage?.({ type: 'enforceLanguage' }); } catch { /* ignore */ }
+        }
 		finalMessage = await enforceTargetLanguageForCommit(finalMessage, inputs.targetLanguage, chat, inputs.userTemplate);
 	} catch (error) {
 		// ignore
 	}
+
+	try { options?.onStage?.({ type: 'done' }); } catch { /* ignore */ }
 
 	return {
 		commitMessage: finalMessage,

@@ -42,6 +42,7 @@
   "config.typingAnimationSpeed.desc": "Speed of the commit message box typing animation in milliseconds per character. Set to -1 to disable the animation.",
   "config.showUsageCost.desc": "When enabled, a brief notification will displays the estimated total cost for the current generation.",
   "config.showUsageCost": "",
+  "config.ui.stageNotifications.enabled.desc": "Show bottom-right stage notifications during chain prompting.",
   "templates.pickWorkspaceFolder": "Pick a workspace folder",
   "templates.quickPickPlaceholder": "Select / manage templates",
   "templates.createNew": "$(add) Create new template…",

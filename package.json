@@ -164,6 +164,12 @@
           "maximum": 32,
           "markdownDescription": "%config.repositoryAnalysis.updateThreshold.desc%"
         },
+        "gitCommitGenie.ui.stageNotifications.enabled": {
+          "order": 10,
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.ui.stageNotifications.enabled.desc%"
+        },
         "gitCommitGenie.repositoryAnalysis.model": {
           "order": 9,
           "type": "string",

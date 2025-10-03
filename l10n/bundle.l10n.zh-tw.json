@@ -68,5 +68,14 @@
   "This action cannot be undone.": "此操作不可撤銷。",
   "Reset": "重設",
   "Repository cost has been reset to $0.00": "倉庫費用已重設為 $0.00",
-  "Failed to reset repository cost: {0}": "重設倉庫費用失敗：{0}"
+  "Failed to reset repository cost: {0}": "重設倉庫費用失敗：{0}",
+  "AI Thinking…": "AI 正在思考…",
+  "Analyzing changes…": "正在分析變更…",
+  "Analyzing changes ({0}/{1})…": "正在分析變更（{0}/{1}）…",
+  "Drafting commit message…": "正在起草提交訊息…",
+  "Validating against rules…": "正在校驗規範…",
+  "Fixing format issues…": "正在修復格式…",
+  "Enforcing target language…": "正在套用目標語言…",
+  "Done": "完成",
+  "Cancelled": "已取消"
 }

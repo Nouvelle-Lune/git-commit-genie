@@ -39,6 +39,17 @@ export const L10N_KEYS = {
     errorGenerating: 'Error generating commit message: {0}',
     failedToGenerate: 'Failed to generate commit message: {0}'
   },
+  stages: {
+    title: 'AI Thinking…',
+    summarizingStart: 'Analyzing changes…',
+    summarizingProgress: 'Analyzing changes ({0}/{1})…',
+    classifyDraft: 'Drafting commit message…',
+    validateFix: 'Validating against rules…',
+    strictFix: 'Fixing format issues…',
+    enforceLanguage: 'Enforcing target language…',
+    done: 'Done',
+    cancelled: 'Cancelled'
+  },
   actions: {
     openSettings: 'Open Settings',
     dismiss: 'Dismiss',

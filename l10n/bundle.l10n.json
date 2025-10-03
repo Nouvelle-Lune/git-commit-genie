@@ -68,5 +68,14 @@
   "This action cannot be undone.": "This action cannot be undone.",
   "Reset": "Reset",
   "Repository cost has been reset to $0.00": "Repository cost has been reset to $0.00",
-  "Failed to reset repository cost: {0}": "Failed to reset repository cost: {0}"
+  "Failed to reset repository cost: {0}": "Failed to reset repository cost: {0}",
+  "AI Thinking…": "AI Thinking…",
+  "Analyzing changes…": "Analyzing changes…",
+  "Analyzing changes ({0}/{1})…": "Analyzing changes ({0}/{1})…",
+  "Drafting commit message…": "Drafting commit message…",
+  "Validating against rules…": "Validating against rules…",
+  "Fixing format issues…": "Fixing format issues…",
+  "Enforcing target language…": "Enforcing target language…",
+  "Done": "Done",
+  "Cancelled": "Cancelled"
 }
