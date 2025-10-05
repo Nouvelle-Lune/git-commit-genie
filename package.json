@@ -3,7 +3,7 @@
   "displayName": "%displayName%",
   "publisher": "Lune-99",
   "description": "%description%",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "license": "MIT",
   "engines": {
     "vscode": "^1.103.0"
@@ -26,12 +26,28 @@
     "deepseek",
     "commit message",
     "git workflow",
-    "productivity",
-    "developer tools",
     "source control",
     "commit message generater",
-    "版本控制",
-    "提交信息"
+    "code review",
+    "openai",
+    "chatgpt",
+    "conventional commits",
+    "git commit",
+    "scm",
+    "source control",
+    "productivity",
+    "developer tools",
+    "ai assistant",
+    "commit helper",
+    "git helper",
+    "commit automation",
+    "code quality",
+    "semantic commit",
+    "code analysis",
+    "static analysis",
+    "pre-commit",
+    "commit hook",
+    "version control"
   ],
   "activationEvents": [
     "onStartupFinished"
