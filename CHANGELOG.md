@@ -1,5 +1,8 @@
 # Changelog
 
+## [2.1.3]
+- fix: Enhanced retry logic with schema validation and improved error handling in Anthropic and DeepSeek provider.
+
 ## [2.1.0]
 - feat: Now genie will show stage notifications when using thinking mode.
 
