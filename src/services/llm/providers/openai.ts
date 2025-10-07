@@ -9,7 +9,7 @@ import { logger } from '../../logger';
 import { ChatFn } from "../llmTypes";
 import { LLMAnalysisResponse, AnalysisPromptParts } from "../../analysis/analysisTypes";
 import { stageNotifications } from '../../../ui/StageNotificationManager';
-import { OpenAICompatibleUtils } from './utils/OpenAICompatibleUtils';
+import { OpenAICompatibleUtils } from './utils/OpenAIUtils';
 import {
     fileSummarySchema,
     classifyAndDraftResponseSchema,
@@ -270,23 +270,23 @@ export class OpenAIService extends BaseLLMService {
         try { stageNotifications.begin(); } catch { /* ignore */ }
         let out;
         try {
-        out = await generateCommitMessageChain(
-            {
-                diffs,
-                currentTime: parsed?.["current-time"],
-                userTemplate: parsed?.["user-template"],
-                targetLanguage: parsed?.["target-language"],
-                validationChecklist: rules.checklistText,
-                repositoryAnalysis: parsed?.["repository-analysis"]
-            },
-            chat,
-            {
-                maxParallel: config.chainMaxParallel,
-                onStage: (event) => {
-                    try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+            out = await generateCommitMessageChain(
+                {
+                    diffs,
+                    currentTime: parsed?.["current-time"],
+                    userTemplate: parsed?.["user-template"],
+                    targetLanguage: parsed?.["target-language"],
+                    validationChecklist: rules.checklistText,
+                    repositoryAnalysis: parsed?.["repository-analysis"]
+                },
+                chat,
+                {
+                    maxParallel: config.chainMaxParallel,
+                    onStage: (event) => {
+                        try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+                    }
                 }
-            }
-        );
+            );
         } finally {
             try { stageNotifications.end(); } catch { /* ignore */ }
         }
