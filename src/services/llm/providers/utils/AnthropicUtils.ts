@@ -25,7 +25,7 @@ export class AnthropicUtils extends BaseProviderUtils {
             tools?: any[];
             toolChoice?: any;
         }
-    ): Promise<{ parsedResponse: any; usage?: any; stop_reason?: string }> {
+    ): Promise<{ parsedResponse: any; usage?: any; parsedAssistantResponse?: any }> {
         if (!client) {
             throw new Error(`${options.provider} client is not initialized`);
         }
@@ -77,9 +77,14 @@ export class AnthropicUtils extends BaseProviderUtils {
 
                 const parsedResponse = block?.input;
 
+                const parsedAssistantResponse = {
+                    role: response.role,
+                    content: JSON.stringify(parsedResponse)
+                };
+
                 const usage = options.trackUsage ? response.usage : undefined;
 
-                return { parsedResponse, usage, stop_reason: (response as any).stop_reason };
+                return { parsedResponse, usage, parsedAssistantResponse };
             } catch (e: any) {
                 lastErr = e;
                 const code = e?.status || e?.statusCode || e?.code;

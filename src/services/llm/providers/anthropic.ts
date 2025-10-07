@@ -1,6 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
 import * as vscode from 'vscode';
 
+import { z } from 'zod';
+import { ChatMessage } from "../llmTypes";
 import { TemplateService } from '../../../template/templateService';
 import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysisTypes';
 import { generateCommitMessageChain } from '../../chain/chainThinking';
@@ -248,12 +250,16 @@ export class AnthropicService extends BaseLLMService {
                     if (attempt < totalAttempts - 1) {
                         logger.warn(`[Genie][Anthropic] Schema validation failed for ${reqType} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
 
-                        const systemMessages = messages.filter(m => m.role === 'system');
-                        if (systemMessages.length > 0) {
-                            const schemaInstruction = `CRITICAL: You MUST strictly follow the tool schema format. Your previous response failed schema validation. Please ensure your response exactly matches the required structure for the ${mapping.tool.name} tool.`;
-                            systemMessages[0].content = schemaInstruction + '\n\n' + systemMessages[0].content;
-                        }
+                        const jsonSchemaString = JSON.stringify(z.toJSONSchema(mapping.schema), null, 2);
 
+                        messages = [
+                            ...messages,
+                            result.parsedAssistantResponse || { role: 'assistant', content: result.parsedResponse ? JSON.stringify(result.parsedResponse) : '' },
+                            {
+                                role: 'user',
+                                content: `The previous response did not conform to the required format, the zod error is ${safe.error}. Please try again and ensure the response matches the specified JSON format: ${jsonSchemaString} exactly.`
+                            }
+                        ];
                         continue;
                     }
 
@@ -269,23 +275,23 @@ export class AnthropicService extends BaseLLMService {
         try { stageNotifications.begin(); } catch { /* ignore */ }
         let out;
         try {
-        out = await generateCommitMessageChain(
-            {
-                diffs,
-                currentTime: parsedInput?.['current-time'],
-                userTemplate: parsedInput?.['user-template'],
-                targetLanguage: parsedInput?.['target-language'],
-                validationChecklist: rules.checklistText,
-                repositoryAnalysis: parsedInput?.['repository-analysis']
-            },
-            chat,
-            {
-                maxParallel: config.chainMaxParallel,
-                onStage: (event) => {
-                    try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+            out = await generateCommitMessageChain(
+                {
+                    diffs,
+                    currentTime: parsedInput?.['current-time'],
+                    userTemplate: parsedInput?.['user-template'],
+                    targetLanguage: parsedInput?.['target-language'],
+                    validationChecklist: rules.checklistText,
+                    repositoryAnalysis: parsedInput?.['repository-analysis']
+                },
+                chat,
+                {
+                    maxParallel: config.chainMaxParallel,
+                    onStage: (event) => {
+                        try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+                    }
                 }
-            }
-        );
+            );
         } finally {
             try { stageNotifications.end(); } catch { /* ignore */ }
         }
@@ -310,13 +316,15 @@ export class AnthropicService extends BaseLLMService {
         const totalAttempts = Math.max(1, retries + 1);
         let lastError: any;
 
+        let messages: ChatMessage[] = [
+            { role: 'system', content: rules.baseRule },
+            { role: 'user', content: jsonMessage }
+        ];
+
         for (let attempt = 0; attempt < totalAttempts; attempt++) {
             const result = await this.utils.callChatCompletion(
                 this.client!,
-                [
-                    { role: 'system', content: rules.baseRule },
-                    { role: 'user', content: jsonMessage }
-                ],
+                messages,
                 {
                     model: config.model,
                     provider: 'Anthropic',
@@ -341,6 +349,18 @@ export class AnthropicService extends BaseLLMService {
             lastError = safe.error;
             if (attempt < totalAttempts - 1) {
                 logger.warn(`[Genie][Anthropic] Schema validation failed (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
+
+                const jsonSchemaString = JSON.stringify(z.toJSONSchema(commitMessageSchema), null, 2);
+
+                messages = [
+                    ...messages,
+                    result.parsedAssistantResponse || { role: 'assistant', content: result.parsedResponse ? JSON.stringify(result.parsedResponse) : '' },
+                    {
+                        role: 'user',
+                        content: `The previous response did not conform to the required format, the zod error is ${lastError}. Please try again and ensure the response matches the specified JSON format: ${jsonSchemaString} exactly.`
+                    }
+                ];
+                continue;
             }
         }
 

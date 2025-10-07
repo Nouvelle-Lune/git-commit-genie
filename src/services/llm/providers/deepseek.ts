@@ -275,23 +275,23 @@ export class DeepSeekService extends BaseLLMService {
         try { stageNotifications.begin(); } catch { /* ignore */ }
         let out;
         try {
-        out = await generateCommitMessageChain(
-            {
-                diffs,
-                currentTime: parsed?.["current-time"],
-                userTemplate: parsed?.["user-template"],
-                targetLanguage: parsed?.["target-language"],
-                validationChecklist: rules.checklistText,
-                repositoryAnalysis: parsed?.["repository-analysis"]
-            },
-            chat,
-            {
-                maxParallel: config.chainMaxParallel,
-                onStage: (event) => {
-                    try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+            out = await generateCommitMessageChain(
+                {
+                    diffs,
+                    currentTime: parsed?.["current-time"],
+                    userTemplate: parsed?.["user-template"],
+                    targetLanguage: parsed?.["target-language"],
+                    validationChecklist: rules.checklistText,
+                    repositoryAnalysis: parsed?.["repository-analysis"]
+                },
+                chat,
+                {
+                    maxParallel: config.chainMaxParallel,
+                    onStage: (event) => {
+                        try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+                    }
                 }
-            }
-        );
+            );
         } finally {
             try { stageNotifications.end(); } catch { /* ignore */ }
         }
@@ -351,12 +351,14 @@ export class DeepSeekService extends BaseLLMService {
             if (attempt < totalAttempts - 1) {
                 logger.warn(`[Genie][DeepSeek] Schema validation failed (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
 
+                const jsonSchemaString = JSON.stringify(z.toJSONSchema(commitMessageSchema), null, 2);
+
                 messages = [
                     ...messages,
                     result.parsedAssistantResponse || { role: 'assistant', content: result.parsedResponse ? JSON.stringify(result.parsedResponse) : '' },
                     {
                         role: 'user',
-                        content: `The previous response did not conform to the required format, the zod error is ${lastError}. Please try again and ensure the response matches the specified JSON format exactly.`
+                        content: `The previous response did not conform to the required format, the zod error is ${lastError}. Please try again and ensure the response matches the specified JSON format: ${jsonSchemaString} exactly.`
                     }
                 ];
             }
