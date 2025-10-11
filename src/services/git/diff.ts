@@ -210,6 +210,33 @@ export class DiffService {
 		const status: DiffStatus = this.convertStatus(change.status);
 		const fileName: string = path.relative(repo.rootUri.fsPath, change.uri.fsPath);
 
+		// Fast-path: treat known binary/data containers as non-diffable and synthesize a concise summary
+		if (this.isBinaryLike(fileName)) {
+			const parentDir = this.getParentDirectoryLabel(fileName);
+			const ext = (path.extname(fileName) || '').replace(/^\./, '').toLowerCase() || 'binary';
+			const kind = this.classifyBinaryKind(ext);
+			const lines: string[] = [
+				'== Binary/Data file change ==',
+				`Type: ${kind}${ext ? ` (${ext})` : ''}`,
+				`Status: ${status}`,
+				`File: ${fileName}`,
+				`Parent: ${parentDir}`
+			];
+			if (status === 'renamed') {
+				const fromPath = path.relative(repo.rootUri.fsPath, (change.originalUri || change.uri).fsPath).replace(/\\/g, '/');
+				const toPath = path.relative(repo.rootUri.fsPath, (change.renameUri || change.uri).fsPath).replace(/\\/g, '/');
+				lines.push(`Rename: ${fromPath} → ${toPath}`);
+			}
+			const rawDiff = lines.join('\n');
+
+			return {
+				fileName,
+				status,
+				diffHunks: [],
+				rawDiff,
+			};
+		}
+
 		let rawDiff: string;
 		try {
 				// Special handling for Jupyter notebooks: always build a source-only diff that ignores outputs/metadata
@@ -268,6 +295,54 @@ export class DiffService {
 			diffHunks,
 			rawDiff,
 		};
+	}
+
+	/**
+	 * Returns a friendly parent directory label limited to the repository scope.
+	 * If the file is at repo root, returns "[repo-root]".
+	 */
+	private getParentDirectoryLabel(relPath: string): string {
+		const norm = relPath.replace(/\\/g, '/');
+		const idx = norm.lastIndexOf('/');
+		if (idx === -1) { return '[repo-root]'; }
+		const dir = norm.substring(0, idx);
+		// Show only the immediate parent folder name for brevity
+		const lastSep = dir.lastIndexOf('/');
+		return lastSep === -1 ? dir : dir.substring(lastSep + 1);
+	}
+
+	/**
+	 * Classify binary-like files by extension into a coarse type for messaging.
+	 */
+	private classifyBinaryKind(ext: string): string {
+		const archives = new Set(['zip','gz','tgz','bz2','tbz2','xz','zst','lz4','7z','rar','tar','jar','war','ear','apk','ipa']);
+		const databases = new Set(['sqlite','sqlite3','db','db3','mdb','accdb','realm','parquet','feather','orc','avro','dbf']);
+		const media = new Set(['png','jpg','jpeg','gif','bmp','tiff','webp','ico','svgz','pdf','mp3','wav','flac','mp4','mkv','mov','avi','webm']);
+		const binaries = new Set(['bin','iso','dll','so','dylib','exe','o','a','class','wasm']);
+		if (archives.has(ext)) return 'archive';
+		if (databases.has(ext)) return 'database';
+		if (media.has(ext)) return 'media';
+		if (binaries.has(ext)) return 'binary';
+		return 'binary';
+	}
+
+	/**
+	 * Heuristic: whether a path likely refers to a binary/data file where text diff is not useful.
+	 */
+	private isBinaryLike(relPath: string): boolean {
+		const ext = (path.extname(relPath) || '').replace(/^\./, '').toLowerCase();
+		if (!ext) return false;
+		const binaryExts = new Set<string>([
+			// Archives & compressed
+			'zip','gz','tgz','bz2','tbz2','xz','zst','lz4','7z','rar','tar','jar','war','ear','apk','ipa',
+			// Databases & data containers
+			'sqlite','sqlite3','db','db3','mdb','accdb','realm','parquet','feather','orc','avro','dbf','hdf5','h5',
+			// Media & documents commonly binary
+			'png','jpg','jpeg','gif','bmp','tiff','webp','ico','svgz','pdf','mp3','wav','flac','mp4','mkv','mov','avi','webm',
+			// Compiled/binary objects
+			'bin','iso','dll','so','dylib','exe','o','a','class','wasm'
+		]);
+		return binaryExts.has(ext);
 	}
 
 	/**
