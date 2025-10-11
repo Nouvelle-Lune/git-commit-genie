@@ -4,6 +4,7 @@ import { API, Change, GitExtension, Repository, Status, Commit, LogOptions } fro
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { logger } from '../logger';
+import { buildNotebookSourceOnlyDiff } from './ipynbDiff';
 
 /**
  * Gets the Git API from the VS Code Git extension, if available.
@@ -211,6 +212,26 @@ export class DiffService {
 
 		let rawDiff: string;
 		try {
+				// Special handling for Jupyter notebooks: always build a source-only diff that ignores outputs/metadata
+				if (fileName.endsWith('.ipynb')) {
+					try {
+						const nbDiff = await buildNotebookSourceOnlyDiff(repo, change);
+						if (nbDiff && nbDiff.trim().length > 0) {
+							rawDiff = nbDiff;
+							// Parse and return immediately to avoid falling back to raw JSON diff noise
+							const diffHunks: DiffHunk[] = this.parseDiff(rawDiff);
+							return {
+								fileName,
+								status,
+								diffHunks,
+								rawDiff,
+							};
+						}
+					} catch (nbErr) {
+						logger.warn('Notebook diff failed, falling back to raw diff:', nbErr);
+					}
+				}
+
 			if (this.isStaged(change.status)) {
 
 				if (status === 'renamed') {
