@@ -338,6 +338,13 @@
         "enablement": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
       },
       {
+        "command": "git-commit-genie.clearRepositoryAnalysisCache",
+        "title": "%command.clearRepositoryAnalysisCache%",
+        "category": "%category.title%",
+        "icon": "$(trash)",
+        "enablement": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
+      },
+      {
         "command": "git-commit-genie.genieMenu",
         "title": "Git Commit Genie: Menu",
         "category": "%category.title%",
@@ -377,6 +384,10 @@
         {
           "command": "git-commit-genie.refreshRepositoryAnalysis",
           "when": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
+        },
+        {
+          "command": "git-commit-genie.clearRepositoryAnalysisCache",
+          "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
         },
         {
           "command": "git-commit-genie.cancelRepositoryAnalysis",

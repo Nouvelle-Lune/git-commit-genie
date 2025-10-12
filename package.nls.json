@@ -12,6 +12,7 @@
   "command.selectTemplate": "Git Commit Genie: Select/Create Template",
   "command.viewRepositoryAnalysis": "Git Commit Genie: View Repository Analysis",
   "command.refreshRepositoryAnalysis": "Git Commit Genie: Refresh Repository Analysis",
+  "command.clearRepositoryAnalysisCache": "Git Commit Genie: Clear Repository Analysis Cache",
   "command.cancelRepositoryAnalysis": "Git Commit Genie: Stop Repository Analysis",
   "command.genieMenu": "Git Commit Genie: Menu",
   "command.showRepositoryCost": "Git Commit Genie: Show Repository Cost",

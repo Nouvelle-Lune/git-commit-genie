@@ -12,6 +12,7 @@
   "command.selectTemplate": "Git Commit Genie: 选择/新建模板",
   "command.viewRepositoryAnalysis": "Git Commit Genie: 查看仓库分析",
   "command.refreshRepositoryAnalysis": "Git Commit Genie: 刷新仓库分析",
+  "command.clearRepositoryAnalysisCache": "Git Commit Genie: 清理仓库分析缓存",
   "command.cancelRepositoryAnalysis": "Git Commit Genie: 停止仓库分析",
   "command.genieMenu": "Git Commit Genie: 菜单",
   "command.showRepositoryCost": "Git Commit Genie: 查看仓库费用",

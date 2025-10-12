@@ -29,8 +29,13 @@ export class RepoAnalysisCommands {
             vscode.commands.registerCommand('git-commit-genie.cancelRepositoryAnalysis', this.cancelRepositoryAnalysis.bind(this))
         );
 
+        // Clear repository analysis cache (JSON in globalState)
+        this.context.subscriptions.push(
+            vscode.commands.registerCommand('git-commit-genie.clearRepositoryAnalysisCache', this.clearRepositoryAnalysisCache.bind(this))
+        );
+
         // Developer command removed
-        }
+    }
 
     private getRepositoryPath(): string | null {
         try {
@@ -176,5 +181,37 @@ export class RepoAnalysisCommands {
             return;
         }
         //TODO: handle other errors
+    }
+
+    private async clearRepositoryAnalysisCache(): Promise<void> {
+        const repositoryPath = this.getRepositoryPath();
+        if (!repositoryPath) {
+            vscode.window.showErrorMessage('No Git repository found.');
+            return;
+        }
+
+        // Confirm action with the user
+        const cancelLabel = vscode.l10n.t(I18N.cost.cancel);
+        const clearLabel = vscode.l10n.t(I18N.repoAnalysis.clear);
+        const choice = await vscode.window.showWarningMessage(
+            vscode.l10n.t(I18N.repoAnalysis.clearConfirm),
+            { modal: true },
+            { title: clearLabel },
+            { title: cancelLabel, isCloseAffordance: true }
+
+        );
+        if (!choice || choice.title !== clearLabel) {
+            return;
+        }
+
+        try {
+            const analysisService = this.serviceRegistry.getAnalysisService();
+            await analysisService.clearAnalysis(repositoryPath);
+            // Refresh status bar state
+            this.statusBarManager.updateStatusBar();
+            vscode.window.showInformationMessage(vscode.l10n.t(I18N.repoAnalysis.cleared));
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to clear repository analysis cache: ${error}`);
+        }
     }
 }
