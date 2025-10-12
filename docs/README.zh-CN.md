@@ -130,9 +130,7 @@ SCM 标题栏：根据状态显示“Generate commit message”或“Stop genera
 
 <img src="../media/demo2.gif" width="600"/>
 
-模版文件存在且非空时，系统尝试抽取“模板策略”。支持：
-1. 自然语言偏好描述。
-2. markdown模版编写。
+模版文件存在且非空时，系统尝试抽取“模板策略”。支持markdown模版编写。
 
 完整指南： [English](./user-template-guide.md) | [中文](./user-template-guide.zh-CN.md)
 
@@ -145,32 +143,11 @@ Minimal Template
 - Prefer: add, fix, refactor; Avoid: update.
 ```
 
-## Thinking 模式 vs 单轮模式
-
-| 模式 | 优点                             | 缺点                 | 适用场景                |
-| ---- | -------------------------------- | -------------------- | ----------------------- |
-| Thinking | 结构最佳，模板贴合度高，分类更准 | 延迟更高，Token 更多 | 多文件 / 需严格风格统一 |
-| 单轮 | 快速，成本低                     | 结构细腻度较低       | 小变更 / 临时修复       |
-
-通过命令或设置切换。
-
 ## 安全与隐私
 
 - API Key 使用 SecretStorage，不以明文写入 settings.json， 不会以任何形式上传到互联网，仅保存在本地。
 - 仅发送“已暂存 diff”中的文件名与修改上下文；不包括未暂存或未跟踪文件。
 - 无遥测 / 分析数据收集。
-
-## 常见问题（Troubleshooting）
-
-| 现象                      | 原因                | 解决                                    |
-| ------------------------- | ------------------- | --------------------------------------- |
-| "No staged changes found" | 未暂存任何文件      | 使用 Source Control 或 `git add` 暂存。 |
-| 生成内容空泛              | 模板不明确          | 尝试编写结构化的模版                    |
-| 频繁 429                  | 并行过高 / 模板过大 | 降低 `chain.maxParallel`。              |
-| 状态栏无“· Thinking”      | 未启用 Thinking     | 使用命令或设置开启。                    |
-| 重复要求输入 API Key      | 秘钥被清除          | 重新运行 Manage Models。                |
-
-
 
 ## 许可证
 

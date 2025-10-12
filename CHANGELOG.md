@@ -1,8 +1,9 @@
 # Changelog
 
-## [2.1.5]
+## [2.1.6]
 - fix: Added spport for .ipynb files commit message generation.
 - fix: Simplified binary file content reading to generate commit messages, saving unnecessary tokens.
+- feat: Added a repository analysis cache cleanup command. The current repository analysis cache primarily includes summaries of the technology stack and characteristics of the repository.
 
 ## [2.1.3]
 - fix: Enhanced retry logic with schema validation and improved error handling in Anthropic and DeepSeek provider.
