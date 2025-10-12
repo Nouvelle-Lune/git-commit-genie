@@ -8,7 +8,7 @@ English version: [English README](../README.md)
 
 ## 概述
 
-Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / DeepSeek / Anthropic / Gemini）自动生成高质量的 Conventional Commits 风格提交信息。内置仓库智能分析功能，自动理解项目结构和技术栈，为提交信息生成提供更好的上下文。支持可选"链式提示"模式（多步推理）与"用户模板"策略，显著提升结构一致性与团队风格统一。
+Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / DeepSeek / Anthropic / Gemini）自动生成高质量的 Conventional Commits 风格提交信息。内置仓库智能分析功能，自动理解项目结构和技术栈，为提交信息生成提供更好的上下文。支持可选“Thinking 模式”（多步推理）与“用户模板”策略，显著提升结构一致性与团队风格统一。
 
 优势：
 - 避免在提交语句格式/措辞上反复纠结。
@@ -37,6 +37,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 - 少量 / 轻量级提交：优先选择轻巧快速的模型，生成更快、Token 消耗更低。
 - 大型 / 多文件提交：再考虑切换更强的模型，以获得更好的理解与结构质量。
 - 可随时通过命令面板运行 "Git Commit Genie: Manage Models" 切换模型。
+ - 可通过命令面板快速切换 Thinking："Git Commit Genie: 启用 / 禁用链式思考模式"。
 
 ## 核心特性
 
@@ -44,7 +45,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | ------------------------ | ---------------------------------------------------------------------------------------------------- |
 | 多模型提供商             | 支持 OpenAI、DeepSeek、Anthropic、Gemini等。                                                         |
 | 仓库智能分析             | 自动分析项目结构、技术栈和架构，为提交信息生成提供上下文；支持手动刷新、实时更新和手动修改分析报告。 |
-| 链式提示模式             | 多步：文件级摘要 → 结构化综合 → 校验修复，显著提升准确度与模板贴合度。                               |
+| Thinking 模式            | 多步：文件级摘要 → 结构化综合 → 校验修复，显著提升准确度与模板贴合度。                               |
 | 用户模板策略             | 内置模板选择和创建功能，支持工作区和用户数据目录，抽取策略影响段落顺序、必填 footers、词汇偏好等。   |
 | Conventional Commit 校验 | 头行格式（type(scope)!: desc），长度 ≤ 72，无句号。                                                  |
 | Diff 感知                | 仅读取"已暂存"更改；自动推断类型（feat / fix / docs / refactor 等）。                                |
@@ -58,15 +59,15 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 ## 工作流程
 
 1. 暂存（Stage）你的变更。
-2. 执行命令：`Git Commit Genie: AI Generate`（SCM 顶部按钮或命令面板）。
-3. 若开启链式模式：
+2. 执行命令：`Git Commit Genie: 生成提交信息`（SCM 顶部按钮或命令面板）。
+3. 若开启 Thinking 模式：
    - 并行生成文件级摘要
    - 综合分析类型与 scope
    - 应用模板策略（若有效）
    - 结构 + 风格自检与最小修复
 4. 输出写入仓库提交框，可人工微调后提交。
 
-未开启链式：使用单轮提示 → 更低延迟，但结构与风格细腻度稍弱。
+未开启 Thinking：使用单轮提示 → 更低延迟，但结构与风格细腻度稍弱。
 
 ## 安装
 
@@ -101,25 +102,26 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `gitCommitGenie.commitLanguage`                     | string  | `auto`  | 生成的提交信息目标语言。选项：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。                               |
 | `gitCommitGenie.typingAnimationSpeed`               | number  | 15      | 提交信息框打字动画速度，单位为每字符毫秒。设置 -1 关闭动画。                                                                                 |  |
 | `gitCommitGenie.showUsageCost`                      | boolean | true    | 启用后在生成文本时弹出通知，显示本次生成的估计总费用。                                                                                       |
-| `gitCommitGenie.ui.stageNotifications.enabled`      | boolean | true    | 链式思考时在右下角显示阶段通知（精简气泡，无标题）。                                                                                         |
+| `gitCommitGenie.ui.stageNotifications.enabled`      | boolean | true    | 在 Thinking 过程中在右下角显示阶段通知（精简气泡，无标题）。                                                                                 |
 
 
 
-## 命令列表
+## 命令
 
-| Command ID                                   | 标题                        | 作用                                         |
-| -------------------------------------------- | --------------------------- | -------------------------------------------- |
-| `git-commit-genie.generateCommitMessage`     | AI Generate                 | 基于已暂存更改生成提交信息。                 |
-| `git-commit-genie.cancelGeneration`          | Stop                        | 取消当前生成。                               |
-| `git-commit-genie.manageModels`              | Manage Models               | 选择提供商 / 输入或更换 API Key / 选择模型。 |
-| `git-commit-genie.toggleChainMode`           | Toggle Chain Prompting      | 快速开启/关闭链式模式。                      |
-| `git-commit-genie.selectTemplate`            | Select/Create Template      | 选择或新建提交信息模板文件。                 |
-| `git-commit-genie.viewRepositoryAnalysis`    | View Repository Analysis    | 快速打开仓库分析报告。                       |
-| `git-commit-genie.refreshRepositoryAnalysis` | Refresh Repository Analysis | 手动刷新仓库分析。                           |
-| `git-commit-genie.cancelRepositoryAnalysis`  | Stop Repository Analysis    | 停止正在进行的仓库分析。                     |
-| `git-commit-genie.genieMenu`                 | Menu                        | 打开Git Commit Genie功能菜单。               |
-| `git-commit-genie.showRepositoryCost`        | Show Repository Cost        | 显示当前工作区累计消耗估算。                 |
-| `git-commit-genie.resetRepositoryCost`       | Reset Repository Cost       | 重置当前工作区累计消耗估算。                 |
+在命令面板中搜索以下命令：
+
+- Git Commit Genie: 生成提交信息
+- Git Commit Genie: 停止生成（生成进行中可见）
+- Git Commit Genie: 管理模型
+- Git Commit Genie: 启用 / 禁用链式思考模式
+- Git Commit Genie: 选择/新建模板
+- Git Commit Genie: 查看仓库分析
+- Git Commit Genie: 刷新仓库分析
+- Git Commit Genie: 清理仓库分析缓存
+- Git Commit Genie: 停止仓库分析（分析进行中可见）
+- Git Commit Genie: 菜单
+- Git Commit Genie: 查看仓库费用
+- Git Commit Genie: 重置仓库费用
 
 SCM 标题栏：根据状态显示“Generate commit message”或“Stop generate”按钮。
 
@@ -143,11 +145,11 @@ Minimal Template
 - Prefer: add, fix, refactor; Avoid: update.
 ```
 
-## 链式模式 vs 单轮模式
+## Thinking 模式 vs 单轮模式
 
 | 模式 | 优点                             | 缺点                 | 适用场景                |
 | ---- | -------------------------------- | -------------------- | ----------------------- |
-| 链式 | 结构最佳，模板贴合度高，分类更准 | 延迟更高，Token 更多 | 多文件 / 需严格风格统一 |
+| Thinking | 结构最佳，模板贴合度高，分类更准 | 延迟更高，Token 更多 | 多文件 / 需严格风格统一 |
 | 单轮 | 快速，成本低                     | 结构细腻度较低       | 小变更 / 临时修复       |
 
 通过命令或设置切换。
@@ -165,7 +167,7 @@ Minimal Template
 | "No staged changes found" | 未暂存任何文件      | 使用 Source Control 或 `git add` 暂存。 |
 | 生成内容空泛              | 模板不明确          | 尝试编写结构化的模版                    |
 | 频繁 429                  | 并行过高 / 模板过大 | 降低 `chain.maxParallel`。              |
-| 状态栏无“· Thinking”      | 未启用链式          | 使用命令或设置开启。                    |
+| 状态栏无“· Thinking”      | 未启用 Thinking     | 使用命令或设置开启。                    |
 | 重复要求输入 API Key      | 秘钥被清除          | 重新运行 Manage Models。                |
 
 

@@ -1,7 +1,8 @@
 # Changelog
 
-## [2.2.3]
-- feat: Added spport for .ipynb files commit message generation.
+## [2.1.5]
+- fix: Added spport for .ipynb files commit message generation.
+- fix: Simplified binary file content reading to generate commit messages, saving unnecessary tokens.
 
 ## [2.1.3]
 - fix: Enhanced retry logic with schema validation and improved error handling in Anthropic and DeepSeek provider.
