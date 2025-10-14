@@ -1,5 +1,8 @@
 # Changelog
 
+## [2.1.7]
+- fix: Update English UI text for better clarity.
+
 ## [2.1.6]
 - fix: Added spport for .ipynb files commit message generation.
 - fix: Simplified binary file content reading to generate commit messages, saving unnecessary tokens.
