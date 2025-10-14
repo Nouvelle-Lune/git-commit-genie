@@ -26,11 +26,11 @@ export class CostCommands {
 
             if (cost === 0) {
                 vscode.window.showInformationMessage(
-                    vscode.l10n.t('No AI usage cost recorded for this repository yet.')
+                    vscode.l10n.t('No Genie usage cost recorded for this repository yet.')
                 );
             } else {
                 vscode.window.showInformationMessage(
-                    vscode.l10n.t('Total AI usage cost for this repository: ${0}', formattedCost)
+                    vscode.l10n.t('Total Genie usage cost for this repository: ${0}', formattedCost)
                 );
             }
         } catch (error) {

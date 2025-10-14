@@ -7,7 +7,7 @@ export const L10N_KEYS = {
     tooltipConfigured: 'Git Commit Genie: {0} / {1}',
     tooltipNeedConfig: 'Git Commit Genie: {0} — click to configure models',
     selectModel: 'Select Model',
-    chainBadge: ' · Chain',
+    chainBadge: ' · Thinking',
     analysisModel: 'Repository Analysis Model: {0} / {1}'
   },
   manageModels: {
@@ -33,9 +33,9 @@ export const L10N_KEYS = {
     disabled: 'disabled'
   },
   generation: {
-    progressTitle: 'AI Generating Commit Message…',
+    progressTitle: 'Genie Generating Commit Message…',
     noStagedChanges: 'No staged changes found.',
-    cancelled: 'AI generation cancelled.',
+    cancelled: 'Genie generation cancelled.',
     errorGenerating: 'Error generating commit message: {0}',
     failedToGenerate: 'Failed to generate commit message: {0}'
   },
@@ -75,7 +75,7 @@ export const L10N_KEYS = {
     manageModels: '$(gear) Manage Models',
     cancelAnalysis: '$(stop-circle) Cancel Analysis',
     refreshAnalysis: '$(refresh) Refresh Analysis',
-    openMarkdown: '$(file) Open repository-analysis.md',
+    openMarkdown: '$(go-to-file) Open repository-analysis.md',
     toggleThingking: '$(thinking) Enable / Disable thinking mode',
   },
   repoAnalysis: {
@@ -125,8 +125,8 @@ export const L10N_KEYS = {
     repositoryAnalysis: 'Repository analysis: ${0} | Cache hit: {1}%'
   },
   cost: {
-    noCostRecorded: 'No AI usage cost recorded for this repository yet.',
-    totalCost: 'Total AI usage cost for this repository: ${0}',
+    noCostRecorded: 'No Genie usage cost recorded for this repository yet.',
+    totalCost: 'Total Genie usage cost for this repository: ${0}',
     failedToGetCost: 'Failed to get repository cost: {0}',
     resetConfirmation: 'Are you sure you want to reset the cost tracking for this repository? This action cannot be undone.',
     reset: 'Reset',
