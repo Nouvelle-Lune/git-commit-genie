@@ -18,20 +18,6 @@ function normalizeSource(src: string[] | string | undefined): string[] {
   return String(src).split(/\r?\n/);
 }
 
-function stringifyCells(nb: Notebook): string[] {
-  const lines: string[] = [];
-  const cells = Array.isArray(nb.cells) ? nb.cells : [];
-  cells.forEach((cell, idx) => {
-    const type = cell?.cell_type || 'unknown';
-    const srcLines = normalizeSource(cell?.source);
-    const title = (srcLines[0] || '').trim();
-    lines.push(`## cell ${idx} (${type})${title ? `: ${title}` : ''}`);
-    lines.push(...srcLines);
-    lines.push('');
-  });
-  return lines;
-}
-
 async function readHead(repo: Repository, relPath: string): Promise<string | null> {
   try {
     return await repo.show('HEAD', relPath);
