@@ -7,6 +7,7 @@ import { GeminiService } from '../services/llm/providers/gemini';
 import { TemplateService } from '../template/templateService';
 import { RepositoryAnalysisService } from '../services/analysis';
 import { LLMService } from '../services/llm/llmTypes';
+import { RepoService } from "../services/repo/repo";
 import { logger } from '../services/logger';
 
 export class ServiceRegistry {
@@ -19,6 +20,7 @@ export class ServiceRegistry {
     private geminiService!: GeminiService;
     private llmServices: Map<string, LLMService>;
     private currentLLMService!: LLMService;
+    private repoService!: RepoService;
 
     constructor(private context: vscode.ExtensionContext) {
         this.llmServices = new Map();
@@ -31,6 +33,7 @@ export class ServiceRegistry {
             // Initialize basic services
             this.diffService = new DiffService();
             this.templateService = new TemplateService(this.context);
+            this.repoService = new RepoService();
 
             // Initialize repository analysis service with placeholder LLM service
             this.analysisService = new RepositoryAnalysisService(this.context, null as any);
@@ -68,7 +71,9 @@ export class ServiceRegistry {
                     await (vscode.commands.executeCommand('git-commit-genie.updateStatusBar'));
                 } catch { /* ignore */ }
             });
-            try { (this.context.subscriptions || []).push(secretDisp); } catch { /* ignore */ }
+            try {
+                (this.context.subscriptions || []).push(secretDisp);
+            } catch { /* ignore */ }
 
             logger.info('Services initialized successfully');
         } catch (error) {
@@ -100,6 +105,10 @@ export class ServiceRegistry {
 
     getLLMService(provider: string): LLMService | undefined {
         return this.llmServices.get(provider);
+    }
+
+    getRepoService(): RepoService {
+        return this.repoService;
     }
 
     // Provider and model management
