@@ -12,6 +12,8 @@ export const L10N_KEYS = {
   },
   manageModels: {
     selectProvider: 'Select a provider…',
+    configureRepoAnalysisModel: 'Configure Repository Analysis Model',
+    configureRepoAnalysisModelDesc: 'For repository analysis feature',
     savedKeyDetected: 'Saved {0} API Key detected',
     reuseSavedKey: 'Reuse saved key ({0})',
     replaceKey: 'Replace key',
@@ -23,9 +25,13 @@ export const L10N_KEYS = {
     validatingKey: 'Validating {0} API Key…',
     noModels: 'No models available.',
     selectModel: 'Select a {0} model…',
+    selectRepoAnalysisModel: 'Select a model for repository analysis…',
     configured: 'Configured {0}: {1}',
+    repoAnalysisConfigured: 'Repository analysis model configured: {0} / {1}',
     currentSuffix: ' (current)',
-    currentLabel: 'Current'
+    currentLabel: 'Current',
+    useDefaultModel: 'Use default model',
+    useDefaultModelDesc: 'Follow the general commit message model'
   },
   chain: {
     toggled: 'Chain prompting {0}.',
