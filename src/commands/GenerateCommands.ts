@@ -7,7 +7,8 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
  * It includes commands for generating commit messages and cancelling ongoing generation.
  */
 export class GenerateCommands {
-    private currentCancelSource: vscode.CancellationTokenSource | undefined;
+    // Track generation per-repository to avoid cross-repo coupling
+    private inFlight: Map<string, vscode.CancellationTokenSource> = new Map();
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -17,20 +18,27 @@ export class GenerateCommands {
     async register(): Promise<void> {
         // Generate commit message command
         this.context.subscriptions.push(
-            vscode.commands.registerCommand('git-commit-genie.generateCommitMessage', this.generateCommitMessage.bind(this))
+            // Accept optional repository arg when invoked from SCM menus
+            vscode.commands.registerCommand('git-commit-genie.generateCommitMessage', (arg?: any) => this.generateCommitMessage(arg))
         );
 
         // Cancel generation command
         this.context.subscriptions.push(
-            vscode.commands.registerCommand('git-commit-genie.cancelGeneration', this.cancelGeneration.bind(this))
+            vscode.commands.registerCommand('git-commit-genie.cancelGeneration', (arg?: any) => this.cancelGeneration(arg))
         );
     }
 
-    private async cancelGeneration(): Promise<void> {
-        this.currentCancelSource?.cancel();
+    private async cancelGeneration(arg?: any): Promise<void> {
+        // Cancel for the repository where the command was invoked
+        const repoService = this.serviceRegistry.getRepoService();
+        const repo = repoService.getRepository(arg) || undefined;
+        const key = repo?.rootUri?.fsPath;
+        if (!key) { return; }
+        const cts = this.inFlight.get(key);
+        cts?.cancel();
     }
 
-    private async generateCommitMessage(): Promise<void> {
+    private async generateCommitMessage(arg?: any): Promise<void> {
         // First-time UX: if provider or model not configured, jump to Manage Models instead of erroring
         const provider = this.serviceRegistry.getProvider().toLowerCase();
         const secretKeyName = this.getSecretKeyName(provider);
@@ -47,10 +55,7 @@ export class GenerateCommands {
             return;
         }
 
-        await vscode.commands.executeCommand('setContext', 'gitCommitGenie.generating', true);
-
         const cts = new vscode.CancellationTokenSource();
-        this.currentCancelSource = cts;
 
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.SourceControl,
@@ -60,7 +65,27 @@ export class GenerateCommands {
             token.onCancellationRequested(() => cts.cancel());
 
             try {
-                const diffs = await this.serviceRegistry.getDiffService().getDiff();
+                // Determine target repository explicitly from invocation context or UI selection
+                const repoService = this.serviceRegistry.getRepoService();
+                const targetRepo: any | undefined = repoService.getRepository(arg) || undefined;
+                
+                const targetRepoPath = targetRepo?.rootUri?.fsPath;
+                if (!targetRepoPath) {
+                    vscode.window.showErrorMessage('No Git repository found.');
+                    return;
+                }
+
+                // Prevent duplicate runs for same repo
+                if (this.inFlight.has(targetRepoPath)) {
+                    vscode.window.showInformationMessage('Generation already running for this repository.');
+                    return;
+                }
+                this.inFlight.set(targetRepoPath, cts);
+
+                // Indicate generating state for UI (global visibility)
+                await vscode.commands.executeCommand('setContext', 'gitCommitGenie.generating', true);
+
+                const diffs = await this.serviceRegistry.getDiffService().getDiff(targetRepoPath);
                 if (diffs.length === 0) {
                     vscode.window.showInformationMessage(vscode.l10n.t(I18N.generation.noStagedChanges));
                     return;
@@ -70,7 +95,7 @@ export class GenerateCommands {
                 const result = await llmService.generateCommitMessage(diffs, { token: cts.token });
 
                 if ('content' in result) {
-                    await this.fillCommitMessage(result.content);
+                    await this.fillCommitMessage(result.content, targetRepo);
                 } else {
                     await this.handleError(result);
                 }
@@ -81,9 +106,15 @@ export class GenerateCommands {
                     vscode.window.showErrorMessage(vscode.l10n.t(I18N.generation.failedToGenerate, error.message));
                 }
             } finally {
+                try {
+                    // Remove from inflight map
+                    this.inFlight.forEach((value, key) => {
+                        if (value === cts) { this.inFlight.delete(key); }
+                    });
+                } catch { /* ignore */ }
                 cts.dispose();
-                this.currentCancelSource = undefined;
-                await vscode.commands.executeCommand('setContext', 'gitCommitGenie.generating', false);
+                // Reset UI context only when no other repo is running
+                await vscode.commands.executeCommand('setContext', 'gitCommitGenie.generating', this.inFlight.size > 0);
             }
         });
     }
@@ -97,10 +128,14 @@ export class GenerateCommands {
         }
     }
 
-    private async fillCommitMessage(content: string): Promise<void> {
-        const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
-        const api = gitExtension.getAPI(1);
-        const repo = api.repositories[0];
+    private async fillCommitMessage(content: string, repoArg?: any): Promise<void> {
+        const repoService = this.serviceRegistry.getRepoService();
+        // Use the repo passed in from generation path when available
+        let repo = repoArg;
+        if (!repo) {
+            // Centralized resolution in RepoService
+            repo = repoService.getRepository() || undefined;
+        }
 
         if (repo) {
             // Simulate typing effect

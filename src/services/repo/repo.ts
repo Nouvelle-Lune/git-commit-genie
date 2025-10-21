@@ -15,6 +15,37 @@ export class RepoService {
     }
 
     /**
+     * Resolve a repository based on an optional command argument or current UI context.
+     * Resolution order:
+     * 1. If arg is a repository-like object with rootUri, return it
+     * 2. If arg has resourceUri, map it to its repository via Git API
+     * 3. Otherwise, fall back to getActiveRepository()
+     */
+    public getRepository(arg?: any): Repository | null {
+        try {
+            const api = this.getGitApi();
+            if (!api) { return null; }
+
+            // 1) Explicit repository object
+            if (arg && typeof arg === 'object' && arg.rootUri?.fsPath) {
+                return arg as Repository;
+            }
+
+            // 2) Resource URI -> repository
+            if (arg && typeof arg === 'object' && arg.resourceUri?.fsPath) {
+                const repo = api.getRepository(arg.resourceUri);
+                if (repo) { return repo; }
+            }
+
+            // 3) Fallback resolution
+            return this.getActiveRepository();
+        } catch (error) {
+            logger.error('[Genie][RepoService] Failed to resolve repository', error);
+            return null;
+        }
+    }
+
+    /**
      * Initialize Git extension and API
      */
     private initialize(): void {
