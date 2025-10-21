@@ -1,29 +1,53 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { ConfigurationManager } from '../config/ConfigurationManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { GitExtension } from '../services/git/git';
 import { RepoService } from '../services/repo/repo';
 import { CostTrackingService } from '../services/cost/costTrackingService';
-import * as path from 'path';
+import {
+    ProviderState,
+    AnalysisState,
+    GitState,
+    AnalysisIcon,
+    LLMProvider,
+    PROVIDER_LABELS,
+    PROVIDER_SECRET_KEYS
+} from './StatusBarTypes';
 
+/**
+ * Manages the status bar item for Git Commit Genie
+ */
 export class StatusBarManager {
     private statusBarItem!: vscode.StatusBarItem;
-    private repoAnalysisRunning = false;
-    private repoAnalysisMissing = false;
-    private hasGitRepo = false;
-    private hasApiKey = false;
-    private lastProviderChecked: string | null = null;
-    private hasModel = false;
-    // Repository analysis selection state (provider/model may differ from generation)
-    private analysisProvider: string | null = null;
-    private analysisModel: string | null = null;
-    private analysisHasApiKey: boolean = false;
-    private lastAnalysisKey: string | null = null;
-
-    private costTracker: CostTrackingService | null = null;
     private repoService!: RepoService;
+    private costTracker: CostTrackingService | null = null;
+
+    // State management
+    private providerState: ProviderState = {
+        provider: '',
+        model: '',
+        hasApiKey: false
+    };
+
+    private analysisState: AnalysisState = {
+        enabled: false,
+        running: false,
+        missing: false,
+        provider: null,
+        model: null,
+        hasApiKey: false
+    };
+
+    private gitState: GitState = {
+        hasRepo: false,
+        repoPath: null,
+        repoLabel: ''
+    };
+
+    private lastAnalysisKey: string | null = null;
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -31,66 +55,18 @@ export class StatusBarManager {
         private configManager: ConfigurationManager
     ) { }
 
+    // ========================================
+    // Public API
+    // ========================================
+
     async initialize(): Promise<void> {
-        // Create status bar item with right alignment and low priority
-        this.statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, -10000);
-        this.statusBarItem.command = 'git-commit-genie.genieMenu';
+        this.createStatusBarItem();
+        this.initializeServices();
+        this.registerEventListeners();
 
-        this.context.subscriptions.push(this.statusBarItem);
-
-        this.repoService = this.serviceRegistry.getRepoService();
-        this.costTracker = this.serviceRegistry.getCostTrackingService();
-
-        const editorDisp = vscode.window.onDidChangeActiveTextEditor(() => {
-            this.updateStatusBar();
-        });
-        this.context.subscriptions.push(editorDisp);
-
-        // Watch secret changes to refresh API key availability state
-        const disp = this.context.secrets.onDidChange(async (e) => {
-            try {
-                if (!e?.key || !e.key.startsWith('gitCommitGenie.secret.')) { return; }
-                // Refresh both general provider and analysis selection; then validate with prompt
-                await this.refreshApiKeyState();
-                await this.refreshAnalysisSelectionState();
-                await this.validateAnalysisModelApiKey(true);
-                this.updateStatusBar();
-            } catch { /* ignore */ }
-        });
-        this.context.subscriptions.push(disp);
-
-        // Watch for workspace folder changes
-        const workspaceDisp = vscode.workspace.onDidChangeWorkspaceFolders(() => {
-            this.updateStatusBar();
-        });
-        this.context.subscriptions.push(workspaceDisp);
-
-        // React to repository analysis model setting changes
-        const cfgDisp = vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('gitCommitGenie.repositoryAnalysis.model')) {
-                // Warn if selected analysis model provider has no API key
-                this.validateAnalysisModelApiKey(true).catch(() => { /* ignore */ });
-                void this.refreshAnalysisSelectionState();
-            }
-        });
-        this.context.subscriptions.push(cfgDisp);
-
-        // Refresh immediately when repository cost changes
-        if (this.costTracker) {
-            const costDisp = this.costTracker.onCostChanged(() => this.updateStatusBar());
-            this.context.subscriptions.push({ dispose: () => (costDisp as any)?.dispose?.() || undefined });
-        }
-
-        // Setup Git repository change listeners
-        this.setupGitRepositoryListeners();
-
-        // Seed API key availability
-        await this.refreshApiKeyState();
-        await this.refreshAnalysisSelectionState();
-        // One-time validation on activation
+        await this.refreshAllStates();
         await this.validateAnalysisModelApiKey(true);
 
-        // Initial update
         this.updateStatusBar();
     }
 
@@ -98,198 +74,108 @@ export class StatusBarManager {
         this.statusBarItem?.dispose();
     }
 
-    // Notify status bar that provider/model for general usage changed
     onProviderModelChanged(provider?: string): void {
-        try {
-            void this.refreshApiKeyState(provider);
-            void this.refreshAnalysisSelectionState();
-        } catch { /* ignore */ }
+        void this.refreshProviderState(provider);
+        void this.refreshAnalysisState();
     }
 
     setRepoAnalysisRunning(running: boolean): void {
-        this.repoAnalysisRunning = running;
-        // Expose a context key so commands/menus can hide the refresh action while running
+        this.analysisState.running = running;
         vscode.commands.executeCommand('setContext', 'gitCommitGenie.analysisRunning', running);
         this.updateStatusBar();
     }
 
-    updateStatusBar(): void {
-        const provider = this.serviceRegistry.getProvider().toLowerCase();
-        const model = this.serviceRegistry.getModel(provider);
-        const providerLabel = this.getProviderLabel(provider);
-        const chainEnabled = this.configManager.readChainEnabled();
-        const chainBadge = chainEnabled ? vscode.l10n.t(I18N.statusBar.chainBadge) : '';
-
-        // If provider changed since last API key check, refresh async
-        if (this.lastProviderChecked !== provider) {
-            void this.refreshApiKeyState(provider);
-        }
-
-        // Update Git repo presence and set context for menus
-        this.hasGitRepo = this.detectGitRepo();
-        vscode.commands.executeCommand('setContext', 'gitCommitGenie.hasGitRepo', this.hasGitRepo);
-
-        // Determine if repo analysis markdown exists (only when enabled and when git repo exists)
-        this.updateRepoAnalysisStatus();
-
-        this.hasModel = !!(model && model.trim());
-        const modelLabel = (this.hasApiKey && this.hasModel)
-            ? this.shortenModelName(model.trim())
-            : vscode.l10n.t(I18N.statusBar.selectModel);
-        const analysisIcon = this.getAnalysisIcon();
-
-        this.statusBarItem.text = `$(genie-base) Genie: ${modelLabel}${chainBadge} ${analysisIcon}`;
-
-        const baseTooltip = (this.hasApiKey && this.hasModel)
-            ? vscode.l10n.t(I18N.statusBar.tooltipConfigured, providerLabel, model)
-            : vscode.l10n.t(I18N.statusBar.tooltipNeedConfig, providerLabel);
-
-        const repoTooltip = this.getRepoTooltip();
-        const analysisTooltip = this.getAnalysisTooltipLine();
-        const tooltipLines: string[] = [];
-        const repoLabel = this.resolveRepositoryLabel();
-        if (repoLabel) {
-            const prefix = vscode.l10n.t(I18N.manageModels.currentLabel);
-            tooltipLines.push(`${prefix}: ${repoLabel}`);
-        }
-        tooltipLines.push(baseTooltip);
-        if (analysisTooltip) {
-            tooltipLines.push(analysisTooltip);
-        }
-        if (repoTooltip) {
-            tooltipLines.push(repoTooltip);
-        }
-        const tooltipText = tooltipLines.join('\n');
-        this.statusBarItem.tooltip = tooltipText;
-        void this.enrichTooltipWithCost(tooltipText, '');
-
-        // Click action: when no Git repo, jump to official initialize command; otherwise open Genie menu
-        this.statusBarItem.command = !this.hasGitRepo ? 'git.init' : 'git-commit-genie.genieMenu';
-        this.statusBarItem.show();
+    isRepoAnalysisRunning(): boolean {
+        return this.analysisState.running;
     }
 
-    private resolveRepositoryLabel(): string {
-        try {
-            const candidate: any = this.repoService;
-            if (candidate && typeof candidate.getRepositoryLabel === 'function') {
-                return candidate.getRepositoryLabel();
-            }
-            const repo = candidate?.getActiveRepository?.();
-            if (!repo) {
-                return '';
-            }
-            const repoPath = candidate?.getRepositoryPath?.(repo);
-            if (!repoPath) {
-                return '';
-            }
-            return path.basename(repoPath);
-        } catch {
-            return '';
-        }
+    hasGitRepository(): boolean {
+        return this.gitState.hasRepo;
     }
 
-    private async enrichTooltipWithCost(baseTooltip: string, _unused: string): Promise<void> {
-        try {
-            if (!this.costTracker) {
-                this.statusBarItem.tooltip = baseTooltip;
+    isRepoAnalysisMissing(): boolean {
+        return this.analysisState.missing;
+    }
+
+    // ========================================
+    // Initialization
+    // ========================================
+
+    private createStatusBarItem(): void {
+        this.statusBarItem = vscode.window.createStatusBarItem(
+            vscode.StatusBarAlignment.Right,
+            -10000
+        );
+        this.statusBarItem.command = 'git-commit-genie.genieMenu';
+        this.context.subscriptions.push(this.statusBarItem);
+    }
+
+    private initializeServices(): void {
+        this.repoService = this.serviceRegistry.getRepoService();
+        this.costTracker = this.serviceRegistry.getCostTrackingService();
+    }
+
+    private registerEventListeners(): void {
+        this.registerEditorListeners();
+        this.registerSecretListeners();
+        this.registerWorkspaceListeners();
+        this.registerConfigListeners();
+        this.registerCostListeners();
+        this.registerGitListeners();
+    }
+
+    private registerEditorListeners(): void {
+        const disposable = vscode.window.onDidChangeActiveTextEditor(() => {
+            this.updateStatusBar();
+        });
+        this.context.subscriptions.push(disposable);
+    }
+
+    private registerSecretListeners(): void {
+        const disposable = this.context.secrets.onDidChange(async (e) => {
+            if (!e?.key?.startsWith('gitCommitGenie.secret.')) {
                 return;
             }
 
-            const repoPath = this.getActiveRepositoryPath();
-            if (!repoPath) {
-                this.statusBarItem.tooltip = baseTooltip;
-                return;
-            }
-
-            const cost = await this.costTracker.getRepositoryCost(repoPath);
-            const parts: string[] = [baseTooltip];
-
-            // Prepare cost line (use i18n messages)
-            if (cost > 0) {
-                const formatted = cost.toFixed(6);
-                parts.push(vscode.l10n.t(I18N.cost.totalCost, formatted));
-            } else {
-                parts.push(vscode.l10n.t(I18N.cost.noCostRecorded));
-            }
-
-            // Only update if tooltip still corresponds to current provider/model state
-            this.statusBarItem.tooltip = parts.join('\n');
-        } catch {
-            // Silently ignore; keep baseline tooltip
-        }
-    }
-
-    private getActiveRepositoryPath(): string | null {
-        try {
-            const repo = this.repoService.getActiveRepository();
-            if (!repo) { return null; }
-            return this.repoService.getRepositoryPath(repo);
-        } catch {
-            return null;
-        }
-    }
-
-    private secretNameFor(provider: string): string {
-        switch (provider) {
-            case 'deepseek': return 'gitCommitGenie.secret.deepseekApiKey';
-            case 'anthropic': return 'gitCommitGenie.secret.anthropicApiKey';
-            case 'gemini': return 'gitCommitGenie.secret.geminiApiKey';
-            default: return 'gitCommitGenie.secret.openaiApiKey';
-        }
-    }
-
-
-    private async refreshApiKeyState(provider?: string): Promise<void> {
-        try {
-            const p = (provider || this.serviceRegistry.getProvider() || 'openai').toLowerCase();
-            const secretName = this.secretNameFor(p);
-            const key = await this.context.secrets.get(secretName);
-            this.hasApiKey = !!(key && key.trim());
-            this.lastProviderChecked = p;
+            await this.refreshProviderState();
+            await this.refreshAnalysisState();
+            await this.validateAnalysisModelApiKey(true);
             this.updateStatusBar();
-        } catch {
-            this.hasApiKey = false;
-            this.lastProviderChecked = provider || null;
+        });
+        this.context.subscriptions.push(disposable);
+    }
+
+    private registerWorkspaceListeners(): void {
+        const disposable = vscode.workspace.onDidChangeWorkspaceFolders(() => {
             this.updateStatusBar();
-        }
+        });
+        this.context.subscriptions.push(disposable);
     }
 
-    private getProviderLabel(provider: string): string {
-        switch (provider) {
-            case 'deepseek': return 'DeepSeek';
-            case 'anthropic': return 'Anthropic';
-            case 'gemini': return 'Gemini';
-            default: return 'OpenAI';
-        }
-    }
-
-    private shortenModelName(modelName: string): string {
-        if (!modelName) {
-            return modelName;
-        }
-        // Remove trailing date/version suffix like -20250219 or -20250219-v1
-        const datePattern = /(.*?)-(20\d{6})(?:[-]?v?\d+)?$/;
-        const match = modelName.match(datePattern);
-        return match ? match[1] : modelName;
-    }
-
-    private detectGitRepo(): boolean {
-        try {
-            // Use VS Code Git API to detect any repository
-            const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
-            if (gitExtension) {
-                const api = gitExtension.getAPI(1);
-                return api && api.repositories.length > 0;
+    private registerConfigListeners(): void {
+        const disposable = vscode.workspace.onDidChangeConfiguration((e) => {
+            if (e.affectsConfiguration('gitCommitGenie.repositoryAnalysis.model')) {
+                void this.validateAnalysisModelApiKey(true);
+                void this.refreshAnalysisState();
             }
-            return false;
-        } catch {
-            return false;
-        }
+        });
+        this.context.subscriptions.push(disposable);
     }
 
+    private registerCostListeners(): void {
+        if (!this.costTracker) {
+            return;
+        }
 
+        const disposable = this.costTracker.onCostChanged(() => {
+            this.updateStatusBar();
+        });
+        this.context.subscriptions.push({
+            dispose: () => (disposable as any)?.dispose?.()
+        });
+    }
 
-    private setupGitRepositoryListeners(): void {
+    private registerGitListeners(): void {
         try {
             const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
             if (!gitExtension) {
@@ -298,205 +184,458 @@ export class StatusBarManager {
 
             const api = gitExtension.getAPI(1);
 
-            // Listen for repository changes
-            const repoDisp = api.onDidOpenRepository(() => {
+            const openDisposable = api.onDidOpenRepository(() => {
                 this.updateStatusBar();
             });
-            this.context.subscriptions.push(repoDisp);
+            this.context.subscriptions.push(openDisposable);
 
-            const repoCloseDisp = api.onDidCloseRepository(() => {
+            const closeDisposable = api.onDidCloseRepository(() => {
                 this.updateStatusBar();
             });
-            this.context.subscriptions.push(repoCloseDisp);
-
+            this.context.subscriptions.push(closeDisposable);
         } catch {
-            // ignore errors in git listener setup
+            // Ignore git listener setup errors
         }
     }
 
-    private updateRepoAnalysisStatus(): void {
-        try {
-            if (this.configManager.isRepoAnalysisEnabled() && this.hasGitRepo) {
-                // Use VS Code Git API to get repository path
-                const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
-                if (gitExtension) {
-                    const api = gitExtension.getAPI(1);
-                    if (api && api.repositories.length > 0) {
-                        const repoPath = api.repositories[0].rootUri?.fsPath;
-                        if (repoPath) {
-                            const mdPath = this.serviceRegistry.getAnalysisService().getAnalysisMarkdownFilePath(repoPath);
-                            this.repoAnalysisMissing = !fs.existsSync(mdPath);
-                        } else {
-                            this.repoAnalysisMissing = false;
-                        }
-                    } else {
-                        this.repoAnalysisMissing = false;
-                    }
-                } else {
-                    this.repoAnalysisMissing = false;
+    // ========================================
+    // State Management
+    // ========================================
+
+    private async refreshAllStates(): Promise<void> {
+        await this.refreshProviderState();
+        await this.refreshGitState();
+        await this.refreshAnalysisState();
+    }
+
+    private async refreshProviderState(provider?: string): Promise<void> {
+        const p = (provider || this.serviceRegistry.getProvider() || 'openai').toLowerCase();
+        const model = this.serviceRegistry.getModel(p);
+        const secretName = this.getSecretNameForProvider(p);
+        const key = await this.context.secrets.get(secretName);
+
+        this.providerState = {
+            provider: p,
+            model: model || '',
+            hasApiKey: !!(key && key.trim())
+        };
+
+        this.updateStatusBar();
+    }
+
+    private async refreshGitState(): Promise<void> {
+        const hasRepo = this.detectGitRepo();
+        const repoPath = hasRepo ? this.getActiveRepositoryPath() : null;
+        const repoLabel = repoPath ? this.resolveRepositoryLabel() : '';
+
+        this.gitState = {
+            hasRepo,
+            repoPath,
+            repoLabel
+        };
+
+        vscode.commands.executeCommand('setContext', 'gitCommitGenie.hasGitRepo', hasRepo);
+    }
+
+    private async refreshAnalysisState(): Promise<void> {
+        const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+        const selected = (cfg.get<string>('model', 'general') || 'general').trim();
+        const enabled = this.configManager.isRepoAnalysisEnabled();
+
+        let provider = this.providerState.provider;
+        let model = this.providerState.model;
+
+        // If a specific model is selected, find its provider
+        if (selected && selected !== 'general') {
+            const candidates = ['openai', 'deepseek', 'anthropic', 'gemini'];
+            for (const p of candidates) {
+                const svc = this.serviceRegistry.getLLMService(p);
+                if (svc?.listSupportedModels().includes(selected)) {
+                    provider = p;
+                    model = selected;
+                    break;
                 }
-            } else {
-                this.repoAnalysisMissing = false;
             }
-        } catch {
-            this.repoAnalysisMissing = false;
+        }
+
+        // Get API key for the analysis provider
+        const key = await this.context.secrets.get(this.getSecretNameForProvider(provider));
+        const hasKey = !!(key && key.trim());
+
+        // Check if analysis file exists
+        const missing = this.checkAnalysisFileMissing();
+
+        const newKey = `${provider}:${model}:${hasKey ? 1 : 0}`;
+        const changed = newKey !== this.lastAnalysisKey;
+
+        this.analysisState = {
+            enabled,
+            running: this.analysisState.running,
+            missing,
+            provider,
+            model,
+            hasApiKey: hasKey
+        };
+
+        this.lastAnalysisKey = newKey;
+
+        if (changed) {
+            this.updateStatusBar();
         }
     }
 
-    private getAnalysisIcon(): string {
-        if (!this.configManager.isRepoAnalysisEnabled()) {
+    private checkAnalysisFileMissing(): boolean {
+        if (!this.configManager.isRepoAnalysisEnabled() || !this.gitState.hasRepo) {
+            return false;
+        }
+
+        try {
+            const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
+            if (!gitExtension) {
+                return false;
+            }
+
+            const api = gitExtension.getAPI(1);
+            if (!api || api.repositories.length === 0) {
+                return false;
+            }
+
+            const repoPath = api.repositories[0].rootUri?.fsPath;
+            if (!repoPath) {
+                return false;
+            }
+
+            const mdPath = this.serviceRegistry
+                .getAnalysisService()
+                .getAnalysisMarkdownFilePath(repoPath);
+
+            return !fs.existsSync(mdPath);
+        } catch {
+            return false;
+        }
+    }
+
+    // ========================================
+    // Status Bar UI Update
+    // ========================================
+
+    updateStatusBar(): void {
+        void this.refreshGitState();
+
+        const text = this.buildStatusBarText();
+        const tooltip = this.buildStatusBarTooltip();
+        const command = this.getStatusBarCommand();
+
+        this.statusBarItem.text = text;
+        void this.enrichTooltipWithCost(tooltip);
+        this.statusBarItem.command = command;
+        this.statusBarItem.show();
+    }
+
+    private buildStatusBarText(): string {
+        const { model } = this.providerState;
+        const chainEnabled = this.configManager.readChainEnabled();
+
+        const chainBadge = chainEnabled ? vscode.l10n.t(I18N.statusBar.chainBadge) : '';
+        const modelLabel = this.getModelLabel();
+        const analysisIcon = this.getAnalysisIcon();
+
+        return `$(genie-base) Genie: ${modelLabel}${chainBadge} ${analysisIcon}`;
+    }
+
+    private getModelLabel(): string {
+        const { hasApiKey, model } = this.providerState;
+
+        if (!hasApiKey || !model.trim()) {
+            return vscode.l10n.t(I18N.statusBar.selectModel);
+        }
+
+        return this.shortenModelName(model.trim());
+    }
+
+    private buildStatusBarTooltip(): string {
+        const lines: string[] = [];
+
+        // Repository label
+        if (this.gitState.repoLabel) {
+            const prefix = vscode.l10n.t(I18N.manageModels.currentLabel);
+            lines.push(`${prefix}: ${this.gitState.repoLabel}`);
+        }
+
+        // Main provider/model info
+        lines.push(this.getProviderTooltip());
+
+        // Analysis info
+        const analysisTooltip = this.getAnalysisTooltip();
+        if (analysisTooltip) {
+            lines.push(analysisTooltip);
+        }
+
+        // Repository status
+        const repoTooltip = this.getRepoTooltip();
+        if (repoTooltip) {
+            lines.push(repoTooltip);
+        }
+
+        return lines.join('\n');
+    }
+
+    private getProviderTooltip(): string {
+        const { provider, model, hasApiKey } = this.providerState;
+        const providerLabel = this.getProviderLabel(provider);
+
+        if (hasApiKey && model.trim()) {
+            return vscode.l10n.t(I18N.statusBar.tooltipConfigured, providerLabel, model);
+        }
+
+        return vscode.l10n.t(I18N.statusBar.tooltipNeedConfig, providerLabel);
+    }
+
+    private getAnalysisTooltip(): string {
+        const { provider, model } = this.analysisState;
+        if (!provider || !model) {
             return '';
         }
-        if (!this.hasGitRepo) {
-            return '$(search-stop)';
-        }
-        // If not properly configured, warn instead of showing check
-        const usingGeneral = !this.analysisProvider || this.analysisProvider === this.serviceRegistry.getProvider().toLowerCase();
-        const okKey = usingGeneral ? this.hasApiKey : this.analysisHasApiKey;
-        const okModel = !!(this.analysisModel && this.analysisModel.trim());
-        if (!okKey || !okModel) {
-            return '$(warning)';
-        }
-        if (this.repoAnalysisRunning) {
-            return '$(sync~spin)';
-        }
-        if (this.repoAnalysisMissing) {
-            return '$(refresh)';
-        }
 
-        return '$(check)';
+        const providerLabel = this.getProviderLabel(provider);
+        const modelLabel = this.shortenModelName(model);
+
+        return vscode.l10n.t(I18N.statusBar.analysisModel, providerLabel, modelLabel || '');
     }
 
     private getRepoTooltip(): string {
-        if (!this.configManager.isRepoAnalysisEnabled()) {
+        if (!this.analysisState.enabled) {
             return '';
         }
-        if (!this.hasGitRepo) {
+
+        if (!this.gitState.hasRepo) {
             return vscode.l10n.t(I18N.repoAnalysis.initGitToEnable);
         }
-        const usingGeneral = !this.analysisProvider || this.analysisProvider === this.serviceRegistry.getProvider().toLowerCase();
-        const okKey = usingGeneral ? this.hasApiKey : this.analysisHasApiKey;
-        const okModel = !!(this.analysisModel && this.analysisModel.trim());
-        if (!okKey) { return vscode.l10n.t(I18N.repoAnalysis.missingApiKey); }
-        if (!okModel) { return vscode.l10n.t(I18N.repoAnalysis.missingModel); }
-        if (this.repoAnalysisRunning) {
+
+        const usingGeneral = !this.analysisState.provider ||
+            this.analysisState.provider === this.providerState.provider;
+        const okKey = usingGeneral ? this.providerState.hasApiKey : this.analysisState.hasApiKey;
+        const okModel = !!(this.analysisState.model && this.analysisState.model.trim());
+
+        if (!okKey) {
+            return vscode.l10n.t(I18N.repoAnalysis.missingApiKey);
+        }
+        if (!okModel) {
+            return vscode.l10n.t(I18N.repoAnalysis.missingModel);
+        }
+        if (this.analysisState.running) {
             return vscode.l10n.t(I18N.repoAnalysis.running);
         }
-        if (this.repoAnalysisMissing) {
+        if (this.analysisState.missing) {
             return vscode.l10n.t(I18N.repoAnalysis.missing);
         }
+
         return vscode.l10n.t(I18N.repoAnalysis.idle);
     }
 
-    private async refreshAnalysisSelectionState(): Promise<void> {
+    private getStatusBarCommand(): string {
+        return this.gitState.hasRepo ? 'git-commit-genie.genieMenu' : 'git.init';
+    }
+
+    // ========================================
+    // Icon and Visual Helpers
+    // ========================================
+
+    private getAnalysisIcon(): string {
+        if (!this.analysisState.enabled) {
+            return AnalysisIcon.None;
+        }
+
+        if (!this.gitState.hasRepo) {
+            return AnalysisIcon.NoRepo;
+        }
+
+        const usingGeneral = !this.analysisState.provider ||
+            this.analysisState.provider === this.providerState.provider;
+        const okKey = usingGeneral ? this.providerState.hasApiKey : this.analysisState.hasApiKey;
+        const okModel = !!(this.analysisState.model && this.analysisState.model.trim());
+
+        if (!okKey || !okModel) {
+            return AnalysisIcon.Warning;
+        }
+
+        if (this.analysisState.running) {
+            return AnalysisIcon.Running;
+        }
+
+        if (this.analysisState.missing) {
+            return AnalysisIcon.Refresh;
+        }
+
+        return AnalysisIcon.Complete;
+    }
+
+    // ========================================
+    // Cost Tracking
+    // ========================================
+
+    private async enrichTooltipWithCost(baseTooltip: string): Promise<void> {
         try {
-            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-            const selected = (cfg.get<string>('model', 'general') || 'general').trim();
-
-            let provider = this.serviceRegistry.getProvider().toLowerCase();
-            let model = this.serviceRegistry.getModel(provider);
-            if (selected && selected !== 'general') {
-                const candidates = ['openai', 'deepseek', 'anthropic', 'gemini'];
-                for (const p of candidates) {
-                    const svc = this.serviceRegistry.getLLMService(p);
-                    if (svc && svc.listSupportedModels().includes(selected)) {
-                        provider = p;
-                        model = selected;
-                        break;
-                    }
-                }
+            if (!this.costTracker || !this.gitState.repoPath) {
+                this.statusBarItem.tooltip = baseTooltip;
+                return;
             }
 
-            // Resolve API key for the analysis provider
-            const key = await this.context.secrets.get(this.secretNameFor(provider));
-            const hasKey = !!(key && key.trim());
+            const cost = await this.costTracker.getRepositoryCost(this.gitState.repoPath);
+            const parts: string[] = [baseTooltip];
 
-            const newKey = `${provider}:${model || ''}:${hasKey ? 1 : 0}`;
-            const changed = newKey !== this.lastAnalysisKey;
-            this.analysisProvider = provider;
-            this.analysisModel = model || '';
-            this.analysisHasApiKey = hasKey;
-            this.lastAnalysisKey = newKey;
-            if (changed) {
-                this.updateStatusBar();
+            if (cost > 0) {
+                const formatted = cost.toFixed(6);
+                parts.push(vscode.l10n.t(I18N.cost.totalCost, formatted));
+            } else {
+                parts.push(vscode.l10n.t(I18N.cost.noCostRecorded));
             }
+
+            this.statusBarItem.tooltip = parts.join('\n');
         } catch {
-            // ignore
+            this.statusBarItem.tooltip = baseTooltip;
         }
     }
 
-    private getAnalysisTooltipLine(): string {
-        try {
-            const provider = (this.analysisProvider || this.serviceRegistry.getProvider() || 'openai').toLowerCase();
-            const model = this.analysisModel || this.serviceRegistry.getModel(provider) || '';
-            const providerLabel = this.getProviderLabel(provider);
-            const modelLabel = this.shortenModelName(model);
-            if (!providerLabel && !modelLabel) { return ''; }
-            return vscode.l10n.t(I18N.statusBar.analysisModel, providerLabel, modelLabel || '');
-        } catch {
-            return '';
-        }
-    }
+    // ========================================
+    // Analysis Model Validation
+    // ========================================
 
     private async validateAnalysisModelApiKey(showPrompt: boolean): Promise<void> {
         try {
             const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
             const selected = (cfg.get<string>('model', 'general') || 'general').trim();
-            const candidates = ['openai', 'deepseek', 'anthropic', 'gemini'];
+
             let provider: string | null = null;
+
             if (!selected || selected === 'general') {
-                provider = (this.serviceRegistry.getProvider() || 'openai').toLowerCase();
+                provider = this.providerState.provider;
             } else {
+                const candidates = ['openai', 'deepseek', 'anthropic', 'gemini'];
                 for (const p of candidates) {
                     const svc = this.serviceRegistry.getLLMService(p);
-                    if (svc && svc.listSupportedModels().includes(selected)) { provider = p; break; }
-                }
-            }
-            if (!provider) { return; }
-            const key = await this.context.secrets.get(this.secretNameFor(provider));
-            if (!key || !key.trim()) {
-                if (showPrompt) {
-                    const providerLabel = this.getProviderLabel(provider);
-                    const choice = await vscode.window.showWarningMessage(
-                        vscode.l10n.t(I18N.repoAnalysis.missingApiKey),
-                        vscode.l10n.t(I18N.actions.enterKey),
-                        vscode.l10n.t(I18N.actions.manageModels),
-                        vscode.l10n.t(I18N.actions.dismiss)
-                    );
-                    if (choice === vscode.l10n.t(I18N.actions.enterKey)) {
-                        const newKey = await vscode.window.showInputBox({
-                            title: vscode.l10n.t(I18N.manageModels.enterKeyTitle, providerLabel),
-                            prompt: `${providerLabel} API Key`,
-                            placeHolder: `${providerLabel} API Key`,
-                            password: true,
-                            ignoreFocusOut: true,
-                        });
-                        if (newKey && newKey.trim()) {
-                            await this.serviceRegistry.getLLMService(provider)?.setApiKey(newKey.trim());
-                            await this.refreshApiKeyState(provider);
-                            await this.refreshAnalysisSelectionState();
-                            this.updateStatusBar();
-                        }
-                    } else if (choice === vscode.l10n.t(I18N.actions.manageModels)) {
-                        await vscode.commands.executeCommand('git-commit-genie.manageModels');
+                    if (svc?.listSupportedModels().includes(selected)) {
+                        provider = p;
+                        break;
                     }
                 }
             }
+
+            if (!provider) {
+                return;
+            }
+
+            const key = await this.context.secrets.get(this.getSecretNameForProvider(provider));
+            if (key && key.trim()) {
+                return;
+            }
+
+            if (!showPrompt) {
+                return;
+            }
+
+            const providerLabel = this.getProviderLabel(provider);
+            const choice = await vscode.window.showWarningMessage(
+                vscode.l10n.t(I18N.repoAnalysis.missingApiKey),
+                vscode.l10n.t(I18N.actions.enterKey),
+                vscode.l10n.t(I18N.actions.manageModels),
+                vscode.l10n.t(I18N.actions.dismiss)
+            );
+
+            if (choice === vscode.l10n.t(I18N.actions.enterKey)) {
+                const newKey = await vscode.window.showInputBox({
+                    title: vscode.l10n.t(I18N.manageModels.enterKeyTitle, providerLabel),
+                    prompt: `${providerLabel} API Key`,
+                    placeHolder: `${providerLabel} API Key`,
+                    password: true,
+                    ignoreFocusOut: true,
+                });
+
+                if (newKey && newKey.trim()) {
+                    await this.serviceRegistry.getLLMService(provider)?.setApiKey(newKey.trim());
+                    await this.refreshProviderState(provider);
+                    await this.refreshAnalysisState();
+                    this.updateStatusBar();
+                }
+            } else if (choice === vscode.l10n.t(I18N.actions.manageModels)) {
+                await vscode.commands.executeCommand('git-commit-genie.manageModels');
+            }
         } catch {
-            // ignore
+            // Ignore validation errors
         }
     }
 
-    // Getters for external access
-    isRepoAnalysisRunning(): boolean {
-        return this.repoAnalysisRunning;
+    // ========================================
+    // Utility Methods
+    // ========================================
+
+    private getSecretNameForProvider(provider: string): string {
+        const normalizedProvider = provider.toLowerCase() as LLMProvider;
+        return PROVIDER_SECRET_KEYS[normalizedProvider] || PROVIDER_SECRET_KEYS.openai;
     }
 
-    hasGitRepository(): boolean {
-        return this.hasGitRepo;
+    private getProviderLabel(provider: string): string {
+        const normalizedProvider = provider.toLowerCase() as LLMProvider;
+        return PROVIDER_LABELS[normalizedProvider] || PROVIDER_LABELS.openai;
     }
 
-    isRepoAnalysisMissing(): boolean {
-        return this.repoAnalysisMissing;
+    private shortenModelName(modelName: string): string {
+        if (!modelName) {
+            return modelName;
+        }
+
+        // Remove trailing date/version suffix like -20250219 or -20250219-v1
+        const datePattern = /(.*?)-(20\d{6})(?:[-]?v?\d+)?$/;
+        const match = modelName.match(datePattern);
+        return match ? match[1] : modelName;
+    }
+
+    private detectGitRepo(): boolean {
+        try {
+            const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
+            if (!gitExtension) {
+                return false;
+            }
+
+            const api = gitExtension.getAPI(1);
+            return !!(api && api.repositories.length > 0);
+        } catch {
+            return false;
+        }
+    }
+
+    private getActiveRepositoryPath(): string | null {
+        try {
+            const repo = this.repoService.getActiveRepository();
+            if (!repo) {
+                return null;
+            }
+            return this.repoService.getRepositoryPath(repo);
+        } catch {
+            return null;
+        }
+    }
+
+    private resolveRepositoryLabel(): string {
+        try {
+            const candidate: any = this.repoService;
+            if (candidate && typeof candidate.getRepositoryLabel === 'function') {
+                return candidate.getRepositoryLabel();
+            }
+
+            const repo = candidate?.getActiveRepository?.();
+            if (!repo) {
+                return '';
+            }
+
+            const repoPath = candidate?.getRepositoryPath?.(repo);
+            if (!repoPath) {
+                return '';
+            }
+
+            return path.basename(repoPath);
+        } catch {
+            return '';
+        }
     }
 }
