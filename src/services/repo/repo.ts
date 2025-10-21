@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { GitExtension, API, Repository } from '../git/git';
+import { GitExtension, API, Repository, Commit, LogOptions } from '../git/git';
 import { logger } from '../logger';
 
 /**
@@ -12,37 +12,6 @@ export class RepoService {
 
     constructor() {
         this.initialize();
-    }
-
-    /**
-     * Resolve a repository based on an optional command argument or current UI context.
-     * Resolution order:
-     * 1. If arg is a repository-like object with rootUri, return it
-     * 2. If arg has resourceUri, map it to its repository via Git API
-     * 3. Otherwise, fall back to getActiveRepository()
-     */
-    public getRepository(arg?: any): Repository | null {
-        try {
-            const api = this.getGitApi();
-            if (!api) { return null; }
-
-            // 1) Explicit repository object
-            if (arg && typeof arg === 'object' && arg.rootUri?.fsPath) {
-                return arg as Repository;
-            }
-
-            // 2) Resource URI -> repository
-            if (arg && typeof arg === 'object' && arg.resourceUri?.fsPath) {
-                const repo = api.getRepository(arg.resourceUri);
-                if (repo) { return repo; }
-            }
-
-            // 3) Fallback resolution
-            return this.getActiveRepository();
-        } catch (error) {
-            logger.error('[Genie][RepoService] Failed to resolve repository', error);
-            return null;
-        }
     }
 
     /**
@@ -75,6 +44,19 @@ export class RepoService {
     public getRepositories(): Repository[] {
         const api = this.getGitApi();
         return api?.repositories || [];
+    }
+
+    /**
+     * Get repository by URI
+     */
+    public getRepositoryByUri(uri: vscode.Uri): Repository | null {
+        try {
+            const api = this.getGitApi();
+            return api?.getRepository(uri) || null;
+        } catch (error) {
+            logger.error('[Genie][RepoService] Failed to get repository by URI', error);
+            return null;
+        }
     }
 
     /**
@@ -118,25 +100,11 @@ export class RepoService {
     /**
      * Get the file system path of the currently active repository
      */
-    public getRepositoryPath(): string | null {
+    public getRepositoryPath(repo: Repository): string | null {
         try {
-            const repo = this.getActiveRepository();
             return repo?.rootUri?.fsPath || null;
         } catch (error) {
             logger.error('[Genie][RepoService] Failed to get repository path', error);
-            return null;
-        }
-    }
-
-    /**
-     * Get repository by URI
-     */
-    public getRepositoryByUri(uri: vscode.Uri): Repository | null {
-        try {
-            const api = this.getGitApi();
-            return api?.getRepository(uri) || null;
-        } catch (error) {
-            logger.error('[Genie][RepoService] Failed to get repository by URI', error);
             return null;
         }
     }
@@ -159,6 +127,65 @@ export class RepoService {
      */
     public isGitAvailable(): boolean {
         return !!this.getGitApi();
+    }
+
+    /**
+     * Gets the Git commit message log for the repository path.
+     * @param repositoryPath Optional path to the Git repository. If not provided, return empty log.
+     * @returns A promise that resolves to an array of commit log entries.
+     */
+
+    public async getRepositoryGitMessageLog(repositoryPath?: string): Promise<string[]> {
+        try {
+
+            let repo: Repository | null = null;
+
+
+            if (repositoryPath) {
+                try {
+                    const uri = vscode.Uri.file(repositoryPath);
+                    repo = this.getRepositoryByUri(uri);
+                } catch { repo = null; }
+            }
+
+            if (!repo) {
+                return [];
+            }
+            const commits: Commit[] = await repo.log();
+
+            return commits.map(commit => commit.message.trim());
+        } catch (error) {
+            logger.error('Failed to get git commit log:', error);
+            return [];
+        }
+    }
+
+
+    /**
+     * Get recent commits (hash, message, dates) from the repository path.
+     * @param options Optional log options such as maxEntries.
+     */
+    public async getRepositoryCommits(options?: LogOptions, repositoryPath?: string): Promise<Commit[]> {
+        try {
+
+            let repo: Repository | null = null;
+
+            if (repositoryPath) {
+                try {
+                    const uri = vscode.Uri.file(repositoryPath);
+                    repo = this.getRepositoryByUri(uri);
+
+                } catch { repo = null; }
+            }
+
+            if (!repo) { return []; }
+
+            const commits: Commit[] = await repo.log(options);
+            return commits || [];
+        } catch (error) {
+            logger.error('Failed to get git commits:', error);
+            return [];
+        }
     }
 
 }

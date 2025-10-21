@@ -1,125 +1,13 @@
 import * as vscode from 'vscode';
 import { DiffData, DiffHunk, DiffStatus } from './gitTypes';
-import { API, Change, GitExtension, Repository, Status, Commit, LogOptions } from "../git/git";
+import { Change, Repository, Status } from "../git/git";
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { logger } from '../logger';
 import { buildNotebookSourceOnlyDiff } from './ipynbDiff';
 
-/**
- * Gets the Git API from the VS Code Git extension, if available.
- * It waits for the extension to be enabled and the API to be initialized.
- */
-async function getGitApi(): Promise<API | undefined> {
-	try {
-		const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
-		if (!gitExtension) {
-			logger.warn('VS Code Git extension not found.');
-			return undefined;
-		}
-		const exports = gitExtension.getAPI(1);
-		return exports;
-	} catch (error) {
-		logger.error('Failed to get Git API:', error);
-		return undefined;
-	}
-}
+import { RepoService } from "../repo/repo";
 
-/**
- * Gets the first available Git repository, waiting for it to be initialized if necessary.
- * @param api The Git API instance.
- * @returns A promise that resolves to the Repository object or null if none is found.
- */
-async function getRepository(api: API): Promise<Repository | null> {
-	if (api.repositories.length > 0) {
-		return api.repositories[0];
-	}
-
-	if (api.onDidOpenRepository) {
-		return new Promise((resolve) => {
-			const timeout = setTimeout(() => {
-				logger.warn('Timed out waiting for Git repository to open.');
-				disposable.dispose();
-				resolve(null);
-			}, 5000); // 5-second timeout
-
-			const disposable = api.onDidOpenRepository((repo: Repository) => {
-				clearTimeout(timeout);
-				disposable.dispose();
-				resolve(repo);
-			});
-		});
-	}
-
-	return null;
-}
-
-/**
- * Gets the Git commit message lo for the repository.
- * @param api The Git API instance.
- * @param repo The Repository object.
- * @returns A promise that resolves to an array of commit log entries.
- */
-
-export async function getRepositoryGitMessageLog(repositoryPath?: string): Promise<string[]> {
-	try {
-		const api = await getGitApi();
-		if (!api) { return []; }
-		let repo: Repository | null = null;
-		if (repositoryPath) {
-			try {
-				const uri = vscode.Uri.file(repositoryPath);
-				repo = api.getRepository(uri);
-				if (!repo) {
-					const root = await api.getRepositoryRoot(uri);
-					if (root) { repo = api.getRepository(root) as Repository | null; }
-				}
-			} catch { repo = null; }
-		}
-		if (!repo) {
-			repo = await getRepository(api as API) as Repository | null;
-		}
-		if (!repo) {
-			return [];
-		}
-		const commits: Commit[] = await repo.log();
-		return commits.map(commit => commit.message.trim());
-	} catch (error) {
-		logger.error('Failed to get git commit log:', error);
-		return [];
-	}
-}
-
-/**
- * Get recent commits (hash, message, dates) from the active repository.
- * @param options Optional log options such as maxEntries.
- */
-export async function getRepositoryCommits(options?: LogOptions, repositoryPath?: string): Promise<Commit[]> {
-    try {
-        const api = await getGitApi();
-        if (!api) { return []; }
-        let repo: Repository | null = null;
-        if (repositoryPath) {
-            try {
-                const uri = vscode.Uri.file(repositoryPath);
-                repo = api.getRepository(uri);
-                if (!repo) {
-                    const root = await api.getRepositoryRoot(uri);
-                    if (root) { repo = api.getRepository(root) as Repository | null; }
-                }
-            } catch { repo = null; }
-        }
-        if (!repo) {
-            repo = await getRepository(api);
-        }
-        if (!repo) { return []; }
-        const commits: Commit[] = await repo.log(options);
-        return commits || [];
-    } catch (error) {
-        logger.error('Failed to get git commits:', error);
-        return [];
-    }
-}
 
 /**
  * A service for analyzing Git diffs.
@@ -134,21 +22,24 @@ export class DiffService {
 	 * @returns A promise that resolves to an array of DiffData objects,
 	 *          or an empty array if there are no changes.
 	 */
-	public async getDiff(): Promise<DiffData[]> {
-		const api = await getGitApi();
-		if (!api) {
-			throw new Error('The official VS Code Git extension is not enabled or failed to initialize.');
-		}
 
-		const repo = await getRepository(api);
-		if (!repo) {
-			logger.warn('No Git repository found or it could not be initialized in time.');
-			return [];
-		}		// Gather staged changes; optionally auto-stage everything if enabled and nothing is staged
+	private repoService: RepoService;
+	constructor(repoService: RepoService) {
+		this.repoService = repoService;
+	}
+
+	public async getDiff(repo: Repository): Promise<DiffData[]> {
+
 		let indexChanges = repo.state.indexChanges;
 		let stagedTemporarily = false;
+
+		const api = this.repoService.getGitApi();
+		if (!api) { return []; }
+
 		const gitPath = api.git.path;
+
 		const cwd = repo.rootUri.fsPath;
+
 		const runGit = async (args: string[]) => new Promise<void>((resolve, reject) => {
 			const child = spawn(gitPath, args, { cwd });
 			let stderr = '';
@@ -239,25 +130,25 @@ export class DiffService {
 
 		let rawDiff: string;
 		try {
-				// Special handling for Jupyter notebooks: always build a source-only diff that ignores outputs/metadata
-				if (fileName.endsWith('.ipynb')) {
-					try {
-						const nbDiff = await buildNotebookSourceOnlyDiff(repo, change);
-						if (nbDiff && nbDiff.trim().length > 0) {
-							rawDiff = nbDiff;
-							// Parse and return immediately to avoid falling back to raw JSON diff noise
-							const diffHunks: DiffHunk[] = this.parseDiff(rawDiff);
-							return {
-								fileName,
-								status,
-								diffHunks,
-								rawDiff,
-							};
-						}
-					} catch (nbErr) {
-						logger.warn('Notebook diff failed, falling back to raw diff:', nbErr);
+			// Special handling for Jupyter notebooks: always build a source-only diff that ignores outputs/metadata
+			if (fileName.endsWith('.ipynb')) {
+				try {
+					const nbDiff = await buildNotebookSourceOnlyDiff(repo, change);
+					if (nbDiff && nbDiff.trim().length > 0) {
+						rawDiff = nbDiff;
+						// Parse and return immediately to avoid falling back to raw JSON diff noise
+						const diffHunks: DiffHunk[] = this.parseDiff(rawDiff);
+						return {
+							fileName,
+							status,
+							diffHunks,
+							rawDiff,
+						};
 					}
+				} catch (nbErr) {
+					logger.warn('Notebook diff failed, falling back to raw diff:', nbErr);
 				}
+			}
 
 			if (this.isStaged(change.status)) {
 
@@ -315,14 +206,14 @@ export class DiffService {
 	 * Classify binary-like files by extension into a coarse type for messaging.
 	 */
 	private classifyBinaryKind(ext: string): string {
-		const archives = new Set(['zip','gz','tgz','bz2','tbz2','xz','zst','lz4','7z','rar','tar','jar','war','ear','apk','ipa']);
-		const databases = new Set(['sqlite','sqlite3','db','db3','mdb','accdb','realm','parquet','feather','orc','avro','dbf']);
-		const media = new Set(['png','jpg','jpeg','gif','bmp','tiff','webp','ico','svgz','pdf','mp3','wav','flac','mp4','mkv','mov','avi','webm']);
-		const binaries = new Set(['bin','iso','dll','so','dylib','exe','o','a','class','wasm']);
-		if (archives.has(ext)) return 'archive';
-		if (databases.has(ext)) return 'database';
-		if (media.has(ext)) return 'media';
-		if (binaries.has(ext)) return 'binary';
+		const archives = new Set(['zip', 'gz', 'tgz', 'bz2', 'tbz2', 'xz', 'zst', 'lz4', '7z', 'rar', 'tar', 'jar', 'war', 'ear', 'apk', 'ipa']);
+		const databases = new Set(['sqlite', 'sqlite3', 'db', 'db3', 'mdb', 'accdb', 'realm', 'parquet', 'feather', 'orc', 'avro', 'dbf']);
+		const media = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp', 'ico', 'svgz', 'pdf', 'mp3', 'wav', 'flac', 'mp4', 'mkv', 'mov', 'avi', 'webm']);
+		const binaries = new Set(['bin', 'iso', 'dll', 'so', 'dylib', 'exe', 'o', 'a', 'class', 'wasm']);
+		if (archives.has(ext)) { return 'archive'; }
+		if (databases.has(ext)) { return 'database'; }
+		if (media.has(ext)) { return 'media'; }
+		if (binaries.has(ext)) { return 'binary'; }
 		return 'binary';
 	}
 
@@ -331,16 +222,16 @@ export class DiffService {
 	 */
 	private isBinaryLike(relPath: string): boolean {
 		const ext = (path.extname(relPath) || '').replace(/^\./, '').toLowerCase();
-		if (!ext) return false;
+		if (!ext) { return false; }
 		const binaryExts = new Set<string>([
 			// Archives & compressed
-			'zip','gz','tgz','bz2','tbz2','xz','zst','lz4','7z','rar','tar','jar','war','ear','apk','ipa',
+			'zip', 'gz', 'tgz', 'bz2', 'tbz2', 'xz', 'zst', 'lz4', '7z', 'rar', 'tar', 'jar', 'war', 'ear', 'apk', 'ipa',
 			// Databases & data containers
-			'sqlite','sqlite3','db','db3','mdb','accdb','realm','parquet','feather','orc','avro','dbf','hdf5','h5',
+			'sqlite', 'sqlite3', 'db', 'db3', 'mdb', 'accdb', 'realm', 'parquet', 'feather', 'orc', 'avro', 'dbf', 'hdf5', 'h5',
 			// Media & documents commonly binary
-			'png','jpg','jpeg','gif','bmp','tiff','webp','ico','svgz','pdf','mp3','wav','flac','mp4','mkv','mov','avi','webm',
+			'png', 'jpg', 'jpeg', 'gif', 'bmp', 'tiff', 'webp', 'ico', 'svgz', 'pdf', 'mp3', 'wav', 'flac', 'mp4', 'mkv', 'mov', 'avi', 'webm',
 			// Compiled/binary objects
-			'bin','iso','dll','so','dylib','exe','o','a','class','wasm'
+			'bin', 'iso', 'dll', 'so', 'dylib', 'exe', 'o', 'a', 'class', 'wasm'
 		]);
 		return binaryExts.has(ext);
 	}

@@ -11,9 +11,9 @@ import {
     LLMAnalysisResponse,
     RepoAnalysisRunResult
 } from './analysisTypes';
-import { getRepositoryGitMessageLog, getRepositoryCommits } from "../git/diff";
 import { RepositoryScanner } from './repositoryScanner';
 import { LLMService, LLMError } from '../llm/llmTypes';
+import { RepoService } from "../repo/repo";
 import { buildRepositoryAnalysisPromptParts } from './analysisChatPrompts';;
 import { logger } from '../logger';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
@@ -28,13 +28,18 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
     private llmService: LLMService | null;
     private resolveLLMService?: (provider: string) => (LLMService | undefined);
+
+    private repoService: RepoService;
     private context: vscode.ExtensionContext;
+
     private currentCancelSource?: vscode.CancellationTokenSource;
     private apiKeyWaiters: Map<string, vscode.Disposable> = new Map();
 
-    constructor(context: vscode.ExtensionContext, llmService: LLMService | null) {
+    constructor(context: vscode.ExtensionContext, llmService: LLMService | null, repoService: RepoService) {
         this.context = context;
         this.llmService = llmService;
+        this.repoService = repoService;
+
     }
 
     public setLLMService(service: LLMService) {
@@ -79,7 +84,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             const scanner = new RepositoryScanner(cfg);
             const scanResult = await scanner.scanRepository(repositoryPath);
 
-            const commitMessageLog = await getRepositoryGitMessageLog(repositoryPath);
+            const commitMessageLog = await this.repoService.getRepositoryGitMessageLog(repositoryPath);
 
             // Generate analysis using LLM
             const analysisRequest: LLMAnalysisRequest = {
@@ -374,7 +379,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
     async getCommitHistory(repositoryPath: string): Promise<CommitHistoryEntry[]> {
         try {
-            const commits = await getRepositoryCommits({}, repositoryPath);
+            const commits = await this.repoService.getRepositoryCommits({}, repositoryPath);
             const entries: CommitHistoryEntry[] = (commits || []).map(c => ({
                 stateHash: c.hash,
                 message: c.message || '',

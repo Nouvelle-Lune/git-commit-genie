@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { L10N_KEYS as I18N } from '../i18n/keys';
+import { Repository } from "../services/git/git";
 
 /**
  * This class handles the registration of commands related to generating commit messages.
@@ -31,7 +32,7 @@ export class GenerateCommands {
     private async cancelGeneration(arg?: any): Promise<void> {
         // Cancel for the repository where the command was invoked
         const repoService = this.serviceRegistry.getRepoService();
-        const repo = repoService.getRepository(arg) || undefined;
+        const repo = repoService.getRepositoryByUri(arg.rootUri) || undefined;
         const key = repo?.rootUri?.fsPath;
         if (!key) { return; }
         const cts = this.inFlight.get(key);
@@ -40,6 +41,7 @@ export class GenerateCommands {
 
     private async generateCommitMessage(arg?: any): Promise<void> {
         // First-time UX: if provider or model not configured, jump to Manage Models instead of erroring
+        console.log('arg:', arg, 'typeof:', typeof arg);
         const provider = this.serviceRegistry.getProvider().toLowerCase();
         const secretKeyName = this.getSecretKeyName(provider);
         const existingKey = await this.context.secrets.get(secretKeyName);
@@ -67,8 +69,8 @@ export class GenerateCommands {
             try {
                 // Determine target repository explicitly from invocation context or UI selection
                 const repoService = this.serviceRegistry.getRepoService();
-                const targetRepo: any | undefined = repoService.getRepository(arg) || undefined;
-                
+                const targetRepo: Repository | undefined = repoService.getRepositoryByUri(arg.rootUri) || undefined;
+
                 const targetRepoPath = targetRepo?.rootUri?.fsPath;
                 if (!targetRepoPath) {
                     vscode.window.showErrorMessage('No Git repository found.');
@@ -85,7 +87,8 @@ export class GenerateCommands {
                 // Indicate generating state for UI (global visibility)
                 await vscode.commands.executeCommand('setContext', 'gitCommitGenie.generating', true);
 
-                const diffs = await this.serviceRegistry.getDiffService().getDiff(targetRepoPath);
+                const diffs = await this.serviceRegistry.getDiffService().getDiff(targetRepo);
+
                 if (diffs.length === 0) {
                     vscode.window.showInformationMessage(vscode.l10n.t(I18N.generation.noStagedChanges));
                     return;
@@ -128,39 +131,31 @@ export class GenerateCommands {
         }
     }
 
-    private async fillCommitMessage(content: string, repoArg?: any): Promise<void> {
-        const repoService = this.serviceRegistry.getRepoService();
-        // Use the repo passed in from generation path when available
-        let repo = repoArg;
-        if (!repo) {
-            // Centralized resolution in RepoService
-            repo = repoService.getRepository() || undefined;
+    private async fillCommitMessage(content: string, repo: Repository): Promise<void> {
+
+        // Simulate typing effect
+        let typingSpeed: number = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('typingAnimationSpeed', -1);
+        typingSpeed = Math.min(typingSpeed, 100);
+
+        if (typingSpeed <= 0) {
+            // Instant fill
+            repo.inputBox.value = content;
+            return;
+        } else {
+            // Animated typing
+            const fullText = content;
+            repo.inputBox.value = '';
+            let i = 0;
+            const interval = setInterval(() => {
+                if (i <= fullText.length) {
+                    repo.inputBox.value = fullText.slice(0, i);
+                    i++;
+                } else {
+                    clearInterval(interval);
+                }
+            }, typingSpeed);
         }
 
-        if (repo) {
-            // Simulate typing effect
-            let typingSpeed: number = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('typingAnimationSpeed', -1);
-            typingSpeed = Math.min(typingSpeed, 100);
-
-            if (typingSpeed <= 0) {
-                // Instant fill
-                repo.inputBox.value = content;
-                return;
-            } else {
-                // Animated typing
-                const fullText = content;
-                repo.inputBox.value = '';
-                let i = 0;
-                const interval = setInterval(() => {
-                    if (i <= fullText.length) {
-                        repo.inputBox.value = fullText.slice(0, i);
-                        i++;
-                    } else {
-                        clearInterval(interval);
-                    }
-                }, typingSpeed);
-            }
-        }
     }
 
     private async handleError(result: any): Promise<void> {

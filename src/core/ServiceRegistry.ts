@@ -31,12 +31,12 @@ export class ServiceRegistry {
             logger.info('Initializing services...');
 
             // Initialize basic services
-            this.diffService = new DiffService();
-            this.templateService = new TemplateService(this.context);
             this.repoService = new RepoService();
+            this.diffService = new DiffService(this.repoService);
+            this.templateService = new TemplateService(this.context);
 
             // Initialize repository analysis service with placeholder LLM service
-            this.analysisService = new RepositoryAnalysisService(this.context, null as any);
+            this.analysisService = new RepositoryAnalysisService(this.context, null as any, this.repoService);
 
             // Initialize LLM services
             this.openAIService = new OpenAIService(this.context, this.templateService, this.analysisService);
