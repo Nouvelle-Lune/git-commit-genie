@@ -2,9 +2,7 @@ import * as vscode from 'vscode';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
-import { RepoAnalysisRunResult } from '../services/analysis/analysisTypes';
 import { logger } from '../services/logger';
-import { GitExtension } from '../services/git/git';
 
 export class RepoAnalysisCommands {
     constructor(
@@ -33,24 +31,6 @@ export class RepoAnalysisCommands {
         this.context.subscriptions.push(
             vscode.commands.registerCommand('git-commit-genie.clearRepositoryAnalysisCache', this.clearRepositoryAnalysisCache.bind(this))
         );
-
-        // Developer command removed
-    }
-
-    private getRepositoryPath(): string | null {
-        try {
-            // Use VS Code Git API to get repository path safely
-            const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
-            if (gitExtension) {
-                const api = gitExtension.getAPI(1);
-                if (api && api.repositories.length > 0) {
-                    return api.repositories[0].rootUri?.fsPath || null;
-                }
-            }
-            return null;
-        } catch {
-            return null;
-        }
     }
 
     private async viewRepositoryAnalysis(): Promise<void> {
@@ -58,7 +38,10 @@ export class RepoAnalysisCommands {
             return;
         }
 
-        const repositoryPath = this.getRepositoryPath();
+        const repoService = this.serviceRegistry.getRepoService();
+
+        const repositoryPath = repoService.getRepositoryPath();
+
         if (!repositoryPath) {
             vscode.window.showErrorMessage('No Git repository found.');
             return;
@@ -119,7 +102,9 @@ export class RepoAnalysisCommands {
             return;
         }
 
-        const repositoryPath = this.getRepositoryPath();
+        const repoService = this.serviceRegistry.getRepoService();
+
+        const repositoryPath = repoService.getRepositoryPath();
         if (!repositoryPath) {
             vscode.window.showErrorMessage('No Git repository found.');
             return;
@@ -165,8 +150,6 @@ export class RepoAnalysisCommands {
         }
     }
 
-    // openAnalysisJson command removed with developer mode
-
     private isRepoAnalysisEnabled(): boolean {
         try {
             return vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis').get<boolean>('enabled', true);
@@ -184,7 +167,12 @@ export class RepoAnalysisCommands {
     }
 
     private async clearRepositoryAnalysisCache(): Promise<void> {
-        const repositoryPath = this.getRepositoryPath();
+        if (!this.isRepoAnalysisEnabled()) {
+            return;
+        }
+        const repoService = this.serviceRegistry.getRepoService();
+        const repositoryPath = repoService.getRepositoryPath();
+
         if (!repositoryPath) {
             vscode.window.showErrorMessage('No Git repository found.');
             return;
