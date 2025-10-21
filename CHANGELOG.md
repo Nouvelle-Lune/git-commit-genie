@@ -1,5 +1,9 @@
 # Changelog
 
+## [2.2.0]
+- feat: Added support for multiple repository.
+- feat: Added support for Gemini 2.5 flash-lite, flash-lite-preview-09-2025, flash-preview-09-2025 models.
+
 ## [2.1.7]
 - fix: Update English UI text for better clarity.
 
