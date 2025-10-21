@@ -61,8 +61,12 @@ export class GeminiService extends BaseLLMService {
 
     public listSupportedModels(): string[] {
         return [
+            'gemini-2.5-flash-lite',
+            'gemini-2.5-flash-lite-preview-09-2025',
             'gemini-2.5-flash',
-            'gemini-2.5-pro'
+            'gemini-2.5-flash-preview-09-2025',
+            'gemini-2.5-pro',
+
         ];
     }
 

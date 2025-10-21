@@ -137,7 +137,8 @@ export class Logger {
         }
 
         // Format output
-        const name = modelName.replace(/-\d{8,}/, "");
+        // Remove date suffixes: -20241022 (Anthropic) or -09-2025 (Gemini), but keep "preview"
+        const name = modelName.replace(/-\d{8,}/, "").replace(/-\d{2}-\d{4}$/, "");
         const formattedCost = cost.toFixed(6);
         const formattedCachePercentage = cachePercentage.toFixed(2);
 
@@ -186,9 +187,11 @@ export class Logger {
         'claude-3-5-haiku-20241022': { input: 0.8, output: 4.0, cached: 0.08 },
 
         // Google Gemini (USD) — based on screenshots
-        'gemini-2.0-flash-exp': { input: 0.075, output: 0.30, cached: 0.0375 },
         'gemini-2.5-pro': { input: 1.25, output: 10.0, cached: 0.31 },
         'gemini-2.5-flash': { input: 0.30, output: 2.50, cached: 0.075 },
+        'gemini-2.5-flash-preview-09-2025': { input: 0.30, output: 2.50, cached: 0.075 },
+        'gemini-2.5-flash-lite': { input: 0.10, output: 0.40, cached: 0.025 },
+        'gemini-2.5-flash-lite-preview-09-2025': { input: 0.10, output: 0.40, cached: 0.025 },
 
         // DeepSeek (USD) - converted from CNY
         'deepseek-chat': { input: 0.274, output: 0.411, cached: 0.027 },

@@ -584,10 +584,30 @@ export class StatusBarManager {
             return modelName;
         }
 
-        // Remove trailing date/version suffix like -20250219 or -20250219-v1
-        const datePattern = /(.*?)-(20\d{6})(?:[-]?v?\d+)?$/;
-        const match = modelName.match(datePattern);
-        return match ? match[1] : modelName;
+        try {
+            // Remove common date/version suffixes:
+            // - Anthropic: -20250219, -20250219-v1
+            // - Gemini: -09-2025, -preview-09-2025 (keep "preview")
+            // - Generic: any 8-digit date suffix
+
+            // First, try to remove Anthropic-style 8-digit dates (e.g., -20250219)
+            let shortened = modelName.replace(/-(20\d{6})(?:[-]?v?\d+)?$/, '');
+            if (shortened !== modelName) {
+                return shortened;
+            }
+
+            // Then try Gemini-style MM-YYYY dates (e.g., -09-2025)
+            shortened = modelName.replace(/-(\d{2}-\d{4})$/, '');
+            if (shortened !== modelName) {
+                return shortened;
+            }
+
+            // Fallback: return original model name
+            return modelName;
+        } catch {
+            // Safety fallback: return original on any error
+            return modelName;
+        }
     }
 
     private detectGitRepo(): boolean {
