@@ -101,9 +101,9 @@ export class AnthropicService extends BaseLLMService {
     /**
      * This function requests a chat completion from Anthropic and expects a structured JSON response
      */
-    async generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options?: { token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError> {
+    async generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options: { repositoryPath: string; token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError> {
         const config = { ...this.getConfig(), model: this.getRepoAnalysisOverrideModel() || this.getConfig().model };
-        const repoPath = this.getRepoPathForLogging();
+        const repoPath = options.repositoryPath;
 
         if (!config.model) {
             return { message: 'Anthropic model is not selected. Please configure it via Manage Models.', statusCode: 400 };

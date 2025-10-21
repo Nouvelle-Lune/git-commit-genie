@@ -105,12 +105,12 @@ export class OpenAIService extends BaseLLMService {
      * @param analysisPromptParts an ChatMessage[] containing keys system and user prompt parts
      * @param options 
      */
-    async generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options?: { token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError> {
+    async generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options: { repositoryPath: string; token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError> {
         const systemMessage = analysisPromptParts.system;
         const userMessage = analysisPromptParts.user;
 
         const modle = this.getRepoAnalysisOverrideModel() || this.getConfig().model;
-        const repoPath = this.getRepoPathForLogging();
+        const repoPath = options.repositoryPath;
 
         if (!modle) {
             return { message: 'OpenAI model is not selected. Please configure it via Manage Models.', statusCode: 400 };

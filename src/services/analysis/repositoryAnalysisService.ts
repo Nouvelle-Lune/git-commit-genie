@@ -96,7 +96,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             const messages = buildRepositoryAnalysisPromptParts(analysisRequest);
             const selected = this.pickRepoAnalysisService();
             try { await selected.service?.refreshFromSettings(); } catch { }
-            const llmResponse = await selected.service?.generateRepoAnalysis(messages, { token: this.currentCancelSource.token });
+            const llmResponse = await selected.service?.generateRepoAnalysis(messages, { repositoryPath, token: this.currentCancelSource.token });
             if (!llmResponse || (llmResponse as LLMError).statusCode) {
                 // If missing API key (401), attach a one-time listener to secrets change
                 const err = (llmResponse as LLMError);
@@ -265,7 +265,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             const messages = buildRepositoryAnalysisPromptParts(analysisRequest);
             const selected = this.pickRepoAnalysisService();
             try { await selected.service?.refreshFromSettings(); } catch { }
-            const llmResponse = await selected.service?.generateRepoAnalysis(messages, { token: this.currentCancelSource?.token });
+            const llmResponse = await selected.service?.generateRepoAnalysis(messages, { repositoryPath, token: this.currentCancelSource?.token });
             if (!llmResponse || (llmResponse as LLMError).statusCode) {
                 const err = (llmResponse as LLMError);
                 if (err?.statusCode === 401) {

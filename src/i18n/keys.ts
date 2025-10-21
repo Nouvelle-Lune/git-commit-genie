@@ -80,6 +80,7 @@ export const L10N_KEYS = {
   },
   repoAnalysis: {
     running: 'Repository analysis in progress…',
+    runningWithRepo: 'Repository analysis in progress for "{0}"…',
     missing: 'Repository analysis missing. Click to re-analyze.',
     idle: 'Repository analysis is up to date.',
     initGitToEnable: 'Initialize a Git repository to enable analysis.',
@@ -94,7 +95,9 @@ export const L10N_KEYS = {
     // New: clearing cache
     clearConfirm: 'This will delete cached JSON repository analysis for this repository. Continue?',
     clear: 'Clear',
-    cleared: 'Repository analysis cache cleared.'
+    cleared: 'Repository analysis cache cleared.',
+    // New: repository selection
+    selectRepository: 'Select a repository'
   },
   templates: {
     pickWorkspaceFolder: 'Pick a workspace folder',

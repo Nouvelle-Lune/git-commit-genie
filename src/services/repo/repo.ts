@@ -152,6 +152,45 @@ export class RepoService {
     }
 
     /**
+     * Pick a repository from available repositories when multiple exist.
+     * Shows a quick pick UI for user selection when there are multiple repositories.
+     * Returns null if user cancels or no repository is available.
+     * @param placeHolder Optional placeholder text for the quick pick
+     * @returns The repository path or null
+     */
+    public async pickRepository(placeHolder?: string): Promise<string | null> {
+        const repositories = this.getRepositories();
+
+        if (repositories.length === 0) {
+            vscode.window.showErrorMessage('No Git repository found.');
+            return null;
+        }
+
+        // If only one repository, return it directly
+        if (repositories.length === 1) {
+            return this.getRepositoryPath(repositories[0]);
+        }
+
+        // Multiple repositories: show quick pick
+        const items = repositories.map(repo => {
+            const repoPath = this.getRepositoryPath(repo);
+            const label = this.getRepositoryLabel(repo);
+            return {
+                label: label || 'Unknown',
+                description: repoPath || '',
+                path: repoPath
+            };
+        });
+
+        const selected = await vscode.window.showQuickPick(items, {
+            placeHolder: placeHolder || vscode.l10n.t('Select a repository'),
+            matchOnDescription: true
+        });
+
+        return selected?.path || null;
+    }
+
+    /**
      * Gets the Git commit message log for the repository path.
      * @param repositoryPath Optional path to the Git repository. If not provided, return empty log.
      * @returns A promise that resolves to an array of commit log entries.

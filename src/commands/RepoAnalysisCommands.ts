@@ -39,11 +39,8 @@ export class RepoAnalysisCommands {
         }
 
         const repoService = this.serviceRegistry.getRepoService();
-
-        const repositoryPath = repoService.getRepositoryPath();
-
+        const repositoryPath = await repoService.pickRepository();
         if (!repositoryPath) {
-            vscode.window.showErrorMessage('No Git repository found.');
             return;
         }
 
@@ -65,7 +62,7 @@ export class RepoAnalysisCommands {
                         title: vscode.l10n.t(I18N.repoAnalysis.initializingTitle),
                         cancellable: false
                     }, async () => {
-                        this.statusBarManager.setRepoAnalysisRunning(true);
+                        this.statusBarManager.setRepoAnalysisRunning(true, repositoryPath);
                         try {
                             initResult = await analysisService.initializeRepository(repositoryPath);
                         } finally {
@@ -103,10 +100,8 @@ export class RepoAnalysisCommands {
         }
 
         const repoService = this.serviceRegistry.getRepoService();
-
-        const repositoryPath = repoService.getRepositoryPath();
+        const repositoryPath = await repoService.pickRepository();
         if (!repositoryPath) {
-            vscode.window.showErrorMessage('No Git repository found.');
             return;
         }
 
@@ -119,7 +114,7 @@ export class RepoAnalysisCommands {
                 title: vscode.l10n.t(I18N.repoAnalysis.refreshingTitle),
                 cancellable: false
             }, async () => {
-                this.statusBarManager.setRepoAnalysisRunning(true);
+                this.statusBarManager.setRepoAnalysisRunning(true, repositoryPath);
                 try {
                     updateResult = await analysisService.updateAnalysis(repositoryPath);
                 } finally {
@@ -158,7 +153,6 @@ export class RepoAnalysisCommands {
         }
     }
 
-
     private async handleError(result: any): Promise<void> {
         if (result.statusCode === 401) {
             return;
@@ -170,11 +164,10 @@ export class RepoAnalysisCommands {
         if (!this.isRepoAnalysisEnabled()) {
             return;
         }
-        const repoService = this.serviceRegistry.getRepoService();
-        const repositoryPath = repoService.getRepositoryPath();
 
+        const repoService = this.serviceRegistry.getRepoService();
+        const repositoryPath = await repoService.pickRepository();
         if (!repositoryPath) {
-            vscode.window.showErrorMessage('No Git repository found.');
             return;
         }
 

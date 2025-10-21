@@ -211,7 +211,7 @@ export class ModelCommands {
             const analysisService = this.serviceRegistry.getAnalysisService();
             const existing = await analysisService.getAnalysis(repositoryPath);
             if (!existing) {
-                this.statusBarManager.setRepoAnalysisRunning(true);
+                this.statusBarManager.setRepoAnalysisRunning(true, repositoryPath);
                 analysisService.initializeRepository(repositoryPath).finally(() => this.statusBarManager.setRepoAnalysisRunning(false));
             }
         } catch {

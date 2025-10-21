@@ -32,6 +32,10 @@ export interface AnalysisState {
     model: string | null;
     /** Whether the API key for analysis provider is configured */
     hasApiKey: boolean;
+    /** The repository path being analyzed (when running) */
+    runningRepoPath: string | null;
+    /** The repository label being analyzed (when running) */
+    runningRepoLabel: string | null;
 }
 
 /**

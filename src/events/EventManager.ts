@@ -163,7 +163,7 @@ export class EventManager {
             const should = await analysisService.shouldUpdateAnalysis(repoPath);
             if (should) {
                 logger.info(`[Genie][RepoAnalysis] Triggered by ${reason}; updating analysis...`);
-                this.statusBarManager.setRepoAnalysisRunning(true);
+                this.statusBarManager.setRepoAnalysisRunning(true, repoPath);
                 analysisService.updateAnalysis(repoPath).catch(err => {
                     logger.error('Failed to update repository analysis on Git change:', err);
                 }).finally(() => this.statusBarManager.setRepoAnalysisRunning(false));
@@ -230,7 +230,7 @@ export class EventManager {
             if (!existingAnalysis) {
                 logger.info('Initializing repository analysis for new workspace...');
                 // Initialize in the background
-                this.statusBarManager.setRepoAnalysisRunning(true);
+                this.statusBarManager.setRepoAnalysisRunning(true, repositoryPath);
                 analysisService.initializeRepository(repositoryPath).catch(error => {
                     logger.error('Failed to initialize repository analysis:', error);
                 }).finally(() => {

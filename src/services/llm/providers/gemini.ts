@@ -103,10 +103,10 @@ export class GeminiService extends BaseLLMService {
      */
     async generateRepoAnalysis(
         analysisPromptParts: AnalysisPromptParts,
-        options?: { token?: vscode.CancellationToken }
+        options: { repositoryPath: string; token?: vscode.CancellationToken }
     ): Promise<LLMAnalysisResponse | LLMError> {
         const config = { ...this.getConfig(), model: this.getRepoAnalysisOverrideModel() || this.getConfig().model };
-        const repoPath = this.getRepoPathForLogging();
+        const repoPath = options.repositoryPath;
 
         if (!config.model) {
             return { message: 'Gemini model is not selected. Please configure it via Manage Models.', statusCode: 400 };
@@ -281,23 +281,23 @@ export class GeminiService extends BaseLLMService {
         try { stageNotifications.begin(); } catch { /* ignore */ }
         let out;
         try {
-        out = await generateCommitMessageChain(
-            {
-                diffs,
-                currentTime: parsedInput?.['current-time'],
-                userTemplate: parsedInput?.['user-template'],
-                targetLanguage: parsedInput?.['target-language'],
-                validationChecklist: rules.checklistText,
-                repositoryAnalysis: parsedInput?.['repository-analysis']
-            },
-            chat,
-            {
-                maxParallel: config.chainMaxParallel,
-                onStage: (event) => {
-                    try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+            out = await generateCommitMessageChain(
+                {
+                    diffs,
+                    currentTime: parsedInput?.['current-time'],
+                    userTemplate: parsedInput?.['user-template'],
+                    targetLanguage: parsedInput?.['target-language'],
+                    validationChecklist: rules.checklistText,
+                    repositoryAnalysis: parsedInput?.['repository-analysis']
+                },
+                chat,
+                {
+                    maxParallel: config.chainMaxParallel,
+                    onStage: (event) => {
+                        try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+                    }
                 }
-            }
-        );
+            );
         } finally {
             try { stageNotifications.end(); } catch { /* ignore */ }
         }

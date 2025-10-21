@@ -38,7 +38,9 @@ export class StatusBarManager {
         missing: false,
         provider: null,
         model: null,
-        hasApiKey: false
+        hasApiKey: false,
+        runningRepoPath: null,
+        runningRepoLabel: null
     };
 
     private gitState: GitState = {
@@ -46,8 +48,6 @@ export class StatusBarManager {
         repoPath: null,
         repoLabel: ''
     };
-
-    private lastAnalysisKey: string | null = null;
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -79,8 +79,19 @@ export class StatusBarManager {
         void this.refreshAnalysisState();
     }
 
-    setRepoAnalysisRunning(running: boolean): void {
+    setRepoAnalysisRunning(running: boolean, repoPath?: string): void {
         this.analysisState.running = running;
+
+        if (running && repoPath) {
+            // Store the repository being analyzed
+            this.analysisState.runningRepoPath = repoPath;
+            this.analysisState.runningRepoLabel = path.basename(repoPath);
+        } else if (!running) {
+            // Clear when analysis finishes
+            this.analysisState.runningRepoPath = null;
+            this.analysisState.runningRepoLabel = null;
+        }
+
         vscode.commands.executeCommand('setContext', 'gitCommitGenie.analysisRunning', running);
         this.updateStatusBar();
     }
@@ -265,23 +276,16 @@ export class StatusBarManager {
         // Check if analysis file exists
         const missing = this.checkAnalysisFileMissing();
 
-        const newKey = `${provider}:${model}:${hasKey ? 1 : 0}`;
-        const changed = newKey !== this.lastAnalysisKey;
-
         this.analysisState = {
             enabled,
             running: this.analysisState.running,
             missing,
             provider,
             model,
-            hasApiKey: hasKey
+            hasApiKey: hasKey,
+            runningRepoPath: this.analysisState.runningRepoPath,
+            runningRepoLabel: this.analysisState.runningRepoLabel
         };
-
-        this.lastAnalysisKey = newKey;
-
-        if (changed) {
-            this.updateStatusBar();
-        }
     }
 
     private checkAnalysisFileMissing(): boolean {
@@ -290,17 +294,8 @@ export class StatusBarManager {
         }
 
         try {
-            const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
-            if (!gitExtension) {
-                return false;
-            }
-
-            const api = gitExtension.getAPI(1);
-            if (!api || api.repositories.length === 0) {
-                return false;
-            }
-
-            const repoPath = api.repositories[0].rootUri?.fsPath;
+            // Use the current active repository path from gitState
+            const repoPath = this.gitState.repoPath;
             if (!repoPath) {
                 return false;
             }
@@ -319,8 +314,9 @@ export class StatusBarManager {
     // Status Bar UI Update
     // ========================================
 
-    updateStatusBar(): void {
-        void this.refreshGitState();
+    async updateStatusBar(): Promise<void> {
+        await this.refreshGitState();
+        await this.refreshAnalysisState();
 
         const text = this.buildStatusBarText();
         const tooltip = this.buildStatusBarTooltip();
@@ -424,6 +420,10 @@ export class StatusBarManager {
             return vscode.l10n.t(I18N.repoAnalysis.missingModel);
         }
         if (this.analysisState.running) {
+            // Show which repository is being analyzed
+            if (this.analysisState.runningRepoLabel) {
+                return vscode.l10n.t(I18N.repoAnalysis.runningWithRepo, this.analysisState.runningRepoLabel);
+            }
             return vscode.l10n.t(I18N.repoAnalysis.running);
         }
         if (this.analysisState.missing) {
