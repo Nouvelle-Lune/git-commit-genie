@@ -20,14 +20,37 @@ export class ModelCommands {
     }
 
     private async manageModels(): Promise<void> {
-        const providerPick = await vscode.window.showQuickPick([
+        // Get current repo analysis model for display
+        const config = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+        const currentRepoModel = config.get<string>('model', 'general') || 'general';
+        const repoModelDesc = currentRepoModel === 'general'
+            ? undefined
+            : `${vscode.l10n.t(I18N.manageModels.currentLabel)}: ${currentRepoModel}`;
+
+        const items: Array<vscode.QuickPickItem & { value: string }> = [
             { label: 'OpenAI', value: 'openai' },
             { label: 'DeepSeek', value: 'deepseek' },
             { label: 'Anthropic', value: 'anthropic' },
             { label: 'Gemini', value: 'gemini' },
-        ], { placeHolder: vscode.l10n.t(I18N.manageModels.selectProvider) });
+            { label: '', kind: vscode.QuickPickItemKind.Separator, value: '' },
+            {
+                label: vscode.l10n.t(I18N.manageModels.configureRepoAnalysisModel),
+                description: repoModelDesc,
+                value: 'repoAnalysis'
+            },
+        ];
+
+        const providerPick = await vscode.window.showQuickPick(items, {
+            placeHolder: vscode.l10n.t(I18N.manageModels.selectProvider)
+        });
 
         if (!providerPick) {
+            return;
+        }
+
+        // Handle repository analysis model configuration
+        if (providerPick.value === 'repoAnalysis') {
+            await this.manageRepoAnalysisModel();
             return;
         }
 
@@ -217,6 +240,88 @@ export class ModelCommands {
         } catch {
             // best-effort only
         }
+    }
+
+    /**
+     * Manage repository analysis model configuration
+     */
+    private async manageRepoAnalysisModel(): Promise<void> {
+        const config = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+        const currentRepoModel = config.get<string>('model', 'general') || 'general';
+
+        // Collect all available models from all providers
+        const allModels: Array<{ label: string, value: string, provider: string, description?: string }> = [];
+
+        // Add "Use default model" option at the top
+        const generalProvider = this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai';
+        const generalModelKey = this.getModelStateKey(generalProvider);
+        const generalModel = this.context.globalState.get<string>(generalModelKey, '');
+        const useDefaultDesc = currentRepoModel === 'general' && generalModel
+            ? `${vscode.l10n.t(I18N.manageModels.currentLabel)}: ${generalModel}`
+            : vscode.l10n.t(I18N.manageModels.useDefaultModelDesc);
+
+        allModels.push({
+            label: vscode.l10n.t(I18N.manageModels.useDefaultModel),
+            value: 'general',
+            provider: 'general',
+            description: useDefaultDesc
+        });
+
+        // Collect models from all providers
+        const providers = [
+            { name: 'OpenAI', value: 'openai' },
+            { name: 'DeepSeek', value: 'deepseek' },
+            { name: 'Anthropic', value: 'anthropic' },
+            { name: 'Gemini', value: 'gemini' }
+        ];
+
+        for (const provider of providers) {
+            try {
+                const service = this.serviceRegistry.getLLMService(provider.value);
+                if (service) {
+                    const models = service.listSupportedModels();
+                    for (const model of models) {
+                        allModels.push({
+                            label: model,
+                            value: model,
+                            provider: provider.name,
+                            description: currentRepoModel === model ? vscode.l10n.t(I18N.manageModels.currentLabel) : provider.name
+                        });
+                    }
+                }
+            } catch {
+                // Ignore provider errors
+            }
+        }
+
+        // Show model picker
+        const modelPick = await vscode.window.showQuickPick(allModels, {
+            placeHolder: vscode.l10n.t(I18N.manageModels.selectRepoAnalysisModel),
+            matchOnDescription: true
+        });
+
+        if (!modelPick) {
+            return;
+        }
+
+        // Update the setting
+        await config.update('model', modelPick.value, vscode.ConfigurationTarget.Global);
+
+        // Show confirmation
+        if (modelPick.value === 'general') {
+            vscode.window.showInformationMessage(
+                vscode.l10n.t(I18N.manageModels.configured,
+                    vscode.l10n.t(I18N.manageModels.useDefaultModel),
+                    vscode.l10n.t(I18N.manageModels.useDefaultModelDesc))
+            );
+        } else {
+            vscode.window.showInformationMessage(
+                vscode.l10n.t(I18N.manageModels.repoAnalysisConfigured, modelPick.provider, modelPick.value)
+            );
+        }
+
+        // Update status bar
+        this.statusBarManager.updateStatusBar();
     }
 
 
