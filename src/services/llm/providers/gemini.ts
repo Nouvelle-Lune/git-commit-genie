@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { GoogleGenAI, Type } from '@google/genai';
-import { BaseLLMService, LLMError, LLMResponse, ChatFn } from '../llmTypes';
+import { BaseLLMService, LLMError, LLMResponse, ChatFn, GenerateCommitMessageOptions } from '../llmTypes';
 import { TemplateService } from '../../../template/templateService';
 import { DiffData } from '../../git/gitTypes';
 import { generateCommitMessageChain } from '../../chain/chainThinking';
@@ -106,6 +106,7 @@ export class GeminiService extends BaseLLMService {
         options?: { token?: vscode.CancellationToken }
     ): Promise<LLMAnalysisResponse | LLMError> {
         const config = { ...this.getConfig(), model: this.getRepoAnalysisOverrideModel() || this.getConfig().model };
+        const repoPath = this.getRepoPathForLogging();
 
         if (!config.model) {
             return { message: 'Gemini model is not selected. Please configure it via Manage Models.', statusCode: 400 };
@@ -130,9 +131,9 @@ export class GeminiService extends BaseLLMService {
             );
 
             if (response.usage) {
-                logger.usageSummary('Gemini', [response.usage], config.model, 'RepoAnalysis');
+                logger.usageSummary(repoPath, 'Gemini', [response.usage], config.model, 'RepoAnalysis');
             } else {
-                logger.usageSummary('Gemini', [], config.model, 'RepoAnalysis');
+                logger.usageSummary(repoPath, 'Gemini', [], config.model, 'RepoAnalysis');
             }
 
             const safe = repoAnalysisResponseSchema.safeParse(response.parsedResponse);
@@ -157,7 +158,7 @@ export class GeminiService extends BaseLLMService {
 
 
 
-    async generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError> {
+    async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {
         if (!this.client) {
             return { message: 'Gemini API key is not set or SDK unavailable.', statusCode: 401 };
         }
@@ -165,18 +166,19 @@ export class GeminiService extends BaseLLMService {
         try {
             const config = this.getConfig();
             const rules = this.utils.getRules();
+            const repoPath = this.getRepoPathForLogging(options?.targetRepo);
 
             if (!config.model) {
                 return { message: 'Gemini model is not selected. Please configure it via Manage Models.', statusCode: 400 };
             }
 
-            const jsonMessage = await this.buildJsonMessage(diffs);
+            const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
 
             if (config.useChain) {
-                return await this.generateThinking(diffs, jsonMessage, config, rules, options);
+                return await this.generateThinking(diffs, jsonMessage, config, rules, repoPath, options);
             }
 
-            return await this.generateDefault(jsonMessage, config, rules, options);
+            return await this.generateDefault(jsonMessage, config, rules, repoPath, options);
         } catch (error: any) {
             return {
                 message: error?.message || 'An unknown error occurred with the Gemini API.',
@@ -193,7 +195,8 @@ export class GeminiService extends BaseLLMService {
         jsonMessage: string,
         config: any,
         rules: any,
-        options?: { token?: vscode.CancellationToken }
+        repoPath: string,
+        options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
         const parsedInput = JSON.parse(jsonMessage);
         const usages: Array<any> = [];
@@ -247,9 +250,9 @@ export class GeminiService extends BaseLLMService {
                 callCount += 1;
                 if (result.usage) {
                     usages.push(result.usage);
-                    logger.usage('Gemini', result.usage, config.model, labelFor(reqType), callCount);
+                    logger.usage(repoPath, 'Gemini', result.usage, config.model, labelFor(reqType), callCount);
                 } else {
-                    logger.usage('Gemini', undefined, config.model, labelFor(reqType), callCount);
+                    logger.usage(repoPath, 'Gemini', undefined, config.model, labelFor(reqType), callCount);
                 }
 
                 // Validate structured output if schema is defined
@@ -300,7 +303,7 @@ export class GeminiService extends BaseLLMService {
         }
 
         if (usages.length) {
-            logger.usageSummary('Gemini', usages, config.model, 'thinking', undefined, false);
+            logger.usageSummary(repoPath, 'Gemini', usages, config.model, 'thinking', undefined, false);
         }
 
         return { content: out.commitMessage };
@@ -313,7 +316,8 @@ export class GeminiService extends BaseLLMService {
         jsonMessage: string,
         config: any,
         rules: any,
-        options?: { token?: vscode.CancellationToken }
+        repoPath: string,
+        options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
         const retries = config.maxRetries ?? 2;
         const totalAttempts = Math.max(1, retries + 1);
@@ -336,9 +340,9 @@ export class GeminiService extends BaseLLMService {
             );
 
             if (result.usage) {
-                logger.usageSummary('Gemini', [result.usage], config.model, 'default');
+                logger.usageSummary(repoPath, 'Gemini', [result.usage], config.model, 'default');
             } else {
-                logger.usageSummary('Gemini', [], config.model, 'default');
+                logger.usageSummary(repoPath, 'Gemini', [], config.model, 'default');
             }
 
             const safe = commitMessageSchema.safeParse(result.parsedResponse);

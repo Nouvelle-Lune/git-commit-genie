@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { GitExtension, API, Repository, Commit, LogOptions } from '../git/git';
 import { logger } from '../logger';
 
@@ -118,6 +119,27 @@ export class RepoService {
             return repo?.inputBox?.value || '';
         } catch (error) {
             logger.error('[Genie][RepoService] Failed to get input box value', error);
+            return '';
+        }
+    }
+
+    /**
+     * Get a human-readable label for the specified or active repository.
+     * Defaults to the repository folder name.
+     */
+    public getRepositoryLabel(repo?: Repository | null): string {
+        try {
+            const targetRepo = repo ?? this.getActiveRepository();
+            if (!targetRepo) {
+                return '';
+            }
+            const repoPath = this.getRepositoryPath(targetRepo);
+            if (!repoPath) {
+                return '';
+            }
+            return path.basename(repoPath);
+        } catch (error) {
+            logger.error('[Genie][RepoService] Failed to get repository label', error);
             return '';
         }
     }

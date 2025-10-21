@@ -8,6 +8,7 @@ import { TemplateService } from '../template/templateService';
 import { RepositoryAnalysisService } from '../services/analysis';
 import { LLMService } from '../services/llm/llmTypes';
 import { RepoService } from "../services/repo/repo";
+import { CostTrackingService } from "../services/cost/costTrackingService";
 import { logger } from '../services/logger';
 
 export class ServiceRegistry {
@@ -21,6 +22,7 @@ export class ServiceRegistry {
     private llmServices: Map<string, LLMService>;
     private currentLLMService!: LLMService;
     private repoService!: RepoService;
+    private costTrackingService!: CostTrackingService;
 
     constructor(private context: vscode.ExtensionContext) {
         this.llmServices = new Map();
@@ -34,6 +36,9 @@ export class ServiceRegistry {
             this.repoService = new RepoService();
             this.diffService = new DiffService(this.repoService);
             this.templateService = new TemplateService(this.context);
+            this.costTrackingService = new CostTrackingService(this.context);
+
+            logger.setCostTracker(this.costTrackingService);
 
             // Initialize repository analysis service with placeholder LLM service
             this.analysisService = new RepositoryAnalysisService(this.context, null as any, this.repoService);
@@ -109,6 +114,10 @@ export class ServiceRegistry {
 
     getRepoService(): RepoService {
         return this.repoService;
+    }
+
+    getCostTrackingService(): CostTrackingService {
+        return this.costTrackingService;
     }
 
     // Provider and model management

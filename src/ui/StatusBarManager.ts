@@ -1,11 +1,12 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { ConfigurationManager } from '../config/ConfigurationManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
-import { API, GitExtension } from '../services/git/git';
-import { costTracker } from '../services/cost';
+import { GitExtension } from '../services/git/git';
+import { RepoService } from '../services/repo/repo';
+import { CostTrackingService } from '../services/cost/costTrackingService';
+import * as path from 'path';
 
 export class StatusBarManager {
     private statusBarItem!: vscode.StatusBarItem;
@@ -21,6 +22,9 @@ export class StatusBarManager {
     private analysisHasApiKey: boolean = false;
     private lastAnalysisKey: string | null = null;
 
+    private costTracker: CostTrackingService | null = null;
+    private repoService!: RepoService;
+
     constructor(
         private context: vscode.ExtensionContext,
         private serviceRegistry: ServiceRegistry,
@@ -33,6 +37,14 @@ export class StatusBarManager {
         this.statusBarItem.command = 'git-commit-genie.genieMenu';
 
         this.context.subscriptions.push(this.statusBarItem);
+
+        this.repoService = this.serviceRegistry.getRepoService();
+        this.costTracker = this.serviceRegistry.getCostTrackingService();
+
+        const editorDisp = vscode.window.onDidChangeActiveTextEditor(() => {
+            this.updateStatusBar();
+        });
+        this.context.subscriptions.push(editorDisp);
 
         // Watch secret changes to refresh API key availability state
         const disp = this.context.secrets.onDidChange(async (e) => {
@@ -64,8 +76,10 @@ export class StatusBarManager {
         this.context.subscriptions.push(cfgDisp);
 
         // Refresh immediately when repository cost changes
-        const costDisp = costTracker.onCostChanged(() => this.updateStatusBar());
-        this.context.subscriptions.push({ dispose: () => (costDisp as any)?.dispose?.() || undefined });
+        if (this.costTracker) {
+            const costDisp = this.costTracker.onCostChanged(() => this.updateStatusBar());
+            this.context.subscriptions.push({ dispose: () => (costDisp as any)?.dispose?.() || undefined });
+        }
 
         // Setup Git repository change listeners
         this.setupGitRepositoryListeners();
@@ -132,21 +146,62 @@ export class StatusBarManager {
 
         const repoTooltip = this.getRepoTooltip();
         const analysisTooltip = this.getAnalysisTooltipLine();
-        // Order: base -> repository analysis model -> repo status -> cost
-        const baseWithAnalysis = analysisTooltip ? `${baseTooltip}\n${analysisTooltip}` : baseTooltip;
-        const fullBase = repoTooltip ? `${baseWithAnalysis}\n${repoTooltip}` : baseWithAnalysis;
-        this.statusBarItem.tooltip = fullBase;
-        void this.enrichTooltipWithCost(fullBase, '');
+        const tooltipLines: string[] = [];
+        const repoLabel = this.resolveRepositoryLabel();
+        if (repoLabel) {
+            const prefix = vscode.l10n.t(I18N.manageModels.currentLabel);
+            tooltipLines.push(`${prefix}: ${repoLabel}`);
+        }
+        tooltipLines.push(baseTooltip);
+        if (analysisTooltip) {
+            tooltipLines.push(analysisTooltip);
+        }
+        if (repoTooltip) {
+            tooltipLines.push(repoTooltip);
+        }
+        const tooltipText = tooltipLines.join('\n');
+        this.statusBarItem.tooltip = tooltipText;
+        void this.enrichTooltipWithCost(tooltipText, '');
 
         // Click action: when no Git repo, jump to official initialize command; otherwise open Genie menu
         this.statusBarItem.command = !this.hasGitRepo ? 'git.init' : 'git-commit-genie.genieMenu';
         this.statusBarItem.show();
     }
 
+    private resolveRepositoryLabel(): string {
+        try {
+            const candidate: any = this.repoService;
+            if (candidate && typeof candidate.getRepositoryLabel === 'function') {
+                return candidate.getRepositoryLabel();
+            }
+            const repo = candidate?.getActiveRepository?.();
+            if (!repo) {
+                return '';
+            }
+            const repoPath = candidate?.getRepositoryPath?.(repo);
+            if (!repoPath) {
+                return '';
+            }
+            return path.basename(repoPath);
+        } catch {
+            return '';
+        }
+    }
+
     private async enrichTooltipWithCost(baseTooltip: string, _unused: string): Promise<void> {
         try {
+            if (!this.costTracker) {
+                this.statusBarItem.tooltip = baseTooltip;
+                return;
+            }
 
-            const cost = await costTracker.getRepositoryCost();
+            const repoPath = this.getActiveRepositoryPath();
+            if (!repoPath) {
+                this.statusBarItem.tooltip = baseTooltip;
+                return;
+            }
+
+            const cost = await this.costTracker.getRepositoryCost(repoPath);
             const parts: string[] = [baseTooltip];
 
             // Prepare cost line (use i18n messages)
@@ -164,6 +219,16 @@ export class StatusBarManager {
         }
     }
 
+    private getActiveRepositoryPath(): string | null {
+        try {
+            const repo = this.repoService.getActiveRepository();
+            if (!repo) { return null; }
+            return this.repoService.getRepositoryPath(repo);
+        } catch {
+            return null;
+        }
+    }
+
     private secretNameFor(provider: string): string {
         switch (provider) {
             case 'deepseek': return 'gitCommitGenie.secret.deepseekApiKey';
@@ -172,6 +237,7 @@ export class StatusBarManager {
             default: return 'gitCommitGenie.secret.openaiApiKey';
         }
     }
+
 
     private async refreshApiKeyState(provider?: string): Promise<void> {
         try {

@@ -1,11 +1,9 @@
 import * as vscode from 'vscode';
-import { ChatMessage, LLMError, LLMResponse } from '../llmTypes';
-import { BaseLLMService } from "../llmTypes";
+import { BaseLLMService, ChatMessage, ChatFn, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { TemplateService } from '../../../template/templateService';
 import { DiffData } from '../../git/gitTypes';
 import OpenAI from 'openai';
 import { generateCommitMessageChain } from "../../chain/chainThinking";
-import { ChatFn } from "../llmTypes";
 import { logger } from '../../logger';
 import { OpenAICompatibleUtils } from './utils/index.js';
 import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysisTypes';
@@ -105,6 +103,7 @@ export class DeepSeekService extends BaseLLMService {
         const userMessage = analysisPromptParts.user;
 
         const modle = this.getRepoAnalysisOverrideModel() || this.getConfig().model;
+        const repoPath = this.getRepoPathForLogging();
 
         if (!modle) {
             return { message: 'DeepSeek model is not selected. Please configure it via Manage Models.', statusCode: 400 };
@@ -126,9 +125,9 @@ export class DeepSeekService extends BaseLLMService {
             );
 
             if (prased.usage) {
-                logger.usageSummary('DeepSeek', [prased.usage], modle, 'RepoAnalysis');
+                logger.usageSummary(repoPath, 'DeepSeek', [prased.usage], modle, 'RepoAnalysis');
             } else {
-                logger.usageSummary('DeepSeek', [], modle, 'RepoAnalysis');
+                logger.usageSummary(repoPath, 'DeepSeek', [], modle, 'RepoAnalysis');
             }
 
             const safe = repoAnalysisResponseSchema.safeParse(prased.parsedResponse);
@@ -155,7 +154,7 @@ export class DeepSeekService extends BaseLLMService {
 
 
 
-    async generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError> {
+    async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {
         if (!this.openai) {
             return {
                 message: 'DeepSeek API key is not set. Please set it in the settings.',
@@ -166,17 +165,18 @@ export class DeepSeekService extends BaseLLMService {
         try {
             const config = this.getConfig();
             const rules = this.utils.getRules();
+            const repoPath = this.getRepoPathForLogging(options?.targetRepo);
 
             if (!config.model) {
                 return { message: 'DeepSeek model is not selected. Please configure it via Manage Models.', statusCode: 400 };
             }
 
-            const jsonMessage = await this.buildJsonMessage(diffs);
+            const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
 
             if (config.useChain) {
-                return await this.generateThinking(diffs, jsonMessage, config, rules, options);
+                return await this.generateThinking(diffs, jsonMessage, config, rules, repoPath, options);
             } else {
-                return await this.generateDefault(jsonMessage, config, rules, options);
+                return await this.generateDefault(jsonMessage, config, rules, repoPath, options);
             }
         } catch (error: any) {
             return {
@@ -194,7 +194,8 @@ export class DeepSeekService extends BaseLLMService {
         jsonMessage: string,
         config: any,
         rules: any,
-        options?: { token?: vscode.CancellationToken }
+        repoPath: string,
+        options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
         const parsed = JSON.parse(jsonMessage);
         const usages: Array<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }> = [];
@@ -239,9 +240,9 @@ export class DeepSeekService extends BaseLLMService {
                 if (result.usage) {
                     usages.push(result.usage);
                     result.usage.model = config.model;
-                    logger.usage('DeepSeek', result.usage, result.usage.model, labelFor(reqType), callCount);
+                    logger.usage(repoPath, 'DeepSeek', result.usage, config.model, labelFor(reqType), callCount);
                 } else {
-                    logger.usage('DeepSeek', undefined, config.model, labelFor(reqType), callCount);
+                    logger.usage(repoPath, 'DeepSeek', undefined, config.model, labelFor(reqType), callCount);
                 }
 
                 if (validationSchema) {
@@ -297,7 +298,7 @@ export class DeepSeekService extends BaseLLMService {
         }
 
         if (usages.length) {
-            logger.usageSummary('DeepSeek', usages, config.model, 'thinking', undefined, false);
+            logger.usageSummary(repoPath, 'DeepSeek', usages, config.model, 'thinking', undefined, false);
         }
 
         return { content: out.commitMessage };
@@ -310,7 +311,8 @@ export class DeepSeekService extends BaseLLMService {
         jsonMessage: string,
         config: any,
         rules: any,
-        options?: { token?: vscode.CancellationToken }
+        repoPath: string,
+        options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
         const retries = this.utils.getMaxRetries();
         const totalAttempts = Math.max(1, retries + 1);
@@ -337,9 +339,9 @@ export class DeepSeekService extends BaseLLMService {
 
             if (result.usage) {
                 result.usage.model = config.model;
-                logger.usageSummary('DeepSeek', [result.usage], config.model, 'default');
+                logger.usageSummary(repoPath, 'DeepSeek', [result.usage], config.model, 'default');
             } else {
-                logger.usageSummary('DeepSeek', [], config.model, 'default');
+                logger.usageSummary(repoPath, 'DeepSeek', [], config.model, 'default');
             }
 
             const safe = commitMessageSchema.safeParse(result.parsedResponse);

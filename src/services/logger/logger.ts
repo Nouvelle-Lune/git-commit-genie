@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { costTracker } from '../cost';
+import { CostTrackingService } from "../cost/costTrackingService";
 
 export enum LogLevel {
     Debug = 0,
@@ -9,14 +9,19 @@ export enum LogLevel {
 }
 
 export class Logger {
+    private readonly prefix = '[Git Commit Genie]';
+
     private static instance: Logger;
+
     private outputChannel: vscode.OutputChannel | null = null;
     private logLevel: LogLevel = LogLevel.Info;
-    private readonly prefix = '[Git Commit Genie]';
     private lastCallType: string = '';
+
+    private costTracker: CostTrackingService | null = null;
 
     private constructor() { }
 
+    // Get singleton instance
     public static getInstance(): Logger {
         if (!Logger.instance) {
             Logger.instance = new Logger();
@@ -36,10 +41,19 @@ export class Logger {
     }
 
     /**
+     * setCostTracker
+     */
+    public setCostTracker(costTracker: CostTrackingService): void {
+        this.costTracker = costTracker;
+    }
+
+    /**
      * Add cost to repository total using cost tracking service
      */
-    private async addCost(cost: number): Promise<void> {
-        await costTracker.addToRepositoryCost(cost);
+    private async addCost(cost: number, repoPath: string): Promise<void> {
+        if (this.costTracker) {
+            await this.costTracker.addToRepositoryCost(cost, repoPath);
+        }
     }
 
     public debug(message: string, ...args: any[]): void {
@@ -71,7 +85,7 @@ export class Logger {
      * Log token usage information with cost calculation and formatting
      * Consolidates token usage, cache percentage, and cost into a single line
      */
-    public usage(provider: string, usage: any, modelName: string, callType: string = '', callCount?: number): void {
+    public usage(repoPath: string, provider: string, usage: any, modelName: string, callType: string = '', callCount?: number): void {
         if (!usage) {
             this.info(`[${provider}]${callType ? ` [${callType}${callCount ? `-${callCount}` : ''}]` : ''} Token usage information not available`);
             return;
@@ -141,7 +155,9 @@ export class Logger {
         const message = `[${provider}] [${name}] ${contextInfo} Token Usage: input ${inputTokens} | output ${outputTokens} | total ${totalTokens} | Cache: ${formattedCachePercentage}% | Cost: ${formattedCost}${currency}`;
 
         // Add to repository cost
-        this.addCost(cost);
+        if (repoPath) {
+            this.addCost(cost, repoPath);
+        }
 
         this.info(message);
     }
@@ -199,6 +215,7 @@ export class Logger {
      * Consolidates multiple usage objects into a single summary with total cost calculation
      */
     public usageSummary(
+        repoPath: string,
         provider: string,
         usages: any[],
         modelName: string,
@@ -276,8 +293,8 @@ export class Logger {
         this.info(message);
 
         // Add to repository cost unless caller indicates it was already counted per-step
-        if (addToCost) {
-            this.addCost(totalCost);
+        if (addToCost && repoPath) {
+            this.addCost(totalCost, repoPath);
         }
 
         // Show notification for cost summary

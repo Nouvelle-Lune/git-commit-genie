@@ -5,7 +5,6 @@ import { CommandManager } from '../commands/CommandManager';
 import { EventManager } from '../events/EventManager';
 import { ConfigurationManager } from '../config/ConfigurationManager';
 import { logger } from '../services/logger';
-import { costTracker } from '../services/cost';
 
 export class ExtensionManager {
     private serviceRegistry: ServiceRegistry;
@@ -25,9 +24,6 @@ export class ExtensionManager {
     async activate(): Promise<void> {
         try {
             logger.info('Git Commit Genie is activating...');
-
-            // Initialize cost tracking service
-            costTracker.initialize(this.context);
 
             // Initialize services
             await this.serviceRegistry.initialize();

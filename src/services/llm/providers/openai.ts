@@ -1,12 +1,10 @@
 import * as vscode from 'vscode';
 import OpenAI from 'openai';
-import { LLMError, LLMResponse } from '../llmTypes';
-import { BaseLLMService } from "../llmTypes";
+import { BaseLLMService, LLMError, LLMResponse, ChatFn, GenerateCommitMessageOptions } from '../llmTypes';
 import { TemplateService } from '../../../template/templateService';
 import { DiffData } from '../../git/gitTypes';
 import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { logger } from '../../logger';
-import { ChatFn } from "../llmTypes";
 import { LLMAnalysisResponse, AnalysisPromptParts } from "../../analysis/analysisTypes";
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { OpenAICompatibleUtils } from './utils/OpenAIUtils';
@@ -112,6 +110,7 @@ export class OpenAIService extends BaseLLMService {
         const userMessage = analysisPromptParts.user;
 
         const modle = this.getRepoAnalysisOverrideModel() || this.getConfig().model;
+        const repoPath = this.getRepoPathForLogging();
 
         if (!modle) {
             return { message: 'OpenAI model is not selected. Please configure it via Manage Models.', statusCode: 400 };
@@ -133,9 +132,9 @@ export class OpenAIService extends BaseLLMService {
             );
 
             if (prased.usage) {
-                logger.usageSummary('OpenAI', [prased.usage], modle, 'RepoAnalysis');
+                logger.usageSummary(repoPath, 'OpenAI', [prased.usage], modle, 'RepoAnalysis');
             } else {
-                logger.usageSummary('OpenAI', [], modle, 'RepoAnalysis');
+                logger.usageSummary(repoPath, 'OpenAI', [], modle, 'RepoAnalysis');
             }
 
             const safe = repoAnalysisResponseSchema.safeParse(prased.parsedResponse);
@@ -160,7 +159,7 @@ export class OpenAIService extends BaseLLMService {
 
     }
 
-    async generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError> {
+    async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {
         if (!this.openai) {
             return {
                 message: 'OpenAI API key is not set. Please set it in the settings.',
@@ -171,17 +170,18 @@ export class OpenAIService extends BaseLLMService {
         try {
             const config = this.getConfig();
             const rules = this.utils.getRules();
+            const repoPath = this.getRepoPathForLogging(options?.targetRepo);
 
             if (!config.model) {
                 return { message: 'OpenAI model is not selected. Please configure it via Manage Models.', statusCode: 400 };
             }
 
-            const jsonMessage = await this.buildJsonMessage(diffs);
+            const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
 
             if (config.useChain) {
-                return await this.generateThinking(diffs, jsonMessage, config, rules, options);
+                return await this.generateThinking(diffs, jsonMessage, config, rules, repoPath, options);
             } else {
-                return await this.generateDefault(jsonMessage, config, rules, options);
+                return await this.generateDefault(jsonMessage, config, rules, repoPath, options);
             }
         } catch (error: any) {
             return {
@@ -199,7 +199,8 @@ export class OpenAIService extends BaseLLMService {
         jsonMessage: string,
         config: any,
         rules: any,
-        options?: { token?: vscode.CancellationToken }
+        repoPath: string,
+        options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
         const parsed = JSON.parse(jsonMessage);
         const usages: Array<any> = [];
@@ -245,9 +246,9 @@ export class OpenAIService extends BaseLLMService {
                     usages.push(result.usage);
                     // Add model info to usage for cost calculation
                     result.usage.model = config.model;
-                    logger.usage('OpenAI', result.usage, result.usage.model, labelFor(reqType), callCount);
+                    logger.usage(repoPath, 'OpenAI', result.usage, config.model, labelFor(reqType), callCount);
                 } else {
-                    logger.usage('OpenAI', undefined, config.model, labelFor(reqType), callCount);
+                    logger.usage(repoPath, 'OpenAI', undefined, config.model, labelFor(reqType), callCount);
                 }
 
                 if (validationSchema) {
@@ -293,7 +294,7 @@ export class OpenAIService extends BaseLLMService {
 
         if (usages.length) {
             // Per-step costs already added; summarize without re-adding cost
-            logger.usageSummary('OpenAI', usages, config.model, 'thinking', undefined, false);
+            logger.usageSummary(repoPath, 'OpenAI', usages, config.model, 'thinking', undefined, false);
         }
 
         return { content: out.commitMessage };
@@ -306,7 +307,8 @@ export class OpenAIService extends BaseLLMService {
         jsonMessage: string,
         config: any,
         rules: any,
-        options?: { token?: vscode.CancellationToken }
+        repoPath: string,
+        options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
         const retries = config.maxRetries ?? 2;
         const totalAttempts = Math.max(1, retries + 1);
@@ -330,9 +332,9 @@ export class OpenAIService extends BaseLLMService {
 
             if (result.usage) {
                 result.usage.model = config.model;
-                logger.usageSummary('OpenAI', [result.usage], config.model, 'default');
+                logger.usageSummary(repoPath, 'OpenAI', [result.usage], config.model, 'default');
             } else {
-                logger.usageSummary('OpenAI', [], config.model, 'default');
+                logger.usageSummary(repoPath, 'OpenAI', [], config.model, 'default');
             }
 
             const safe = commitMessageSchema.safeParse(result.parsedResponse);

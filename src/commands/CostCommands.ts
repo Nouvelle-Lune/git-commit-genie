@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { ServiceRegistry } from '../core/ServiceRegistry';
-import { costTracker } from '../services/cost';
 
 export class CostCommands {
     constructor(
@@ -21,7 +20,25 @@ export class CostCommands {
 
     private async showRepositoryCost(): Promise<void> {
         try {
-            const cost = await costTracker.getRepositoryCost();
+            const repoService = this.serviceRegistry.getRepoService();
+            const repo = repoService.getActiveRepository();
+            if (!repo) {
+                vscode.window.showWarningMessage(
+                    vscode.l10n.t('No active Git repository detected. Open a repository before viewing cost.')
+                );
+                return;
+            }
+
+            const repoPath = repoService.getRepositoryPath(repo);
+            if (!repoPath) {
+                vscode.window.showWarningMessage(
+                    vscode.l10n.t('Unable to resolve the repository path. Please try again.')
+                );
+                return;
+            }
+
+            const costTracker = this.serviceRegistry.getCostTrackingService();
+            const cost = await costTracker.getRepositoryCost(repoPath);
             const formattedCost = cost.toFixed(6);
 
             if (cost === 0) {
@@ -55,7 +72,25 @@ export class CostCommands {
             );
 
             if (choice?.title === vscode.l10n.t('Reset')) {
-                await costTracker.resetRepositoryCost();
+                const repoService = this.serviceRegistry.getRepoService();
+                const repo = repoService.getActiveRepository();
+                if (!repo) {
+                    vscode.window.showWarningMessage(
+                        vscode.l10n.t('No active Git repository detected. Open a repository before resetting cost.')
+                    );
+                    return;
+                }
+
+                const repoPath = repoService.getRepositoryPath(repo);
+                if (!repoPath) {
+                    vscode.window.showWarningMessage(
+                        vscode.l10n.t('Unable to resolve the repository path. Please try again.')
+                    );
+                    return;
+                }
+
+                const costTracker = this.serviceRegistry.getCostTrackingService();
+                await costTracker.resetRepositoryCost(repoPath);
                 vscode.window.showInformationMessage(
                     vscode.l10n.t('Repository cost has been reset to $0.00')
                 );

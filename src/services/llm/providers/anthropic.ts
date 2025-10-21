@@ -2,7 +2,6 @@ import Anthropic from '@anthropic-ai/sdk';
 import * as vscode from 'vscode';
 
 import { z } from 'zod';
-import { ChatMessage } from "../llmTypes";
 import { TemplateService } from '../../../template/templateService';
 import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysisTypes';
 import { generateCommitMessageChain } from '../../chain/chainThinking';
@@ -10,7 +9,7 @@ import { DiffData } from '../../git/gitTypes';
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { AnthropicUtils } from './utils/AnthropicUtils';
-import { BaseLLMService, ChatFn, LLMError, LLMResponse } from '../llmTypes';
+import { BaseLLMService, ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { AnthropicCommitMessageTool, AnthropicRepoAnalysisTool, AnthropicFileSummaryTool, AnthropicClassifyAndDraftTool, AnthropicValidateAndFixTool } from './schemas/anthropicSchemas';
 import {
     fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema, repoAnalysisResponseSchema,
@@ -104,6 +103,7 @@ export class AnthropicService extends BaseLLMService {
      */
     async generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options?: { token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError> {
         const config = { ...this.getConfig(), model: this.getRepoAnalysisOverrideModel() || this.getConfig().model };
+        const repoPath = this.getRepoPathForLogging();
 
         if (!config.model) {
             return { message: 'Anthropic model is not selected. Please configure it via Manage Models.', statusCode: 400 };
@@ -129,9 +129,9 @@ export class AnthropicService extends BaseLLMService {
             );
 
             if (response.usage) {
-                logger.usageSummary('Anthropic', [response.usage], config.model, 'RepoAnalysis');
+                logger.usageSummary(repoPath, 'Anthropic', [response.usage], config.model, 'RepoAnalysis');
             } else {
-                logger.usageSummary('Anthropic', [], config.model, 'RepoAnalysis');
+                logger.usageSummary(repoPath, 'Anthropic', [], config.model, 'RepoAnalysis');
             }
 
             const safe = repoAnalysisResponseSchema.safeParse(response.parsedResponse);
@@ -154,7 +154,7 @@ export class AnthropicService extends BaseLLMService {
         }
     }
 
-    async generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError> {
+    async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {
         if (!this.client) {
             return { message: 'Anthropic API key is not set. Please set it in the settings.', statusCode: 401 };
         }
@@ -162,18 +162,19 @@ export class AnthropicService extends BaseLLMService {
         try {
             const config = this.getConfig();
             const rules = this.utils.getRules();
+            const repoPath = this.getRepoPathForLogging(options?.targetRepo);
 
             if (!config.model) {
                 return { message: 'Anthropic model is not selected. Please configure it via Manage Models.', statusCode: 400 };
             }
 
-            const jsonMessage = await this.buildJsonMessage(diffs);
+            const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
 
             if (config.useChain) {
-                return await this.generateThinking(diffs, jsonMessage, config, rules, options);
+                return await this.generateThinking(diffs, jsonMessage, config, rules, repoPath, options);
             }
 
-            return await this.generateDefault(jsonMessage, config, rules, options);
+            return await this.generateDefault(jsonMessage, config, rules, repoPath, options);
         } catch (error: any) {
             return {
                 message: error?.message || 'An unknown error occurred with the Anthropic API.',
@@ -190,7 +191,8 @@ export class AnthropicService extends BaseLLMService {
         jsonMessage: string,
         config: any,
         rules: any,
-        options?: { token?: vscode.CancellationToken }
+        repoPath: string,
+        options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
         const parsedInput = JSON.parse(jsonMessage);
         const usages: Array<any> = [];
@@ -236,9 +238,9 @@ export class AnthropicService extends BaseLLMService {
                 callCount += 1;
                 if (result.usage) {
                     usages.push(result.usage);
-                    logger.usage('Anthropic', result.usage, config.model, labelFor(reqType), callCount);
+                    logger.usage(repoPath, 'Anthropic', result.usage, config.model, labelFor(reqType), callCount);
                 } else {
-                    logger.usage('Anthropic', undefined, config.model, labelFor(reqType), callCount);
+                    logger.usage(repoPath, 'Anthropic', undefined, config.model, labelFor(reqType), callCount);
                 }
 
                 if (mapping) {
@@ -297,7 +299,7 @@ export class AnthropicService extends BaseLLMService {
         }
 
         if (usages.length) {
-            logger.usageSummary('Anthropic', usages, config.model, 'thinking', undefined, false);
+            logger.usageSummary(repoPath, 'Anthropic', usages, config.model, 'thinking', undefined, false);
         }
 
         return { content: out.commitMessage };
@@ -310,7 +312,8 @@ export class AnthropicService extends BaseLLMService {
         jsonMessage: string,
         config: any,
         rules: any,
-        options?: { token?: vscode.CancellationToken }
+        repoPath: string,
+        options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
         const retries = config.maxRetries ?? 2;
         const totalAttempts = Math.max(1, retries + 1);
@@ -336,9 +339,9 @@ export class AnthropicService extends BaseLLMService {
             );
 
             if (result.usage) {
-                logger.usageSummary('Anthropic', [result.usage], config.model, 'default');
+                logger.usageSummary(repoPath, 'Anthropic', [result.usage], config.model, 'default');
             } else {
-                logger.usageSummary('Anthropic', [], config.model, 'default');
+                logger.usageSummary(repoPath, 'Anthropic', [], config.model, 'default');
             }
 
             const safe = commitMessageSchema.safeParse(result.parsedResponse);

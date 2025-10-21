@@ -4,7 +4,8 @@ import { DiffData } from '../git/gitTypes';
 import { TemplateService } from '../../template/templateService';
 import { IRepositoryAnalysisService } from '../analysis/analysisTypes';
 import { LLMAnalysisResponse, AnalysisPromptParts } from '../analysis/analysisTypes';
-import { GitExtension } from '../git/git';
+import { Repository } from '../git/git';
+import { RepoService } from '../repo/repo';
 
 export type ChatRole = 'system' | 'user' | 'assistant' | 'developer';
 
@@ -47,6 +48,11 @@ export interface LLMError {
     statusCode?: number;
 }
 
+export interface GenerateCommitMessageOptions {
+    token?: vscode.CancellationToken;
+    targetRepo?: Repository;
+}
+
 /**
  * Interface for an LLM service provider.
  */
@@ -63,7 +69,7 @@ export interface LLMService {
 
     clearApiKey(): Promise<void>;
 
-    generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
+    generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError>;
 
     generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options?: { token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError>;
 }
@@ -72,11 +78,13 @@ export abstract class BaseLLMService implements LLMService {
     protected context: vscode.ExtensionContext;
     protected templateService: TemplateService;
     protected analysisService?: IRepositoryAnalysisService;
+    protected repoService: RepoService;
 
     constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: IRepositoryAnalysisService) {
         this.context = context;
         this.templateService = templateService;
         this.analysisService = analysisService;
+        this.repoService = new RepoService();
     }
 
     abstract refreshFromSettings(): Promise<void>;
@@ -84,33 +92,38 @@ export abstract class BaseLLMService implements LLMService {
     abstract listSupportedModels(): string[];
     abstract setApiKey(apiKey: string): Promise<void>;
     abstract clearApiKey(): Promise<void>;
-    abstract generateCommitMessage(diffs: DiffData[], options?: { token?: vscode.CancellationToken }): Promise<LLMResponse | LLMError>;
+    abstract generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError>;
     abstract generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options?: { token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError>;
 
-    protected getRepositoryPath(): string | null {
+    protected getRepositoryPath(repo?: Repository | null): string | null {
         try {
-            // Use VS Code Git API to get repository path safely
-            const gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
-            if (gitExtension) {
-                const api = gitExtension.getAPI(1);
-                if (api && api.repositories.length > 0) {
-                    return api.repositories[0].rootUri?.fsPath || null;
-                }
+            if (repo) {
+                return this.repoService.getRepositoryPath(repo);
             }
-            return null;
+            const activeRepo = this.repoService.getActiveRepository();
+            if (!activeRepo) { return null; }
+            return this.repoService.getRepositoryPath(activeRepo);
         } catch {
             return null;
         }
     }
 
-    protected getRepoInputBoxValue(): string {
-        const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
-        const api = gitExtension.getAPI(1);
-        const repo = api.repositories[0];
-        return repo.inputBox.value || '';
+    protected getRepoInputBoxValue(repo?: Repository | null): string {
+        try {
+            if (repo) {
+                return repo.inputBox?.value || '';
+            }
+            return this.repoService.getRepoInputBoxValue();
+        } catch {
+            return '';
+        }
     }
 
-    protected async buildJsonMessage(diffs: DiffData[]): Promise<string> {
+    protected getRepoPathForLogging(targetRepo?: Repository | null): string {
+        return this.getRepositoryPath(targetRepo) || '';
+    }
+
+    protected async buildJsonMessage(diffs: DiffData[], targetRepo?: Repository): Promise<string> {
         const time = new Date().toLocaleString();
 
         // Get repository analysis instead of workspace files
@@ -121,7 +134,7 @@ export abstract class BaseLLMService implements LLMService {
         let repositoryAnalysis = '';
         if (this.analysisService) {
             try {
-                const repositoryPath = this.getRepositoryPath();
+                const repositoryPath = this.getRepositoryPath(targetRepo);
                 if (repositoryPath) {
                     repositoryAnalysis = await this.analysisService.getAnalysisForPrompt(repositoryPath);
                     repositoryAnalysis = JSON.parse(repositoryAnalysis);

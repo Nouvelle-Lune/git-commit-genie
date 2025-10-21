@@ -5,18 +5,12 @@ import * as vscode from 'vscode';
  * Handles repository-based cost accumulation and storage
  */
 export class CostTrackingService {
-    private static instance: CostTrackingService;
     private context: vscode.ExtensionContext | null = null;
     private readonly _onCostChanged = new vscode.EventEmitter<void>();
     public readonly onCostChanged = this._onCostChanged.event;
 
-    private constructor() { }
-
-    public static getInstance(): CostTrackingService {
-        if (!CostTrackingService.instance) {
-            CostTrackingService.instance = new CostTrackingService();
-        }
-        return CostTrackingService.instance;
+    constructor(context: vscode.ExtensionContext) {
+        this.initialize(context);
     }
 
     public initialize(context: vscode.ExtensionContext): void {
@@ -26,22 +20,15 @@ export class CostTrackingService {
     /**
      * Add cost to repository total
      */
-    public async addToRepositoryCost(cost: number): Promise<void> {
+    public async addToRepositoryCost(cost: number, repoPath: string): Promise<void> {
         if (!this.context) {
             console.warn('[CostTrackingService] Context not available for cost tracking');
             return;
         }
 
         try {
-            // Get current workspace folder path as repository identifier
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
-                console.warn('[CostTrackingService] No workspace folder found for cost tracking');
-                return;
-            }
 
-            const repositoryPath = workspaceFolders[0].uri.fsPath;
-            const costKey = `gitCommitGenie.repositoryCost.${Buffer.from(repositoryPath).toString('base64')}`;
+            const costKey = `gitCommitGenie.repositoryCost.${Buffer.from(repoPath).toString('base64')}`;
 
             // Get existing cost and add new cost
             const existingCost = this.context.globalState.get<number>(costKey, 0);
@@ -61,19 +48,13 @@ export class CostTrackingService {
     /**
      * Get total cost for current repository
      */
-    public async getRepositoryCost(): Promise<number> {
+    public async getRepositoryCost(repoPath: string): Promise<number> {
         if (!this.context) {
             return 0;
         }
 
         try {
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
-                return 0;
-            }
-
-            const repositoryPath = workspaceFolders[0].uri.fsPath;
-            const costKey = `gitCommitGenie.repositoryCost.${Buffer.from(repositoryPath).toString('base64')}`;
+            const costKey = `gitCommitGenie.repositoryCost.${Buffer.from(repoPath).toString('base64')}`;
 
             return this.context.globalState.get<number>(costKey, 0);
         } catch (error) {
@@ -85,19 +66,14 @@ export class CostTrackingService {
     /**
      * Reset repository cost to zero
      */
-    public async resetRepositoryCost(): Promise<void> {
+    public async resetRepositoryCost(repoPath: string): Promise<void> {
         if (!this.context) {
             return;
         }
 
         try {
-            const workspaceFolders = vscode.workspace.workspaceFolders;
-            if (!workspaceFolders || workspaceFolders.length === 0) {
-                return;
-            }
 
-            const repositoryPath = workspaceFolders[0].uri.fsPath;
-            const costKey = `gitCommitGenie.repositoryCost.${Buffer.from(repositoryPath).toString('base64')}`;
+            const costKey = `gitCommitGenie.repositoryCost.${Buffer.from(repoPath).toString('base64')}`;
 
             await this.context.globalState.update(costKey, 0);
             // Notify listeners so UI can refresh immediately
@@ -135,6 +111,3 @@ export class CostTrackingService {
         return costs;
     }
 }
-
-// Export a global instance
-export const costTracker = CostTrackingService.getInstance();

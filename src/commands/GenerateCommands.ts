@@ -69,10 +69,15 @@ export class GenerateCommands {
             try {
                 // Determine target repository explicitly from invocation context or UI selection
                 const repoService = this.serviceRegistry.getRepoService();
-                const targetRepo: Repository | undefined = repoService.getRepositoryByUri(arg.rootUri) || undefined;
-
+                let targetRepo: Repository | null = null;
+                if (arg?.rootUri) {
+                    targetRepo = repoService.getRepositoryByUri(arg.rootUri);
+                }
+                if (!targetRepo) {
+                    targetRepo = repoService.getActiveRepository();
+                }
                 const targetRepoPath = targetRepo?.rootUri?.fsPath;
-                if (!targetRepoPath) {
+                if (!targetRepo || !targetRepoPath) {
                     vscode.window.showErrorMessage('No Git repository found.');
                     return;
                 }
@@ -95,7 +100,7 @@ export class GenerateCommands {
                 }
 
                 const llmService = this.serviceRegistry.getCurrentLLMService();
-                const result = await llmService.generateCommitMessage(diffs, { token: cts.token });
+                const result = await llmService.generateCommitMessage(diffs, { token: cts.token, targetRepo });
 
                 if ('content' in result) {
                     await this.fillCommitMessage(result.content, targetRepo);
