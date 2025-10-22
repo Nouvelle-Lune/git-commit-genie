@@ -17,6 +17,7 @@ import { RepoService } from "../repo/repo";
 import { buildRepositoryAnalysisPromptParts } from './analysisChatPrompts';;
 import { logger } from '../logger';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
+import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../llm/providers/config/ProviderConfig';
 
 /**
  * Repository analysis service implementation
@@ -481,7 +482,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 return { provider: p, service: this.llmService };
             }
 
-            const candidates = ['openai', 'deepseek', 'anthropic', 'gemini'];
+            const candidates = getAllProviderKeys();
             for (const p of candidates) {
                 const svc = this.resolveLLMService?.(p);
                 try {
@@ -506,12 +507,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * Get human-readable provider label
      */
     private getProviderLabel(provider: string): string {
-        switch (provider) {
-            case 'deepseek': return 'DeepSeek';
-            case 'anthropic': return 'Anthropic';
-            case 'gemini': return 'Gemini';
-            default: return 'OpenAI';
-        }
+        return getProviderLabel(provider);
     }
 
     /**
@@ -525,16 +521,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 return selected;
             }
 
-            switch (provider) {
-                case 'deepseek':
-                    return this.context.globalState.get<string>('gitCommitGenie.deepseekModel', '');
-                case 'anthropic':
-                    return this.context.globalState.get<string>('gitCommitGenie.anthropicModel', '');
-                case 'gemini':
-                    return this.context.globalState.get<string>('gitCommitGenie.geminiModel', '');
-                default:
-                    return this.context.globalState.get<string>('gitCommitGenie.openaiModel', '');
-            }
+            const modelKey = getProviderModelStateKey(provider);
+            return this.context.globalState.get<string>(modelKey, '');
         } catch {
             return undefined;
         }

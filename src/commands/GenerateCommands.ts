@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { Repository } from "../services/git/git";
+import { getProviderSecretKey, getProviderLabel } from '../services/llm/providers/config/ProviderConfig';
 
 /**
  * This class handles the registration of commands related to generating commit messages.
@@ -128,12 +129,7 @@ export class GenerateCommands {
     }
 
     private getSecretKeyName(provider: string): string {
-        switch (provider) {
-            case 'deepseek': return 'gitCommitGenie.secret.deepseekApiKey';
-            case 'anthropic': return 'gitCommitGenie.secret.anthropicApiKey';
-            case 'gemini': return 'gitCommitGenie.secret.geminiApiKey';
-            default: return 'gitCommitGenie.secret.openaiApiKey';
-        }
+        return getProviderSecretKey(provider);
     }
 
     private async fillCommitMessage(content: string, repo: Repository): Promise<void> {
@@ -205,11 +201,6 @@ export class GenerateCommands {
     }
 
     private getProviderLabel(provider: string): string {
-        switch (provider) {
-            case 'deepseek': return 'DeepSeek';
-            case 'anthropic': return 'Anthropic';
-            case 'gemini': return 'Gemini';
-            default: return 'OpenAI';
-        }
+        return getProviderLabel(provider);
     }
 }

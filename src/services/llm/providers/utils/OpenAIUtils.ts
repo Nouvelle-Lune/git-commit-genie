@@ -74,7 +74,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                     return { parsedResponse, usage };
 
                 }
-                if (options.provider === 'DeepSeek') {
+                if (options.provider === 'DeepSeek' || options.provider === 'Qwen') {
                     const response = await client.chat.completions.create(
                         requestOptions,
                         {
@@ -160,7 +160,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             return baseOptions;
         }
 
-        if (options.provider === 'DeepSeek') {
+        if (options.provider === 'DeepSeek' || options.provider === 'Qwen') {
             const baseOptions: any = {
                 model: options.model,
                 messages: messages,

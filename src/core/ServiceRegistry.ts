@@ -4,12 +4,14 @@ import { OpenAIService } from '../services/llm/providers/openai';
 import { DeepSeekService } from '../services/llm/providers/deepseek';
 import { AnthropicService } from '../services/llm/providers/anthropic';
 import { GeminiService } from '../services/llm/providers/gemini';
+import { QwenService } from '../services/llm/providers/qwen';
 import { TemplateService } from '../template/templateService';
 import { RepositoryAnalysisService } from '../services/analysis';
 import { LLMService } from '../services/llm/llmTypes';
 import { RepoService } from "../services/repo/repo";
 import { CostTrackingService } from "../services/cost/costTrackingService";
 import { logger } from '../services/logger';
+import { getProviderModelStateKey, getProviderFromSecretKey, QWEN_REGIONS } from '../services/llm/providers/config/ProviderConfig';
 
 export class ServiceRegistry {
     private diffService!: DiffService;
@@ -19,6 +21,7 @@ export class ServiceRegistry {
     private deepseekService!: DeepSeekService;
     private anthropicService!: AnthropicService;
     private geminiService!: GeminiService;
+    private qwenService!: QwenService;
     private llmServices: Map<string, LLMService>;
     private currentLLMService!: LLMService;
     private repoService!: RepoService;
@@ -48,12 +51,14 @@ export class ServiceRegistry {
             this.deepseekService = new DeepSeekService(this.context, this.templateService, this.analysisService);
             this.anthropicService = new AnthropicService(this.context, this.templateService, this.analysisService);
             this.geminiService = new GeminiService(this.context, this.templateService, this.analysisService);
+            this.qwenService = new QwenService(this.context, this.templateService, this.analysisService);
 
             // Setup LLM services map
             this.llmServices.set('openai', this.openAIService);
             this.llmServices.set('deepseek', this.deepseekService);
             this.llmServices.set('anthropic', this.anthropicService);
             this.llmServices.set('gemini', this.geminiService);
+            this.llmServices.set('qwen', this.qwenService);
 
             // Set initial LLM service
             this.currentLLMService = this.pickService();
@@ -126,16 +131,8 @@ export class ServiceRegistry {
     }
 
     getModel(provider: string): string {
-        switch (provider) {
-            case 'deepseek':
-                return this.context.globalState.get<string>('gitCommitGenie.deepseekModel', '');
-            case 'anthropic':
-                return this.context.globalState.get<string>('gitCommitGenie.anthropicModel', '');
-            case 'gemini':
-                return this.context.globalState.get<string>('gitCommitGenie.geminiModel', '');
-            default:
-                return this.context.globalState.get<string>('gitCommitGenie.openaiModel', '');
-        }
+        const modelKey = getProviderModelStateKey(provider);
+        return this.context.globalState.get<string>(modelKey, '');
     }
 
     pickService(): LLMService {
@@ -150,10 +147,12 @@ export class ServiceRegistry {
     }
 
     private secretKeyToProvider(secretKey: string): string | null {
-        if (secretKey.endsWith('.openaiApiKey')) { return 'openai'; }
-        if (secretKey.endsWith('.deepseekApiKey')) { return 'deepseek'; }
-        if (secretKey.endsWith('.anthropicApiKey')) { return 'anthropic'; }
-        if (secretKey.endsWith('.geminiApiKey')) { return 'gemini'; }
-        return null;
+        // Check Qwen regional keys first
+        for (const regionConfig of Object.values(QWEN_REGIONS)) {
+            if (secretKey === regionConfig.secretKey) {
+                return 'qwen';
+            }
+        }
+        return getProviderFromSecretKey(secretKey);
     }
 }

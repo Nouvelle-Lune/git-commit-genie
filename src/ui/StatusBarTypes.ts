@@ -2,12 +2,14 @@
  * Types for StatusBarManager
  */
 
+import { PROVIDER_CONFIGS, ProviderKey } from '../services/llm/providers/config/ProviderConfig';
+
 /**
  * Provider configuration state
  * Represents the current LLM provider and model selection for commit message generation
  */
 export interface ProviderState {
-    /** The current provider (e.g., 'openai', 'deepseek', 'anthropic', 'gemini') */
+    /** The current provider (e.g., 'openai', 'deepseek', 'anthropic', 'gemini', 'qwen') */
     provider: string;
     /** The selected model name */
     model: string;
@@ -72,24 +74,18 @@ export enum AnalysisIcon {
 /**
  * LLM Provider types supported by the extension
  */
-export type LLMProvider = 'openai' | 'deepseek' | 'anthropic' | 'gemini';
+export type LLMProvider = ProviderKey;
 
 /**
  * Provider display labels
  */
-export const PROVIDER_LABELS: Record<LLMProvider, string> = {
-    openai: 'OpenAI',
-    deepseek: 'DeepSeek',
-    anthropic: 'Anthropic',
-    gemini: 'Gemini'
-};
+export const PROVIDER_LABELS: Record<LLMProvider, string> = Object.fromEntries(
+    Object.entries(PROVIDER_CONFIGS).map(([key, config]) => [key, config.label])
+) as Record<LLMProvider, string>;
 
 /**
  * Secret storage keys for each provider
  */
-export const PROVIDER_SECRET_KEYS: Record<LLMProvider, string> = {
-    openai: 'gitCommitGenie.secret.openaiApiKey',
-    deepseek: 'gitCommitGenie.secret.deepseekApiKey',
-    anthropic: 'gitCommitGenie.secret.anthropicApiKey',
-    gemini: 'gitCommitGenie.secret.geminiApiKey'
-};
+export const PROVIDER_SECRET_KEYS: Record<LLMProvider, string> = Object.fromEntries(
+    Object.entries(PROVIDER_CONFIGS).map(([key, config]) => [key, config.secretKey])
+) as Record<LLMProvider, string>;

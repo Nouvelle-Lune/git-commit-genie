@@ -7,6 +7,7 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
 import { GitExtension } from '../services/git/git';
 import { RepoService } from '../services/repo/repo';
 import { CostTrackingService } from '../services/cost/costTrackingService';
+import { getAllProviderKeys } from '../services/llm/providers/config/ProviderConfig';
 import {
     ProviderState,
     AnalysisState,
@@ -258,7 +259,7 @@ export class StatusBarManager {
 
         // If a specific model is selected, find its provider
         if (selected && selected !== 'general') {
-            const candidates = ['openai', 'deepseek', 'anthropic', 'gemini'];
+            const candidates = getAllProviderKeys();
             for (const p of candidates) {
                 const svc = this.serviceRegistry.getLLMService(p);
                 if (svc?.listSupportedModels().includes(selected)) {
@@ -511,7 +512,7 @@ export class StatusBarManager {
             if (!selected || selected === 'general') {
                 provider = this.providerState.provider;
             } else {
-                const candidates = ['openai', 'deepseek', 'anthropic', 'gemini'];
+                const candidates = getAllProviderKeys();
                 for (const p of candidates) {
                     const svc = this.serviceRegistry.getLLMService(p);
                     if (svc?.listSupportedModels().includes(selected)) {

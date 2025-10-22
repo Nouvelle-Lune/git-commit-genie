@@ -31,7 +31,12 @@ export const L10N_KEYS = {
     currentSuffix: ' (current)',
     currentLabel: 'Current',
     useDefaultModel: 'Use default model',
-    useDefaultModelDesc: 'Follow the general commit message model'
+    useDefaultModelDesc: 'Follow the general commit message model',
+    qwenRegionSelect: 'Select Qwen API Region',
+    qwenRegionIntl: 'International',
+    qwenRegionIntlDesc: 'For international API keys',
+    qwenRegionChina: 'China',
+    qwenRegionChinaDesc: 'For mainland China API keys'
   },
   chain: {
     toggled: 'Chain prompting {0}.',

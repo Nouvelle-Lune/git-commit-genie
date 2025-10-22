@@ -54,6 +54,13 @@ export class QwenService extends BaseLLMService {
         return region === 'china' ? SECRET_QWEN_API_KEY_CHINA : SECRET_QWEN_API_KEY_INTL;
     }
 
+    /**
+     * Get current region setting (for pricing and logging)
+     */
+    public getRegion(): 'china' | 'intl' {
+        return this.context.globalState.get<string>(QWEN_REGION_KEY, 'intl') as 'china' | 'intl';
+    }
+
     public async refreshFromSettings(): Promise<void> {
         const apiKey = await this.context.secrets.get(this.getSecretKey());
         this.openai = apiKey ? new OpenAI({ apiKey, baseURL: this.getApiUrl() }) : null;
@@ -158,9 +165,9 @@ export class QwenService extends BaseLLMService {
             );
 
             if (parsed.usage) {
-                logger.usageSummary(repoPath, 'Qwen', [parsed.usage], model, 'RepoAnalysis');
+                logger.usageSummary(repoPath, 'Qwen', [parsed.usage], model, 'RepoAnalysis', undefined, true, this.getRegion());
             } else {
-                logger.usageSummary(repoPath, 'Qwen', [], model, 'RepoAnalysis');
+                logger.usageSummary(repoPath, 'Qwen', [], model, 'RepoAnalysis', undefined, true, this.getRegion());
             }
 
             const safe = repoAnalysisResponseSchema.safeParse(parsed.parsedResponse);
@@ -327,7 +334,7 @@ export class QwenService extends BaseLLMService {
         }
 
         if (usages.length) {
-            logger.usageSummary(repoPath, 'Qwen', usages, config.model, 'thinking', undefined, false);
+            logger.usageSummary(repoPath, 'Qwen', usages, config.model, 'thinking', undefined, false, this.getRegion());
         }
 
         return { content: out.commitMessage };
@@ -368,9 +375,9 @@ export class QwenService extends BaseLLMService {
 
             if (result.usage) {
                 result.usage.model = config.model;
-                logger.usageSummary(repoPath, 'Qwen', [result.usage], config.model, 'default');
+                logger.usageSummary(repoPath, 'Qwen', [result.usage], config.model, 'default', undefined, true, this.getRegion());
             } else {
-                logger.usageSummary(repoPath, 'Qwen', [], config.model, 'default');
+                logger.usageSummary(repoPath, 'Qwen', [], config.model, 'default', undefined, true, this.getRegion());
             }
 
             const safe = commitMessageSchema.safeParse(result.parsedResponse);

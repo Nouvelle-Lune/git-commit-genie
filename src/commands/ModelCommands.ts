@@ -4,6 +4,7 @@ import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
+import { getProviderModelStateKey, getProviderSecretKey, QWEN_REGIONS } from '../services/llm/providers/config/ProviderConfig';
 
 export class ModelCommands {
     constructor(
@@ -32,6 +33,7 @@ export class ModelCommands {
             { label: 'DeepSeek', value: 'deepseek' },
             { label: 'Anthropic', value: 'anthropic' },
             { label: 'Gemini', value: 'gemini' },
+            { label: 'Qwen', value: 'qwen' },
             { label: '', kind: vscode.QuickPickItemKind.Separator, value: '' },
             {
                 label: vscode.l10n.t(I18N.manageModels.configureRepoAnalysisModel),
@@ -54,7 +56,33 @@ export class ModelCommands {
             return;
         }
 
-        const secretName = this.getSecretName(providerPick.value);
+        // Handle Qwen region selection
+        let qwenRegion: string | undefined;
+        if (providerPick.value === 'qwen') {
+            const regionPick = await vscode.window.showQuickPick([
+                {
+                    label: vscode.l10n.t(I18N.manageModels.qwenRegionIntl),
+                    value: 'intl',
+                    detail: vscode.l10n.t(I18N.manageModels.qwenRegionIntlDesc)
+                },
+                {
+                    label: vscode.l10n.t(I18N.manageModels.qwenRegionChina),
+                    value: 'china',
+                    detail: vscode.l10n.t(I18N.manageModels.qwenRegionChinaDesc)
+                }
+            ], {
+                placeHolder: vscode.l10n.t(I18N.manageModels.qwenRegionSelect)
+            });
+
+            if (!regionPick) {
+                return;
+            }
+            qwenRegion = regionPick.value;
+            // Save region selection
+            await this.context.globalState.update('gitCommitGenie.qwenRegion', qwenRegion);
+        }
+
+        const secretName = this.getSecretName(providerPick.value, qwenRegion);
         const modelStateKey = this.getModelStateKey(providerPick.value);
 
         let existingKey = await this.context.secrets.get(secretName);
@@ -92,7 +120,13 @@ export class ModelCommands {
                     // Avoid token-wasting pings when API key is unchanged
                     models = service.listSupportedModels();
                 } else {
-                    models = await service.validateApiKeyAndListModels(apiKeyToUse!);
+                    // Pass region for Qwen provider only
+                    if (providerPick.value === 'qwen' && qwenRegion) {
+                        // TypeScript knows QwenService accepts region parameter
+                        models = await (service as any).validateApiKeyAndListModels(apiKeyToUse!, qwenRegion);
+                    } else {
+                        models = await service.validateApiKeyAndListModels(apiKeyToUse!);
+                    }
                 }
             });
         } catch (err: any) {
@@ -121,22 +155,16 @@ export class ModelCommands {
         );
     }
 
-    private getSecretName(provider: string): string {
-        switch (provider) {
-            case 'deepseek': return 'gitCommitGenie.secret.deepseekApiKey';
-            case 'anthropic': return 'gitCommitGenie.secret.anthropicApiKey';
-            case 'gemini': return 'gitCommitGenie.secret.geminiApiKey';
-            default: return 'gitCommitGenie.secret.openaiApiKey';
+    private getSecretName(provider: string, qwenRegion?: string): string {
+        // Special handling for Qwen's region-specific keys
+        if (provider === 'qwen' && qwenRegion) {
+            return QWEN_REGIONS[qwenRegion]?.secretKey || getProviderSecretKey(provider);
         }
+        return getProviderSecretKey(provider);
     }
 
     private getModelStateKey(provider: string): string {
-        switch (provider) {
-            case 'deepseek': return 'gitCommitGenie.deepseekModel';
-            case 'anthropic': return 'gitCommitGenie.anthropicModel';
-            case 'gemini': return 'gitCommitGenie.geminiModel';
-            default: return 'gitCommitGenie.openaiModel';
-        }
+        return getProviderModelStateKey(provider);
     }
 
     private async handleExistingApiKey(existingKey: string, providerLabel: string, secretName: string): Promise<string | undefined> {
@@ -272,7 +300,8 @@ export class ModelCommands {
             { name: 'OpenAI', value: 'openai' },
             { name: 'DeepSeek', value: 'deepseek' },
             { name: 'Anthropic', value: 'anthropic' },
-            { name: 'Gemini', value: 'gemini' }
+            { name: 'Gemini', value: 'gemini' },
+            { name: 'Qwen', value: 'qwen' }
         ];
 
         for (const provider of providers) {

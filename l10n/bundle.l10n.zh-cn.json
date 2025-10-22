@@ -88,5 +88,10 @@
   "Fixing format issues…": "正在修复格式…",
   "Enforcing target language…": "正在应用目标语言…",
   "Done": "完成",
-  "Cancelled": "已取消"
+  "Cancelled": "已取消",
+  "Select Qwen API Region": "选择 Qwen API 区域",
+  "International": "国际",
+  "For international API keys": "使用国际 API Key",
+  "China": "中国",
+  "For mainland China API keys": "使用中国 API Key"
 }
