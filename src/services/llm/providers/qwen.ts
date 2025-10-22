@@ -75,7 +75,7 @@ export class QwenService extends BaseLLMService {
                 // Found key in the other region, switch to it
                 apiKey = otherKey;
                 await this.context.globalState.update(QWEN_REGION_KEY, otherRegion);
-                logger.info(`[Qwen] Automatically switched from ${currentRegion} to ${otherRegion} region`);
+                logger.info(`[Genie][Qwen] Automatically switched from ${currentRegion} to ${otherRegion} region`);
             }
         }
 
