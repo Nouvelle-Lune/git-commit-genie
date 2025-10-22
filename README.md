@@ -8,7 +8,7 @@ Chinese version: [中文说明](./docs/README.zh-CN.md)
 
 ## Overview
 
-Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using mainstream LLM providers (OpenAI / DeepSeek / Anthropic / Gemini). Features intelligent repository analysis that understands your project structure and tech stack to provide better context for commit generation. Supports optional multi‑step Thinking mode and user template strategy to improve structural consistency and style alignment.
+Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using mainstream LLM providers (OpenAI / DeepSeek / Anthropic / Gemini / Qwen). Features intelligent repository analysis that understands your project structure and tech stack to provide better context for commit generation. Supports optional multi‑step Thinking mode and user template strategy to improve structural consistency and style alignment.
 
 ## Usage Demo
 
@@ -46,7 +46,7 @@ Basic format:
 
 | Feature                         | Description                                                                                                                                                                                               |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Multi‑provider LLM support      | Supports OpenAI, DeepSeek, Anthropic, Gemini.                                                                                                                                                             |
+| Multi‑provider LLM support      | Supports OpenAI, DeepSeek, Anthropic, Gemini, Qwen.                                                                                                                                                       |
 | Repository Intelligence         | Automatically analyzes project structure, tech stack, and architecture to provide context for better commit messages; supports manual refresh, real-time updates, and manual editing of analysis reports. |
 | Thinking Mode                   | Optional multi‑step pipeline: per‑file summaries → structured synthesis → validation & minimal fix‑ups (improves accuracy & template adherence).                                                          |
 | User Template Strategy          | Built-in template selection and creation, supports workspace and user data directory storage, extracts strategy affecting structure, required footers, and vocabulary preferences.                        |
@@ -158,7 +158,7 @@ MIT
 ## Acknowledgements
 
 - [Conventional Commits](https://conventionalcommits.org/) - https://github.com/conventional-commits/conventionalcommits.org
-- OpenAI / DeepSeek / Anthropic / Gemini model ecosystems.
+- OpenAI / DeepSeek / Anthropic / Gemini / Qwen model ecosystems.
 
 ---
 

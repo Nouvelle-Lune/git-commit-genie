@@ -8,7 +8,7 @@ English version: [English README](../README.md)
 
 ## 概述
 
-Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / DeepSeek / Anthropic / Gemini）自动生成高质量的 Conventional Commits 风格提交信息。内置仓库智能分析功能，自动理解项目结构和技术栈，为提交信息生成提供更好的上下文。支持可选“Thinking 模式”（多步推理）与“用户模板”策略，显著提升结构一致性与团队风格统一。
+Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / DeepSeek / Anthropic / Gemini / Qwen）自动生成高质量的 Conventional Commits 风格提交信息。内置仓库智能分析功能，自动理解项目结构和技术栈，为提交信息生成提供更好的上下文。支持可选"Thinking 模式"（多步推理）与"用户模板"策略，显著提升结构一致性与团队风格统一。
 
 优势：
 - 避免在提交语句格式/措辞上反复纠结。
@@ -52,7 +52,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 
 | 特性                     | 说明                                                                                                 |
 | ------------------------ | ---------------------------------------------------------------------------------------------------- |
-| 多模型提供商             | 支持 OpenAI、DeepSeek、Anthropic、Gemini等。                                                         |
+| 多模型提供商             | 支持 OpenAI、DeepSeek、Anthropic、Gemini、Qwen 等。                                                  |
 | 仓库智能分析             | 自动分析项目结构、技术栈和架构，为提交信息生成提供上下文；支持手动刷新、实时更新和手动修改分析报告。 |
 | Thinking 模式            | 多步：文件级摘要 → 结构化综合 → 校验修复，显著提升准确度与模板贴合度。                               |
 | 用户模板策略             | 内置模板选择和创建功能，支持工作区和用户数据目录，抽取策略影响段落顺序、必填 footers、词汇偏好等。   |
@@ -165,7 +165,7 @@ MIT
 ## 致谢
 
 - [Conventional Commits](https://conventionalcommits.org/) - https://github.com/conventional-commits/conventionalcommits.org
-- OpenAI / DeepSeek / Anthropic / Gemini 模型生态
+- OpenAI / DeepSeek / Anthropic / Gemini / Qwen 模型生态
 
 ---
 
