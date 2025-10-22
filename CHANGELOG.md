@@ -1,5 +1,8 @@
 # Changelog
 
+## [2.3.0]
+- feat: Added support for Qwen models from Qwen LLM provider.
+
 ## [2.2.0]
 - feat: Added support for multiple repository.
 - feat: Added support for Gemini 2.5 flash-lite, flash-lite-preview-09-2025, flash-preview-09-2025 models.
