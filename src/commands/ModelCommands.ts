@@ -4,7 +4,13 @@ import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
-import { getProviderModelStateKey, getProviderSecretKey, QWEN_REGIONS } from '../services/llm/providers/config/ProviderConfig';
+import {
+    getProviderModelStateKey,
+    getProviderSecretKey,
+    getProviderLabel,
+    getAllProviderKeys,
+    QWEN_REGIONS
+} from '../services/llm/providers/config/ProviderConfig';
 
 export class ModelCommands {
     constructor(
@@ -28,19 +34,21 @@ export class ModelCommands {
             ? undefined
             : `${vscode.l10n.t(I18N.manageModels.currentLabel)}: ${currentRepoModel}`;
 
-        const items: Array<vscode.QuickPickItem & { value: string }> = [
-            { label: 'OpenAI', value: 'openai' },
-            { label: 'DeepSeek', value: 'deepseek' },
-            { label: 'Anthropic', value: 'anthropic' },
-            { label: 'Gemini', value: 'gemini' },
-            { label: 'Qwen', value: 'qwen' },
+        // Build provider list from ProviderConfig
+        const items: Array<vscode.QuickPickItem & { value: string }> = getAllProviderKeys().map(key => ({
+            label: getProviderLabel(key),
+            value: key
+        }));
+
+        // Add separator and repo analysis config option
+        items.push(
             { label: '', kind: vscode.QuickPickItemKind.Separator, value: '' },
             {
                 label: vscode.l10n.t(I18N.manageModels.configureRepoAnalysisModel),
                 description: repoModelDesc,
                 value: 'repoAnalysis'
-            },
-        ];
+            }
+        );
 
         const providerPick = await vscode.window.showQuickPick(items, {
             placeHolder: vscode.l10n.t(I18N.manageModels.selectProvider)
@@ -87,11 +95,20 @@ export class ModelCommands {
 
         let existingKey = await this.context.secrets.get(secretName);
         let apiKeyToUse: string | undefined = existingKey || undefined;
+        let keyWasCleared = false;
 
         if (existingKey) {
             apiKeyToUse = await this.handleExistingApiKey(existingKey, providerPick.label, secretName);
             if (!apiKeyToUse) {
                 return;
+            }
+            // Check if the key was cleared and re-entered
+            // In this case, existingKey should be refreshed
+            const currentKey = await this.context.secrets.get(secretName);
+            if (!currentKey && apiKeyToUse) {
+                // Key was cleared in handleExistingApiKey
+                keyWasCleared = true;
+                existingKey = undefined;
             }
         }
 
@@ -147,6 +164,12 @@ export class ModelCommands {
         // Update provider and model
         await this.updateProviderAndModel(providerPick, modelPick, modelStateKey, apiKeyToUse!, existingKey);
 
+        // If key was cleared and re-entered, give secret change listener time to process
+        // This ensures status bar reflects the new key state
+        if (keyWasCleared) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
         // Notify status bar that general provider/model changed so 'general' analysis selection follows
         this.statusBarManager.onProviderModelChanged(providerPick.value);
         this.statusBarManager.updateStatusBar();
@@ -185,6 +208,9 @@ export class ModelCommands {
 
         if (action.value === 'clear') {
             await this.context.secrets.delete(secretName);
+            // Give the secret change listener time to update the status bar
+            // This ensures the UI reflects the cleared state before prompting for new key
+            await new Promise(resolve => setTimeout(resolve, 100));
             const newKey = await this.promptForApiKey(providerLabel);
             return newKey;
         }
@@ -296,13 +322,14 @@ export class ModelCommands {
         });
 
         // Collect models from all providers
-        const providers = [
-            { name: 'OpenAI', value: 'openai' },
-            { name: 'DeepSeek', value: 'deepseek' },
-            { name: 'Anthropic', value: 'anthropic' },
-            { name: 'Gemini', value: 'gemini' },
-            { name: 'Qwen', value: 'qwen' }
-        ];
+        // Note: Qwen is excluded because it has region-specific configuration (china/intl)
+        // Users should use 'general' mode to use Qwen for repository analysis
+        const providers = getAllProviderKeys()
+            .filter(key => key !== 'qwen') // Exclude Qwen due to regional variants
+            .map(key => ({
+                name: getProviderLabel(key),
+                value: key
+            }));
 
         for (const provider of providers) {
             try {

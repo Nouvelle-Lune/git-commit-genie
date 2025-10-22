@@ -62,7 +62,23 @@ export class QwenService extends BaseLLMService {
     }
 
     public async refreshFromSettings(): Promise<void> {
-        const apiKey = await this.context.secrets.get(this.getSecretKey());
+        const currentRegion = this.context.globalState.get<string>(QWEN_REGION_KEY, 'intl');
+        let apiKey = await this.context.secrets.get(this.getSecretKey());
+
+        // If current region's key doesn't exist, try the other region
+        if (!apiKey) {
+            const otherRegion = currentRegion === 'china' ? 'intl' : 'china';
+            const otherSecretKey = otherRegion === 'china' ? SECRET_QWEN_API_KEY_CHINA : SECRET_QWEN_API_KEY_INTL;
+            const otherKey = await this.context.secrets.get(otherSecretKey);
+
+            if (otherKey) {
+                // Found key in the other region, switch to it
+                apiKey = otherKey;
+                await this.context.globalState.update(QWEN_REGION_KEY, otherRegion);
+                logger.info(`[Qwen] Automatically switched from ${currentRegion} to ${otherRegion} region`);
+            }
+        }
+
         this.openai = apiKey ? new OpenAI({ apiKey, baseURL: this.getApiUrl() }) : null;
     }
 

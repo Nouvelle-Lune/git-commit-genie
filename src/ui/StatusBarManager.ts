@@ -7,7 +7,7 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
 import { GitExtension } from '../services/git/git';
 import { RepoService } from '../services/repo/repo';
 import { CostTrackingService } from '../services/cost/costTrackingService';
-import { getAllProviderKeys } from '../services/llm/providers/config/ProviderConfig';
+import { getAllProviderKeys, getProviderSecretKey } from '../services/llm/providers/config/ProviderConfig';
 import {
     ProviderState,
     AnalysisState,
@@ -224,7 +224,20 @@ export class StatusBarManager {
         const p = (provider || this.serviceRegistry.getProvider() || 'openai').toLowerCase();
         const model = this.serviceRegistry.getModel(p);
         const secretName = this.getSecretNameForProvider(p);
-        const key = await this.context.secrets.get(secretName);
+        let key = await this.context.secrets.get(secretName);
+
+        // For Qwen, if current region's key doesn't exist, check the other region
+        if (!key && p === 'qwen') {
+            const currentRegion = this.context.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
+            const otherRegion = currentRegion === 'china' ? 'intl' : 'china';
+            const otherSecretKey = getProviderSecretKey('qwen', otherRegion);
+            const otherKey = await this.context.secrets.get(otherSecretKey);
+
+            if (otherKey) {
+                // Use key from the other region
+                key = otherKey;
+            }
+        }
 
         this.providerState = {
             provider: p,
@@ -271,7 +284,21 @@ export class StatusBarManager {
         }
 
         // Get API key for the analysis provider
-        const key = await this.context.secrets.get(this.getSecretNameForProvider(provider));
+        let key = await this.context.secrets.get(this.getSecretNameForProvider(provider));
+
+        // For Qwen, if current region's key doesn't exist, check the other region
+        if (!key && provider === 'qwen') {
+            const currentRegion = this.context.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
+            const otherRegion = currentRegion === 'china' ? 'intl' : 'china';
+            const otherSecretKey = getProviderSecretKey('qwen', otherRegion);
+            const otherKey = await this.context.secrets.get(otherSecretKey);
+
+            if (otherKey) {
+                // Use key from the other region
+                key = otherKey;
+            }
+        }
+
         const hasKey = !!(key && key.trim());
 
         // Check if analysis file exists
@@ -571,11 +598,17 @@ export class StatusBarManager {
     // ========================================
 
     private getSecretNameForProvider(provider: string): string {
-        const normalizedProvider = provider.toLowerCase() as LLMProvider;
-        return PROVIDER_SECRET_KEYS[normalizedProvider] || PROVIDER_SECRET_KEYS.openai;
-    }
+        const normalizedProvider = provider.toLowerCase();
 
-    private getProviderLabel(provider: string): string {
+        // For Qwen, get the region-specific secret key
+        // The actual region switching logic is handled in QwenService.refreshFromSettings()
+        if (normalizedProvider === 'qwen') {
+            const region = this.context.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
+            return getProviderSecretKey('qwen', region);
+        }
+
+        return PROVIDER_SECRET_KEYS[normalizedProvider as LLMProvider] || PROVIDER_SECRET_KEYS.openai;
+    } private getProviderLabel(provider: string): string {
         const normalizedProvider = provider.toLowerCase() as LLMProvider;
         return PROVIDER_LABELS[normalizedProvider] || PROVIDER_LABELS.openai;
     }
