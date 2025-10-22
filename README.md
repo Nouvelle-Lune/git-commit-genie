@@ -10,8 +10,17 @@ Chinese version: [中文说明](./docs/README.zh-CN.md)
 
 Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using mainstream LLM providers (OpenAI / DeepSeek / Anthropic / Gemini). Features intelligent repository analysis that understands your project structure and tech stack to provide better context for commit generation. Supports optional multi‑step Thinking mode and user template strategy to improve structural consistency and style alignment.
 
-## Usage
-<img src="./media/demo1.gif" width="300"/>
+## Usage Demo
+
+<div align="center">
+  <img src="./media/demo1.gif" width="300" alt="Usage Demo"/>
+</div>
+
+#### Status Bar Display
+
+<div align="center">
+  <img src="./media/status-bar.png" width="300" alt="Status Bar"/>
+</div>
 
 ## Format
 

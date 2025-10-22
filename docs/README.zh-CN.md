@@ -16,8 +16,17 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 - 通过一个简单的模板文件定义 Body / Footers / 语气 / 词汇偏好。
 - 支持多模型动态切换，快速选择最适合的提供商与模型。
 
-## Usage
-<img src="../media/demo1.gif" width="300"/>
+## 使用演示
+
+<div align="center">
+  <img src="../media/demo1.gif" width="300" alt="使用演示"/>
+</div>
+
+#### 状态栏显示
+
+<div align="center">
+  <img src="../media/status-bar.png" width="300" alt="状态栏"/>
+</div>
 
 ## 格式
 
