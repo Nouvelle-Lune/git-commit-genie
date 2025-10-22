@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { CostTrackingService } from "../cost/costTrackingService";
+import { PRICING_TABLE } from '../cost/pricing';
 
 export enum LogLevel {
     Debug = 0,
@@ -85,7 +86,16 @@ export class Logger {
      * Log token usage information with cost calculation and formatting
      * Consolidates token usage, cache percentage, and cost into a single line
      */
-    public usage(repoPath: string, provider: string, usage: any, modelName: string, callType: string = '', callCount?: number): void {
+    public usage(
+        repoPath: string,
+        provider: string,
+        usage: any,
+        modelName: string,
+        callType: string = '',
+        callCount?: number,
+        region?: string,
+        thinkingMode?: boolean
+    ): void {
         if (!usage) {
             this.info(`[${provider}]${callType ? ` [${callType}${callCount ? `-${callCount}` : ''}]` : ''} Token usage information not available`);
             return;
@@ -131,6 +141,14 @@ export class Logger {
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
+            if (provider === 'Qwen') {
+                inputTokens = usage.prompt_tokens || 0;
+                outputTokens = usage.completion_tokens || 0;
+                cachedTokens = usage.prompt_tokens_details?.cached_tokens || 0;
+                totalTokens = inputTokens + outputTokens;
+                cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+                cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens, region, thinkingMode);
+            }
         } catch (e) {
             this.warn(`Failed to parse token usage for ${modelName}: ${e}`);
             return;
@@ -164,53 +182,60 @@ export class Logger {
     }
 
     /**
-     * Pricing table (cost per 1M tokens). DeepSeek values are in CNY (RMB); others in USD.
-     */
-    private static readonly PRICING_TABLE = {
-        // OpenAI (USD)
-        'gpt-5': { input: 1.25, output: 10.0, cached: 0.125 },
-        'gpt-5-mini': { input: 0.25, output: 2.0, cached: 0.025 },
-        'gpt-5-nano': { input: 0.05, output: 0.4, cached: 0.005 },
-        'gpt-4.1': { input: 2.0, output: 8.0, cached: 0.5 },
-        'gpt-4.1-mini': { input: 0.4, output: 1.6, cached: 0.1 },
-        'gpt-4o': { input: 2.5, output: 10.0, cached: 1.25 },
-        'gpt-4o-mini': { input: 0.15, output: 0.6, cached: 0.075 },
-        'o4-mini': { input: 1.10, output: 4.40, cached: 0.275 },
-
-        // Anthropic Claude (USD)
-        'claude-opus-4-1-20250805': { input: 15.0, output: 75.0, cached: 1.5 },
-        'claude-opus-4-20250514': { input: 15.0, output: 75.0, cached: 1.5 },
-        'claude-sonnet-4-20250514': { input: 3.0, output: 15.0, cached: 0.3 },
-        'claude-3-7-sonnet-20250219': { input: 3.0, output: 15.0, cached: 0.3 },
-        'claude-3-5-sonnet-20241022': { input: 3.0, output: 15.0, cached: 0.3 },
-        'claude-3-5-sonnet-20240620': { input: 3.0, output: 15.0, cached: 0.3 },
-        'claude-3-5-haiku-20241022': { input: 0.8, output: 4.0, cached: 0.08 },
-
-        // Google Gemini (USD) — based on screenshots
-        'gemini-2.5-pro': { input: 1.25, output: 10.0, cached: 0.31 },
-        'gemini-2.5-flash': { input: 0.30, output: 2.50, cached: 0.075 },
-        'gemini-2.5-flash-preview-09-2025': { input: 0.30, output: 2.50, cached: 0.075 },
-        'gemini-2.5-flash-lite': { input: 0.10, output: 0.40, cached: 0.025 },
-        'gemini-2.5-flash-lite-preview-09-2025': { input: 0.10, output: 0.40, cached: 0.025 },
-
-        // DeepSeek (USD) - converted from CNY
-        'deepseek-chat': { input: 0.274, output: 0.411, cached: 0.027 },
-        'deepseek-reasoner': { input: 0.274, output: 0.411, cached: 0.027 },
-    };
-
-    /**
      * Calculate API call cost
+     * @param modelName - Model name, can include region suffix for Qwen (e.g., 'qwen3-max:china')
+     * @param inputTokens - Number of input tokens
+     * @param outputTokens - Number of output tokens
+     * @param cachedTokens - Number of cached tokens (optional)
+     * @param region - Region for Qwen models ('china' or 'intl'), will be appended to modelName
+     * @param thinkingMode - Whether Qwen Plus is using thinking/reasoning mode (higher output cost)
      */
-    private calculateCost(modelName: string, inputTokens: number, outputTokens: number, cachedTokens?: number): number {
-        const pricing = Logger.PRICING_TABLE[modelName as keyof typeof Logger.PRICING_TABLE];
-        if (!pricing) {
-            throw new Error("Unknown model pricing");
+    private calculateCost(
+        modelName: string,
+        inputTokens: number,
+        outputTokens: number,
+        cachedTokens?: number,
+        region?: string,
+        thinkingMode?: boolean
+    ): number {
+        // For Qwen models, append region to model name if provided
+        let pricingKey = modelName;
+        if (region && modelName.startsWith('qwen')) {
+            pricingKey = `${modelName}:${region}`;
+            // Append thinking mode suffix if enabled for qwen-plus models
+            if (thinkingMode && modelName.includes('qwen-plus')) {
+                pricingKey = `${pricingKey}:thinking`;
+            }
         }
 
-        const inputCost = (inputTokens / 1000000) * pricing.input;
-        const outputCost = (outputTokens / 1000000) * pricing.output;
-        const cachedCost = cachedTokens ? (cachedTokens / 1000000) * pricing.cached : 0;
-        return inputCost + outputCost + cachedCost;
+        const pricing = PRICING_TABLE[pricingKey];
+        if (!pricing) {
+            this.warn(`Unknown model pricing for: ${pricingKey}`);
+            return 0;
+        }
+
+        // Check if this is tiered pricing
+        if ('tiers' in pricing) {
+            // Find the appropriate tier based on input tokens
+            const tier = pricing.tiers.find((t) => inputTokens <= t.maxInputTokens);
+            if (!tier) {
+                this.warn(`No pricing tier found for ${pricingKey} with ${inputTokens} input tokens`);
+                return 0;
+            }
+            const nonCachedInputTokens = cachedTokens ? inputTokens - cachedTokens : inputTokens;
+            const inputCost = (nonCachedInputTokens / 1000000) * tier.input;
+            const outputCost = (outputTokens / 1000000) * tier.output;
+            const cachedCost = cachedTokens ? (cachedTokens / 1000000) * tier.cached : 0;
+
+            return inputCost + outputCost + cachedCost;
+        } else {
+            const nonCachedInputTokens = cachedTokens ? inputTokens - cachedTokens : inputTokens;
+            const inputCost = (nonCachedInputTokens / 1000000) * pricing.input;
+            const outputCost = (outputTokens / 1000000) * pricing.output;
+            const cachedCost = cachedTokens ? (cachedTokens / 1000000) * pricing.cached : 0;
+
+            return inputCost + outputCost + cachedCost;
+        }
     }
 
     /**
@@ -224,7 +249,9 @@ export class Logger {
         modelName: string,
         callType: string = '',
         callCount?: number,
-        addToCost: boolean = true
+        addToCost: boolean = true,
+        region?: string,
+        thinkingMode?: boolean
     ): void {
         if (!usages.length) {
             this.info(`[${provider}]${callType ? ` [${callType}${callCount ? `-${callCount}` : ''}]` : ''} No token usage data to summarize`);
@@ -264,7 +291,12 @@ export class Logger {
                     inputTokens = usage.prompt_tokens ?? 0;
                     outputTokens = usage.completion_tokens ?? 0;
                     cachedTokens = usage.cached_content_tokens ?? 0;
-                } else {
+                } else if (provider === 'Qwen') {
+                    inputTokens = usage.prompt_tokens || 0;
+                    outputTokens = usage.completion_tokens || 0;
+                    cachedTokens = usage.prompt_tokens_details?.cached_tokens || 0;
+                }
+                else {
                     this.warn(`Unknown model for usage summary: ${modelName}`);
                     continue;
                 }
@@ -276,7 +308,7 @@ export class Logger {
                 totalTokens += usage.total_tokens || (inputTokens + outputTokens);
 
                 // Calculate cost for this usage
-                totalCost += this.calculateCost(modelName, inputTokens, outputTokens, cachedTokens);
+                totalCost += this.calculateCost(modelName, inputTokens, outputTokens, cachedTokens, region, thinkingMode);
             } catch (e) {
                 this.warn(`Failed to parse token usage in summary for ${modelName}: ${e}`);
                 continue;
