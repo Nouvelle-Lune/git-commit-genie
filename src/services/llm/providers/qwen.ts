@@ -5,7 +5,7 @@ import { DiffData } from '../../git/gitTypes';
 import OpenAI from 'openai';
 import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { logger } from '../../logger';
-import { OpenAICompatibleUtils } from './utils/index.js';
+import { OpenAICompatibleUtils } from './utils/index';
 import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysisTypes';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { z } from "zod";

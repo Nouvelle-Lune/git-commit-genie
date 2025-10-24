@@ -1,9 +1,9 @@
 import * as vscode from 'vscode';
-import { BaseProviderUtils } from './BaseProviderUtils.js';
-import { logger } from '../../../logger/index.js';
+import { BaseProviderUtils } from './BaseProviderUtils';
+import { logger } from '../../../logger/index';
 
 import { Content, GoogleGenAI, GenerateContentConfig } from '@google/genai';
-import { ChatMessage } from '../../llmTypes.js';
+import { ChatMessage } from '../../llmTypes';
 
 
 // Global type definitions for @google/genai compatibility

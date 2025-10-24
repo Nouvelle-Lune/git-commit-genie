@@ -7,7 +7,7 @@ import { generateCommitMessageChain } from '../../chain/chainThinking';
 
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
-import { GeminiUtils } from './utils/GeminiUtils.js';
+import { GeminiUtils } from './utils/GeminiUtils';
 import { LLMAnalysisResponse, AnalysisPromptParts } from '../../analysis/analysisTypes';
 import {
     GeminiCommitMessageSchema,
