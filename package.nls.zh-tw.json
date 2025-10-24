@@ -21,7 +21,7 @@
   "config.repositoryAnalysis.model.general": "使用預設模型",
   "config.autoStageAllForDiff.desc": "僅當暫存區為空時：臨時將所有變更加入暫存以建立 diff，之後會自動還原暫存狀態。請謹慎使用——這可能會將無關變更包含進提示。",
   "config.chain.enabled.desc": "啟用鏈式多步提示生成提交資訊（可使生成的提交資訊更詳盡且更貼合使用者模板，但會增加延遲與 Token 消耗）",
-  "config.chain.maxParallelNew.desc": "鏈式提示的並行 LLM 呼叫最大數量。請謹慎增大以避免觸發速率限制。",
+  "config.chain.maxParallel.desc": "鏈式提示的並行 LLM 呼叫最大數量。請謹慎增大以避免觸發速率限制。",
   "config.llm.maxRetries.desc": "API 請求失敗最大重試次數",
   "config.llm.temperature.desc": "Temperature（0-2），預設為 0.2。",
   "config.commitLanguage.desc": "產生的提交資訊目標語言。",

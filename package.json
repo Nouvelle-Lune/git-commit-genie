@@ -121,7 +121,7 @@
         "gitCommitGenie.chain.enabled": {
           "order": 1,
           "type": "boolean",
-          "default": false,
+          "default": true,
           "markdownDescription": "%config.chain.enabled.desc%",
           "tags": [
             "experimental"
@@ -132,7 +132,7 @@
           "type": "number",
           "default": 2,
           "minimum": 1,
-          "markdownDescription": "%config.chain.maxParallelNew.desc%"
+          "markdownDescription": "%config.chain.maxParallel.desc%"
         },
         "gitCommitGenie.llm.maxRetries": {
           "order": 3,
@@ -148,14 +148,6 @@
           "minimum": 0,
           "maximum": 2,
           "markdownDescription": "%config.llm.temperature.desc%"
-        },
-        "gitCommitGenie.chainMaxParallel": {
-          "order": 2,
-          "type": "number",
-          "default": 2,
-          "minimum": 1,
-          "markdownDescription": "%config.chainMaxParallel.desc%",
-          "deprecationMessage": "Deprecated: use gitCommitGenie.chain.maxParallel instead"
         },
         "gitCommitGenie.repositoryAnalysis.enabled": {
           "order": 6,
