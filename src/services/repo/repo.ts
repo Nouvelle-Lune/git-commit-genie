@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { GitExtension, API, Repository, Commit, LogOptions } from '../git/git';
 import { logger } from '../logger';
+import { L10N_KEYS as I18N } from '../../i18n/keys';
 
 /**
  * Repository service for managing Git repository operations
@@ -162,7 +163,7 @@ export class RepoService {
         const repositories = this.getRepositories();
 
         if (repositories.length === 0) {
-            vscode.window.showErrorMessage('No Git repository found.');
+            vscode.window.showErrorMessage(vscode.l10n.t(I18N.common.noGitRepository));
             return null;
         }
 

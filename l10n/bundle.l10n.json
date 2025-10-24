@@ -72,8 +72,8 @@
   "Clear": "Clear",
   "Repository analysis cache cleared.": "Repository analysis cache cleared.",
   "Select a repository": "Select a repository",
-  "No AI usage cost recorded for this repository yet.": "No Genie usage cost recorded for this repository yet.",
-  "Total AI usage cost for this repository: ${0}": "Total Genie usage cost for this repository: ${0}",
+  "No Genie usage cost recorded for this repository yet.": "No Genie usage cost recorded for this repository yet.",
+  "Total Genie usage cost for this repository: ${0}": "Total Genie usage cost for this repository: ${0}",
   "Failed to get repository cost: {0}": "Failed to get repository cost: {0}",
   "Are you sure you want to reset the cost tracking for this repository?": "Are you sure you want to reset the cost tracking for this repository?",
   "This action cannot be undone.": "This action cannot be undone.",
@@ -88,5 +88,13 @@
   "Fixing format issues…": "Fixing format issues…",
   "Enforcing target language…": "Enforcing target language…",
   "Done": "Done",
-  "Cancelled": "Cancelled"
+  "Cancelled": "Cancelled",
+  "Select Qwen API Region": "Select Qwen API Region",
+  "International": "International",
+  "For international API keys": "For international API keys",
+  "China": "China",
+  "For mainland China API keys": "For mainland China API keys",
+  "Generation already running for this repository.": "Generation already running for this repository.",
+  "No Git repository found.": "No Git repository found.",
+  "Failed to create template directory": "Failed to create template directory"
 }

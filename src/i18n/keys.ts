@@ -73,7 +73,9 @@ export const L10N_KEYS = {
   },
   common: {
     noWorkspace: 'No workspace folder is open.',
-    apiKeyUpdated: '{0} API key updated.'
+    apiKeyUpdated: '{0} API key updated.',
+    generationRunning: 'Generation already running for this repository.',
+    noGitRepository: 'No Git repository found.'
   },
   rateLimit: {
     hit: 'Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.'
@@ -132,7 +134,8 @@ export const L10N_KEYS = {
     deleteFailed: 'Failed to delete template: {0}',
     renameExists: 'A template with that name already exists.',
     renameFailed: 'Rename failed: {0}',
-    openFailed: 'Failed to open template: {0}'
+    openFailed: 'Failed to open template: {0}',
+    createDirFailed: 'Failed to create template directory'
   },
   costNotification: {
     commitMessageGeneration: 'Commit message generation: ${0} | Cache hit: {1}%',

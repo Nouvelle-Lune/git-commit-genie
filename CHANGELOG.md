@@ -1,5 +1,8 @@
 # Changelog
 
+## [2.3.1]
+- fix: Fixed some text display issues.
+
 ## [2.3.0]
 - feat: Added support for Qwen models from Qwen LLM provider.
 

@@ -79,13 +79,13 @@ export class GenerateCommands {
                 }
                 const targetRepoPath = targetRepo?.rootUri?.fsPath;
                 if (!targetRepo || !targetRepoPath) {
-                    vscode.window.showErrorMessage('No Git repository found.');
+                    vscode.window.showErrorMessage(vscode.l10n.t(I18N.common.noGitRepository));
                     return;
                 }
 
                 // Prevent duplicate runs for same repo
                 if (this.inFlight.has(targetRepoPath)) {
-                    vscode.window.showInformationMessage('Generation already running for this repository.');
+                    vscode.window.showInformationMessage(vscode.l10n.t(I18N.common.generationRunning));
                     return;
                 }
                 this.inFlight.set(targetRepoPath, cts);

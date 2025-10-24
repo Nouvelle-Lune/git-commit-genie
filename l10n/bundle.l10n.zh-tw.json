@@ -72,8 +72,8 @@
   "Clear": "清理",
   "Repository analysis cache cleared.": "已清理倉庫分析快取。",
   "Select a repository": "選擇一個倉庫",
-  "No AI usage cost recorded for this repository yet.": "此倉庫尚無 Genie 使用費用記錄。",
-  "Total AI usage cost for this repository: ${0}": "此倉庫的 Genie 使用總費用：${0}",
+  "No Genie usage cost recorded for this repository yet.": "此倉庫尚無 Genie 使用費用記錄。",
+  "Total Genie usage cost for this repository: ${0}": "此倉庫的 Genie 使用總費用：${0}",
   "Failed to get repository cost: {0}": "獲取倉庫費用失敗：{0}",
   "Are you sure you want to reset the cost tracking for this repository?": "確定要重設此倉庫的費用追蹤嗎？",
   "This action cannot be undone.": "此操作不可撤銷。",
@@ -93,5 +93,8 @@
   "International": "國際",
   "For international API keys": "使用國際 API Key",
   "China": "中國",
-  "For mainland China API keys": "使用中國 API Key"
+  "For mainland China API keys": "使用中國 API Key",
+  "Generation already running for this repository.": "此倉庫已有正在進行的生成任務。",
+  "No Git repository found.": "未找到 Git 倉庫。",
+  "Failed to create template directory": "建立模板目錄失敗"
 }

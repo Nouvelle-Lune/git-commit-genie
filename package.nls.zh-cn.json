@@ -41,6 +41,7 @@
   "config.commitLanguage.ru": "俄文",
   "config.commitLanguage.it": "意大利文",
   "config.typingAnimationSpeed.desc": "提交信息框打字动画速度，单位为每字符毫秒。设置 -1 关闭动画。",
+  "config.showUsageCost": "显示使用费用",
   "config.showUsageCost.desc": "启用后在生成文本时弹出通知，显示本次生成的估计总费用。",
   "config.ui.stageNotifications.enabled.desc": "在链式思考过程中在右下角显示阶段通知。",
   "templates.pickWorkspaceFolder": "选择工作区文件夹",
