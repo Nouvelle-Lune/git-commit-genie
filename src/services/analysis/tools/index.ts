@@ -26,3 +26,4 @@ export * from './searchTools';
 export * from './fileTools';
 export * from './compressionTools';
 export * from './utils';
+export * from './modelContext';

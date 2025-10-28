@@ -329,6 +329,13 @@
         "enablement": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true"
       },
       {
+        "command": "git-commit-genie.runAiRepositoryAnalysis",
+        "title": "Run AI Repository Analysis (experimental)",
+        "category": "%category.title%",
+        "icon": "$(beaker)",
+        "enablement": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
+      },
+      {
         "command": "git-commit-genie.refreshRepositoryAnalysis",
         "title": "%command.refreshRepositoryAnalysis%",
         "category": "%category.title%",
@@ -378,6 +385,10 @@
         {
           "command": "git-commit-genie.cancelRepositoryAnalysis",
           "when": "false"
+        },
+        {
+          "command": "git-commit-genie.runAiRepositoryAnalysis",
+          "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
         },
         {
           "command": "git-commit-genie.refreshRepositoryAnalysis",
