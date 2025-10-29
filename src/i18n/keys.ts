@@ -71,6 +71,28 @@ export const L10N_KEYS = {
   errors: {
     invalidApiKey: '{0} API key appears invalid or revoked.'
   },
+  provider: {
+    // API key errors
+    apiKeyNotSet: '{0} API key is not set. Please set it in the settings.',
+    clientNotInitialized: '{0} client is not initialized',
+    // Model errors
+    modelNotSelected: '{0} model is not selected. Please configure it via Manage Models.',
+    modelNotConfigured: '{0} model is not configured',
+    // Service errors
+    serviceNotAvailable: '{0} service is not available',
+    methodNotSupported: 'Provider does not support {0} method',
+    // Chat errors
+    chatJsonFailed: 'Raw chat JSON failed after retries',
+    chatTextFailed: 'Raw chat text failed after retries',
+    chatFailed: '{0} chat failed after retries',
+    // Validation errors
+    validationFailed: 'Failed to validate structured response from {0}.',
+    commitMessageValidationFailed: 'Failed to validate structured commit message from {0}.',
+    // Generic errors
+    unknownError: 'An unknown error occurred with the {0} API.',
+    operationCancelled: 'Operation cancelled',
+    invalidResponse: 'Invalid response from {0}',
+  },
   common: {
     noWorkspace: 'No workspace folder is open.',
     apiKeyUpdated: '{0} API key updated.',
