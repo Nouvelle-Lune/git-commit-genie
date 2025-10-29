@@ -17,7 +17,7 @@ import { RepoService } from "../repo/repo";
 import { buildRepositoryAnalysisPromptParts } from './analysisChatPrompts';;
 import { logger } from '../logger';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
-import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../llm/providers/config/ProviderConfig';
+import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../llm/providers/config/providerConfig';
 
 /**
  * Repository analysis service implementation

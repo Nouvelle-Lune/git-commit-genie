@@ -18,7 +18,7 @@ import { LLMService, LLMError, ChatMessage } from '../../llm/llmTypes';
 import { RepoService } from '../../repo/repo';
 import { logger } from '../../logger';
 import { L10N_KEYS as I18N } from '../../../i18n/keys';
-import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../../llm/providers/config/ProviderConfig';
+import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../../llm/providers/config/providerConfig';
 
 // Tools
 import { listDirectory } from '../tools/directoryTools';
@@ -27,7 +27,6 @@ import { readFileContent } from '../tools/fileTools';
 import { compressContext } from '../tools/compressionTools';
 import { DirectoryEntry, SearchFilesResult, ToolResult } from '../tools/toolTypes';
 import { getMaxContextByFunction, estimateCharBudget } from '../tools/modelContext';
-import { RepoAnalysisServiceChatBridge } from './repoAnalysisServiceChatBridge';
 
 /**
  * Tool-driven repository analysis service
@@ -49,13 +48,11 @@ export class AIRepositoryAnalysisService implements IRepositoryAnalysisService {
 	private context: vscode.ExtensionContext;
 	private currentCancelSource?: vscode.CancellationTokenSource;
 	private apiKeyWaiters: Map<string, vscode.Disposable> = new Map();
-	private bridge: RepoAnalysisServiceChatBridge;
 
 	constructor(context: vscode.ExtensionContext, llmService: LLMService | null, repoService: RepoService) {
 		this.context = context;
 		this.llmService = llmService;
 		this.repoService = repoService;
-		this.bridge = new RepoAnalysisServiceChatBridge(context);
 	}
 
 	/**
@@ -455,15 +452,28 @@ export class AIRepositoryAnalysisService implements IRepositoryAnalysisService {
 	}
 
 	/**
-	 * Make a JSON-only LLM call via the provider bridge.
+	 * Make a JSON-only LLM call via the provider service.
 	 * Ensures temperature and token limits come from settings.
 	 */
 	private async safeJsonCall(history: ChatMessage[], repoPath: string): Promise<any | null> {
 		try {
-			const { provider } = this.pickRepoAnalysisService();
+			const { provider, service } = this.pickRepoAnalysisService();
+			if (!service) {
+				throw Object.assign(new Error(`${provider} service is not available`), { statusCode: 400 });
+			}
+
 			const model = this.getActiveModelForProvider(provider) || '';
-			const region = this.context.globalState.get<'china' | 'intl'>('gitCommitGenie.qwenRegion', 'intl');
-			const action = await this.bridge.chatJson(provider, model, history, { token: this.currentCancelSource?.token, region });
+
+			// Type assertion to access chatJson method that all providers now have
+			const chatJsonMethod = (service as any).chatJson;
+			if (typeof chatJsonMethod !== 'function') {
+				throw new Error('Provider does not support chatJson method');
+			}
+
+			const action = await chatJsonMethod.call(service, history, {
+				model,
+				token: this.currentCancelSource?.token
+			});
 			return action;
 		} catch (err: any) {
 			const provider = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai');
@@ -530,10 +540,23 @@ export class AIRepositoryAnalysisService implements IRepositoryAnalysisService {
 					const preserveStructure = !!args.preserveStructure;
 					const language = typeof args.language === 'string' ? args.language : undefined;
 					const chatFn = async (messages: ChatMessage[]): Promise<string> => {
-						const { provider } = this.pickRepoAnalysisService();
+						const { provider, service } = this.pickRepoAnalysisService();
+						if (!service) {
+							throw new Error(`${provider} service is not available`);
+						}
+
 						const model = this.getActiveModelForProvider(provider) || '';
-						const region = this.context.globalState.get<'china' | 'intl'>('gitCommitGenie.qwenRegion', 'intl');
-						return await this.bridge.chatText(provider, model, messages, { token: this.currentCancelSource?.token, region });
+
+						// Type assertion to access chatText method that all providers now have
+						const chatTextMethod = (service as any).chatText;
+						if (typeof chatTextMethod !== 'function') {
+							throw new Error('Provider does not support chatText method');
+						}
+
+						return await chatTextMethod.call(service, messages, {
+							model,
+							token: this.currentCancelSource?.token
+						});
 					};
 					logger.info(`[Genie][AIRepoAnalysis] Running compressContext: targetTokens=${targetTokens}, preserveStructure=${preserveStructure}, language=${language || 'n/a'}`);
 					return await compressContext(content, chatFn, { targetTokens, preserveStructure, language });

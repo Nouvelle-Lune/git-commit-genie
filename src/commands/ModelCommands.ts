@@ -10,7 +10,7 @@ import {
     getProviderLabel,
     getAllProviderKeys,
     QWEN_REGIONS
-} from '../services/llm/providers/config/ProviderConfig';
+} from '../services/llm/providers/config/providerConfig';
 
 export class ModelCommands {
     constructor(

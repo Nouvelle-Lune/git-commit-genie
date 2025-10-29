@@ -7,7 +7,7 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
 import { GitExtension } from '../services/git/git';
 import { RepoService } from '../services/repo/repo';
 import { CostTrackingService } from '../services/cost/costTrackingService';
-import { getAllProviderKeys, getProviderSecretKey } from '../services/llm/providers/config/ProviderConfig';
+import { getAllProviderKeys, getProviderSecretKey } from '../services/llm/providers/config/providerConfig';
 import {
     ProviderState,
     AnalysisState,

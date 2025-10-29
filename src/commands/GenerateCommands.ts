@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { Repository } from "../services/git/git";
-import { getProviderSecretKey, getProviderLabel } from '../services/llm/providers/config/ProviderConfig';
+import { getProviderSecretKey, getProviderLabel } from '../services/llm/providers/config/providerConfig';
 
 /**
  * This class handles the registration of commands related to generating commit messages.

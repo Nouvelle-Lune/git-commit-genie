@@ -11,7 +11,7 @@ import { LLMService } from '../services/llm/llmTypes';
 import { RepoService } from "../services/repo/repo";
 import { CostTrackingService } from "../services/cost/costTrackingService";
 import { logger } from '../services/logger';
-import { getProviderModelStateKey, getProviderFromSecretKey, QWEN_REGIONS } from '../services/llm/providers/config/ProviderConfig';
+import { getProviderModelStateKey, getProviderFromSecretKey, QWEN_REGIONS } from '../services/llm/providers/config/providerConfig';
 
 export class ServiceRegistry {
     private diffService!: DiffService;
