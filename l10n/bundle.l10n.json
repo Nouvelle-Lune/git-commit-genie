@@ -34,7 +34,7 @@
   "Repository analysis is up to date.": "Repository analysis is up to date.",
   "Initialize a Git repository to enable analysis.": "Initialize a Git repository to enable analysis.",
   "No staged changes found.": "No staged changes found.",
-  "AI generation cancelled.": "Genie generation cancelled.",
+  "Genie generation cancelled.": "Genie generation cancelled.",
   "Error generating commit message: {0}": "Error generating commit message: {0}",
   "Failed to generate commit message: {0}": "Failed to generate commit message: {0}",
   "Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.": "Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.",

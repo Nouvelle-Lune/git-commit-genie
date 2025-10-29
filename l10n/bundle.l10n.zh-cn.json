@@ -35,7 +35,7 @@
   "Repository analysis is up to date.": "仓库分析已就绪。",
   "Initialize a Git repository to enable analysis.": "初始化 Git 仓库以启用分析。",
   "No staged changes found.": "未找到已暂存的更改。",
-  "AI generation cancelled.": "已取消 Genie 生成。",
+  "Genie generation cancelled.": "已取消 Genie 生成。",
   "Error generating commit message: {0}": "生成提交信息出错：{0}",
   "Failed to generate commit message: {0}": "生成提交信息失败：{0}",
   "Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.": "已触发 {0}（{1}）的速率限制。请考虑降低链式并发（{2}）或升级您的套餐。",
