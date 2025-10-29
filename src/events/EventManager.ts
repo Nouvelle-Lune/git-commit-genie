@@ -8,6 +8,7 @@ import { logger } from '../services/logger';
 
 export class EventManager {
     private lastHeadByRepo = new Map<string, string | undefined>();
+    private initializationAttempted = false;
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -143,7 +144,14 @@ export class EventManager {
             for (const r of api.repositories) {
                 attachRepoListeners(r);
             }
-            api.onDidOpenRepository((repo: Repository) => attachRepoListeners(repo));
+
+            // Listen for new repositories being opened/detected
+            const onDidOpenRepo = api.onDidOpenRepository((repo: Repository) => {
+                attachRepoListeners(repo);
+                // Try to initialize analysis when a new repository is detected
+                this.initializeRepositoryAnalysis();
+            });
+            this.context.subscriptions.push(onDidOpenRepo);
         } catch {
             // ignore errors
         }
@@ -214,13 +222,21 @@ export class EventManager {
 
             const api = gitExtension.getAPI(1);
             if (!api || api.repositories.length === 0) {
-                logger.info('[Genie][RepoAnalysis] No Git repository found. Skipping analysis init.');
+                // Retry
+                if (!this.initializationAttempted) {
+                    this.initializationAttempted = true;
+
+                    // Retry after a delay as a fallback
+                    setTimeout(() => {
+                        this.initializationAttempted = false;
+                        this.initializeRepositoryAnalysis();
+                    }, 2000);
+                }
                 return;
             }
 
             const repositoryPath = api.repositories[0].rootUri?.fsPath;
             if (!repositoryPath) {
-                logger.info('[Genie][RepoAnalysis] Could not get repository path. Skipping analysis init.');
                 return;
             }
 
@@ -228,7 +244,8 @@ export class EventManager {
             const analysisService = this.serviceRegistry.getAnalysisService();
             const existingAnalysis = await analysisService.getAnalysis(repositoryPath);
             if (!existingAnalysis) {
-                logger.info('Initializing repository analysis for new workspace...');
+                // Only notify when successfully starting initialization
+                logger.info('[Genie][RepoAnalysis] Repository detected, initializing analysis...');
                 // Initialize in the background
                 this.statusBarManager.setRepoAnalysisRunning(true, repositoryPath);
                 analysisService.initializeRepository(repositoryPath).catch(error => {
@@ -237,6 +254,9 @@ export class EventManager {
                     this.statusBarManager.setRepoAnalysisRunning(false);
                 });
             }
+
+            // Mark as successfully initialized
+            this.initializationAttempted = true;
         } catch (error) {
             logger.error('Error during repository analysis initialization:', error);
         }
