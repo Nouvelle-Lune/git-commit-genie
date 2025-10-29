@@ -5,7 +5,6 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
 import { ModelCommands } from './ModelCommands';
 import { GenerateCommands } from './GenerateCommands';
 import { RepoAnalysisCommands } from './RepoAnalysisCommands';
-import { AiRepoAnalysisCommands } from './AiRepoAnalysisCommands';
 import { MenuCommands } from './MenuCommands';
 import { CostCommands } from './CostCommands';
 
@@ -14,7 +13,6 @@ export class CommandManager {
     private generateCommands!: GenerateCommands;
     private repoAnalysisCommands!: RepoAnalysisCommands;
     private menuCommands!: MenuCommands;
-    private aiRepoAnalysisCommands!: AiRepoAnalysisCommands;
     private costCommands!: CostCommands;
 
     constructor(
@@ -28,7 +26,6 @@ export class CommandManager {
         this.modelCommands = new ModelCommands(this.context, this.serviceRegistry, this.statusBarManager);
         this.generateCommands = new GenerateCommands(this.context, this.serviceRegistry);
         this.repoAnalysisCommands = new RepoAnalysisCommands(this.context, this.serviceRegistry, this.statusBarManager);
-        this.aiRepoAnalysisCommands = new AiRepoAnalysisCommands(this.context, this.serviceRegistry, this.statusBarManager);
         this.menuCommands = new MenuCommands(this.context, this.serviceRegistry, this.statusBarManager);
         this.costCommands = new CostCommands(this.context, this.serviceRegistry);
 
@@ -44,7 +41,6 @@ export class CommandManager {
         await this.modelCommands.register();
         await this.generateCommands.register();
         await this.repoAnalysisCommands.register();
-        await this.aiRepoAnalysisCommands.register();
         await this.menuCommands.register();
         this.costCommands.registerCommands();
 

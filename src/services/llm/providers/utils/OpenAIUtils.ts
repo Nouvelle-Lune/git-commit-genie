@@ -45,11 +45,11 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
         }
     ): Promise<{ parsedResponse?: any; usage?: any; parsedAssistantResponse?: any }> {
         if (!client) {
-            throw new Error(`${options.provider} client is not initialized`);
+            throw ProviderError.clientNotInitialized(options.provider);
         }
 
         if (!options.model) {
-            throw new Error(`${options.provider} model is not selected`);
+            throw ProviderError.modelNotSelected(options.provider);
         }
 
         const controller = this.createAbortController(options.token);
@@ -58,11 +58,12 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
         let lastErr: any;
         const retries = this.getMaxRetries();
         const totalAttempts = Math.max(1, retries + 1);
+
         for (let attempt = 0; attempt < totalAttempts; attempt++) {
             try {
                 const requestOptions = this.buildRequestOptions(options, messages);
 
-                if (options.provider === 'OpenAI') {
+                if (options.provider.toLowerCase() === 'openai') {
                     const response = await client.responses.parse(
                         requestOptions,
                         {
@@ -75,7 +76,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                     return { parsedResponse, usage };
 
                 }
-                if (options.provider === 'DeepSeek' || options.provider === 'Qwen') {
+                if (options.provider.toLowerCase() === 'deepseek' || options.provider.toLowerCase() === 'qwen') {
                     const response = await client.chat.completions.create(
                         requestOptions,
                         {
@@ -98,7 +99,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 const code = e?.status || e?.code;
 
                 if (controller.signal.aborted) {
-                    throw new Error('Cancelled');
+                    throw ProviderError.cancelled();
                 }
 
                 if (code === 429) {
@@ -109,13 +110,12 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                     continue;
                 }
 
-                throw e;
+                throw ProviderError.wrap(e, options.provider);
             }
         }
 
-        throw lastErr || new Error(`${options.provider} chat failed after retries`);
+        throw ProviderError.chatFailed(options.provider, lastErr);
     }
-
 
     buildRequestOptions(
         options: {
@@ -127,7 +127,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
         },
         messages: ChatMessage[]
     ) {
-        if (options.provider === 'OpenAI') {
+        if (options.provider.toLowerCase() === 'openai') {
             const requestTypeSchemaMap = new Map<RequestType, { schema: any; name: string }>([
                 ['commitMessage', { schema: commitMessageSchema, name: 'commitMessage' }],
                 ['summary', { schema: fileSummarySchema, name: 'fileSummary' }],
@@ -161,7 +161,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             return baseOptions;
         }
 
-        if (options.provider === 'DeepSeek' || options.provider === 'Qwen') {
+        if (options.provider.toLowerCase() === 'deepseek' || options.provider.toLowerCase() === 'qwen') {
             const baseOptions: any = {
                 model: options.model,
                 messages: messages,
@@ -174,7 +174,10 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             return baseOptions;
         }
 
-        throw new Error(`Unsupported provider: ${options.provider}`);
+        throw ProviderError.wrap(
+            new Error(`Unsupported provider for OpenAI-compatible utils: ${options.provider}`),
+            options.provider
+        );
     }
 
     /**
@@ -215,120 +218,4 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             return preferredModels;
         }
     }
-
-    /**
-     * Raw JSON chat for tool-driven scenarios without business logic
-     */
-    async rawChatJson(
-        client: OpenAI,
-        messages: ChatMessage[],
-        options: {
-            model: string;
-            token?: vscode.CancellationToken;
-            temperature?: number;
-        }
-    ): Promise<any> {
-        this.validateClient(client, 'OpenAI');
-        this.validateModel(options.model, 'OpenAI');
-
-        const controller = this.createAbortController(options.token);
-        this.checkCancellation(options.token);
-
-        let lastErr: any;
-        const retries = this.getMaxRetries();
-        const totalAttempts = Math.max(1, retries + 1);
-
-        for (let attempt = 0; attempt < totalAttempts; attempt++) {
-            try {
-                const response = await client.chat.completions.create(
-                    {
-                        model: options.model,
-                        messages,
-                        temperature: options.temperature ?? this.getTemperature(),
-                        response_format: { type: 'json_object' }
-                    },
-                    { signal: controller.signal }
-                );
-
-                const content = response.choices[0]?.message?.content || '{}';
-                return JSON.parse(content);
-            } catch (e: any) {
-                lastErr = e;
-                const code = e?.status || e?.code;
-
-                if (controller.signal.aborted) {
-                    throw ProviderError.cancelled();
-                }
-
-                if (code === 429) {
-                    const wait = this.getRetryDelayMs(e);
-                    logger.warn(`[Genie][Raw Chat] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
-                    await this.sleep(wait);
-                    continue;
-                }
-
-                throw ProviderError.wrap(e, 'OpenAI');
-            }
-        }
-
-        throw ProviderError.chatJsonFailed('OpenAI', lastErr);
-    }
-
-    /**
-     * Raw text chat for tool-driven scenarios without business logic
-     */
-    async rawChatText(
-        client: OpenAI,
-        messages: ChatMessage[],
-        options: {
-            model: string;
-            token?: vscode.CancellationToken;
-            temperature?: number;
-        }
-    ): Promise<string> {
-        this.validateClient(client, 'OpenAI');
-        this.validateModel(options.model, 'OpenAI');
-
-        const controller = this.createAbortController(options.token);
-        this.checkCancellation(options.token);
-
-        let lastErr: any;
-        const retries = this.getMaxRetries();
-        const totalAttempts = Math.max(1, retries + 1);
-
-        for (let attempt = 0; attempt < totalAttempts; attempt++) {
-            try {
-                const response = await client.chat.completions.create(
-                    {
-                        model: options.model,
-                        messages,
-                        temperature: options.temperature ?? this.getTemperature()
-                    },
-                    { signal: controller.signal }
-                );
-
-                return response.choices[0]?.message?.content || '';
-            } catch (e: any) {
-                lastErr = e;
-                const code = e?.status || e?.code;
-
-                if (controller.signal.aborted) {
-                    throw ProviderError.cancelled();
-                }
-
-                if (code === 429) {
-                    const wait = this.getRetryDelayMs(e);
-                    logger.warn(`[Genie][Raw Chat] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
-                    await this.sleep(wait);
-                    continue;
-                }
-
-                throw ProviderError.wrap(e, 'OpenAI');
-            }
-        }
-
-        throw ProviderError.chatTextFailed('OpenAI', lastErr);
-    }
-
-
 }

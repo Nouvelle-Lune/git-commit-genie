@@ -6,14 +6,13 @@ import { TemplateService } from '../../../template/templateService';
 import { DiffData } from '../../git/gitTypes';
 import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { logger } from '../../logger';
-import { LLMAnalysisResponse, AnalysisPromptParts } from "../../analysis/analysisTypes";
+import { IRepositoryAnalysisService } from "../../analysis/analysisTypes";
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { OpenAICompatibleUtils } from './utils/openAIUtils';
 import {
     fileSummarySchema,
     classifyAndDraftResponseSchema,
     validateAndFixResponseSchema,
-    repoAnalysisResponseSchema,
     commitMessageSchema
 } from './schemas/common';
 
@@ -27,7 +26,7 @@ export class OpenAIService extends BaseLLMService {
     protected context: vscode.ExtensionContext;
     private utils: OpenAICompatibleUtils;
 
-    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: any) {
+    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: IRepositoryAnalysisService) {
         super(context, templateService, analysisService);
         this.context = context;
         this.utils = new OpenAICompatibleUtils(context);
@@ -110,67 +109,6 @@ export class OpenAIService extends BaseLLMService {
      */
     private getConfig() {
         return this.utils.getProviderConfig('gitCommitGenie', 'openaiModel');
-    }
-
-    private getRepoAnalysisOverrideModel(): string | null {
-        return this.utils.getRepoAnalysisOverrideModel(this.listSupportedModels());
-    }
-
-
-    /**
-     * This function requests a chat completion from OpenAI and expects a structured JSON response
-     * @param analysisPromptParts an ChatMessage[] containing keys system and user prompt parts
-     * @param options 
-     */
-    async generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options: { repositoryPath: string; token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError> {
-        const systemMessage = analysisPromptParts.system;
-        const userMessage = analysisPromptParts.user;
-
-        const modle = this.getRepoAnalysisOverrideModel() || this.getConfig().model;
-        const repoPath = options.repositoryPath;
-
-        if (!modle) {
-            return this.createModelNotSelectedError();
-        }
-        if (!this.openai) {
-            return this.createApiKeyNotSetError();
-        }
-        try {
-            const prased = await this.utils.callChatCompletion(
-                this.openai,
-                [systemMessage, userMessage],
-                {
-                    model: modle,
-                    provider: 'OpenAI',
-                    token: options?.token,
-                    trackUsage: true,
-                    requestType: 'repoAnalysis'
-                }
-            );
-
-            if (prased.usage) {
-                logger.usageSummary(repoPath, 'OpenAI', [prased.usage], modle, 'RepoAnalysis');
-            } else {
-                logger.usageSummary(repoPath, 'OpenAI', [], modle, 'RepoAnalysis');
-            }
-
-            const safe = repoAnalysisResponseSchema.safeParse(prased.parsedResponse);
-            if (!safe.success) {
-                return { message: 'Failed to validate structured response from OpenAI.', statusCode: 500 };
-            }
-
-            return {
-                summary: safe.data.summary,
-                projectType: safe.data.projectType,
-                technologies: safe.data.technologies,
-                insights: safe.data.insights,
-                usage: prased.usage
-            };
-        } catch (error: any) {
-            return this.convertToLLMError(error);
-        }
-
-
     }
 
     async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {

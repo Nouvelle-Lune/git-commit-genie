@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 
 import { z } from 'zod';
 import { TemplateService } from '../../../template/templateService';
-import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysisTypes';
+import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import { generateCommitMessageChain } from '../../chain/chainThinking';
 import { DiffData } from '../../git/gitTypes';
 import { logger } from '../../logger';
@@ -11,9 +11,9 @@ import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { AnthropicUtils } from './utils/anthropicUtils';
 import { ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from '../baseLLMService';
-import { AnthropicCommitMessageTool, AnthropicRepoAnalysisTool, AnthropicFileSummaryTool, AnthropicClassifyAndDraftTool, AnthropicValidateAndFixTool } from './schemas/anthropicSchemas';
+import { AnthropicCommitMessageTool, AnthropicFileSummaryTool, AnthropicClassifyAndDraftTool, AnthropicValidateAndFixTool } from './schemas/anthropicSchemas';
 import {
-    fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema, repoAnalysisResponseSchema,
+    fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
     commitMessageSchema
 } from './schemas/common';
 
@@ -27,7 +27,7 @@ export class AnthropicService extends BaseLLMService {
     protected context: vscode.ExtensionContext;
     private utils: AnthropicUtils;
 
-    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: any) {
+    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: IRepositoryAnalysisService) {
         super(context, templateService, analysisService);
         this.context = context;
         this.utils = new AnthropicUtils(context);
@@ -110,63 +110,6 @@ export class AnthropicService extends BaseLLMService {
      */
     private getConfig() {
         return this.utils.getProviderConfig('gitCommitGenie', 'anthropicModel');
-    }
-
-    private getRepoAnalysisOverrideModel(): string | null {
-        return this.utils.getRepoAnalysisOverrideModel(this.listSupportedModels());
-    }
-
-    /**
-     * This function requests a chat completion from Anthropic and expects a structured JSON response
-     */
-    async generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options: { repositoryPath: string; token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError> {
-        const config = { ...this.getConfig(), model: this.getRepoAnalysisOverrideModel() || this.getConfig().model };
-        const repoPath = options.repositoryPath;
-
-        if (!config.model) {
-            return this.createModelNotSelectedError();
-        }
-
-        if (!this.client) {
-            return this.createApiKeyNotSetError();
-        }
-
-        try {
-            const response = await this.utils.callChatCompletion(
-                this.client,
-                [analysisPromptParts.system, analysisPromptParts.user],
-                {
-                    model: config.model,
-                    provider: 'Anthropic',
-                    token: options?.token,
-                    maxTokens: 2048,
-                    trackUsage: true,
-                    tools: [AnthropicRepoAnalysisTool],
-                    toolChoice: { type: 'tool', name: AnthropicRepoAnalysisTool.name }
-                }
-            );
-
-            if (response.usage) {
-                logger.usageSummary(repoPath, 'Anthropic', [response.usage], config.model, 'RepoAnalysis');
-            } else {
-                logger.usageSummary(repoPath, 'Anthropic', [], config.model, 'RepoAnalysis');
-            }
-
-            const safe = repoAnalysisResponseSchema.safeParse(response.parsedResponse);
-            if (!safe.success) {
-                return { message: 'Failed to validate structured response from Anthropic.', statusCode: 500 };
-            }
-
-            return {
-                summary: safe.data.summary,
-                projectType: safe.data.projectType,
-                technologies: safe.data.technologies,
-                insights: safe.data.insights,
-                usage: response.usage
-            };
-        } catch (error: any) {
-            return this.convertToLLMError(error);
-        }
     }
 
     async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {

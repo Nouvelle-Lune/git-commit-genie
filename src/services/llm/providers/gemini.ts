@@ -9,10 +9,9 @@ import { generateCommitMessageChain } from '../../chain/chainThinking';
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { GeminiUtils } from './utils/geminiUtils';
-import { LLMAnalysisResponse, AnalysisPromptParts } from '../../analysis/analysisTypes';
+import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import {
     GeminiCommitMessageSchema,
-    GeminiRepoAnalysisSchema,
     GeminiFileSummarySchema,
     GeminiClassifyAndDraftSchema,
     GeminiValidateAndFixSchema,
@@ -21,7 +20,6 @@ import {
 import {
     // Shared Zod schemas used to check structured output
     commitMessageSchema,
-    repoAnalysisResponseSchema,
     fileSummarySchema,
     classifyAndDraftResponseSchema,
     validateAndFixResponseSchema
@@ -37,7 +35,7 @@ export class GeminiService extends BaseLLMService {
     protected context: vscode.ExtensionContext;
     private utils: GeminiUtils;
 
-    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: any) {
+    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: IRepositoryAnalysisService) {
         super(context, templateService, analysisService);
         this.context = context;
         this.utils = new GeminiUtils(context);
@@ -115,67 +113,6 @@ export class GeminiService extends BaseLLMService {
     private getConfig() {
         return this.utils.getProviderConfig('gitCommitGenie', 'geminiModel');
     }
-
-    private getRepoAnalysisOverrideModel(): string | null {
-        return this.utils.getRepoAnalysisOverrideModel(this.listSupportedModels());
-    }
-
-    /**
-     * Generate repository analysis using structured output
-     */
-    async generateRepoAnalysis(
-        analysisPromptParts: AnalysisPromptParts,
-        options: { repositoryPath: string; token?: vscode.CancellationToken }
-    ): Promise<LLMAnalysisResponse | LLMError> {
-        const config = { ...this.getConfig(), model: this.getRepoAnalysisOverrideModel() || this.getConfig().model };
-        const repoPath = options.repositoryPath;
-
-        if (!config.model) {
-            return this.createModelNotSelectedError();
-        }
-
-        if (!this.client) {
-            return this.createApiKeyNotSetError();
-        }
-
-        try {
-            const response = await this.utils.callChatCompletion(
-                this.client,
-                [analysisPromptParts.system, analysisPromptParts.user],
-                {
-                    model: config.model,
-                    provider: 'Gemini',
-                    responseSchema: GeminiRepoAnalysisSchema,
-                    token: options?.token,
-                    trackUsage: true,
-                    maxTokens: 2048
-                }
-            );
-
-            if (response.usage) {
-                logger.usageSummary(repoPath, 'Gemini', [response.usage], config.model, 'RepoAnalysis');
-            } else {
-                logger.usageSummary(repoPath, 'Gemini', [], config.model, 'RepoAnalysis');
-            }
-
-            const safe = repoAnalysisResponseSchema.safeParse(response.parsedResponse);
-            if (!safe.success) {
-                return { message: 'Failed to validate structured response from Gemini.', statusCode: 500 };
-            }
-
-            return {
-                summary: safe.data.summary,
-                projectType: safe.data.projectType,
-                technologies: safe.data.technologies,
-                insights: safe.data.insights,
-                usage: response.usage
-            };
-        } catch (error: any) {
-            return this.convertToLLMError(error);
-        }
-    }
-
-
 
     async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {
         if (!this.client) {

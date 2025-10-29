@@ -18,45 +18,6 @@ export abstract class BaseProviderUtils {
     }
 
     /**
-     * Raw JSON chat without business logic or schema validation.
-     * For tool-driven analysis and generic use cases.
-     * 
-     * @param client LLM client instance (type depends on provider)
-     * @param messages Chat messages with roles 'system' | 'user' | 'assistant'
-     * @param options Configuration including model, token, temperature, and optional region for Qwen
-     * @returns Parsed JSON object from the assistant response
-     */
-    abstract rawChatJson(
-        client: any,
-        messages: ChatMessage[],
-        options: {
-            model: string;
-            token?: vscode.CancellationToken;
-            temperature?: number;
-            region?: 'china' | 'intl';
-        }
-    ): Promise<any>;
-
-    /**
-     * Raw text chat without business logic or schema validation.
-     * 
-     * @param client LLM client instance (type depends on provider)
-     * @param messages Chat messages with roles 'system' | 'user' | 'assistant'
-     * @param options Configuration including model, token, temperature, and optional region for Qwen
-     * @returns Assistant message content as plain text
-     */
-    abstract rawChatText(
-        client: any,
-        messages: ChatMessage[],
-        options: {
-            model: string;
-            token?: vscode.CancellationToken;
-            temperature?: number;
-            region?: 'china' | 'intl';
-        }
-    ): Promise<string>;
-
-    /**
      * Validate that a client is initialized
      * @throws ProviderError if client is null/undefined
      */

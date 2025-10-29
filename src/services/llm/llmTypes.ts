@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
 import { DiffData } from '../git/gitTypes';
-import { LLMAnalysisResponse, AnalysisPromptParts } from '../analysis/analysisTypes';
 import { Repository } from '../git/git';
 
 export type ChatRole = 'system' | 'user' | 'assistant' | 'developer';
@@ -66,6 +65,4 @@ export interface LLMService {
     clearApiKey(): Promise<void>;
 
     generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError>;
-
-    generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options: { repositoryPath: string; token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError>;
 }

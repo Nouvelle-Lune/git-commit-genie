@@ -4,7 +4,6 @@ import { z } from 'zod';
 import { DiffData } from '../git/gitTypes';
 import { TemplateService } from '../../template/templateService';
 import { IRepositoryAnalysisService } from '../analysis/analysisTypes';
-import { LLMAnalysisResponse, AnalysisPromptParts } from '../analysis/analysisTypes';
 import { Repository } from '../git/git';
 import { RepoService } from '../repo/repo';
 import { ProviderError } from './providers/errors/providerError';
@@ -40,7 +39,6 @@ export abstract class BaseLLMService implements LLMService {
     abstract setApiKey(apiKey: string): Promise<void>;
     abstract clearApiKey(): Promise<void>;
     abstract generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError>;
-    abstract generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options: { repositoryPath: string; token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError>;
 
     /**
      * Get the LLM client instance for raw chat operations
@@ -49,8 +47,8 @@ export abstract class BaseLLMService implements LLMService {
     protected abstract getClient(): any | null;
 
     /**
-     * Get the provider utils instance for raw chat operations
-     * @returns Utils instance with rawChatJson and rawChatText methods
+     * Get the provider utils instance for chat operations
+     * @returns Utils instance with callChatCompletion method
      */
     protected abstract getUtils(): any;
 
@@ -102,58 +100,6 @@ export abstract class BaseLLMService implements LLMService {
             message: error?.message || `An unknown error occurred with the ${this.getProviderName()} API.`,
             statusCode: error?.status || error?.statusCode || 500
         };
-    }
-
-    /**
-     * Raw JSON chat for tool-driven scenarios (e.g., AI Repository Analysis)
-     * Implemented in base class using provider-specific client and utils
-     * 
-     * @param messages Chat messages with roles 'system' | 'user' | 'assistant'
-     * @param options Configuration including optional model override and cancellation token
-     * @returns Parsed JSON object from the assistant response
-     */
-    public async chatJson(messages: ChatMessage[], options?: { model?: string; token?: vscode.CancellationToken }): Promise<any> {
-        const client = this.getClient();
-        if (!client) {
-            throw ProviderError.apiKeyNotSet(this.getProviderName());
-        }
-
-        const model = options?.model || this.getCurrentModel();
-        if (!model) {
-            throw ProviderError.modelNotSelected(this.getProviderName());
-        }
-
-        const utils = this.getUtils();
-        return await utils.rawChatJson(client, messages, {
-            model,
-            token: options?.token
-        });
-    }
-
-    /**
-     * Raw text chat for tool-driven scenarios (e.g., AI Repository Analysis)
-     * Implemented in base class using provider-specific client and utils
-     * 
-     * @param messages Chat messages with roles 'system' | 'user' | 'assistant'
-     * @param options Configuration including optional model override and cancellation token
-     * @returns Assistant message content as plain text
-     */
-    public async chatText(messages: ChatMessage[], options?: { model?: string; token?: vscode.CancellationToken }): Promise<string> {
-        const client = this.getClient();
-        if (!client) {
-            throw ProviderError.apiKeyNotSet(this.getProviderName());
-        }
-
-        const model = options?.model || this.getCurrentModel();
-        if (!model) {
-            throw ProviderError.modelNotSelected(this.getProviderName());
-        }
-
-        const utils = this.getUtils();
-        return await utils.rawChatText(client, messages, {
-            model,
-            token: options?.token
-        });
     }
 
     /**

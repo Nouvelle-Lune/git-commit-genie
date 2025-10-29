@@ -82,8 +82,6 @@ export const L10N_KEYS = {
     serviceNotAvailable: '{0} service is not available',
     methodNotSupported: 'Provider does not support {0} method',
     // Chat errors
-    chatJsonFailed: 'Raw chat JSON failed after retries',
-    chatTextFailed: 'Raw chat text failed after retries',
     chatFailed: '{0} chat failed after retries',
     // Validation errors
     validationFailed: 'Failed to validate structured response from {0}.',

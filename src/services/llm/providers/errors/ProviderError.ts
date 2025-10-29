@@ -84,22 +84,6 @@ export class ProviderError extends Error {
     }
 
     /**
-     * Create error for failed chat JSON
-     */
-    static chatJsonFailed(provider: string, originalError?: Error): ProviderError {
-        const message = vscode.l10n.t(I18N.provider.chatJsonFailed);
-        return new ProviderError(message, 500, provider, originalError);
-    }
-
-    /**
-     * Create error for failed chat text
-     */
-    static chatTextFailed(provider: string, originalError?: Error): ProviderError {
-        const message = vscode.l10n.t(I18N.provider.chatTextFailed);
-        return new ProviderError(message, 500, provider, originalError);
-    }
-
-    /**
      * Create error for generic chat failure
      */
     static chatFailed(provider: string, originalError?: Error): ProviderError {

@@ -7,14 +7,13 @@ import OpenAI from 'openai';
 import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { logger } from '../../logger';
 import { OpenAICompatibleUtils } from './utils/index';
-import { AnalysisPromptParts, LLMAnalysisResponse } from '../../analysis/analysisTypes';
+import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { z } from "zod";
 import {
     fileSummarySchema,
     classifyAndDraftResponseSchema,
     validateAndFixResponseSchema,
-    repoAnalysisResponseSchema,
     commitMessageSchema
 } from './schemas/common';
 
@@ -38,7 +37,7 @@ export class QwenService extends BaseLLMService {
     private openai: OpenAI | null = null;
     private utils: OpenAICompatibleUtils;
 
-    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: any) {
+    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: IRepositoryAnalysisService) {
         super(context, templateService, analysisService);
         this.context = context;
         this.utils = new OpenAICompatibleUtils(context);
@@ -161,64 +160,6 @@ export class QwenService extends BaseLLMService {
      */
     private getConfig() {
         return this.utils.getProviderConfig('gitCommitGenie', 'qwenModel');
-    }
-
-    private getRepoAnalysisOverrideModel(): string | null {
-        return this.utils.getRepoAnalysisOverrideModel(this.listSupportedModels());
-    }
-
-    /**
-     * This function requests a chat completion from Qwen and expects a structured JSON response
-     * @param analysisPromptParts an ChatMessage[] containing keys system and user prompt parts
-     * @param options 
-     */
-    async generateRepoAnalysis(analysisPromptParts: AnalysisPromptParts, options: { repositoryPath: string; token?: vscode.CancellationToken }): Promise<LLMAnalysisResponse | LLMError> {
-        const systemMessage = analysisPromptParts.system;
-        const userMessage = analysisPromptParts.user;
-
-        const model = this.getRepoAnalysisOverrideModel() || this.getConfig().model;
-        const repoPath = options.repositoryPath;
-
-        if (!model) {
-            return this.createModelNotSelectedError();
-        }
-        if (!this.openai) {
-            return this.createApiKeyNotSetError();
-        }
-        try {
-            const parsed = await this.utils.callChatCompletion(
-                this.openai,
-                [systemMessage, userMessage],
-                {
-                    model: model,
-                    provider: 'Qwen',
-                    token: options?.token,
-                    trackUsage: true,
-                    requestType: 'repoAnalysis'
-                }
-            );
-
-            if (parsed.usage) {
-                logger.usageSummary(repoPath, 'Qwen', [parsed.usage], model, 'RepoAnalysis', undefined, true, this.getRegion());
-            } else {
-                logger.usageSummary(repoPath, 'Qwen', [], model, 'RepoAnalysis', undefined, true, this.getRegion());
-            }
-
-            const safe = repoAnalysisResponseSchema.safeParse(parsed.parsedResponse);
-            if (!safe.success) {
-                return { message: 'Failed to validate structured response from Qwen.', statusCode: 500 };
-            }
-
-            return {
-                summary: safe.data.summary,
-                projectType: safe.data.projectType,
-                technologies: safe.data.technologies,
-                insights: safe.data.insights,
-                usage: parsed.usage
-            };
-        } catch (error: any) {
-            return this.convertToLLMError(error);
-        }
     }
 
     async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {
