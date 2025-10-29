@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-
+import { logger } from "../logger";
 /**
  * Cost tracking service for AI API usage
  * Handles repository-based cost accumulation and storage
@@ -22,7 +22,7 @@ export class CostTrackingService {
      */
     public async addToRepositoryCost(cost: number, repoPath: string): Promise<void> {
         if (!this.context) {
-            console.warn('[CostTrackingService] Context not available for cost tracking');
+            logger.warn('[CostTrackingService] Context not available for cost tracking');
             return;
         }
 
@@ -37,11 +37,11 @@ export class CostTrackingService {
             // Save updated cost
             await this.context.globalState.update(costKey, newTotalCost);
 
-            console.debug(`[CostTrackingService] Repository cost updated: +$${cost.toFixed(6)} | Total: $${newTotalCost.toFixed(6)}`);
+            logger.debug(`[CostTrackingService] Repository cost updated: +$${cost.toFixed(6)} | Total: $${newTotalCost.toFixed(6)}`);
             // Notify listeners so UI can refresh immediately
             this._onCostChanged.fire();
         } catch (error) {
-            console.warn(`[CostTrackingService] Failed to update repository cost: ${error}`);
+            logger.warn(`[CostTrackingService] Failed to update repository cost: ${error}`);
         }
     }
 
@@ -58,7 +58,7 @@ export class CostTrackingService {
 
             return this.context.globalState.get<number>(costKey, 0);
         } catch (error) {
-            console.warn(`[CostTrackingService] Failed to get repository cost: ${error}`);
+            logger.warn(`[CostTrackingService] Failed to get repository cost: ${error}`);
             return 0;
         }
     }
@@ -79,7 +79,7 @@ export class CostTrackingService {
             // Notify listeners so UI can refresh immediately
             this._onCostChanged.fire();
         } catch (error) {
-            console.warn(`[CostTrackingService] Failed to reset repository cost: ${error}`);
+            logger.warn(`[CostTrackingService] Failed to reset repository cost: ${error}`);
         }
     }
 
@@ -105,7 +105,7 @@ export class CostTrackingService {
                 costs.set(repositoryPath, cost);
             }
         } catch (error) {
-            console.warn(`[CostTrackingService] Failed to get all repository costs: ${error}`);
+            logger.warn(`[CostTrackingService] Failed to get all repository costs: ${error}`);
         }
 
         return costs;
