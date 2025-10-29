@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
-import { BaseProviderUtils } from './BaseProviderUtils';
+import { BaseProviderUtils } from './baseProviderUtils';
 import { logger } from '../../../logger/index';
+import { ProviderError } from '../errors/providerError';
 
 import { Content, GoogleGenAI, GenerateContentConfig } from '@google/genai';
 import { ChatMessage } from '../../llmTypes';
@@ -201,4 +202,142 @@ export class GeminiUtils extends BaseProviderUtils {
             throw new Error(err?.message || `Failed to validate ${provider} API key.`);
         }
     }
+
+    /**
+     * Raw JSON chat for tool-driven scenarios without business logic
+     */
+    async rawChatJson(
+        client: GoogleGenAI,
+        messages: any[],
+        options: {
+            model: string;
+            token?: vscode.CancellationToken;
+            temperature?: number;
+        }
+    ): Promise<any> {
+        this.validateClient(client, 'Gemini');
+        this.validateModel(options.model, 'Gemini');
+
+        this.checkCancellation(options.token);
+
+        let lastErr: any;
+        const retries = this.getMaxRetries();
+        const totalAttempts = Math.max(1, retries + 1);
+
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            try {
+                const chatContents: GeminiChatContents = this.convertMessagesToGeminiFormat(messages, undefined);
+
+                const config: GenerateContentConfig = {
+                    temperature: options.temperature ?? this.getTemperature(),
+                    responseMimeType: 'application/json'
+                };
+
+                config.systemInstruction = chatContents.systemInstruction;
+
+                const controller = this.createAbortController(options.token);
+                config.abortSignal = controller.signal;
+
+                const response = await client.models.generateContent({
+                    model: options.model,
+                    contents: chatContents.content,
+                    config: config,
+                });
+
+                const content = response.text ?? '';
+
+                // Extract JSON from response
+                const start = content.indexOf('{');
+                const end = content.lastIndexOf('}');
+                if (start >= 0 && end > start) {
+                    return JSON.parse(content.slice(start, end + 1));
+                }
+                return JSON.parse(content || '{}');
+            } catch (e: any) {
+                lastErr = e;
+                const code = e?.status || e?.statusCode || e?.code;
+
+                if (e.name === 'AbortError' || e.message?.includes('aborted')) {
+                    throw ProviderError.cancelled();
+                }
+
+                if (code === 429) {
+                    await this.maybeWarnRateLimit('Gemini', options.model);
+                    const wait = this.getRetryDelayMs(e);
+                    logger.warn(`[Genie][Raw Chat] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
+                    await this.sleep(wait);
+                    continue;
+                }
+
+                throw ProviderError.wrap(e, 'Gemini');
+            }
+        }
+
+        throw ProviderError.chatJsonFailed('Gemini', lastErr);
+    }
+
+    /**
+     * Raw text chat for tool-driven scenarios without business logic
+     */
+    async rawChatText(
+        client: GoogleGenAI,
+        messages: any[],
+        options: {
+            model: string;
+            token?: vscode.CancellationToken;
+            temperature?: number;
+        }
+    ): Promise<string> {
+        this.validateClient(client, 'Gemini');
+        this.validateModel(options.model, 'Gemini');
+
+        this.checkCancellation(options.token);
+
+        let lastErr: any;
+        const retries = this.getMaxRetries();
+        const totalAttempts = Math.max(1, retries + 1);
+
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            try {
+                const chatContents: GeminiChatContents = this.convertMessagesToGeminiFormat(messages, undefined);
+
+                const config: GenerateContentConfig = {
+                    temperature: options.temperature ?? this.getTemperature()
+                };
+
+                config.systemInstruction = chatContents.systemInstruction;
+
+                const controller = this.createAbortController(options.token);
+                config.abortSignal = controller.signal;
+
+                const response = await client.models.generateContent({
+                    model: options.model,
+                    contents: chatContents.content,
+                    config: config,
+                });
+
+                return response.text ?? '';
+            } catch (e: any) {
+                lastErr = e;
+                const code = e?.status || e?.statusCode || e?.code;
+
+                if (e.name === 'AbortError' || e.message?.includes('aborted')) {
+                    throw ProviderError.cancelled();
+                }
+
+                if (code === 429) {
+                    await this.maybeWarnRateLimit('Gemini', options.model);
+                    const wait = this.getRetryDelayMs(e);
+                    logger.warn(`[Genie][Raw Chat] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
+                    await this.sleep(wait);
+                    continue;
+                }
+
+                throw ProviderError.wrap(e, 'Gemini');
+            }
+        }
+
+        throw ProviderError.chatTextFailed('Gemini', lastErr);
+    }
 }
+

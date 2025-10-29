@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import OpenAI from 'openai';
 import { zodTextFormat } from './openAiZodPatch';
-import { BaseProviderUtils } from './BaseProviderUtils';
+import { BaseProviderUtils } from './baseProviderUtils';
 import { logger } from '../../../logger';
+import { ProviderError } from '../errors/providerError';
 
 import { ChatMessage, RequestType } from "../../llmTypes";
 
@@ -213,6 +214,120 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             await this.validateApiKey(client, preferredModels[0], provider);
             return preferredModels;
         }
+    }
+
+    /**
+     * Raw JSON chat for tool-driven scenarios without business logic
+     */
+    async rawChatJson(
+        client: OpenAI,
+        messages: ChatMessage[],
+        options: {
+            model: string;
+            token?: vscode.CancellationToken;
+            temperature?: number;
+        }
+    ): Promise<any> {
+        this.validateClient(client, 'OpenAI');
+        this.validateModel(options.model, 'OpenAI');
+
+        const controller = this.createAbortController(options.token);
+        this.checkCancellation(options.token);
+
+        let lastErr: any;
+        const retries = this.getMaxRetries();
+        const totalAttempts = Math.max(1, retries + 1);
+
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            try {
+                const response = await client.chat.completions.create(
+                    {
+                        model: options.model,
+                        messages,
+                        temperature: options.temperature ?? this.getTemperature(),
+                        response_format: { type: 'json_object' }
+                    },
+                    { signal: controller.signal }
+                );
+
+                const content = response.choices[0]?.message?.content || '{}';
+                return JSON.parse(content);
+            } catch (e: any) {
+                lastErr = e;
+                const code = e?.status || e?.code;
+
+                if (controller.signal.aborted) {
+                    throw ProviderError.cancelled();
+                }
+
+                if (code === 429) {
+                    const wait = this.getRetryDelayMs(e);
+                    logger.warn(`[Genie][Raw Chat] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
+                    await this.sleep(wait);
+                    continue;
+                }
+
+                throw ProviderError.wrap(e, 'OpenAI');
+            }
+        }
+
+        throw ProviderError.chatJsonFailed('OpenAI', lastErr);
+    }
+
+    /**
+     * Raw text chat for tool-driven scenarios without business logic
+     */
+    async rawChatText(
+        client: OpenAI,
+        messages: ChatMessage[],
+        options: {
+            model: string;
+            token?: vscode.CancellationToken;
+            temperature?: number;
+        }
+    ): Promise<string> {
+        this.validateClient(client, 'OpenAI');
+        this.validateModel(options.model, 'OpenAI');
+
+        const controller = this.createAbortController(options.token);
+        this.checkCancellation(options.token);
+
+        let lastErr: any;
+        const retries = this.getMaxRetries();
+        const totalAttempts = Math.max(1, retries + 1);
+
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            try {
+                const response = await client.chat.completions.create(
+                    {
+                        model: options.model,
+                        messages,
+                        temperature: options.temperature ?? this.getTemperature()
+                    },
+                    { signal: controller.signal }
+                );
+
+                return response.choices[0]?.message?.content || '';
+            } catch (e: any) {
+                lastErr = e;
+                const code = e?.status || e?.code;
+
+                if (controller.signal.aborted) {
+                    throw ProviderError.cancelled();
+                }
+
+                if (code === 429) {
+                    const wait = this.getRetryDelayMs(e);
+                    logger.warn(`[Genie][Raw Chat] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
+                    await this.sleep(wait);
+                    continue;
+                }
+
+                throw ProviderError.wrap(e, 'OpenAI');
+            }
+        }
+
+        throw ProviderError.chatTextFailed('OpenAI', lastErr);
     }
 
 

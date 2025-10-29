@@ -3,16 +3,121 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { logger } from '../../../logger';
 import { L10N_KEYS as I18N } from '../../../../i18n/keys';
+import { ChatMessage } from '../../llmTypes';
+import { ProviderError } from '../errors/providerError';
 
 /**
  * Common utility functions for LLM providers
  */
-export class BaseProviderUtils {
+export abstract class BaseProviderUtils {
     protected context: vscode.ExtensionContext;
 
     constructor(context: vscode.ExtensionContext) {
         this.context = context;
 
+    }
+
+    /**
+     * Raw JSON chat without business logic or schema validation.
+     * For tool-driven analysis and generic use cases.
+     * 
+     * @param client LLM client instance (type depends on provider)
+     * @param messages Chat messages with roles 'system' | 'user' | 'assistant'
+     * @param options Configuration including model, token, temperature, and optional region for Qwen
+     * @returns Parsed JSON object from the assistant response
+     */
+    abstract rawChatJson(
+        client: any,
+        messages: ChatMessage[],
+        options: {
+            model: string;
+            token?: vscode.CancellationToken;
+            temperature?: number;
+            region?: 'china' | 'intl';
+        }
+    ): Promise<any>;
+
+    /**
+     * Raw text chat without business logic or schema validation.
+     * 
+     * @param client LLM client instance (type depends on provider)
+     * @param messages Chat messages with roles 'system' | 'user' | 'assistant'
+     * @param options Configuration including model, token, temperature, and optional region for Qwen
+     * @returns Assistant message content as plain text
+     */
+    abstract rawChatText(
+        client: any,
+        messages: ChatMessage[],
+        options: {
+            model: string;
+            token?: vscode.CancellationToken;
+            temperature?: number;
+            region?: 'china' | 'intl';
+        }
+    ): Promise<string>;
+
+    /**
+     * Validate that a client is initialized
+     * @throws ProviderError if client is null/undefined
+     */
+    protected validateClient(client: any, providerName: string): void {
+        if (!client) {
+            throw ProviderError.clientNotInitialized(providerName);
+        }
+    }
+
+    /**
+     * Validate that a model is selected
+     * @throws ProviderError if model is empty
+     */
+    protected validateModel(model: string | undefined, providerName: string): void {
+        if (!model || model.trim().length === 0) {
+            throw ProviderError.modelNotSelected(providerName);
+        }
+    }
+
+    /**
+ * Get unified provider configuration combining common settings with provider-specific model
+ * @param providerKey The provider's configuration key prefix (e.g., 'gitCommitGenie')
+ * @param modelStateKey The global state key for the model (e.g., 'openaiModel')
+ * @returns Configuration object with model, useChain, chainMaxParallel, maxRetries
+ */
+    /**
+     * Get unified provider configuration combining common settings with provider-specific model
+     * @param providerKey The provider's configuration key prefix (e.g., 'gitCommitGenie')
+     * @param modelStateKey The global state key for the model (e.g., 'openaiModel')
+     * @returns Configuration object with model, useChain, chainMaxParallel, maxRetries
+     */
+    public getProviderConfig(providerKey: string, modelStateKey: string): {
+        model: string;
+        useChain: boolean;
+        chainMaxParallel: number;
+        maxRetries: number;
+    } {
+        const commonConfig = this.getCommonConfig();
+        return {
+            ...commonConfig,
+            model: this.context.globalState.get<string>(`${providerKey}.${modelStateKey}`, '')
+        };
+    }
+
+    /**
+     * Get repository analysis model override if configured for this provider
+     * @param supportedModels List of models supported by this provider
+     * @returns Override model string or null if using general setting
+     */
+    public getRepoAnalysisOverrideModel(supportedModels: string[]): string | null {
+        try {
+            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+            const value = (cfg.get<string>('model', 'general') || 'general').trim();
+            if (!value || value === 'general') {
+                return null;
+            }
+            // Only apply override if the selected model belongs to this provider
+            return supportedModels.includes(value) ? value : null;
+        } catch {
+            return null;
+        }
     }
 
     /**

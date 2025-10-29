@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { BaseLLMService, ChatMessage, ChatFn, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
+import { ChatMessage, ChatFn, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
+import { BaseLLMService } from '../baseLLMService';
 import { TemplateService } from '../../../template/templateService';
 import { DiffData } from '../../git/gitTypes';
 import OpenAI from 'openai';
@@ -128,25 +129,42 @@ export class QwenService extends BaseLLMService {
     }
 
     /**
+     * Get the Qwen client instance
+     */
+    protected getClient(): OpenAI | null {
+        return this.openai;
+    }
+
+    /**
+     * Get the Qwen utils instance
+     */
+    protected getUtils(): OpenAICompatibleUtils {
+        return this.utils;
+    }
+
+    /**
+     * Get the provider name for error messages
+     */
+    protected getProviderName(): string {
+        return 'Qwen';
+    }
+
+    /**
+     * Get the current model configuration
+     */
+    protected getCurrentModel(): string {
+        return this.context.globalState.get<string>('gitCommitGenie.qwenModel', '');
+    }
+
+    /**
      * Get Qwen-specific configuration
      */
     private getConfig() {
-        const commonConfig = this.utils.getCommonConfig();
-        return {
-            ...commonConfig,
-            model: this.context.globalState.get<string>('gitCommitGenie.qwenModel', '')
-        };
+        return this.utils.getProviderConfig('gitCommitGenie', 'qwenModel');
     }
 
     private getRepoAnalysisOverrideModel(): string | null {
-        try {
-            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-            const value = (cfg.get<string>('model', 'general') || 'general').trim();
-            if (!value || value === 'general') { return null; }
-            return this.listSupportedModels().includes(value) ? value : null;
-        } catch {
-            return null;
-        }
+        return this.utils.getRepoAnalysisOverrideModel(this.listSupportedModels());
     }
 
     /**
@@ -162,10 +180,10 @@ export class QwenService extends BaseLLMService {
         const repoPath = options.repositoryPath;
 
         if (!model) {
-            return { message: 'Qwen model is not selected. Please configure it via Manage Models.', statusCode: 400 };
+            return this.createModelNotSelectedError();
         }
         if (!this.openai) {
-            return { message: 'Qwen API key is not set. Please set it in the settings.', statusCode: 401 };
+            return this.createApiKeyNotSetError();
         }
         try {
             const parsed = await this.utils.callChatCompletion(
@@ -199,19 +217,13 @@ export class QwenService extends BaseLLMService {
                 usage: parsed.usage
             };
         } catch (error: any) {
-            return {
-                message: error.message || 'An unknown error occurred with the Qwen API.',
-                statusCode: error.status,
-            };
+            return this.convertToLLMError(error);
         }
     }
 
     async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {
         if (!this.openai) {
-            return {
-                message: 'Qwen API key is not set. Please set it in the settings.',
-                statusCode: 401,
-            };
+            return this.createApiKeyNotSetError();
         }
 
         try {
@@ -220,7 +232,7 @@ export class QwenService extends BaseLLMService {
             const repoPath = this.getRepoPathForLogging(options?.targetRepo);
 
             if (!config.model) {
-                return { message: 'Qwen model is not selected. Please configure it via Manage Models.', statusCode: 400 };
+                return this.createModelNotSelectedError();
             }
 
             const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
@@ -231,10 +243,7 @@ export class QwenService extends BaseLLMService {
                 return await this.generateDefault(jsonMessage, config, rules, repoPath, options);
             }
         } catch (error: any) {
-            return {
-                message: error.message || 'An unknown error occurred with the Qwen API.',
-                statusCode: error.status,
-            };
+            return this.convertToLLMError(error);
         }
     }
 
@@ -303,18 +312,14 @@ export class QwenService extends BaseLLMService {
                         return safe.data;
                     }
                     if (attempt < totalAttempts - 1) {
-                        logger.warn(`[Genie][Qwen] Schema validation failed for ${reqType} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
-
-                        const jsonSchemaString = JSON.stringify(z.toJSONSchema(validationSchema), null, 2);
-
-                        messages = [
-                            ...messages,
-                            result.parsedAssistantResponse || { role: 'assistant', content: result.parsedResponse ? JSON.stringify(result.parsedResponse) : '' },
-                            {
-                                role: 'user',
-                                content: `The previous response did not conform to the required format, the zod error is ${safe.error}. Please try again and ensure the response matches the specified JSON format: ${jsonSchemaString}.`
-                            }
-                        ];
+                        this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
+                        messages = this.buildSchemaValidationRetryMessages(
+                            messages,
+                            result,
+                            safe.error,
+                            validationSchema,
+                            reqType
+                        );
                         continue;
                     }
                     throw new Error(`Qwen structured result failed local validation for ${reqType} after ${totalAttempts} attempts`);
@@ -403,21 +408,20 @@ export class QwenService extends BaseLLMService {
 
             lastError = safe.error;
             if (attempt < totalAttempts - 1) {
-                logger.warn(`[Genie][Qwen] Schema validation failed (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
-
-                const jsonSchemaString = JSON.stringify(z.toJSONSchema(commitMessageSchema), null, 2);
-
-                messages = [
-                    ...messages,
-                    result.parsedAssistantResponse || { role: 'assistant', content: result.parsedResponse ? JSON.stringify(result.parsedResponse) : '' },
-                    {
-                        role: 'user',
-                        content: `The previous response did not conform to the required format, the zod error is ${lastError}. Please try again and ensure the response matches the specified JSON format: ${jsonSchemaString} exactly.`
-                    }
-                ];
+                this.logSchemaValidationRetry('commitMessage', attempt, totalAttempts);
+                messages = this.buildSchemaValidationRetryMessages(
+                    messages,
+                    result,
+                    safe.error,
+                    commitMessageSchema,
+                    'commitMessage'
+                );
+                continue;
             }
         }
 
         return { message: 'Failed to validate structured commit message from Qwen.', statusCode: 500 };
     }
+
 }
+

@@ -1,13 +1,14 @@
 import * as vscode from 'vscode';
 import { GoogleGenAI, Type } from '@google/genai';
-import { BaseLLMService, LLMError, LLMResponse, ChatFn, GenerateCommitMessageOptions } from '../llmTypes';
+import { LLMError, LLMResponse, ChatFn, ChatMessage, GenerateCommitMessageOptions } from '../llmTypes';
+import { BaseLLMService } from '../baseLLMService';
 import { TemplateService } from '../../../template/templateService';
 import { DiffData } from '../../git/gitTypes';
 import { generateCommitMessageChain } from '../../chain/chainThinking';
 
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
-import { GeminiUtils } from './utils/GeminiUtils';
+import { GeminiUtils } from './utils/geminiUtils';
 import { LLMAnalysisResponse, AnalysisPromptParts } from '../../analysis/analysisTypes';
 import {
     GeminiCommitMessageSchema,
@@ -81,25 +82,42 @@ export class GeminiService extends BaseLLMService {
     }
 
     /**
+     * Get the Gemini client instance
+     */
+    protected getClient(): GoogleGenAI | null {
+        return this.client;
+    }
+
+    /**
+     * Get the Gemini utils instance
+     */
+    protected getUtils(): GeminiUtils {
+        return this.utils;
+    }
+
+    /**
+     * Get the provider name for error messages
+     */
+    protected getProviderName(): string {
+        return 'Gemini';
+    }
+
+    /**
+     * Get the current model configuration
+     */
+    protected getCurrentModel(): string {
+        return this.context.globalState.get<string>('gitCommitGenie.geminiModel', '');
+    }
+
+    /**
      * Get Gemini-specific configuration
      */
     private getConfig() {
-        const commonConfig = this.utils.getCommonConfig();
-        return {
-            ...commonConfig,
-            model: this.context.globalState.get<string>('gitCommitGenie.geminiModel', '')
-        };
+        return this.utils.getProviderConfig('gitCommitGenie', 'geminiModel');
     }
 
     private getRepoAnalysisOverrideModel(): string | null {
-        try {
-            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-            const value = (cfg.get<string>('model', 'general') || 'general').trim();
-            if (!value || value === 'general') { return null; }
-            return this.listSupportedModels().includes(value) ? value : null;
-        } catch {
-            return null;
-        }
+        return this.utils.getRepoAnalysisOverrideModel(this.listSupportedModels());
     }
 
     /**
@@ -113,11 +131,11 @@ export class GeminiService extends BaseLLMService {
         const repoPath = options.repositoryPath;
 
         if (!config.model) {
-            return { message: 'Gemini model is not selected. Please configure it via Manage Models.', statusCode: 400 };
+            return this.createModelNotSelectedError();
         }
 
         if (!this.client) {
-            return { message: 'Gemini API key is not set or SDK unavailable.', statusCode: 401 };
+            return this.createApiKeyNotSetError();
         }
 
         try {
@@ -153,10 +171,7 @@ export class GeminiService extends BaseLLMService {
                 usage: response.usage
             };
         } catch (error: any) {
-            return {
-                message: error?.message || 'An unknown error occurred with the Gemini API.',
-                statusCode: error?.status,
-            };
+            return this.convertToLLMError(error);
         }
     }
 
@@ -164,7 +179,7 @@ export class GeminiService extends BaseLLMService {
 
     async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {
         if (!this.client) {
-            return { message: 'Gemini API key is not set or SDK unavailable.', statusCode: 401 };
+            return this.createApiKeyNotSetError();
         }
 
         try {
@@ -173,7 +188,7 @@ export class GeminiService extends BaseLLMService {
             const repoPath = this.getRepoPathForLogging(options?.targetRepo);
 
             if (!config.model) {
-                return { message: 'Gemini model is not selected. Please configure it via Manage Models.', statusCode: 400 };
+                return this.createModelNotSelectedError();
             }
 
             const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
@@ -184,10 +199,7 @@ export class GeminiService extends BaseLLMService {
 
             return await this.generateDefault(jsonMessage, config, rules, repoPath, options);
         } catch (error: any) {
-            return {
-                message: error?.message || 'An unknown error occurred with the Gemini API.',
-                statusCode: error?.status,
-            };
+            return this.convertToLLMError(error);
         }
     }
 
@@ -269,7 +281,14 @@ export class GeminiService extends BaseLLMService {
                     }
 
                     if (attempt < totalAttempts - 1) {
-                        logger.warn(`[Genie][Gemini] Schema validation failed for ${reqType} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
+                        this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
+                        messages = this.buildSchemaValidationRetryMessages(
+                            messages,
+                            result,
+                            safe.error,
+                            validationSchema,
+                            reqType
+                        );
                         continue;
                     }
 
@@ -326,14 +345,15 @@ export class GeminiService extends BaseLLMService {
         const retries = config.maxRetries ?? 2;
         const totalAttempts = Math.max(1, retries + 1);
         let lastError: any;
+        let messages: ChatMessage[] = [
+            { role: 'system', content: rules.baseRule },
+            { role: 'user', content: jsonMessage }
+        ];
 
         for (let attempt = 0; attempt < totalAttempts; attempt++) {
             const result = await this.utils.callChatCompletion(
                 this.client!,
-                [
-                    { role: 'system', content: rules.baseRule },
-                    { role: 'user', content: jsonMessage }
-                ],
+                messages,
                 {
                     model: config.model,
                     provider: 'Gemini',
@@ -356,10 +376,21 @@ export class GeminiService extends BaseLLMService {
 
             lastError = safe.error;
             if (attempt < totalAttempts - 1) {
-                logger.warn(`[Genie][Gemini] Schema validation failed (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
+                this.logSchemaValidationRetry('commitMessage', attempt, totalAttempts);
+                messages = this.buildSchemaValidationRetryMessages(
+                    messages,
+                    result,
+                    safe.error,
+                    commitMessageSchema,
+                    'commitMessage'
+                );
+                continue;
             }
         }
 
         return { message: 'Failed to validate structured commit message from Gemini.', statusCode: 500 };
     }
+
 }
+
+

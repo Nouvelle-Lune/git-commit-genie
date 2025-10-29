@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import Anthropic from '@anthropic-ai/sdk';
-import { BaseProviderUtils } from './BaseProviderUtils';
+import { BaseProviderUtils } from './baseProviderUtils';
 import { logger } from '../../../logger';
 import { ToolUseBlock } from '@anthropic-ai/sdk/resources';
+import { ProviderError } from '../errors/providerError';
 
 /**
  * Utilities for Anthropic Claude API
@@ -126,4 +127,156 @@ export class AnthropicUtils extends BaseProviderUtils {
             throw new Error(err?.message || `Failed to validate ${provider} API key.`);
         }
     }
+
+    /**
+     * Raw JSON chat for tool-driven scenarios without business logic
+     */
+    async rawChatJson(
+        client: Anthropic,
+        messages: any[],
+        options: {
+            model: string;
+            token?: vscode.CancellationToken;
+            temperature?: number;
+        }
+    ): Promise<any> {
+        this.validateClient(client, 'Anthropic');
+        this.validateModel(options.model, 'Anthropic');
+
+        this.checkCancellation(options.token);
+
+        // Handle system messages for Anthropic format
+        const systemMessages = messages.filter(m => m.role === 'system');
+        const nonSystemMessages = messages.filter(m => m.role !== 'system');
+        const systemText = systemMessages.length > 0
+            ? systemMessages.map(m => m.content).join('\n\n')
+            : undefined;
+
+        let lastErr: any;
+        const retries = this.getMaxRetries();
+        const totalAttempts = Math.max(1, retries + 1);
+
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            try {
+                const controller = this.createAbortController(options.token);
+
+                const requestOptions: any = {
+                    model: options.model,
+                    messages: nonSystemMessages,
+                    temperature: options.temperature ?? this.getTemperature(),
+                    max_tokens: 2048,
+                };
+
+                if (systemText) {
+                    requestOptions.system = systemText;
+                }
+
+                const response = await client.messages.create(requestOptions, {
+                    signal: controller.signal
+                });
+
+                const block = response.content[0] as any;
+                const text = block?.text || '';
+
+                // Extract JSON from response
+                const start = text.indexOf('{');
+                const end = text.lastIndexOf('}');
+                if (start >= 0 && end > start) {
+                    return JSON.parse(text.slice(start, end + 1));
+                }
+                return JSON.parse(text || '{}');
+            } catch (e: any) {
+                lastErr = e;
+                const code = e?.status || e?.statusCode || e?.code;
+
+                if (e.name === 'AbortError' || e.message?.includes('aborted')) {
+                    throw ProviderError.cancelled();
+                }
+
+                if (code === 429) {
+                    await this.maybeWarnRateLimit('Anthropic', options.model);
+                    const wait = this.getRetryDelayMs(e);
+                    logger.warn(`[Genie][Raw Chat] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
+                    await this.sleep(wait);
+                    continue;
+                }
+
+                throw ProviderError.wrap(e, 'Anthropic');
+            }
+        }
+
+        throw ProviderError.chatJsonFailed('Anthropic', lastErr);
+    }
+
+    /**
+     * Raw text chat for tool-driven scenarios without business logic
+     */
+    async rawChatText(
+        client: Anthropic,
+        messages: any[],
+        options: {
+            model: string;
+            token?: vscode.CancellationToken;
+            temperature?: number;
+        }
+    ): Promise<string> {
+        this.validateClient(client, 'Anthropic');
+        this.validateModel(options.model, 'Anthropic');
+
+        this.checkCancellation(options.token);
+
+        // Handle system messages for Anthropic format
+        const systemMessages = messages.filter(m => m.role === 'system');
+        const nonSystemMessages = messages.filter(m => m.role !== 'system');
+        const systemText = systemMessages.length > 0
+            ? systemMessages.map(m => m.content).join('\n\n')
+            : undefined;
+
+        let lastErr: any;
+        const retries = this.getMaxRetries();
+        const totalAttempts = Math.max(1, retries + 1);
+
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            try {
+                const controller = this.createAbortController(options.token);
+
+                const requestOptions: any = {
+                    model: options.model,
+                    messages: nonSystemMessages,
+                    temperature: options.temperature ?? this.getTemperature(),
+                    max_tokens: 2048,
+                };
+
+                if (systemText) {
+                    requestOptions.system = systemText;
+                }
+
+                const response = await client.messages.create(requestOptions, {
+                    signal: controller.signal
+                });
+
+                return (response.content[0] as any)?.text || '';
+            } catch (e: any) {
+                lastErr = e;
+                const code = e?.status || e?.statusCode || e?.code;
+
+                if (e.name === 'AbortError' || e.message?.includes('aborted')) {
+                    throw ProviderError.cancelled();
+                }
+
+                if (code === 429) {
+                    await this.maybeWarnRateLimit('Anthropic', options.model);
+                    const wait = this.getRetryDelayMs(e);
+                    logger.warn(`[Genie][Raw Chat] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
+                    await this.sleep(wait);
+                    continue;
+                }
+
+                throw ProviderError.wrap(e, 'Anthropic');
+            }
+        }
+
+        throw ProviderError.chatTextFailed('Anthropic', lastErr);
+    }
 }
+
