@@ -108,8 +108,10 @@ export class Logger {
         let cachePercentage = 0;
         let cost = 0;
 
+        const providerLower = provider.toLowerCase();
+
         try {
-            if (provider === 'OpenAI') {
+            if (providerLower === 'openai') {
                 inputTokens = usage.input_tokens || 0;
                 outputTokens = usage.output_tokens || 0;
                 cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
@@ -117,7 +119,7 @@ export class Logger {
                 totalTokens = usage.total_tokens || (inputTokens + outputTokens);
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens);
             }
-            if (provider === 'DeepSeek') {
+            if (providerLower === 'deepseek') {
                 inputTokens = usage.prompt_tokens || 0;
                 outputTokens = usage.completion_tokens || 0;
                 cachedTokens = usage.prompt_cache_hit_tokens || 0;
@@ -125,7 +127,7 @@ export class Logger {
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
-            if (provider === 'Anthropic') {
+            if (providerLower === 'anthropic') {
                 inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
                 outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
                 cachedTokens = usage.cached_tokens ?? usage.input_tokens_details?.cached_tokens ?? 0;
@@ -133,7 +135,7 @@ export class Logger {
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
-            if (provider === 'Gemini') {
+            if (providerLower === 'gemini') {
                 inputTokens = usage.prompt_tokens ?? 0;
                 outputTokens = usage.completion_tokens ?? 0;
                 totalTokens = usage.total_tokens ?? (inputTokens + outputTokens);
@@ -141,7 +143,7 @@ export class Logger {
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
-            if (provider === 'Qwen') {
+            if (providerLower === 'qwen') {
                 inputTokens = usage.prompt_tokens || 0;
                 outputTokens = usage.completion_tokens || 0;
                 cachedTokens = usage.prompt_tokens_details?.cached_tokens || 0;
@@ -264,6 +266,8 @@ export class Logger {
         let totalTokens = 0;
         let totalCost = 0;
 
+        const providerLower = provider.toLowerCase();
+
         // Process each usage object
         for (const usage of usages) {
             if (!usage) {
@@ -275,29 +279,29 @@ export class Logger {
             let cachedTokens = 0;
 
             try {
-                if (provider === 'OpenAI') {
+                if (providerLower === 'openai') {
                     inputTokens = usage.input_tokens || 0;
                     outputTokens = usage.output_tokens || 0;
                     cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
-                } else if (provider === 'DeepSeek') {
+                } else if (providerLower === 'deepseek') {
                     inputTokens = usage.prompt_tokens || 0;
                     outputTokens = usage.completion_tokens || 0;
                     cachedTokens = usage.prompt_cache_hit_tokens || 0;
-                } else if (provider === 'Anthropic') {
+                } else if (providerLower === 'anthropic') {
                     inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
                     outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
                     cachedTokens = usage.cached_tokens ?? usage.input_tokens_details?.cached_tokens ?? 0;
-                } else if (provider === 'Gemini') {
+                } else if (providerLower === 'gemini') {
                     inputTokens = usage.prompt_tokens ?? 0;
                     outputTokens = usage.completion_tokens ?? 0;
                     cachedTokens = usage.cached_content_tokens ?? 0;
-                } else if (provider === 'Qwen') {
+                } else if (providerLower === 'qwen') {
                     inputTokens = usage.prompt_tokens || 0;
                     outputTokens = usage.completion_tokens || 0;
                     cachedTokens = usage.prompt_tokens_details?.cached_tokens || 0;
                 }
                 else {
-                    this.warn(`Unknown model for usage summary: ${modelName}`);
+                    this.warn(`Unknown provider for usage summary: ${provider}`);
                     continue;
                 }
 
