@@ -50,7 +50,8 @@
     "version control"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onViewContainer:gitCommitGenie"
   ],
   "main": "./dist/extension.js",
   "l10n": "./l10n",
@@ -283,6 +284,25 @@
           "markdownDescription": "%config.showUsageCost.desc%"
         }
       }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "gitCommitGenie",
+          "title": "Git Commit Genie",
+          "icon": "$(genie-base)"
+        }
+      ]
+    },
+    "views": {
+      "gitCommitGenie": [
+        {
+          "type": "webview",
+          "id": "gitCommitGenie.panel",
+          "icon": "$(genie-base)",
+          "name": "Dashboard"
+        }
+      ]
     },
     "commands": [
       {

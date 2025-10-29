@@ -4,6 +4,7 @@ import { StatusBarManager } from '../ui/StatusBarManager';
 import { CommandManager } from '../commands/CommandManager';
 import { EventManager } from '../events/EventManager';
 import { ConfigurationManager } from '../config/ConfigurationManager';
+import { WebviewProvider } from '../ui/WebviewProvider';
 import { logger } from '../services/logger';
 
 export class ExtensionManager {
@@ -12,6 +13,7 @@ export class ExtensionManager {
     private commandManager: CommandManager;
     private eventManager: EventManager;
     private configManager: ConfigurationManager;
+    private WebviewProvider: WebviewProvider;
 
     constructor(private context: vscode.ExtensionContext) {
         this.serviceRegistry = new ServiceRegistry(context);
@@ -19,6 +21,7 @@ export class ExtensionManager {
         this.statusBarManager = new StatusBarManager(context, this.serviceRegistry, this.configManager);
         this.commandManager = new CommandManager(context, this.serviceRegistry, this.statusBarManager);
         this.eventManager = new EventManager(context, this.serviceRegistry, this.statusBarManager);
+        this.WebviewProvider = new WebviewProvider(context.extensionUri);
     }
 
     async activate(): Promise<void> {
@@ -34,6 +37,16 @@ export class ExtensionManager {
             await this.commandManager.initialize();
             await this.eventManager.initialize();
 
+            // Register webview provider AFTER all services are initialized
+
+            const provider = this.WebviewProvider;
+
+            const disposable = vscode.window.registerWebviewViewProvider(
+                WebviewProvider.viewType,
+                provider,
+                { webviewOptions: { retainContextWhenHidden: true } }
+            );
+            this.context.subscriptions.push(disposable);
             logger.info('Git Commit Genie activated successfully');
         } catch (error) {
             logger.error('Error during extension activation:', error);
