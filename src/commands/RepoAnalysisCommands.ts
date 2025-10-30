@@ -189,7 +189,7 @@ export class RepoAnalysisCommands {
             const analysisService = this.serviceRegistry.getAnalysisService();
             await analysisService.clearAnalysis(repositoryPath);
             // Refresh status bar state
-            this.statusBarManager.updateStatusBar();
+            await this.statusBarManager.updateStatusBar();
             vscode.window.showInformationMessage(vscode.l10n.t(I18N.repoAnalysis.cleared));
         } catch (error) {
             vscode.window.showErrorMessage(`Failed to clear repository analysis cache: ${error}`);

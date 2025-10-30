@@ -79,7 +79,7 @@ export async function compressContext(
         const compressed = await chatFn([
             {
                 role: 'system',
-                content: 'You are an expert at compressing and summarizing information while preserving essential meaning and context.'
+                content: 'You are an expert at compressing and summarizing information while preserving essential meaning and context. Your goal is to compress the content window for an AI agent. IMPORTANT: Return ONLY the compressed text content directly, without any JSON formatting, code blocks, or markdown wrappers.'
             },
             {
                 role: 'user',
@@ -87,7 +87,32 @@ export async function compressContext(
             }
         ]);
 
-        const compressedSize = compressed.length;
+        // Clean up potential markdown code fences or JSON wrappers
+        let cleanedCompressed = compressed.trim();
+
+        // Remove markdown code fences if present
+        if (cleanedCompressed.startsWith('```')) {
+            cleanedCompressed = cleanedCompressed
+                .replace(/^```(?:text|markdown|json)?\n?/i, '')
+                .replace(/\n?```$/i, '')
+                .trim();
+        }
+
+        // Remove JSON wrappers if present (e.g., {"compressed": "..."})
+        if (cleanedCompressed.startsWith('{') && cleanedCompressed.endsWith('}')) {
+            try {
+                const parsed = JSON.parse(cleanedCompressed);
+                if (typeof parsed.compressed === 'string') {
+                    cleanedCompressed = parsed.compressed;
+                } else if (typeof parsed.content === 'string') {
+                    cleanedCompressed = parsed.content;
+                }
+            } catch {
+                // Not valid JSON, keep as is
+            }
+        }
+
+        const compressedSize = cleanedCompressed.length;
         const compressionRatio = 1 - (compressedSize / originalSize);
 
         // Generate summary of what was done
@@ -100,7 +125,7 @@ export async function compressContext(
         return {
             success: true,
             data: {
-                compressed,
+                compressed: cleanedCompressed,
                 originalSize,
                 compressedSize,
                 compressionRatio,
@@ -131,7 +156,6 @@ function buildCompressionPrompt(
         'Compress the following content by summarizing details.',
         'Keep core concepts, important decisions, and key findings.',
         'Remove examples unless they are crucial for understanding.',
-        'Target: 40-60% size reduction.',
         'Focus on the most relevant information.'
     );
 

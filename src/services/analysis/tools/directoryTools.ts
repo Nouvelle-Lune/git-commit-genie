@@ -120,7 +120,7 @@ async function collectEntries(
 
                 // Add file-specific information
                 if (!isDirectory) {
-                    entry.size = stats.size;
+                    entry.size = (stats.size / 1024).toString() + 'KB';
                     entry.extension = path.extname(item).toLowerCase();
                 }
 

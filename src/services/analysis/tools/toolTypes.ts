@@ -17,6 +17,8 @@ export interface ToolResult<T = any> {
     error?: string;
     /** Warnings encountered during execution */
     warnings?: string[];
+    /** Usage statistics if applicable */
+    usage?: any;
 }
 
 /**
@@ -30,7 +32,7 @@ export interface DirectoryEntry {
     /** Relative path from repository root */
     path: string;
     /** File size in bytes (only for files) */
-    size?: number;
+    size?: string;
     /** File extension (only for files) */
     extension?: string;
 }
