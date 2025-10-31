@@ -96,5 +96,7 @@
   "For mainland China API keys": "使用中國 API Key",
   "Generation already running for this repository.": "此倉庫已有正在進行的生成任務。",
   "No Git repository found.": "未找到 Git 倉庫。",
-  "Failed to create template directory": "建立模板目錄失敗"
+  "Failed to create template directory": "建立模板目錄失敗",
+  "Repository analysis request limit reached, reset request count and continue task?": "倉庫分析請求次數已達到上限，是否重置請求計數並繼續任務？",
+  "Reset and continue": "重置並繼續"
 }

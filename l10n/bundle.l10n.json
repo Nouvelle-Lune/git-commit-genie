@@ -96,5 +96,7 @@
   "For mainland China API keys": "For mainland China API keys",
   "Generation already running for this repository.": "Generation already running for this repository.",
   "No Git repository found.": "No Git repository found.",
-  "Failed to create template directory": "Failed to create template directory"
+  "Failed to create template directory": "Failed to create template directory",
+  "Repository analysis request limit reached, reset request count and continue task?": "Repository analysis request limit reached, reset request count and continue task?",
+  "Reset and continue": "Reset and continue"
 }

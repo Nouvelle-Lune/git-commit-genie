@@ -551,11 +551,25 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
 
         // Limit total thinking/acting steps to prevent runaway loops
-        const maxSteps = 99;
+        let maxSteps = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('repositoryAnalysis.MaxCount', 99999);
+        if (maxSteps === -1) {
+            maxSteps = 99999;
+        }
         const maxContextTokens = getMaxContextByFunction('repoAnalysis', model);
         const contextThreshold = maxContextTokens * 0.9; // Force compress at 90% of context limit
 
-        for (let step = 0; step < maxSteps; step++) {
+        for (let step = 0; step <= maxSteps; step++) {
+
+            if (step === maxSteps) {
+                let choice = await this.isResetStep();
+                if (choice) {
+                    step = 0;
+                } else {
+                    logger.warn('[Genie][RepoAnalysis] Reached maximum analysis steps; aborting.');
+                    return null;
+                }
+            }
+
             // Check context size and force compression if needed
             const totalContextLength = msgs.map(m => m.content.length).reduce((a, b) => a + b, 0);
             const estimatedTokens = totalContextLength / 4; // Rough estimate: 1 token ≈ 4 chars
@@ -653,7 +667,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 if (provider.toLowerCase() === 'openai' && (result as any).functionCallId) {
                     openaiPendingCallId = String((result as any).functionCallId || '');
                     openaiPendingToolOutput = JSON.stringify(toolResult || {});
-                    // Do not append additional messages; function_call_output will be passed next turn
+
                 } else {
                     // Other providers: keep text-based conversation
                     msgs.push({ role: 'assistant', content: JSON.stringify(action) });
@@ -1051,6 +1065,16 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         throw new Error(errorMsg);
     }
 
+
+    private handleAnalysisError(error: any, operationName: string): RepoAnalysisRunResult {
+        if (error?.name === 'Canceled' || error?.message?.includes?.('cancel')) {
+            logger.warn(`[Genie][RepoAnalysis] ${operationName} cancelled by user.`);
+            return 'skipped';
+        }
+        logger.error(`Failed to ${operationName.toLowerCase()} repository analysis`, error as any);
+        throw error;
+    }
+
     /**
      * Sets up a watcher for API key changes to retry analysis
      * 
@@ -1333,22 +1357,21 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         }
     }
 
+    private async isResetStep(): Promise<boolean> {
+        const choice = await vscode.window.showInformationMessage(
+            vscode.l10n.t(I18N.repoAnalysis.resetStepNotification),
+            vscode.l10n.t(I18N.repoAnalysis.resetAndContinue),
+            vscode.l10n.t(I18N.repoAnalysis.cancel)
+        );
 
-
-    private handleAnalysisError(error: any, operationName: string): RepoAnalysisRunResult {
-        if (error?.name === 'Canceled' || error?.message?.includes?.('cancel')) {
-            logger.warn(`[Genie][RepoAnalysis] ${operationName} cancelled by user.`);
-            return 'skipped';
+        if (choice === vscode.l10n.t(I18N.repoAnalysis.resetAndContinue)) {
+            logger.info('[Genie][RepoAnalysis] User chose to reset step count and continue');
+            return true;
+        } else {
+            logger.info('[Genie][RepoAnalysis] User cancelled step reset');
+            return false;
         }
-        logger.error(`Failed to ${operationName.toLowerCase()} repository analysis`, error as any);
-        throw error;
     }
+
 }
 
-// Internal data structure for gathered signals
-interface AugmentedSignals {
-    rootEntries?: DirectoryEntry[];
-    entryFiles?: string[];
-    languageCounts?: Record<string, number>;
-    frameworkMatches?: SearchFilesResult;
-}

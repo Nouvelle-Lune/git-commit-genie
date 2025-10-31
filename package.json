@@ -120,7 +120,7 @@
           ]
         },
         "gitCommitGenie.chain.enabled": {
-          "order": 1,
+          "order": 2,
           "type": "boolean",
           "default": true,
           "markdownDescription": "%config.chain.enabled.desc%",
@@ -129,21 +129,21 @@
           ]
         },
         "gitCommitGenie.chain.maxParallel": {
-          "order": 2,
+          "order": 3,
           "type": "number",
           "default": 2,
           "minimum": 1,
           "markdownDescription": "%config.chain.maxParallel.desc%"
         },
         "gitCommitGenie.llm.maxRetries": {
-          "order": 3,
+          "order": 4,
           "type": "number",
           "default": 2,
           "minimum": 1,
           "markdownDescription": "%config.llm.maxRetries.desc%"
         },
         "gitCommitGenie.llm.temperature": {
-          "order": 4,
+          "order": 5,
           "type": "number",
           "default": 0.2,
           "minimum": 0,
@@ -174,13 +174,20 @@
           "markdownDescription": "%config.repositoryAnalysis.updateThreshold.desc%"
         },
         "gitCommitGenie.ui.stageNotifications.enabled": {
-          "order": 10,
+          "order": 12,
           "type": "boolean",
           "default": true,
           "markdownDescription": "%config.ui.stageNotifications.enabled.desc%"
         },
-        "gitCommitGenie.repositoryAnalysis.model": {
+        "gitCommitGenie.repositoryAnalysis.MaxCount": {
           "order": 9,
+          "type": "number",
+          "default": -1,
+          "minimum": -1,
+          "markdownDescription": "%config.repositoryAnalysis.MaxCount.desc%"
+        },
+        "gitCommitGenie.repositoryAnalysis.model": {
+          "order": 10,
           "type": "string",
           "default": "general",
           "enum": [
@@ -266,7 +273,7 @@
           "markdownDescription": "%config.commitLanguage.desc%"
         },
         "gitCommitGenie.typingAnimationSpeed": {
-          "order": 6,
+          "order": 11,
           "type": "number",
           "default": 15,
           "minimum": -1,
@@ -274,7 +281,7 @@
           "markdownDescription": "%config.typingAnimationSpeed.desc%"
         },
         "gitCommitGenie.showUsageCost": {
-          "order": 9,
+          "order": 13,
           "type": "boolean",
           "default": true,
           "markdownDescription": "%config.showUsageCost.desc%"

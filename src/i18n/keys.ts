@@ -125,12 +125,13 @@ export const L10N_KEYS = {
     mdNotFound: 'repository-analysis.md not found. Use Refresh Analysis to generate it.',
     missingApiKey: 'LLM API key not set. Configure models to enable repository analysis.',
     missingModel: 'LLM model not selected. Configure models to enable repository analysis.',
-    // New: clearing cache
     clearConfirm: 'This will delete cached JSON repository analysis for this repository. Continue?',
     clear: 'Clear',
     cleared: 'Repository analysis cache cleared.',
-    // New: repository selection
-    selectRepository: 'Select a repository'
+    selectRepository: 'Select a repository',
+    resetStepNotification: 'Repository analysis request limit reached, reset request count and continue task?',
+    resetAndContinue: 'Reset and continue',
+    cancel: 'Cancel'
   },
   templates: {
     pickWorkspaceFolder: 'Pick a workspace folder',

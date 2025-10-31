@@ -25,6 +25,7 @@
   "config.repositoryAnalysis.enabled.desc": "Enable repository analysis to provide better context for commit message generation.",
   "config.repositoryAnalysis.excludePatterns.desc": "File patterns to exclude from repository analysis scanning.",
   "config.repositoryAnalysis.updateThreshold.desc": "Number of commits after which to update the repository analysis.",
+  "config.repositoryAnalysis.MaxCount.desc": "Maximum requests for repository analysis model, set -1 for unlimited.",
   "config.repositoryAnalysis.model.desc": "Model used for repository analysis. When a specific model is selected, its provider is used automatically for analysis. Choose 'Use default model' to reuse your main commit message model.",
   "config.repositoryAnalysis.model.general": "Use default model",
   "config.commitLanguage.desc": "Target language for generated commit messages.",
