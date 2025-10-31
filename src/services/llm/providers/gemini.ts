@@ -8,7 +8,7 @@ import { generateCommitMessageChain } from '../../chain/chainThinking';
 
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
-import { GeminiUtils } from './utils/geminiUtils';
+import { GeminiUtils } from './utils/GeminiUtils';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import { 
     GeminiCommitMessageSchema, 
@@ -337,4 +337,3 @@ export class GeminiService extends BaseLLMService {
     }
 
 }
-

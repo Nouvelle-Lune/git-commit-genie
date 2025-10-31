@@ -2,6 +2,8 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { exec } from 'child_process';
+import * as util from 'util';
 
 import {
     IRepositoryAnalysisService,
@@ -51,6 +53,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     // In-flight guards to prevent duplicate work per repository
     private initInflight: Map<string, Promise<RepoAnalysisRunResult>> = new Map();
     private updateInflight: Map<string, Promise<RepoAnalysisRunResult>> = new Map();
+    // Promisified exec for git CLI usage
+    private static readonly execPromise = util.promisify(exec);
 
     constructor(context: vscode.ExtensionContext, llmService: LLMService | null, repoService: RepoService) {
         this.context = context;
@@ -407,11 +411,31 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         ];
 
         const userExcludes = this.normalizeExcludePatterns(input.excludePatterns);
+        const isIncremental = !!input.previousAnalysis;
+        const commitWindowSize = Array.isArray(input.recentCommits) ? input.recentCommits.length : 0;
         const system = [
             'You are an autonomous repository analysis agent. You can call tools to explore the repository and then produce a final structured analysis.',
             'Respond with STRICT JSON only, no markdown code fences.',
             'For every tool action, include a concise English "reason" describing what you will do next (e.g., "I will use searchFiles to look for framework imports").',
             'If your provider supports function calling, always prefer calling the provided tools directly and do not output free-form plans. To finish, call the finalize tool with the final analysis object.',
+            '',
+            (isIncremental
+                ? [
+                    'Mode: INCREMENTAL UPDATE. There is an existing repository analysis. Prefer focused exploration over full rescans.',
+                    `Consider the last ${commitWindowSize} commit messages to decide if the project\'s purpose, architecture, key technologies, or capabilities materially changed.`,
+                    'Strategy: start from the changed files and their immediate neighbors (imports/configs/entry modules). Use searchFiles to locate related code and readFileContent to verify impact.',
+                    'Guidelines (flexible): avoid broad scans when targeted reads can answer the question; if evidence is insufficient, you MAY expand to list specific subpaths or read additional related files until impact is clear.',
+                    'Material change examples: new/removed public APIs or commands, substantial config changes (e.g., dependencies in package.json/pyproject), new services/modules, or core feature behavior changes.',
+                    'Non-material examples: docs-only, style/formatting, test-only, CI/chore/refactor with no functional effect.',
+                    'When no material change is found: immediately finalize by returning the previous summary/projectType/technologies unchanged. In insights, add a short line like: "Incremental: No significant changes in the last commits (N)."',
+                    'When a material change is found: minimally update summary/projectType/technologies only where required and add an insights line starting with "Incremental:" summarizing the change, the commit count reviewed, and the key impacted areas/files.',
+                    'Tip: If commit messages mention specific files/dirs (e.g., package.json, config.ts), prefer searchFiles for those names then readFileContent on HEAD to verify actual functional impact.',
+                    'Note: You may conceptually think of using a "git show"-style view for specific commits; however, your available tools are limited to searchFiles and readFileContent on the working tree. Use them to approximate the diff impact.',
+                ].join('\n')
+                : [
+                    'Mode: INITIAL ANALYSIS. Explore efficiently and focus on high-signal files (e.g., README, package/config files, entry points).',
+                ].join('\n')
+            ),
             '',
             'Action schema (discriminated union):',
             '{',
@@ -437,23 +461,60 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             'Tool catalog:'
         ].concat(toolsSpec.map(t => `- ${t.name} ${t.args}: ${t.desc}`)).join('\n');
 
-        // Pre-fetch root directory structure to provide initial context
+        // Pre-fetch root directory structure only for initial analysis to seed context without encouraging a full scan in incremental mode
         let rootDirContext = '';
-        try {
-            const rootList = await listDirectory(repoPath, { depth: 1, excludePatterns: userExcludes });
-            if (rootList.success && rootList.data) {
-                const entries = rootList.data.entries || [];
-                const dirs = entries.filter(e => e.type === 'directory').map(e => e.name);
-                const files = entries.filter(e => e.type === 'file').map(e => e.name);
-                rootDirContext = [
-                    '',
-                    '## Root Directory Structure (depth=1)',
-                    dirs.length ? `Directories (${dirs.length}): ${dirs.slice(0, 30).join(', ')}${dirs.length > 30 ? ', ...' : ''}` : 'No directories',
-                    files.length ? `Files (${files.length}): ${files.slice(0, 30).join(', ')}${files.length > 30 ? ', ...' : ''}` : 'No files'
-                ].join('\n');
+        if (!isIncremental) {
+            try {
+                const rootList = await listDirectory(repoPath, { depth: 1, excludePatterns: userExcludes });
+                if (rootList.success && rootList.data) {
+                    const entries = rootList.data.entries || [];
+                    const dirs = entries.filter(e => e.type === 'directory').map(e => e.name);
+                    const files = entries.filter(e => e.type === 'file').map(e => e.name);
+                    rootDirContext = [
+                        '',
+                        '## Root Directory Structure (depth=1)',
+                        dirs.length ? `Directories (${dirs.length}): ${dirs.slice(0, 30).join(', ')}${dirs.length > 30 ? ', ...' : ''}` : 'No directories',
+                        files.length ? `Files (${files.length}): ${files.slice(0, 30).join(', ')}${files.length > 30 ? ', ...' : ''}` : 'No files'
+                    ].join('\n');
+                }
+            } catch (err) {
+                logger.warn('[Genie][RepoAnalysis] Failed to pre-fetch root directory structure', err as any);
             }
-        } catch (err) {
-            logger.warn('[Genie][RepoAnalysis] Failed to pre-fetch root directory structure', err as any);
+        }
+
+        // Build recent commit change details for incremental mode
+        let recentChangesContext = '';
+        // Preserve changed file paths separately so they survive conversation compression
+        let preservedChangedFiles = '';
+        // Keep structured commit diffs for building preserved list
+        let recentCommitDiffs: Array<{ hash: string; shortHash: string; subject: string; files: string[]; diff: string }> = [];
+        if (isIncremental && commitWindowSize > 0) {
+            try {
+                const commits = await this.getRecentCommitsWithDiffs(repoPath, commitWindowSize);
+                recentCommitDiffs = commits || [];
+                if (recentCommitDiffs.length) {
+                    const sections = recentCommitDiffs.map(c => {
+                        const filesLine = c.files.length ? `Files (${c.files.length}): ${c.files.join(', ')}` : 'Files: none';
+                        const diffIntro = c.diff ? `Diff:` : 'Diff: (none)';
+                        return [
+                            `- [${c.shortHash}] ${c.subject}`,
+                            filesLine,
+                            diffIntro,
+                            c.diff ? c.diff : undefined
+                        ].filter(Boolean).join('\n');
+                    });
+                    recentChangesContext = ['', '## Recent Commit Changes', ...sections].join('\n');
+
+                    // Build preserved filenames block (no diffs) to keep across compression cycles
+                    const preserved = recentCommitDiffs.map(c => {
+                        const filesLine = c.files.length ? c.files.join(', ') : '(none)';
+                        return `- [${c.shortHash}] ${c.subject}\n  Files (${c.files.length}): ${filesLine}`;
+                    }).join('\n');
+                    preservedChangedFiles = ['## Changed Files (preserved; do not compress)', preserved].join('\n');
+                }
+            } catch (err) {
+                logger.warn('[Genie][RepoAnalysis] Failed to gather recent commit diffs', err as any);
+            }
         }
 
         let msgs: ChatMessage[] = [
@@ -465,10 +526,13 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     input.previousAnalysis ? `Previous summary: ${this.truncateTo(input.previousAnalysis.summary || '', 800)}` : undefined,
                     input.previousAnalysis ? `Previous technologies: ${(input.previousAnalysis.technologies || []).join(', ')}` : undefined,
                     input.previousAnalysis ? `Previous insights: ${(input.previousAnalysis.insights || []).join('; ')}` : undefined,
-                    input.recentCommits?.length ? `Recent commits: ${input.recentCommits.slice(0, 5).map(c => `- ${c}`).join('\n')}` : undefined,
+                    isIncremental ? `Analysis mode: incremental (review at most ${commitWindowSize} commits; update only if material change).` : 'Analysis mode: initial',
+                    input.recentCommits?.length ? `Recent commits (last ${commitWindowSize}):\n${input.recentCommits.map((c, i) => `C${i + 1}: ${c}`).join('\n')}` : undefined,
+                    isIncremental ? 'Use commit messages above to hypothesize impacted areas. Prefer targeted searchFiles and a few readFileContent calls to verify. Avoid full scans.' : undefined,
                     rootDirContext, // Include pre-fetched root directory structure
+                    recentChangesContext, // Include git show-style summary when in incremental mode
                     '',
-                    'Goal: Understanding the role of repositories and the impact of continuous changes on their functionality for other agents. When done, return action="final".'
+                    'Goal: Provide global context strictly for commit message generation. In incremental mode, focus on whether the latest commits change repository functionality or architecture, and finalize early if not. Include an insights line starting with "Incremental:" that states whether a repo-level update is needed and why. When done, return action="final".'
                 ].filter(Boolean).join('\n')
             }
         ];
@@ -519,11 +583,13 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     }
 
                     if (compressResult.success && compressResult.data) {
-                        // Keep original system message, replace conversation with compressed version
-                        msgs = [
-                            msgs[0], // Preserve original system message with tool specs
-                            { role: 'user', content: `Here is the compressed Exploration History for last conversation, Continue exploring: \n\n${compressResult.data.compressed}` }
-                        ];
+                        // Keep original system message, re-attach preserved changed files, then replace conversation with compressed version
+                        const newMsgs: ChatMessage[] = [msgs[0]]; // Preserve original system message with tool specs
+                        if (preservedChangedFiles && preservedChangedFiles.trim().length > 0) {
+                            newMsgs.push({ role: 'user', content: preservedChangedFiles });
+                        }
+                        newMsgs.push({ role: 'user', content: `Here is the compressed Exploration History for last conversation, Continue exploring: \n\n${compressResult.data.compressed}` });
+                        msgs = newMsgs;
                         const newSize = msgs.map(m => m.content.length).reduce((a, b) => a + b, 0);
                         logger.info(`[Genie][RepoAnalysis] Compression successful: ${Math.round(totalContextLength / 4)} → ${Math.round(newSize / 4)} tokens (${(compressResult.data.compressionRatio * 100).toFixed(1)}% reduction)`);
                     } else {
@@ -1258,6 +1324,76 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      */
     private hashPath(filePath: string): string {
         return crypto.createHash('md5').update(filePath).digest('hex');
+    }
+
+    /**
+     * Execute a git CLI command in the given repository path.
+     */
+    private async git(repoPath: string, args: string, timeoutMs: number = 15000): Promise<{ stdout: string; stderr: string }> {
+        try {
+            return await RepositoryAnalysisService.execPromise(args, { cwd: repoPath, timeout: timeoutMs, maxBuffer: 5 * 1024 * 1024 });
+        } catch (err: any) {
+            const msg = err?.stderr || err?.stdout || err?.message || 'git command failed';
+            throw new Error(String(msg));
+        }
+    }
+
+    /**
+     * Pull recent commits with changed files and trimmed diff content (git show approximation).
+     * Keeps strict budgets to avoid bloating the prompt.
+     */
+    private async getRecentCommitsWithDiffs(
+        repoPath: string,
+        n: number
+    ): Promise<Array<{ hash: string; shortHash: string; subject: string; files: string[]; diff: string }>> {
+        try {
+            if (!n || n <= 0) { return []; }
+
+            // Ensure we are inside a git repo; if not, bail silently
+            try {
+                const { stdout } = await this.git(repoPath, 'git rev-parse --is-inside-work-tree');
+                if (!stdout.toString().trim().startsWith('true')) { return []; }
+            } catch { return []; }
+
+            const logFormat = '%H%x1f%s%x1e';
+            const { stdout: logStdout } = await this.git(repoPath, `git log -n ${Math.max(1, n)} --pretty=format:${logFormat}`);
+            const entries = logStdout.split('\x1e').map(s => s.trim()).filter(Boolean);
+            const commits: Array<{ hash: string; subject: string }> = entries.map(line => {
+                const [hash, subject] = line.split('\x1f');
+                return { hash: (hash || '').trim(), subject: (subject || '').trim() };
+            }).filter(e => e.hash);
+
+            const out: Array<{ hash: string; shortHash: string; subject: string; files: string[]; diff: string }> = [];
+
+            for (const c of commits) {
+                let files: string[] = [];
+                let diff = '';
+
+                try {
+                    const { stdout: filesStdout } = await this.git(repoPath, `git show --name-only --pretty="" --no-color ${c.hash}`);
+                    files = filesStdout.split('\n').map(f => f.trim()).filter(Boolean);
+                } catch { files = []; }
+
+                try {
+                    // Patch only, no extra headers
+                    const { stdout: diffStdout } = await this.git(repoPath, `git show --no-color --patch --unified=3 --pretty=format: ${c.hash}`);
+                    diff = (diffStdout || '').toString();
+                } catch { diff = ''; }
+
+                out.push({
+                    hash: c.hash,
+                    shortHash: c.hash.slice(0, 7),
+                    subject: c.subject,
+                    files,
+                    diff
+                });
+            }
+
+            return out;
+        } catch (error) {
+            logger.warn('[Genie][RepoAnalysis] getRecentCommitsWithDiffs failed', error as any);
+            return [];
+        }
     }
 
     /**

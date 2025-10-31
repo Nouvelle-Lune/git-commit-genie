@@ -31,6 +31,7 @@ export class DiffService {
 	public async getDiff(repo: Repository): Promise<DiffData[]> {
 
 		let indexChanges = repo.state.indexChanges;
+		
 		let stagedTemporarily = false;
 
 		const api = this.repoService.getGitApi();
