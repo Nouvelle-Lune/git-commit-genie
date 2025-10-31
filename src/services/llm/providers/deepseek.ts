@@ -11,10 +11,8 @@ import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { z } from "zod";
 import {
-    fileSummarySchema,
-    classifyAndDraftResponseSchema,
-    validateAndFixResponseSchema,
-    commitMessageSchema
+    fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
+    commitMessageSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
 } from './schemas/common';
 
 const DEEPSEEK_API_URL = 'https://api.deepseek.com';
@@ -157,6 +155,8 @@ export class DeepSeekService extends BaseLLMService {
                     case 'strictFix': return 'strict-fix';
                     case 'enforceLanguage': return 'lang-fix';
                     case 'commitMessage': return 'build-commit-msg';
+                    case 'repoAnalysis': return 'repo-analysis';
+                    case 'repoAnalysisAction': return 'repo-analysis-action';
                     default: return 'thinking';
                 }
             };
@@ -167,6 +167,8 @@ export class DeepSeekService extends BaseLLMService {
                 commitMessage: commitMessageSchema,
                 strictFix: commitMessageSchema,
                 enforceLanguage: commitMessageSchema,
+                repoAnalysis: repoAnalysisResponseSchema,
+                repoAnalysisAction: repoAnalysisActionSchema,
             };
 
             const validationSchema = reqType ? schemaMap[reqType] : undefined;

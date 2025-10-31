@@ -10,11 +10,13 @@ import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { GeminiUtils } from './utils/geminiUtils';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
-import {
-    GeminiCommitMessageSchema,
-    GeminiFileSummarySchema,
-    GeminiClassifyAndDraftSchema,
-    GeminiValidateAndFixSchema,
+import { 
+    GeminiCommitMessageSchema, 
+    GeminiFileSummarySchema, 
+    GeminiClassifyAndDraftSchema, 
+    GeminiValidateAndFixSchema, 
+    GeminiRepoAnalysisSchema,
+    GeminiRepoAnalysisActionSchema
 } from './schemas/geminiSchemas';
 
 import {
@@ -22,7 +24,9 @@ import {
     commitMessageSchema,
     fileSummarySchema,
     classifyAndDraftResponseSchema,
-    validateAndFixResponseSchema
+    validateAndFixResponseSchema,
+    repoAnalysisResponseSchema,
+    repoAnalysisActionSchema
 } from "./schemas/common";
 
 const SECRET_GEMINI_API_KEY = 'gitCommitGenie.secret.geminiApiKey';
@@ -60,8 +64,6 @@ export class GeminiService extends BaseLLMService {
 
     public listSupportedModels(): string[] {
         return [
-            'gemini-2.5-flash-lite',
-            'gemini-2.5-flash-lite-preview-09-2025',
             'gemini-2.5-flash',
             'gemini-2.5-flash-preview-09-2025',
             'gemini-2.5-pro',
@@ -165,6 +167,8 @@ export class GeminiService extends BaseLLMService {
                     case 'strictFix': return 'strict-fix';
                     case 'enforceLanguage': return 'lang-fix';
                     case 'commitMessage': return 'build-commit-msg';
+                    case 'repoAnalysis': return 'repo-analysis';
+                    case 'repoAnalysisAction': return 'repo-analysis-action';
                     default: return 'thinking';
                 }
             };
@@ -176,6 +180,8 @@ export class GeminiService extends BaseLLMService {
                 commitMessage: GeminiCommitMessageSchema,
                 strictFix: GeminiCommitMessageSchema,
                 enforceLanguage: GeminiCommitMessageSchema,
+                repoAnalysis: GeminiRepoAnalysisSchema,
+                repoAnalysisAction: GeminiRepoAnalysisActionSchema,
             };
 
             const schemaMapValidation: Record<string, any> = {
@@ -185,6 +191,8 @@ export class GeminiService extends BaseLLMService {
                 commitMessage: commitMessageSchema,
                 strictFix: commitMessageSchema,
                 enforceLanguage: commitMessageSchema,
+                repoAnalysis: repoAnalysisResponseSchema,
+                repoAnalysisAction: repoAnalysisActionSchema,
             };
 
             const schema = reqType ? schemaMap[reqType] : undefined;
@@ -329,5 +337,4 @@ export class GeminiService extends BaseLLMService {
     }
 
 }
-
 

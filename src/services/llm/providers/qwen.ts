@@ -11,10 +11,8 @@ import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { z } from "zod";
 import {
-    fileSummarySchema,
-    classifyAndDraftResponseSchema,
-    validateAndFixResponseSchema,
-    commitMessageSchema
+    fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
+    commitMessageSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
 } from './schemas/common';
 
 const QWEN_API_URL_CHINA = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
@@ -213,6 +211,8 @@ export class QwenService extends BaseLLMService {
                     case 'strictFix': return 'strict-fix';
                     case 'enforceLanguage': return 'lang-fix';
                     case 'commitMessage': return 'build-commit-msg';
+                    case 'repoAnalysis': return 'repo-analysis';
+                    case 'repoAnalysisAction': return 'repo-analysis-action';
                     default: return 'thinking';
                 }
             };
@@ -223,6 +223,8 @@ export class QwenService extends BaseLLMService {
                 commitMessage: commitMessageSchema,
                 strictFix: commitMessageSchema,
                 enforceLanguage: commitMessageSchema,
+                repoAnalysis: repoAnalysisResponseSchema,
+                repoAnalysisAction: repoAnalysisActionSchema,
             };
 
             const validationSchema = reqType ? schemaMap[reqType] : undefined;
@@ -242,9 +244,11 @@ export class QwenService extends BaseLLMService {
                 if (result.usage) {
                     usages.push(result.usage);
                     result.usage.model = config.model;
-                    logger.usage(repoPath, 'Qwen', result.usage, config.model, labelFor(reqType), callCount);
+                    // Pass region so pricing key matches PRICING_TABLE (e.g., qwen3-coder-flash:intl)
+                    logger.usage(repoPath, 'Qwen', result.usage, config.model, labelFor(reqType), callCount, this.getRegion());
                 } else {
-                    logger.usage(repoPath, 'Qwen', undefined, config.model, labelFor(reqType), callCount);
+                    // Pass region even if usage is missing to keep formatting consistent
+                    logger.usage(repoPath, 'Qwen', undefined, config.model, labelFor(reqType), callCount, this.getRegion());
                 }
 
                 if (validationSchema) {
@@ -365,4 +369,3 @@ export class QwenService extends BaseLLMService {
     }
 
 }
-

@@ -35,8 +35,6 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'claude-opus-4-20250514': 200_000,
 
   // Google Gemini
-  'gemini-2.5-flash-lite': 128_000,
-  'gemini-2.5-flash-lite-preview-09-2025': 128_000,
   'gemini-2.5-flash': 1_000_000,
   'gemini-2.5-flash-preview-09-2025': 1_000_000,
   'gemini-2.5-pro': 1_000_000,
@@ -92,4 +90,3 @@ export function estimateCharBudget(tokens: number, fraction = 0.6): number {
   // Rough heuristic: ~4 chars per token; keep headroom via fraction
   return Math.floor((tokens * 4) * Math.max(0.1, Math.min(1, fraction)));
 }
-

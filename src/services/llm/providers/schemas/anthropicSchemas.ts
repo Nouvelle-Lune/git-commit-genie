@@ -28,6 +28,33 @@ export const RepoAnalysisJSONSchema = {
   required: ['summary', 'projectType', 'technologies', 'insights']
 } as const;
 
+export const RepoAnalysisActionJSONSchema = {
+  type: 'object',
+  properties: {
+    action: { type: 'string', enum: ['tool', 'final'] },
+    toolName: { type: 'string', enum: ['listDirectory', 'searchFiles', 'readFileContent', 'compressContext'] },
+    args: { type: 'object' },
+    reason: { type: 'string' },
+    final: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', minLength: 1 },
+        projectType: { type: 'string', minLength: 1 },
+        technologies: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 }
+        },
+        insights: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 }
+        }
+      },
+      required: ['summary', 'projectType', 'technologies', 'insights']
+    }
+  },
+  required: ['action']
+} as const;
+
 /**
  * Convenience tool descriptors for Anthropic Messages API
  */
@@ -41,6 +68,12 @@ export const AnthropicRepoAnalysisTool = {
   name: 'repo_analysis',
   description: 'Return a structured repository analysis as a JSON object.',
   input_schema: RepoAnalysisJSONSchema
+} as const;
+
+export const AnthropicRepoAnalysisActionTool = {
+  name: 'repo_analysis_action',
+  description: 'Return an action decision during repository analysis exploration.',
+  input_schema: RepoAnalysisActionJSONSchema
 } as const;
 
 // ----- Additional tools used in chain mode -----

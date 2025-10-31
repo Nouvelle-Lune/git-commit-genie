@@ -7,18 +7,21 @@ import { ProviderError } from '../errors/providerError';
 
 import { ChatMessage, RequestType } from "../../llmTypes";
 
-import { commitMessageSchema, fileSummarySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, repoAnalysisResponseSchema } from "../schemas/common";
+import { commitMessageSchema, fileSummarySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema } from "../schemas/common";
+import { OpenAIRepoAnalysisFunctions } from "../schemas/openaiFunctions";
 
 
 interface OpenAIRequestOptions {
     model: string;
     instructions?: string;
-    input: string;
+    input: any;
     max_output_tokens?: number;
     temperature?: number;
     text?: any;
     response_format?: any;
     requestType: RequestType;
+    previous_response_id?: string;
+    store?: boolean;
 }
 
 
@@ -42,8 +45,11 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             trackUsage?: boolean;
             maxTokens?: number;
             requestType: RequestType;
+            previousResponseId?: string;
+            store?: boolean;
+            toolOutputs?: Array<{ call_id: string; output: string }>; // For OpenAI Responses function_call_output
         }
-    ): Promise<{ parsedResponse?: any; usage?: any; parsedAssistantResponse?: any }> {
+    ): Promise<{ parsedResponse?: any; usage?: any; parsedAssistantResponse?: any; responseId?: string; functionCallId?: string }> {
         if (!client) {
             throw ProviderError.clientNotInitialized(options.provider);
         }
@@ -64,17 +70,36 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 const requestOptions = this.buildRequestOptions(options, messages);
 
                 if (options.provider.toLowerCase() === 'openai') {
-                    const response = await client.responses.parse(
-                        requestOptions,
-                        {
-                            signal: controller.signal
-                        }
+                    // Use Responses API with function calling for OpenAI
+                    const response = await client.responses.create(
+                        requestOptions as any,
+                        { signal: controller.signal }
                     );
-                    const parsedResponse = response.output_parsed;
-                    const usage = options.trackUsage ? response.usage : undefined;
-
-                    return { parsedResponse, usage };
-
+                    const output: any[] = (response as any)?.output || [];
+                    // Find first function call item, if any
+                    const fnCall = output.find((it: any) => it?.type === 'function_call');
+                    // Try to capture a brief reason from any assistant message in this response
+                    let reasonText = '';
+                    const msg = output.filter((it: any) => it?.type === 'message').pop();
+                    if (msg && Array.isArray(msg.content)) {
+                        const texts = msg.content.filter((c: any) => c?.type === 'output_text').map((c: any) => c?.text || '').filter(Boolean);
+                        reasonText = texts.join('\n').slice(0, 500);
+                    }
+                    if (fnCall && fnCall?.name) {
+                        const name = String(fnCall.name);
+                        const argsStr = String(fnCall.arguments || '{}');
+                        let args: any = {};
+                        try { args = JSON.parse(argsStr); } catch { args = {}; }
+                        const argReason = typeof args?.reason === 'string' ? args.reason : '';
+                        if (argReason) { reasonText = argReason; delete args.reason; }
+                        if (name === 'finalize') {
+                            const final = args || {};
+                            return { parsedResponse: { action: 'final', final }, usage: (response as any).usage, responseId: (response as any)?.id, functionCallId: String(fnCall.call_id || fnCall.id || '') };
+                        }
+                        return { parsedResponse: { action: 'tool', toolName: name, args, reason: reasonText }, usage: (response as any).usage, responseId: (response as any)?.id, functionCallId: String(fnCall.call_id || fnCall.id || '') };
+                    }
+                    // If no function call, treat as an error 
+                    throw new Error('OpenAI did not return a function call.');
                 }
                 if (options.provider.toLowerCase() === 'deepseek' || options.provider.toLowerCase() === 'qwen') {
                     const response = await client.chat.completions.create(
@@ -124,6 +149,9 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             temperature?: number;
             maxTokens?: number;
             requestType: RequestType;
+            previousResponseId?: string;
+            store?: boolean;
+            toolOutputs?: Array<{ call_id: string; output: string }>;
         },
         messages: ChatMessage[]
     ) {
@@ -134,15 +162,30 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 ['draft', { schema: classifyAndDraftResponseSchema, name: 'classifyAndDraftResponse' }],
                 ['fix', { schema: validateAndFixResponseSchema, name: 'validateAndFixResponse' }],
                 ['repoAnalysis', { schema: repoAnalysisResponseSchema, name: 'repoAnalysisResponse' }],
+                ['repoAnalysisAction', { schema: repoAnalysisActionSchema, name: 'repoAnalysisAction' }],
                 // Treat strictFix and enforceLanguage like commitMessage for schema purposes
                 ['strictFix', { schema: commitMessageSchema, name: 'commitMessage' }],
                 ['enforceLanguage', { schema: commitMessageSchema, name: 'commitMessage' }],
             ]);
 
-            const baseOptions = {
+            // Responses API supports either a string or a list of message-like items for `input`.
+            // Map our ChatMessage[] to EasyInputMessage[] and provide system guidance via `instructions`.
+            const systemMsg = messages.find(m => m.role === 'system')?.content || '';
+            const inputItems: any[] = messages
+                .filter(m => m.role !== 'system')
+                .map(m => ({ role: m.role, content: m.content }));
+            // Append function_call_output items if provided
+            if (options.toolOutputs && Array.isArray(options.toolOutputs) && options.toolOutputs.length) {
+                for (const item of options.toolOutputs) {
+                    if (item && typeof item.call_id === 'string' && typeof item.output === 'string') {
+                        inputItems.push({ type: 'function_call_output', call_id: item.call_id, output: item.output });
+                    }
+                }
+            }
+            const baseOptions: any = {
                 model: options.model,
-                instructions: messages.find(m => m.role === 'system')?.content || '',
-                input: messages.find(m => m.role === 'user')?.content || '',
+                instructions: systemMsg || undefined,
+                input: inputItems,
                 max_output_tokens: options.maxTokens,
             };
 
@@ -152,10 +195,26 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             }
 
             const schemaConfig = requestTypeSchemaMap.get(options.requestType);
-            if (schemaConfig) {
+            if (schemaConfig && options.requestType !== 'repoAnalysisAction') {
                 (baseOptions as OpenAIRequestOptions).text = {
                     format: zodTextFormat(schemaConfig.schema, schemaConfig.name)
                 };
+            }
+
+            // Enable OpenAI function calling for repoAnalysisAction
+            if (options.requestType === 'repoAnalysisAction') {
+                (baseOptions as any).tools = [...OpenAIRepoAnalysisFunctions];
+                // Force exactly one function call per turn and avoid free-form text responses.
+                (baseOptions as any).tool_choice = 'required';
+                (baseOptions as any).parallel_tool_calls = false;
+            }
+
+            // Chain responses using previous_response_id when provided
+            if (options.previousResponseId) {
+                (baseOptions as any).previous_response_id = options.previousResponseId;
+            }
+            if (typeof options.store === 'boolean') {
+                (baseOptions as any).store = options.store;
             }
 
             return baseOptions;

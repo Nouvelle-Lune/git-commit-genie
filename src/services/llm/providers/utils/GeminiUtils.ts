@@ -4,7 +4,7 @@ import { logger } from '../../../logger/index';
 import { ProviderError } from '../errors/providerError';
 
 import { Content, GoogleGenAI, GenerateContentConfig } from '@google/genai';
-import { ChatMessage } from '../../llmTypes';
+import { ChatMessage, RequestType } from '../../llmTypes';
 
 
 // Global type definitions for @google/genai compatibility
@@ -50,6 +50,10 @@ export class GeminiUtils extends BaseProviderUtils {
             trackUsage?: boolean;
             responseSchema?: any;
             systemInstruction?: string;
+            // Function calling (Gemini) support
+            requestType?: RequestType;
+            functionDeclarations?: any[];
+            // If needed later, we can add `functionResponse` parts support
         }
     ): Promise<{ parsedResponse?: any; usage?: any }> {
 
@@ -79,10 +83,21 @@ export class GeminiUtils extends BaseProviderUtils {
                     config.maxOutputTokens = options.maxTokens;
                 }
 
-                // Add structured output support
-                if (options.responseSchema) {
+                // Add structured output support for non-tool use cases
+                if (options.responseSchema && !options.functionDeclarations) {
                     config.responseMimeType = 'application/json';
                     config.responseSchema = options.responseSchema;
+                }
+
+                // Add Gemini function calling when functionDeclarations provided
+                if (Array.isArray(options.functionDeclarations) && options.functionDeclarations.length) {
+                    (config as any).tools = [{ functionDeclarations: options.functionDeclarations }];
+                    // Encourage the model to call functions rather than chat
+                    (config as any).toolConfig = {
+                        functionCallingConfig: {
+                            mode: 'any'
+                        }
+                    };
                 }
 
                 config.systemInstruction = chatContents.systemInstruction;
@@ -97,20 +112,63 @@ export class GeminiUtils extends BaseProviderUtils {
                     config: config,
                 });
 
-                const content = response.text ?? '';
                 const usage = options.trackUsage ? this.extractUsageFromResponse(response) : undefined;
 
-                // Parse JSON response if responseSchema is provided
-                let parsedResponse;
-                if (options.responseSchema && content) {
+                let parsedResponse: any = undefined;
+
+                // Function calling path: normalize to repoAnalysisAction-like action objects
+                if (Array.isArray(options.functionDeclarations) && options.functionDeclarations.length && options.requestType === 'repoAnalysisAction') {
+                    const fcTop = (response as any)?.functionCalls;
+                    let fnName: string | undefined;
+                    let fnArgs: any = {};
+
+
+                    fnName = String(fcTop[0]?.name || '');
+                    fnArgs = (fcTop[0]?.args) ?? {};
+
+                    if (!fnName) {
+                        // No function call; retry
+                        continue;
+                    }
+
+                    let reasonText = '';
+                    if (typeof fnArgs?.reason === 'string') {
+                        reasonText = String(fnArgs.reason);
+                        try { delete fnArgs.reason; } catch { /* ignore */ }
+                    }
+
+                    if (fnName === 'finalize') {
+                        parsedResponse = { action: 'final', final: fnArgs };
+                    } else {
+                        parsedResponse = { action: 'tool', toolName: fnName, args: fnArgs, reason: reasonText };
+                    }
+                } else if (options.responseSchema) {
+                    // Structured output path: extract and parse JSON from candidates
+                    let jsonText = '';
                     try {
-                        parsedResponse = JSON.parse(content);
-                    } catch (error) {
-                        continue; // Retry on JSON parse error
+                        const candidates = (response as any)?.candidates || [];
+                        const parts: any[] = candidates?.[0]?.content?.parts || [];
+                        const texts = parts
+                            .map((p: any) => typeof p?.text === 'string' ? p.text : '')
+                            .filter(Boolean);
+                        jsonText = texts.join('');
+                        if (!jsonText) {
+                            // Fallback to response.text if available
+                            jsonText = (response as any)?.text || '';
+                        }
+                    } catch { /* ignore */ }
+
+                    if (!jsonText) {
+                        // No JSON returned; retry
+                        continue;
+                    }
+                    try {
+                        parsedResponse = JSON.parse(jsonText);
+                    } catch {
+                        // Retry on parse failure
+                        continue;
                     }
                 }
-
-                // Token usage logging is handled at provider level to avoid duplication
 
                 return { parsedResponse, usage };
             } catch (e: any) {

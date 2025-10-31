@@ -11,10 +11,17 @@ import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { AnthropicUtils } from './utils/anthropicUtils';
 import { ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from '../baseLLMService';
-import { AnthropicCommitMessageTool, AnthropicFileSummaryTool, AnthropicClassifyAndDraftTool, AnthropicValidateAndFixTool } from './schemas/anthropicSchemas';
+import { 
+    AnthropicCommitMessageTool, 
+    AnthropicFileSummaryTool, 
+    AnthropicClassifyAndDraftTool, 
+    AnthropicValidateAndFixTool, 
+    AnthropicRepoAnalysisTool,
+    AnthropicRepoAnalysisActionTool
+} from './schemas/anthropicSchemas';
 import {
     fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
-    commitMessageSchema
+    commitMessageSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
 } from './schemas/common';
 
 const SECRET_ANTHROPIC_API_KEY = 'gitCommitGenie.secret.anthropicApiKey';
@@ -163,6 +170,8 @@ export class AnthropicService extends BaseLLMService {
                     case 'strictFix': return 'strict-fix';
                     case 'enforceLanguage': return 'lang-fix';
                     case 'commitMessage': return 'build-commit-msg';
+                    case 'repoAnalysis': return 'repo-analysis';
+                    case 'repoAnalysisAction': return 'repo-analysis-action';
                     default: return 'thinking';
                 }
             };
@@ -174,6 +183,8 @@ export class AnthropicService extends BaseLLMService {
                 commitMessage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
                 strictFix: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
                 enforceLanguage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
+                repoAnalysis: { tool: AnthropicRepoAnalysisTool, schema: repoAnalysisResponseSchema },
+                repoAnalysisAction: { tool: AnthropicRepoAnalysisActionTool, schema: repoAnalysisActionSchema },
             };
 
             const mapping = reqType ? toolMap[reqType] : undefined;

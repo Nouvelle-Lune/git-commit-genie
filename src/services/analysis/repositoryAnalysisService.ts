@@ -8,10 +8,8 @@ import {
     RepositoryAnalysis,
     CommitHistoryEntry,
     AnalysisConfig,
-    LLMAnalysisRequest,
     LLMAnalysisResponse,
     RepoAnalysisRunResult,
-    AnalysisPromptParts,
     RepositoryScanResult
 } from './analysisTypes';
 import { LLMService, LLMError, ChatMessage } from '../llm/llmTypes';
@@ -19,6 +17,8 @@ import { RepoService } from '../repo/repo';
 import { logger } from '../logger';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
 import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../llm/providers/config/providerConfig';
+import { AnthropicRepoAnalysisActionTool } from '../llm/providers/schemas/anthropicSchemas';
+import { GeminiRepoAnalysisFunctionDeclarations } from '../llm/providers/schemas/geminiFunctions';
 
 // Tools
 import { listDirectory } from './tools/directoryTools';
@@ -26,7 +26,7 @@ import { searchFiles } from './tools/searchTools';
 import { readFileContent } from './tools/fileTools';
 import { compressContext } from './tools/compressionTools';
 import { DirectoryEntry, SearchFilesResult, ToolResult } from './tools/toolTypes';
-import { getMaxContextByFunction, estimateCharBudget } from './tools/modelContext';
+import { getMaxContextByFunction } from './tools/modelContext';
 
 /**
  * Tool-driven repository analysis service
@@ -48,6 +48,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private context: vscode.ExtensionContext;
     private currentCancelSource?: vscode.CancellationTokenSource;
     private apiKeyWaiters: Map<string, vscode.Disposable> = new Map();
+    // In-flight guards to prevent duplicate work per repository
+    private initInflight: Map<string, Promise<RepoAnalysisRunResult>> = new Map();
+    private updateInflight: Map<string, Promise<RepoAnalysisRunResult>> = new Map();
 
     constructor(context: vscode.ExtensionContext, llmService: LLMService | null, repoService: RepoService) {
         this.context = context;
@@ -102,59 +105,75 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * @returns Result status: 'success' if completed, 'skipped' if disabled or cancelled, 'error' on failure
      */
     async initializeRepository(repositoryPath: string): Promise<RepoAnalysisRunResult> {
-        const cfg = this.getConfig();
-        this.currentCancelSource = new vscode.CancellationTokenSource();
-
-        if (!cfg.enabled) {
-            return 'skipped';
+        // Deduplicate concurrent initialization attempts for the same repository
+        const inflight = this.initInflight.get(repositoryPath);
+        if (inflight) {
+            logger.info('[Genie][RepoAnalysis] Initialization already in progress; waiting for result.');
+            return inflight;
         }
 
+        const task = (async (): Promise<RepoAnalysisRunResult> => {
+            const cfg = this.getConfig();
+            this.currentCancelSource = new vscode.CancellationTokenSource();
+
+            if (!cfg.enabled) {
+                return 'skipped';
+            }
+
+            try {
+                const existing = await this.getAnalysis(repositoryPath);
+                if (existing) {
+                    logger.info('[Genie][RepoAnalysis] Analysis exists, skip init.');
+                    return 'skipped';
+                }
+
+                logger.info(`[Genie][RepoAnalysis] Initializing for: ${repositoryPath}`);
+                const commitMessageLog = await this.repoService.getRepositoryGitMessageLog(repositoryPath);
+
+                const llmResp = await this.runAgenticAnalysis({
+                    repositoryPath,
+                    recentCommits: (commitMessageLog || []).slice(0, cfg.updateThreshold) || [],
+                    excludePatterns: cfg.excludePatterns || []
+                });
+                if (!llmResp) { return 'skipped'; }
+
+                if (this.currentCancelSource?.token.isCancellationRequested) {
+                    logger.warn('[Genie][RepoAnalysis] Initialization cancelled after LLM response; aborting save.');
+                    return 'skipped';
+                }
+
+                const historyAtInit = await this.getCommitHistory(repositoryPath);
+                const lastHashAtInit = historyAtInit.length > 0 ? historyAtInit[0].stateHash : undefined;
+                const analysis: RepositoryAnalysis = {
+                    repositoryPath,
+                    timestamp: new Date().toISOString(),
+                    lastAnalyzedStateHash: lastHashAtInit,
+                    summary: llmResp.summary,
+                    insights: llmResp.insights,
+                    projectType: llmResp.projectType,
+                    technologies: llmResp.technologies,
+                    // In tool-driven mode, we do not force a scan. Keep these optional
+                    keyDirectories: [],
+                    importantFiles: [],
+                    readmeContent: undefined,
+                    configFiles: {}
+                };
+
+                await this.saveAnalysis(repositoryPath, analysis);
+                await this.saveAnalysisMarkdown(repositoryPath, analysis);
+
+                logger.info('[Genie][RepoAnalysis] Initialization completed.');
+                return 'success';
+            } catch (error: any) {
+                return this.handleAnalysisError(error, 'Initialization');
+            }
+        })();
+
+        this.initInflight.set(repositoryPath, task);
         try {
-            const existing = await this.getAnalysis(repositoryPath);
-            if (existing) {
-                logger.info('[Genie][RepoAnalysis] Analysis exists, skip init.');
-                return 'skipped';
-            }
-
-            logger.info(`[Genie][RepoAnalysis] Initializing for: ${repositoryPath}`);
-            const commitMessageLog = await this.repoService.getRepositoryGitMessageLog(repositoryPath);
-
-            const llmResp = await this.runAgenticAnalysis({
-                repositoryPath,
-                recentCommits: (commitMessageLog || []).slice(0, cfg.updateThreshold) || [],
-                excludePatterns: cfg.excludePatterns || []
-            });
-            if (!llmResp) { return 'skipped'; }
-
-            if (this.currentCancelSource?.token.isCancellationRequested) {
-                logger.warn('[Genie][RepoAnalysis] Initialization cancelled after LLM response; aborting save.');
-                return 'skipped';
-            }
-
-            const historyAtInit = await this.getCommitHistory(repositoryPath);
-            const lastHashAtInit = historyAtInit.length > 0 ? historyAtInit[0].stateHash : undefined;
-            const analysis: RepositoryAnalysis = {
-                repositoryPath,
-                timestamp: new Date().toISOString(),
-                lastAnalyzedStateHash: lastHashAtInit,
-                summary: llmResp.summary,
-                insights: llmResp.insights,
-                projectType: llmResp.projectType,
-                technologies: llmResp.technologies,
-                // In tool-driven mode, we do not force a scan. Keep these optional
-                keyDirectories: [],
-                importantFiles: [],
-                readmeContent: undefined,
-                configFiles: {}
-            };
-
-            await this.saveAnalysis(repositoryPath, analysis);
-            await this.saveAnalysisMarkdown(repositoryPath, analysis);
-
-            logger.info('[Genie][RepoAnalysis] Initialization completed.');
-            return 'success';
-        } catch (error: any) {
-            return this.handleAnalysisError(error, 'Initialization');
+            return await task;
+        } finally {
+            this.initInflight.delete(repositoryPath);
         }
     }
 
@@ -171,56 +190,72 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * @returns Result status: 'success' if completed, 'skipped' if disabled or cancelled, 'error' on failure
      */
     async updateAnalysis(repositoryPath: string): Promise<RepoAnalysisRunResult> {
-        const cfg = this.getConfig();
-        if (!cfg.enabled) { return 'skipped'; }
-        this.currentCancelSource = new vscode.CancellationTokenSource();
+        // Deduplicate concurrent update attempts for the same repository
+        const inflight = this.updateInflight.get(repositoryPath);
+        if (inflight) {
+            logger.info('[Genie][RepoAnalysis] Update already in progress; waiting for result.');
+            return inflight;
+        }
 
+        const task = (async (): Promise<RepoAnalysisRunResult> => {
+            const cfg = this.getConfig();
+            if (!cfg.enabled) { return 'skipped'; }
+            this.currentCancelSource = new vscode.CancellationTokenSource();
+
+            try {
+                const existing = await this.getAnalysis(repositoryPath);
+                if (!existing) {
+                    return await this.initializeRepository(repositoryPath);
+                }
+
+                const commitHistory = await this.getCommitHistory(repositoryPath);
+                const recentCommits = commitHistory
+                    .slice(0, cfg.updateThreshold)
+                    .map(e => e.message);
+
+                const llmResp = await this.runAgenticAnalysis({
+                    repositoryPath,
+                    recentCommits,
+                    excludePatterns: cfg.excludePatterns || [],
+                    previousAnalysis: existing
+                });
+                if (!llmResp) { return 'skipped'; }
+
+                const lastHashNow = commitHistory.length > 0 ? commitHistory[0].stateHash : existing.lastAnalyzedStateHash;
+                const updated: RepositoryAnalysis = {
+                    ...existing,
+                    timestamp: new Date().toISOString(),
+                    lastAnalyzedStateHash: lastHashNow,
+                    summary: llmResp.summary,
+                    insights: llmResp.insights,
+                    projectType: llmResp.projectType,
+                    technologies: llmResp.technologies,
+                    // Keep previously saved structural hints if any
+                    keyDirectories: existing.keyDirectories || [],
+                    importantFiles: existing.importantFiles || [],
+                    readmeContent: existing.readmeContent,
+                    configFiles: existing.configFiles || {}
+                };
+
+                if (this.currentCancelSource?.token.isCancellationRequested) {
+                    logger.warn('[Genie][RepoAnalysis] Update cancelled after LLM response; aborting save.');
+                    return 'skipped';
+                }
+
+                await this.saveAnalysis(repositoryPath, updated);
+                await this.saveAnalysisMarkdown(repositoryPath, updated);
+                logger.info('[Genie][RepoAnalysis] Update completed.');
+                return 'success';
+            } catch (error: any) {
+                return this.handleAnalysisError(error, 'Update');
+            }
+        })();
+
+        this.updateInflight.set(repositoryPath, task);
         try {
-            const existing = await this.getAnalysis(repositoryPath);
-            if (!existing) {
-                return await this.initializeRepository(repositoryPath);
-            }
-
-            const commitHistory = await this.getCommitHistory(repositoryPath);
-            const recentCommits = commitHistory
-                .slice(0, cfg.updateThreshold)
-                .map(e => e.message);
-
-            const llmResp = await this.runAgenticAnalysis({
-                repositoryPath,
-                recentCommits,
-                excludePatterns: cfg.excludePatterns || [],
-                previousAnalysis: existing
-            });
-            if (!llmResp) { return 'skipped'; }
-
-            const lastHashNow = commitHistory.length > 0 ? commitHistory[0].stateHash : existing.lastAnalyzedStateHash;
-            const updated: RepositoryAnalysis = {
-                ...existing,
-                timestamp: new Date().toISOString(),
-                lastAnalyzedStateHash: lastHashNow,
-                summary: llmResp.summary,
-                insights: llmResp.insights,
-                projectType: llmResp.projectType,
-                technologies: llmResp.technologies,
-                // Keep previously saved structural hints if any
-                keyDirectories: existing.keyDirectories || [],
-                importantFiles: existing.importantFiles || [],
-                readmeContent: existing.readmeContent,
-                configFiles: existing.configFiles || {}
-            };
-
-            if (this.currentCancelSource?.token.isCancellationRequested) {
-                logger.warn('[Genie][RepoAnalysis] Update cancelled after LLM response; aborting save.');
-                return 'skipped';
-            }
-
-            await this.saveAnalysis(repositoryPath, updated);
-            await this.saveAnalysisMarkdown(repositoryPath, updated);
-            logger.info('[Genie][RepoAnalysis] Update completed.');
-            return 'success';
-        } catch (error: any) {
-            return this.handleAnalysisError(error, 'Update');
+            return await task;
+        } finally {
+            this.updateInflight.delete(repositoryPath);
         }
     }
 
@@ -376,20 +411,28 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             'You are an autonomous repository analysis agent. You can call tools to explore the repository and then produce a final structured analysis.',
             'Respond with STRICT JSON only, no markdown code fences.',
             'For every tool action, include a concise English "reason" describing what you will do next (e.g., "I will use searchFiles to look for framework imports").',
+            'If your provider supports function calling, always prefer calling the provided tools directly and do not output free-form plans. To finish, call the finalize tool with the final analysis object.',
             '',
-            'Action schema:',
+            'Action schema (discriminated union):',
             '{',
-            '  "action": "tool" | "final",',
-            '  "toolName"?: "listDirectory" | "searchFiles" | "readFileContent" | "compressContext",',
-            '  "args"?: object,',
-            '  "reason"?: string,',
-            '  "final"?: {',
+            '  // Tool branch:',
+            '  "action": "tool",',
+            '  "toolName": "listDirectory" | "searchFiles" | "readFileContent" | "compressContext",',
+            '  "args": object,',
+            '  "reason": string',
+            '}',
+            'OR',
+            '{',
+            '  // Final branch:',
+            '  "action": "final",',
+            '  "final": {',
             '     "summary": string,',
             '     "projectType": string,',
             '     "technologies": string[],',
             '     "insights": string[]',
             '  }',
             '}',
+            'Note: Always include all top-level keys required by the schema. When action is "tool", set "final" to null. When action is "final", set "toolName", "args", and "reason" to null.',
             '',
             'Tool catalog:'
         ].concat(toolsSpec.map(t => `- ${t.name} ${t.args}: ${t.desc}`)).join('\n');
@@ -425,19 +468,28 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     input.recentCommits?.length ? `Recent commits: ${input.recentCommits.slice(0, 5).map(c => `- ${c}`).join('\n')}` : undefined,
                     rootDirContext, // Include pre-fetched root directory structure
                     '',
-                    'Goal: Explore just enough to confidently infer project type, tech stack and any key insights. Minimize tool calls. When done, return action="final".'
+                    'Goal: Understanding the role of repositories and the impact of continuous changes on their functionality for other agents. When done, return action="final".'
                 ].filter(Boolean).join('\n')
             }
         ];
 
         // Track usage for all tool calls
         const usages: Array<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }> = [];
+        // Track OpenAI Responses API previous_response_id to chain state
+        let previousResponseId: string | undefined;
+        // Track OpenAI function calling pending tool output
+        let openaiPendingCallId: string | undefined;
+        let openaiPendingToolOutput: string | undefined;
         const { provider } = this.pickRepoAnalysisService();
         const model = this.getActiveModelForProvider(provider) || '';
+        const normalizedProvider = (provider || '').toLowerCase();
+        const qwenRegion = normalizedProvider === 'qwen'
+            ? (this.context.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl') as 'china' | 'intl')
+            : undefined;
 
 
         // Limit total thinking/acting steps to prevent runaway loops
-        const maxSteps = 12;
+        const maxSteps = 99;
         const maxContextTokens = getMaxContextByFunction('repoAnalysis', model);
         const contextThreshold = maxContextTokens * 0.9; // Force compress at 90% of context limit
 
@@ -463,7 +515,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     // Track compression usage
                     if (compressResult.usage) {
                         usages.push(compressResult.usage);
-                        logger.usage(repoPath, provider, compressResult.usage, model, `compression-step-${step + 1}`, step + 1);
+                        logger.usage(repoPath, provider, compressResult.usage, model, `compression-step-${step + 1}`, step + 1, qwenRegion);
                     }
 
                     if (compressResult.success && compressResult.data) {
@@ -482,16 +534,25 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 }
             }
 
-            const result = await this.safeJsonCall(msgs, repoPath);
+            const toolOutputToSend = openaiPendingCallId && openaiPendingToolOutput ? { call_id: openaiPendingCallId, output: openaiPendingToolOutput } : undefined;
+            const result = await this.safeJsonCall(msgs, repoPath, previousResponseId, toolOutputToSend);
             if (!result) { return null; }
 
             const action = result.action;
 
+            // For OpenAI Responses API, remember response id to improve multi-turn fidelity
+            if ((result as any).responseId) {
+                previousResponseId = (result as any).responseId;
+            }
+
             // Track usage
             if (result.usage) {
                 usages.push(result.usage);
-                logger.usage(repoPath, provider, result.usage, model, `tool-step-${step + 1}`, step + 1);
+                logger.usage(repoPath, provider, result.usage, model, `tool-step-${step + 1}`, step + 1, qwenRegion);
             }
+
+            // Clear sent tool output after successful call
+            if (toolOutputToSend) { openaiPendingCallId = undefined; openaiPendingToolOutput = undefined; }
 
             if (action.action === 'final') {
                 logger.info('[Genie][RepoAnalysis] Model produced final analysis.');
@@ -501,7 +562,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
                     // Log usage summary
                     if (usages.length) {
-                        logger.usageSummary(repoPath, provider, usages, model, 'RepoAnalysis', undefined, false);
+                        logger.usageSummary(repoPath, provider, usages, model, 'RepoAnalysis', undefined, false, qwenRegion);
                     }
 
                     return {
@@ -511,9 +572,11 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         projectType: f.projectType
                     };
                 }
-                // invalid final
-                logger.warn('[Genie][RepoAnalysis] Final action missing required fields; abort.');
-                return null;
+                // invalid final -> nudge model to return required fields instead of aborting
+                logger.warn('[Genie][RepoAnalysis] Final action missing required fields; requesting correction.');
+                msgs.push({ role: 'assistant', content: JSON.stringify(action) });
+                msgs.push({ role: 'user', content: 'The final object is missing required fields. Please return strictly valid JSON with fields: { "final": { "summary": string, "projectType": string, "technologies": string[], "insights": string[] } } and no extra text.' });
+                continue;
             }
 
             if (action.action === 'tool') {
@@ -522,9 +585,16 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 logger.info(`[Genie][RepoAnalysis] Step ${step + 1}: Model chose tool '${toolName}'. Reason: ${String(action.reason || '').slice(0, 500)}`);
                 const toolResult = await this.runTool(repoPath, toolName, args, userExcludes);
                 this.logToolOutcome(toolName, toolResult);
-                // Record assistant intent and tool result for next reasoning turn
-                msgs.push({ role: 'assistant', content: JSON.stringify(action) });
-                msgs.push({ role: 'user', content: `TOOL_RESULT(${toolName}): ${JSON.stringify(toolResult)}` });
+                // For OpenAI function calling, queue function_call_output instead of text TOOL_RESULT
+                if (provider.toLowerCase() === 'openai' && (result as any).functionCallId) {
+                    openaiPendingCallId = String((result as any).functionCallId || '');
+                    openaiPendingToolOutput = JSON.stringify(toolResult || {});
+                    // Do not append additional messages; function_call_output will be passed next turn
+                } else {
+                    // Other providers: keep text-based conversation
+                    msgs.push({ role: 'assistant', content: JSON.stringify(action) });
+                    msgs.push({ role: 'user', content: `TOOL_RESULT(${toolName}): ${JSON.stringify(toolResult)}` });
+                }
                 continue;
             }
 
@@ -534,7 +604,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
         // Log usage summary even if we didn't get final result
         if (usages.length) {
-            logger.usageSummary(repoPath, provider, usages, model, 'RepoAnalysis', undefined, false);
+            logger.usageSummary(repoPath, provider, usages, model, 'RepoAnalysis', undefined, false, qwenRegion);
         }
 
 
@@ -546,7 +616,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * Ensures temperature and token limits come from settings.
      * Returns both the parsed action and usage statistics.
      */
-    private async safeJsonCall(history: ChatMessage[], repoPath: string): Promise<{ action: any; usage?: any } | null> {
+    private async safeJsonCall(history: ChatMessage[], repoPath: string, previousResponseId?: string, openaiToolOutput?: { call_id: string; output: string }): Promise<{ action: any; usage?: any; responseId?: string; functionCallId?: string } | null> {
         try {
             const { provider, service } = this.pickRepoAnalysisService();
             if (!service) {
@@ -562,20 +632,64 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 throw Object.assign(new Error(`${provider} client is not initialized`), { statusCode: 401 });
             }
 
-            const result = await utils.callChatCompletion(client, history, {
+            // Get provider-specific schema and options
+            let callOptions: any = {
                 model,
                 provider,
                 token: this.currentCancelSource?.token,
-                trackUsage: true,
-                requestType: 'repoAnalysis'
-            });
+                trackUsage: true
+            };
+
+            // Apply provider-specific schema handling
+            switch (provider.toLowerCase()) {
+                case 'openai': {
+                    // OpenAI uses requestType for schema mapping
+                    callOptions.requestType = 'repoAnalysisAction';
+                    if (previousResponseId) {
+                        callOptions.previousResponseId = previousResponseId;
+                        callOptions.store = true;
+                    }
+                    break;
+                }
+                case 'anthropic': {
+                    // Use Anthropic schema
+                    callOptions.tools = [AnthropicRepoAnalysisActionTool];
+                    callOptions.toolChoice = { type: 'tool', name: AnthropicRepoAnalysisActionTool.name };
+                    break;
+                }
+                case 'gemini': {
+                    // Prefer Gemini native function calling for repoAnalysisAction
+                    callOptions.requestType = 'repoAnalysisAction';
+                    callOptions.functionDeclarations = [...GeminiRepoAnalysisFunctionDeclarations];
+                    break;
+                }
+                case 'qwen':
+                case 'deepseek': {
+                    // These providers use requestType like OpenAI
+                    callOptions.requestType = 'repoAnalysisAction';
+                    break;
+                }
+                default: {
+                    // Fallback to requestType
+                    callOptions.requestType = 'repoAnalysisAction';
+                    break;
+                }
+            }
+
+            if (provider.toLowerCase() === 'openai' && openaiToolOutput) {
+                callOptions.toolOutputs = [openaiToolOutput];
+            }
+
+            const result = await utils.callChatCompletion(client, history, callOptions);
 
             return {
                 action: result.parsedResponse,
-                usage: result.usage
+                usage: result.usage,
+                responseId: (result as any).responseId,
+                functionCallId: (result as any).functionCallId
             };
         } catch (err: any) {
-            const provider = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai');
+            const provider = this.pickRepoAnalysisService().provider;
             if (err?.statusCode) {
                 await this.handleLLMError({ message: err.message, statusCode: err.statusCode }, provider, repoPath);
                 return null;
@@ -622,6 +736,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     const ex = Array.isArray(args.excludePatterns) ? args.excludePatterns : excludePatterns;
                     const maxMatchesPerFile = typeof args.maxMatchesPerFile === 'number' ? args.maxMatchesPerFile : 5;
                     const contextLines = typeof args.contextLines === 'number' ? args.contextLines : 2;
+                    if (!query || query.trim().length === 0) {
+                        return { success: false, error: 'searchFiles.query must be a non-empty string' };
+                    }
                     logger.info(`[Genie][RepoAnalysis] Running searchFiles: type=${searchType}, query='${query}', useRegex=${useRegex}, path='${searchPath}', maxResults=${maxResults}`);
                     return await searchFiles(repoPath, query, { searchType, useRegex, searchPath, maxResults, caseSensitive, excludePatterns: ex, maxMatchesPerFile, contextLines });
                 }
@@ -723,9 +840,11 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 case 'compressContext': {
                     const origSize = typeof data?.originalSize === 'number' ? data.originalSize : 0;
                     const compSize = typeof data?.compressedSize === 'number' ? data.compressedSize : 0;
-                    const ratio = typeof data?.compressionRatio === 'number' ? (data.compressionRatio * 100).toFixed(1) + '%' : 'n/a';
+                    const delta = compSize - origSize;
+                    const pct = origSize > 0 ? Math.abs((delta / origSize) * 100).toFixed(1) + '%' : '0%';
+                    const direction = delta < 0 ? 'reduction' : (delta > 0 ? 'increase' : 'no change');
                     const summary = data?.summary || 'No summary';
-                    logger.info(`[Genie][RepoAnalysis] compressContext -> ${origSize} → ${compSize} chars (${ratio} reduction). ${summary}`);
+                    logger.info(`[Genie][RepoAnalysis] compressContext -> ${origSize} → ${compSize} chars (${pct} ${direction}). ${summary}`);
                     break;
                 }
                 default:

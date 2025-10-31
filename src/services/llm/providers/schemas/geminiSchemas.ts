@@ -130,3 +130,55 @@ export const GeminiRepoAnalysisSchema = {
         insights: createArrayType(createStringType(), "Key insights about the repository.")
     }
 };
+
+/**
+ * Schema for repository analysis action during exploration
+ */
+export const GeminiRepoAnalysisActionSchema = {
+    type: Type.OBJECT,
+    properties: {
+        action: createEnumType(['tool', 'final'], "Action type: 'tool' to call a tool, 'final' to provide final analysis"),
+        toolName: createEnumType(['listDirectory', 'searchFiles', 'readFileContent', 'compressContext'], "Tool to call when action is 'tool'"),
+        args: {
+            type: Type.OBJECT,
+            properties: {
+                // listDirectory
+                dirPath: createStringType("Absolute directory path inside repository (for listDirectory)"),
+                depth: createNumberType("Directory depth (for listDirectory)", 0),
+                excludePatterns: createArrayType(createStringType(), "Glob-like patterns to exclude (for listDirectory/searchFiles)"),
+                // searchFiles
+                query: createStringType("Search query (for searchFiles)"),
+                searchType: createEnumType(['name','content'], "Search type (for searchFiles)"),
+                useRegex: createBooleanType("Use regular expression (for searchFiles)"),
+                searchPath: createStringType("Path to search within (for searchFiles)"),
+                maxResults: createNumberType("Maximum results (for searchFiles)", 1),
+                caseSensitive: createBooleanType("Case sensitive (for searchFiles)"),
+                maxMatchesPerFile: createNumberType("Max matches per file (for searchFiles)", 1),
+                contextLines: createNumberType("Context lines for content search (for searchFiles)", 0),
+                // readFileContent
+                filePath: createStringType("Absolute file path inside repository (for readFileContent)"),
+                startLine: createNumberType("Start line (for readFileContent)", 1),
+                maxLines: createNumberType("Max lines (for readFileContent)", 1),
+                encoding: createStringType("Text encoding (for readFileContent)"),
+                // compressContext
+                content: createStringType("Content to compress (for compressContext)"),
+                targetTokens: createNumberType("Target tokens after compression (for compressContext)", 1),
+                preserveStructure: createBooleanType("Preserve structure (for compressContext)"),
+                language: createStringType("Language hint (for compressContext)")
+            },
+            description: "Arguments for the tool call - provide only relevant properties for the selected tool"
+        },
+        reason: createStringType("Brief explanation of what you will do next (required)"),
+        final: {
+            type: Type.OBJECT,
+            properties: {
+                summary: createStringType("Brief but comprehensive summary of the repository purpose and architecture"),
+                projectType: createStringType("Main project type (e.g., Web App, Library, CLI Tool, etc.)"),
+                technologies: createArrayType(createStringType(), "Array of main technologies used"),
+                insights: createArrayType(createStringType(), "Key architectural insights about the project")
+            },
+            description: "Final analysis result when action is 'final'"
+        }
+    },
+    required: ['action','reason']
+};

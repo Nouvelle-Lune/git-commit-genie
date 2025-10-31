@@ -79,7 +79,7 @@ export async function compressContext(
         const compressed = await chatFn([
             {
                 role: 'system',
-                content: 'You are an expert at compressing and summarizing information while preserving essential meaning and context. Your goal is to compress the content window for an AI agent. IMPORTANT: Return ONLY the compressed text content directly, without any JSON formatting, code blocks, or markdown wrappers.'
+                content: 'You are an expert at compressing and summarizing information while preserving essential meaning and context. Your goal is to compress the content window for an AI agent. IMPORTANT: Return ONLY a strict JSON object of the form { "compressed_content": string } with the compressed text. Do NOT include extra fields, code fences, markdown wrappers, or explanations.'
             },
             {
                 role: 'user',
@@ -112,7 +112,12 @@ export async function compressContext(
             }
         }
 
-        const compressedSize = cleanedCompressed.length;
+        // Minimal guard: if model expands, keep original to avoid bloat
+        let compressedSize = cleanedCompressed.length;
+        if (compressedSize >= originalSize) {
+            cleanedCompressed = content;
+            compressedSize = originalSize;
+        }
         const compressionRatio = 1 - (compressedSize / originalSize);
 
         // Generate summary of what was done
@@ -156,7 +161,9 @@ function buildCompressionPrompt(
         'Compress the following content by summarizing details.',
         'Keep core concepts, important decisions, and key findings.',
         'Remove examples unless they are crucial for understanding.',
-        'Focus on the most relevant information.'
+        'Focus on the most relevant information.',
+        'Do NOT add new information or expand descriptions.',
+        'Output MUST be strictly shorter than the input (fewer characters).'
     );
 
     // Add structure preservation instruction
@@ -185,11 +192,12 @@ function buildCompressionPrompt(
     if (targetTokens) {
         parts.push(
             '',
-            `Target output: approximately ${targetTokens} tokens (rough estimate: ${Math.floor(targetTokens * 4)} characters).`
+            `Target output: approximately ${targetTokens} tokens (rough estimate: ${Math.floor(targetTokens * 4)} characters).`,
+            'If needed to satisfy brevity, prefer concise wording and remove redundancies.'
         );
     }
 
-    // Add content
+    // Add content and output contract reminder
     parts.push(
         '',
         '---',
@@ -200,7 +208,7 @@ function buildCompressionPrompt(
         '',
         '---',
         '',
-        'Provide only the compressed version without any preamble or explanation.'
+        'Return only a strict JSON object: { "compressed_content": string }. No code fences or commentary.'
     );
 
     return parts.join('\n');
@@ -214,11 +222,17 @@ function generateCompressionSummary(
     compressedSize: number,
     preserveStructure: boolean
 ): string {
-    const reduction = ((1 - compressedSize / originalSize) * 100).toFixed(1);
+    const delta = compressedSize - originalSize;
+    const pct = originalSize > 0 ? Math.abs((delta / originalSize) * 100) : 0;
+    const pctText = `${pct.toFixed(1)}%`;
 
-    const parts: string[] = [
-        `Reduced from ${originalSize} to ${compressedSize} characters (${reduction}% reduction)`
-    ];
+    const changed = delta === 0
+        ? `No size change (${originalSize} chars)`
+        : delta < 0
+            ? `Reduced from ${originalSize} to ${compressedSize} characters (${pctText} reduction)`
+            : `Increased from ${originalSize} to ${compressedSize} characters (${pctText} increase)`;
+
+    const parts: string[] = [changed];
 
     if (preserveStructure) {
         parts.push('Preserved logical structure');

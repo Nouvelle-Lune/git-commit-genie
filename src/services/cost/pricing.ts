@@ -58,8 +58,7 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     },
     'gemini-2.5-flash': { input: 0.30, output: 2.50, cached: 0.075 },
     'gemini-2.5-flash-preview-09-2025': { input: 0.30, output: 2.50, cached: 0.075 },
-    'gemini-2.5-flash-lite': { input: 0.10, output: 0.40, cached: 0.025 },
-    'gemini-2.5-flash-lite-preview-09-2025': { input: 0.10, output: 0.40, cached: 0.025 },
+    // lite variants removed
 
     // DeepSeek (USD)
     'deepseek-chat': { input: 0.274, output: 0.411, cached: 0.027 },
