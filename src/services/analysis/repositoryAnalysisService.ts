@@ -2,8 +2,8 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
-import { exec } from 'child_process';
 import * as util from 'util';
+import { exec } from 'child_process';
 
 import {
     IRepositoryAnalysisService,
@@ -11,9 +11,9 @@ import {
     CommitHistoryEntry,
     AnalysisConfig,
     LLMAnalysisResponse,
-    RepoAnalysisRunResult,
-    RepositoryScanResult
+    RepoAnalysisRunResult
 } from './analysisTypes';
+
 import { LLMService, LLMError, ChatMessage } from '../llm/llmTypes';
 import { RepoService } from '../repo/repo';
 import { logger } from '../logger';
@@ -35,9 +35,7 @@ import { getMaxContextByFunction } from './tools/modelContext';
  * 
  * This module provides an LLM-driven repository analysis flow
  * where the model decides how to explore the repository by calling tools
- * (listDirectory, searchFiles, readFileContent, compressContext). It avoids
- * fixed scanning logic and stores results in the same structure as the
- * existing analysis.
+ * (listDirectory, searchFiles, readFileContent, compressContext).
  */
 export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private static readonly ANALYSIS_MD_FILE_NAME = 'repository-analysis.md';
@@ -572,7 +570,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
                     const compressResult = await this.runTool(repoPath, 'compressContext', {
                         content: conversationHistory,
-                        targetTokens: Math.floor(maxContextTokens * 0.3),
+                        targetTokens: Math.floor(maxContextTokens * 0.5),
                         preserveStructure: true
                     }, userExcludes);
 
@@ -1120,108 +1118,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         if (!s) { return ''; }
         if (s.length <= maxChars) { return s; }
         return s.slice(0, Math.max(0, maxChars - 8)) + '\n...[truncated]';
-    }
-
-    /**
-     * Normalizes repository scan results to ensure consistent structure
-     * 
-     * Handles potentially undefined or malformed scan results by
-     * providing default values and ensuring all expected properties exist.
-     * 
-     * @param raw The raw scan result to normalize
-     * @returns A normalized repository scan result
-     */
-    private normalizeScanResult(raw: RepositoryScanResult | undefined): RepositoryScanResult {
-        if (!raw) {
-            return {
-                keyDirectories: [],
-                importantFiles: [],
-                configFiles: {},
-                scannedFileCount: 0,
-                scanDuration: 0,
-            } as RepositoryScanResult;
-        }
-        const keyDirectories = Array.isArray(raw.keyDirectories) ? raw.keyDirectories : [];
-        const importantFiles = Array.isArray(raw.importantFiles) ? raw.importantFiles : [] as any;
-        const configFiles = raw.configFiles || {};
-        const scannedFileCount = typeof raw.scannedFileCount === 'number' ? raw.scannedFileCount : 0;
-        const scanDuration = typeof raw.scanDuration === 'number' ? raw.scanDuration : 0;
-        const readmeContent = typeof raw.readmeContent === 'string' ? raw.readmeContent : undefined;
-        return { keyDirectories, importantFiles, configFiles, scannedFileCount, scanDuration, readmeContent } as RepositoryScanResult;
-    }
-
-    /**
-     * Gathers additional repository signals to enhance analysis
-     * 
-     * Collects supplementary information about the repository structure,
-     * including root directory entries, potential entry files, language
-     * distribution, and framework signals.
-     * 
-     * @param repositoryPath The path to the repository
-     * @param excludePatterns Patterns to exclude from analysis
-     * @returns Object containing gathered signals
-     */
-    private async gatherAdditionalSignals(repositoryPath: string, excludePatterns: string[]): Promise<AugmentedSignals> {
-        const out: AugmentedSignals = {};
-        try {
-            // Root directory entries (depth=1)
-            const rootList = await listDirectory(repositoryPath, { depth: 1, excludePatterns });
-            if (rootList.success && rootList.data) {
-                out.rootEntries = rootList.data.entries;
-            }
-        } catch { /* ignore */ }
-
-        try {
-            // Potential entry files by common names
-            const entryRegex = '(?:^|/)(index|main|app|server)\.(ts|tsx|js|jsx|py|go|rb|php|java)$';
-            const entrySearch = await searchFiles(repositoryPath, entryRegex, {
-                searchType: 'name', useRegex: true, caseSensitive: false, maxResults: 200, excludePatterns
-            });
-            if (entrySearch.success && entrySearch.data) {
-                out.entryFiles = entrySearch.data.results.map(r => r.filePath);
-            }
-        } catch { /* ignore */ }
-
-        try {
-            // Language distribution signals from file extensions (sampled by name search)
-            const langRegex = '\\.(ts|tsx|js|jsx|py|rb|php|java|go|rs|cs|cpp|c|kt|swift)$';
-            const langSearch = await searchFiles(repositoryPath, langRegex, {
-                searchType: 'name', useRegex: true, caseSensitive: false, maxResults: 1000, excludePatterns
-            });
-            if (langSearch.success && langSearch.data) {
-                const counts: Record<string, number> = {};
-                for (const r of langSearch.data.results) {
-                    const ext = this.extOf(r.filePath);
-                    if (!ext) { continue; }
-                    counts[ext] = (counts[ext] || 0) + 1;
-                }
-                out.languageCounts = counts;
-            }
-        } catch { /* ignore */ }
-
-        try {
-            // Framework signals by content regex
-            const fwRegex = 'express\\(|fastify\\(|koa\\(|nestjs|next\\.|nuxt|react|vue|svelte|flask|django|spring|rails|laravel|gin\\.|beego|fiber|rocket|actix|asp\\.net|angular\\.module';
-            const frameworkSearch = await searchFiles(repositoryPath, fwRegex, {
-                searchType: 'content', useRegex: true, caseSensitive: false, maxResults: 200, excludePatterns, maxMatchesPerFile: 2, contextLines: 1
-            });
-            if (frameworkSearch.success) {
-                out.frameworkMatches = frameworkSearch.data as SearchFilesResult;
-            }
-        } catch { /* ignore */ }
-
-        return out;
-    }
-
-    /**
-     * Extracts the file extension from a path
-     * 
-     * @param relPath The file path to extract extension from
-     * @returns The lowercase file extension or null if not found
-     */
-    private extOf(relPath: string): string | null {
-        const m = relPath.match(/\.([a-zA-Z0-9]+)$/);
-        return m ? m[1].toLowerCase() : null;
     }
 
     /**

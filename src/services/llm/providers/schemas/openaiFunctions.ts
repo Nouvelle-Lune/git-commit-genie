@@ -1,5 +1,4 @@
 // OpenAI Responses API function definitions for repo analysis tools
-// These are strict JSON Schemas (no oneOf/anyOf) per OpenAI's structured tools requirements.
 
 export const OpenAIFunction_ListDirectory = {
   type: 'function',
