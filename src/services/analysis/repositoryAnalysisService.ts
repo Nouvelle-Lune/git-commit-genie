@@ -983,7 +983,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * 
      * Provides specific handling for common error scenarios:
      * - 401: Authentication errors (missing/invalid API key)
-     * - 400: Bad request errors (often missing model)
+     * - 400: Bad request errors
      * - 403: Permission errors (API key lacks permissions)
      * - 429: Rate limit errors
      * 
@@ -1005,14 +1005,10 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         }
         if (err?.statusCode === 400) {
             try {
-                const picked = await vscode.window.showWarningMessage(
-                    vscode.l10n.t(I18N.repoAnalysis.missingModel),
-                    vscode.l10n.t(I18N.actions.manageModels),
-                    vscode.l10n.t(I18N.actions.dismiss)
+                await vscode.window.showWarningMessage(
+                    `${err.message}`,
                 );
-                if (picked === vscode.l10n.t(I18N.actions.manageModels)) {
-                    void vscode.commands.executeCommand('git-commit-genie.manageModels');
-                }
+                void vscode.commands.executeCommand('git-commit-genie.cancelRepositoryAnalysis');
             } catch { }
             return null;
         }
