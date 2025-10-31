@@ -51,6 +51,10 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     // In-flight guards to prevent duplicate work per repository
     private initInflight: Map<string, Promise<RepoAnalysisRunResult>> = new Map();
     private updateInflight: Map<string, Promise<RepoAnalysisRunResult>> = new Map();
+    // Safety timers to auto-clear stuck in-flight entries
+    private initInflightTimers: Map<string, NodeJS.Timeout> = new Map();
+    private updateInflightTimers: Map<string, NodeJS.Timeout> = new Map();
+    private readonly inflightTimeoutMs = 10 * 60 * 1000; // 10 minutes
     // Promisified exec for git CLI usage
     private static readonly execPromise = util.promisify(exec);
 
@@ -172,10 +176,30 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         })();
 
         this.initInflight.set(repositoryPath, task);
+        // Safety: auto-clear if something gets stuck
+        try {
+            const oldTimer = this.initInflightTimers.get(repositoryPath);
+            if (oldTimer) { clearTimeout(oldTimer); }
+        } catch { /* ignore */ }
+        const timer = setTimeout(() => {
+            try {
+                if (this.initInflight.has(repositoryPath)) {
+                    this.initInflight.delete(repositoryPath);
+                    logger.warn(`[Genie][RepoAnalysis] Initialization in-flight guard expired; resetting for ${repositoryPath}`);
+                }
+            } catch { /* ignore */ }
+            this.initInflightTimers.delete(repositoryPath);
+        }, this.inflightTimeoutMs);
+        this.initInflightTimers.set(repositoryPath, timer);
         try {
             return await task;
         } finally {
             this.initInflight.delete(repositoryPath);
+            try {
+                const t = this.initInflightTimers.get(repositoryPath);
+                if (t) { clearTimeout(t); }
+            } catch { /* ignore */ }
+            this.initInflightTimers.delete(repositoryPath);
         }
     }
 
@@ -254,10 +278,30 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         })();
 
         this.updateInflight.set(repositoryPath, task);
+        // Safety: auto-clear if something gets stuck
+        try {
+            const oldTimer = this.updateInflightTimers.get(repositoryPath);
+            if (oldTimer) { clearTimeout(oldTimer); }
+        } catch { /* ignore */ }
+        const timer = setTimeout(() => {
+            try {
+                if (this.updateInflight.has(repositoryPath)) {
+                    this.updateInflight.delete(repositoryPath);
+                    logger.warn(`[Genie][RepoAnalysis] Update in-flight guard expired; resetting for ${repositoryPath}`);
+                }
+            } catch { /* ignore */ }
+            this.updateInflightTimers.delete(repositoryPath);
+        }, this.inflightTimeoutMs);
+        this.updateInflightTimers.set(repositoryPath, timer);
         try {
             return await task;
         } finally {
             this.updateInflight.delete(repositoryPath);
+            try {
+                const t = this.updateInflightTimers.get(repositoryPath);
+                if (t) { clearTimeout(t); }
+            } catch { /* ignore */ }
+            this.updateInflightTimers.delete(repositoryPath);
         }
     }
 
@@ -565,6 +609,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         const { provider } = this.pickRepoAnalysisService();
         const model = this.getActiveModelForProvider(provider) || '';
         const normalizedProvider = (provider || '').toLowerCase();
+
+        // For Qwen models, track region for usage logging
         const qwenRegion = normalizedProvider === 'qwen'
             ? (this.context.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl') as 'china' | 'intl')
             : undefined;
