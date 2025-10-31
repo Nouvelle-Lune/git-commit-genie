@@ -484,27 +484,29 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         let recentChangesContext = '';
         // Preserve changed file paths separately so they survive conversation compression
         let preservedChangedFiles = '';
-        // Keep structured commit diffs for building preserved list
-        let recentCommitDiffs: Array<{ hash: string; shortHash: string; subject: string; files: string[]; diff: string }> = [];
+        // Keep structured recent commit summaries (hash, subject, changed files)
+        let recentCommitFiles: Array<{ hash: string; shortHash: string; subject: string; files: string[] }> = [];
         if (isIncremental && commitWindowSize > 0) {
             try {
-                const commits = await this.getRecentCommitsWithDiffs(repoPath, commitWindowSize);
-                recentCommitDiffs = commits || [];
-                if (recentCommitDiffs.length) {
-                    const sections = recentCommitDiffs.map(c => {
+                const commits = await this.getRecentCommitsWithFiles(repoPath, commitWindowSize);
+                recentCommitFiles = commits || [];
+                if (recentCommitFiles.length) {
+                    const sections = recentCommitFiles.map(c => {
                         const filesLine = c.files.length ? `Files (${c.files.length}): ${c.files.join(', ')}` : 'Files: none';
-                        const diffIntro = c.diff ? `Diff:` : 'Diff: (none)';
                         return [
                             `- [${c.shortHash}] ${c.subject}`,
-                            filesLine,
-                            diffIntro,
-                            c.diff ? c.diff : undefined
+                            filesLine
                         ].filter(Boolean).join('\n');
                     });
-                    recentChangesContext = ['', '## Recent Commit Changes', ...sections].join('\n');
+                    // Intentionally omit raw diffs to reduce context size. Encourage targeted exploration.
+                    const header = [
+                        '## Recent Commit Changes',
+                        'Use commit messages together with the changed file names below to hypothesize impact. Raw diffs are intentionally omitted; prefer searchFiles and selective readFileContent when needed.'
+                    ];
+                    recentChangesContext = ['', ...header, ...sections].join('\n');
 
                     // Build preserved filenames block (no diffs) to keep across compression cycles
-                    const preserved = recentCommitDiffs.map(c => {
+                    const preserved = recentCommitFiles.map(c => {
                         const filesLine = c.files.length ? c.files.join(', ') : '(none)';
                         return `- [${c.shortHash}] ${c.subject}\n  Files (${c.files.length}): ${filesLine}`;
                     }).join('\n');
@@ -514,6 +516,24 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 logger.warn('[Genie][RepoAnalysis] Failed to gather recent commit diffs', err as any);
             }
         }
+
+        // Build recent commits block, annotated with changed files when available
+        let recentCommitsBlock = '';
+        if (Array.isArray(input.recentCommits) && input.recentCommits.length > 0) {
+            if (recentCommitFiles.length > 0) {
+                const lines = recentCommitFiles.map((c, i) => {
+                    const filesLine = c.files.length ? `Files (${c.files.length}): ${c.files.join(', ')}` : 'Files: none';
+                    return `C${i + 1}: ${c.subject}\n${filesLine}`;
+                }).join('\n');
+                recentCommitsBlock = `Recent commits (last ${commitWindowSize}):\n${lines}`;
+            } else {
+                recentCommitsBlock = `Recent commits (last ${commitWindowSize}):\n${input.recentCommits.map((c, i) => `C${i + 1}: ${c}`).join('\n')}`;
+            }
+        }
+
+        // If we have annotated recent commits with files above, we don't need
+        // the separate Recent Commit Changes section to avoid duplication.
+        const includeRecentChangesSection = !(Array.isArray(recentCommitFiles) && recentCommitFiles.length > 0);
 
         let msgs: ChatMessage[] = [
             { role: 'system', content: system },
@@ -525,10 +545,10 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     input.previousAnalysis ? `Previous technologies: ${(input.previousAnalysis.technologies || []).join(', ')}` : undefined,
                     input.previousAnalysis ? `Previous insights: ${(input.previousAnalysis.insights || []).join('; ')}` : undefined,
                     isIncremental ? `Analysis mode: incremental (review at most ${commitWindowSize} commits; update only if material change).` : 'Analysis mode: initial',
-                    input.recentCommits?.length ? `Recent commits (last ${commitWindowSize}):\n${input.recentCommits.map((c, i) => `C${i + 1}: ${c}`).join('\n')}` : undefined,
+                    recentCommitsBlock || undefined,
                     isIncremental ? 'Use commit messages above to hypothesize impacted areas. Prefer targeted searchFiles and a few readFileContent calls to verify. Avoid full scans.' : undefined,
                     rootDirContext, // Include pre-fetched root directory structure
-                    recentChangesContext, // Include git show-style summary when in incremental mode
+                    includeRecentChangesSection ? recentChangesContext : undefined, // Avoid duplication
                     '',
                     'Goal: Provide global context strictly for commit message generation. In incremental mode, focus on whether the latest commits change repository functionality or architecture, and finalize early if not. Include an insights line starting with "Incremental:" that states whether a repo-level update is needed and why. When done, return action="final".'
                 ].filter(Boolean).join('\n')
@@ -1255,59 +1275,61 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     }
 
     /**
-     * Pull recent commits with changed files and trimmed diff content (git show approximation).
-     * Keeps strict budgets to avoid bloating the prompt.
+     * Pull recent commits with changed files using a single git log call (no raw diffs).
+     * Uses a record separator to delineate commits and parses file lists under each commit.
      */
-    private async getRecentCommitsWithDiffs(
+    private async getRecentCommitsWithFiles(
         repoPath: string,
         n: number
-    ): Promise<Array<{ hash: string; shortHash: string; subject: string; files: string[]; diff: string }>> {
+    ): Promise<Array<{ hash: string; shortHash: string; subject: string; files: string[] }>> {
         try {
             if (!n || n <= 0) { return []; }
 
-            // Ensure we are inside a git repo; if not, bail silently
             try {
                 const { stdout } = await this.git(repoPath, 'git rev-parse --is-inside-work-tree');
                 if (!stdout.toString().trim().startsWith('true')) { return []; }
             } catch { return []; }
 
-            const logFormat = '%H%x1f%s%x1e';
-            const { stdout: logStdout } = await this.git(repoPath, `git log -n ${Math.max(1, n)} --pretty=format:${logFormat}`);
-            const entries = logStdout.split('\x1e').map(s => s.trim()).filter(Boolean);
-            const commits: Array<{ hash: string; subject: string }> = entries.map(line => {
-                const [hash, subject] = line.split('\x1f');
-                return { hash: (hash || '').trim(), subject: (subject || '').trim() };
-            }).filter(e => e.hash);
+            const logFormat = '%x1e%H%x1f%s%n';
+            const { stdout: logStdout } = await this.git(
+                repoPath,
+                `git log -n ${Math.max(1, n)} --pretty=format:${logFormat} --name-only --no-color`
+            );
 
-            const out: Array<{ hash: string; shortHash: string; subject: string; files: string[]; diff: string }> = [];
+            const chunks = (logStdout || '').toString().split('\x1e');
+            const out: Array<{ hash: string; shortHash: string; subject: string; files: string[] }> = [];
 
-            for (const c of commits) {
-                let files: string[] = [];
-                let diff = '';
+            for (const raw of chunks) {
+                const chunk = raw.trim();
+                if (!chunk) { continue; }
 
-                try {
-                    const { stdout: filesStdout } = await this.git(repoPath, `git show --name-only --pretty="" --no-color ${c.hash}`);
-                    files = filesStdout.split('\n').map(f => f.trim()).filter(Boolean);
-                } catch { files = []; }
+                const idx = chunk.indexOf('\n');
+                const header = idx >= 0 ? chunk.slice(0, idx) : chunk;
+                const filesBlock = idx >= 0 ? chunk.slice(idx + 1) : '';
 
-                try {
-                    // Patch only, no extra headers
-                    const { stdout: diffStdout } = await this.git(repoPath, `git show --no-color --patch --unified=3 --pretty=format: ${c.hash}`);
-                    diff = (diffStdout || '').toString();
-                } catch { diff = ''; }
+                const [hashRaw, subjectRaw] = header.split('\x1f');
+                const hash = (hashRaw || '').trim();
+                const subject = (subjectRaw || '').trim();
+                if (!hash) { continue; }
+
+                const files = Array.from(new Set(
+                    filesBlock
+                        .split('\n')
+                        .map(s => s.trim())
+                        .filter(line => !!line && !line.includes('\x1f') && !line.includes('\x1e'))
+                ));
 
                 out.push({
-                    hash: c.hash,
-                    shortHash: c.hash.slice(0, 7),
-                    subject: c.subject,
-                    files,
-                    diff
+                    hash,
+                    shortHash: hash.slice(0, 7),
+                    subject,
+                    files
                 });
             }
 
             return out;
         } catch (error) {
-            logger.warn('[Genie][RepoAnalysis] getRecentCommitsWithDiffs failed', error as any);
+            logger.warn('[Genie][RepoAnalysis] getRecentCommitsWithFiles failed', error as any);
             return [];
         }
     }
@@ -1374,4 +1396,3 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     }
 
 }
-
