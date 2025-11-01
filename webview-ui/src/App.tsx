@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { RepoSection } from './components/RepoSection';
 import { QuickActions } from './components/QuickActions';
 import { Statistics } from './components/Statistics';
 import { ThemeColor } from './components/ThemeColor';
@@ -13,11 +12,33 @@ interface Message {
     [key: string]: any;
 }
 
+interface I18nTexts {
+    repositoryList: string;
+    switchRepo: string;
+    quickActions: string;
+    generateCommit: string;
+    analyzeRepo: string;
+    statistics: string;
+    todayLabel: string;
+    totalLabel: string;
+    themeColor: string;
+}
+
 export const App: React.FC = () => {
-    const [repoName, setRepoName] = useState<string>('');
-    const [showSwitchButton, setShowSwitchButton] = useState<boolean>(false);
+    const [repositories, setRepositories] = useState<Array<{ name: string; path: string; cost: number }>>([]);
     const [todayCount, setTodayCount] = useState<number>(0);
     const [totalCount, setTotalCount] = useState<number>(0);
+    const [i18n, setI18n] = useState<I18nTexts>({
+        repositoryList: 'Repository List',
+        switchRepo: 'Switch Repository',
+        quickActions: 'Quick Actions',
+        generateCommit: 'Generate Commit Message',
+        analyzeRepo: 'Analyze Repository',
+        statistics: 'Statistics',
+        todayLabel: 'Today:',
+        totalLabel: 'Total:',
+        themeColor: 'Theme Color'
+    });
 
     useEffect(() => {
         // Handle messages from the extension
@@ -29,8 +50,12 @@ export const App: React.FC = () => {
                     setTotalCount(message.totalCount);
                     break;
                 case 'updateRepo':
-                    setRepoName(message.repoName);
-                    setShowSwitchButton(message.showSwitchButton);
+                    if (message.repositories) {
+                        setRepositories(message.repositories);
+                    }
+                    if (message.i18n) {
+                        setI18n(message.i18n);
+                    }
                     break;
             }
         };
@@ -44,10 +69,6 @@ export const App: React.FC = () => {
             window.removeEventListener('message', messageHandler);
         };
     }, []);
-
-    const handleSwitchRepo = () => {
-        vscode.postMessage({ type: 'switchRepo' });
-    };
 
     const handleGenerateCommit = () => {
         vscode.postMessage({ type: 'generateCommit' });
@@ -65,24 +86,46 @@ export const App: React.FC = () => {
         <div className="container">
             <h2>🧞 Git Commit Genie</h2>
 
-            {showSwitchButton && (
-                <RepoSection
-                    repoName={repoName}
-                    onSwitchRepo={handleSwitchRepo}
-                />
+            {repositories.length > 0 && (
+                <div className="section repo-section">
+                    <h3>{i18n.repositoryList}</h3>
+                    <div className="repo-list">
+                        {repositories.map((repo, index) => (
+                            <div key={index} className="repo-item">
+                                <span className="repo-name">{repo.name}</span>
+                                <span className="repo-cost">${repo.cost.toFixed(4)}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
             )}
 
             <QuickActions
                 onGenerateCommit={handleGenerateCommit}
                 onAnalyzeRepo={handleAnalyzeRepo}
+                i18n={{
+                    title: i18n.quickActions,
+                    generateCommit: i18n.generateCommit,
+                    analyzeRepo: i18n.analyzeRepo
+                }}
             />
 
             <Statistics
                 todayCount={todayCount}
                 totalCount={totalCount}
+                i18n={{
+                    title: i18n.statistics,
+                    todayLabel: i18n.todayLabel,
+                    totalLabel: i18n.totalLabel
+                }}
             />
 
-            <ThemeColor onColorSelected={handleColorSelected} />
+            <ThemeColor
+                onColorSelected={handleColorSelected}
+                i18n={{
+                    title: i18n.themeColor
+                }}
+            />
         </div>
     );
 };

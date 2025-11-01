@@ -37,8 +37,7 @@ export class ExtensionManager {
             await this.eventManager.initialize();
 
             // Register webview provider AFTER all services are initialized
-            const repoService = this.serviceRegistry.getRepoService();
-            this.WebviewProvider = new WebviewProvider(this.context.extensionUri, repoService);
+            this.WebviewProvider = new WebviewProvider(this.context.extensionUri, this.serviceRegistry);
 
             const provider = this.WebviewProvider;
 

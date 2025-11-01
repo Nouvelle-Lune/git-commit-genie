@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { RepoService } from '../services/repo';
-import { Repository } from '../services/git/git';
+import { ServiceRegistry } from '../core/ServiceRegistry';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import * as path from 'path';
 
@@ -12,13 +11,31 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'gitCommitGenie.panel';
 
     private _view?: vscode.WebviewView;
-    private _repoService: RepoService;
+    private _serviceRegistry: ServiceRegistry;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
-        repoService: RepoService,
+        serviceRegistry: ServiceRegistry,
     ) {
-        this._repoService = repoService;
+        this._serviceRegistry = serviceRegistry;
+
+        // Listen for repository changes
+        const gitApi = this._serviceRegistry.getRepoService().getGitApi();
+        if (gitApi) {
+            gitApi.onDidOpenRepository(() => {
+                // Update webview when new repositories are opened
+                if (this._view) {
+                    this._sendRepoData().catch(err => console.error('Failed to send repo data on repo open:', err));
+                }
+            });
+
+            gitApi.onDidCloseRepository(() => {
+                // Update webview when repositories are closed
+                if (this._view) {
+                    this._sendRepoData().catch(err => console.error('Failed to send repo data on repo close:', err));
+                }
+            });
+        }
     }
 
     public resolveWebviewView(
@@ -39,15 +56,15 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
-        // Send initial data to webview
-        this._sendRepoData();
+        // Send initial data to webview (async)
+        this._sendRepoData().catch(err => console.error('Failed to send repo data:', err));
 
         // Handle messages from the webview
         webviewView.webview.onDidReceiveMessage(async data => {
             switch (data.type) {
                 case 'ready':
                     // Webview is ready, send initial data
-                    this._sendRepoData();
+                    await this._sendRepoData();
                     break;
                 case 'colorSelected':
                     {
@@ -62,11 +79,6 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 case 'analyzeRepo':
                     {
                         vscode.commands.executeCommand('gitCommitGenie.repoAnalysis.refresh');
-                        break;
-                    }
-                case 'switchRepo':
-                    {
-                        await this._handleSwitchRepository();
                         break;
                     }
             }
@@ -92,77 +104,35 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
     /**
      * Send repository data to webview
      */
-    private _sendRepoData(): void {
-        const repoName = this._getCurrentRepoName();
-        const repositories = this._repoService.getRepositories();
-        const showSwitchButton = repositories.length > 1;
+    private async _sendRepoData(): Promise<void> {
+        const repoService = this._serviceRegistry.getRepoService();
+        const costService = this._serviceRegistry.getCostTrackingService();
+        const repositories = repoService.getRepositories();
+
+        // Get all repository costs
+        const repoCosts: Array<{ name: string; path: string; cost: number }> = [];
+        for (const repo of repositories) {
+            const repoPath = repo.rootUri.fsPath;
+            const repoName = path.basename(repoPath);
+            const cost = await costService.getRepositoryCost(repoPath);
+            repoCosts.push({ name: repoName, path: repoPath, cost });
+        }
 
         this.sendMessage({
             type: 'updateRepo',
-            repoName,
-            showSwitchButton
-        });
-    }
-
-    /**
-     * Handle repository switch request
-     */
-    private async _handleSwitchRepository(): Promise<void> {
-        const repositories = this._repoService.getRepositories();
-
-        if (repositories.length === 0) {
-            vscode.window.showInformationMessage(vscode.l10n.t(I18N.common.noGitRepository));
-            return;
-        }
-
-        if (repositories.length === 1) {
-            vscode.window.showInformationMessage(vscode.l10n.t(I18N.common.onlyOneRepository));
-            return;
-        }
-
-        const items = repositories.map(repo => {
-            const repoPath = repo.rootUri.fsPath;
-            const repoName = path.basename(repoPath);
-            const activeRepo = this._repoService.getActiveRepository();
-            const isActive = activeRepo?.rootUri.fsPath === repoPath;
-
-            return {
-                label: isActive ? `$(check) ${repoName}` : repoName,
-                description: repoPath,
-                repo: repo
-            };
-        });
-
-        const selected = await vscode.window.showQuickPick(items, {
-            placeHolder: vscode.l10n.t(I18N.repoAnalysis.selectRepository)
-        });
-
-        if (selected) {
-            // Switch to the selected repository by opening a file in that repo
-            const files = await vscode.workspace.findFiles(
-                new vscode.RelativePattern(selected.repo.rootUri, '**/*'),
-                '**/node_modules/**',
-                1
-            );
-
-            if (files.length > 0) {
-                await vscode.window.showTextDocument(files[0], { preview: false });
+            repositories: repoCosts,
+            i18n: {
+                repositoryList: vscode.l10n.t(I18N.dashboard.repositoryList),
+                switchRepo: vscode.l10n.t(I18N.dashboard.switchRepo),
+                quickActions: vscode.l10n.t(I18N.dashboard.quickActions),
+                generateCommit: vscode.l10n.t(I18N.dashboard.generateCommit),
+                analyzeRepo: vscode.l10n.t(I18N.dashboard.analyzeRepo),
+                statistics: vscode.l10n.t(I18N.dashboard.statistics),
+                todayLabel: vscode.l10n.t(I18N.dashboard.todayLabel),
+                totalLabel: vscode.l10n.t(I18N.dashboard.totalLabel),
+                themeColor: vscode.l10n.t(I18N.dashboard.themeColor)
             }
-
-            // Update the webview content to reflect the new repository
-            this._sendRepoData();
-        }
-    }
-
-    /**
-     * Get current repository display name
-     */
-    private _getCurrentRepoName(): string {
-        const activeRepo = this._repoService.getActiveRepository();
-        if (!activeRepo) {
-            return vscode.l10n.t(I18N.dashboard.noRepo);
-        }
-        return path.basename(activeRepo.rootUri.fsPath);
+        });
     }
 
     private _getHtmlForWebview(webview: vscode.Webview): string {

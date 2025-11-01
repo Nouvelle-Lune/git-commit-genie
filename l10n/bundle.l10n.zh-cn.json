@@ -96,7 +96,19 @@
   "For mainland China API keys": "使用中国 API Key",
   "Generation already running for this repository.": "此仓库已有正在进行的生成任务。",
   "No Git repository found.": "未找到 Git 仓库。",
+  "Only one repository available": "只有一个仓库可用",
+  "Current active repository": "当前活动仓库",
   "Failed to create template directory": "创建模板目录失败",
   "Repository analysis request limit reached, reset request count and continue task?": "仓库分析请求次数已达到上限，是否重置请求计数并继续任务？",
-  "Reset and continue": "重置并继续"
+  "Reset and continue": "重置并继续",
+  "Quick Actions": "快捷操作",
+  "Generate Commit Message": "生成提交信息",
+  "Analyze Repository": "分析仓库",
+  "Statistics": "统计",
+  "Today:": "今日：",
+  "Total:": "总计：",
+  "Repository List": "仓库列表",
+  "Switch Repository": "切换仓库",
+  "No repository": "无仓库",
+  "Theme Color": "主题颜色"
 }

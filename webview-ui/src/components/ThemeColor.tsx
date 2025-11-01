@@ -3,11 +3,14 @@ import './ThemeColor.css';
 
 interface ThemeColorProps {
     onColorSelected: (color: string) => void;
+    i18n: {
+        title: string;
+    };
 }
 
 const colors = ['#007acc', '#68217a', '#0e7c86', '#dd5144'];
 
-export const ThemeColor: React.FC<ThemeColorProps> = ({ onColorSelected }) => {
+export const ThemeColor: React.FC<ThemeColorProps> = ({ onColorSelected, i18n }) => {
     const [selectedColor, setSelectedColor] = useState<string | null>(null);
 
     const handleColorClick = (color: string) => {
@@ -17,7 +20,7 @@ export const ThemeColor: React.FC<ThemeColorProps> = ({ onColorSelected }) => {
 
     return (
         <div className="section">
-            <h3>Theme Color</h3>
+            <h3>{i18n.title}</h3>
             <div className="color-picker">
                 {colors.map((color) => (
                     <button

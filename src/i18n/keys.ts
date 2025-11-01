@@ -181,7 +181,7 @@ export const L10N_KEYS = {
     statistics: 'Statistics',
     todayLabel: 'Today:',
     totalLabel: 'Total:',
-    currentRepo: 'Current Repository',
+    repositoryList: 'Repository List',
     switchRepo: 'Switch Repository',
     noRepo: 'No repository',
     themeColor: 'Theme Color'

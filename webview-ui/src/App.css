@@ -36,3 +36,43 @@ h3 {
 .section:last-child {
     border-bottom: none;
 }
+
+.repo-section h3 {
+    margin-bottom: 12px;
+}
+
+.repo-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.repo-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background-color: var(--vscode-input-background);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 4px;
+    transition: background-color 0.2s;
+}
+
+.repo-item:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.repo-name {
+    font-weight: 500;
+    color: var(--vscode-foreground);
+}
+
+.repo-cost {
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 12px;
+    color: var(--vscode-charts-green);
+    background-color: var(--vscode-badge-background);
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+}

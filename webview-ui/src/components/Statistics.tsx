@@ -4,19 +4,24 @@ import './Statistics.css';
 interface StatisticsProps {
     todayCount: number;
     totalCount: number;
+    i18n: {
+        title: string;
+        todayLabel: string;
+        totalLabel: string;
+    };
 }
 
-export const Statistics: React.FC<StatisticsProps> = ({ todayCount, totalCount }) => {
+export const Statistics: React.FC<StatisticsProps> = ({ todayCount, totalCount, i18n }) => {
     return (
         <div className="section">
-            <h3>Statistics</h3>
+            <h3>{i18n.title}</h3>
             <div className="stats">
                 <div className="stat-item">
-                    <span className="stat-label">Today:</span>
+                    <span className="stat-label">{i18n.todayLabel}</span>
                     <span className="stat-value">{todayCount}</span>
                 </div>
                 <div className="stat-item">
-                    <span className="stat-label">Total:</span>
+                    <span className="stat-label">{i18n.totalLabel}</span>
                     <span className="stat-value">{totalCount}</span>
                 </div>
             </div>
