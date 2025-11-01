@@ -3,6 +3,7 @@ import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { WebviewMessage, ExtensionMessage, RepositoryInfo } from './types/messages';
+import { logger } from '../services/logger';
 
 /**
  * WebviewViewProvider for Git Commit Genie panel
@@ -41,6 +42,14 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 })
             );
         }
+
+        // Listen to cost changes
+        const costService = this._serviceRegistry.getCostTrackingService();
+        this._disposables.push(
+            costService.onCostChanged(() => {
+                this._handleRepositoryChange();
+            })
+        );
     }
 
     /**
@@ -49,7 +58,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
     private _handleRepositoryChange(): void {
         if (this._view) {
             this.sendRepositoryData().catch(err =>
-                console.error('Failed to send repository data:', err)
+                logger.error('[WebviewProvider] Failed to send repository data:', err)
             );
         }
     }
