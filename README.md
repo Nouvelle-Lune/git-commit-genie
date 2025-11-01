@@ -47,7 +47,7 @@ Basic format:
 | Feature                         | Description                                                                                                                                                                                               |
 | ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Multi‑provider LLM support      | Supports OpenAI, DeepSeek, Anthropic, Gemini, Qwen.                                                                                                                                                       |
-| Repository Intelligence         | Automatically analyzes project structure, tech stack, and architecture to provide context for better commit messages; supports manual refresh, real-time updates, and manual editing of analysis reports. |
+| Repository Intelligence         | AI-powered repository analysis agent that autonomously explores your codebase using intelligent tools; automatically understands project structure, tech stack, and architecture to provide contextual insights for better commit messages; supports manual refresh, real-time updates, and editable analysis reports. |
 | Thinking Mode                   | Optional multi‑step pipeline: per‑file summaries → structured synthesis → validation & minimal fix‑ups (improves accuracy & template adherence).                                                          |
 | User Template Strategy          | Built-in template selection and creation, supports workspace and user data directory storage, extracts strategy affecting structure, required footers, and vocabulary preferences.                        |
 | Conventional Commit Enforcement | Header validation (type, optional scope, optional `!`, ≤ 72 chars, imperative, no trailing period).                                                                                                       |
@@ -101,6 +101,7 @@ All settings are under: `Git Commit Genie`.
 | `gitCommitGenie.repositoryAnalysis.enabled`         | boolean | true    | Enable repository analysis to provide better context for commit message generation.                                                                                                                                                                                 |
 | `gitCommitGenie.repositoryAnalysis.excludePatterns` | array   | []      | File patterns to exclude from repository analysis scanning (gitignore-style).                                                                                                                                                                                       |
 | `gitCommitGenie.repositoryAnalysis.updateThreshold` | number  | 10      | Number of commits after which to update the repository analysis.                                                                                                                                                                                                    |
+| `gitCommitGenie.repositoryAnalysis.MaxCount`        | number  | unlimited | Maximum number of analysis steps allowed during repository exploration. Set to -1 for unlimited steps (default).                                                                                                                                                 |
 | `gitCommitGenie.repositoryAnalysis.model`           | enum    | general | Model used for repository analysis. Pick any supported model across providers; the provider automatically switches to match your selection. Choose "Use default model" to reuse your main commit message model. You can configure this via "Manage Models" command. |
 | `gitCommitGenie.commitLanguage`                     | string  | `auto`  | Target language for generated commit messages. Options: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`.                                                                                                                             |
 | `gitCommitGenie.typingAnimationSpeed`               | number  | 15      | Speed of the commit message box typing animation in milliseconds per character. Set to -1 to disable the animation.                                                                                                                                                 |
@@ -117,10 +118,10 @@ Search these in the Command Palette:
 - Git Commit Genie: Manage Models
 - Git Commit Genie: Enable / Disable thinking mode
 - Git Commit Genie: Select/Create Template
-- Git Commit Genie: View Repository Analysis
-- Git Commit Genie: Refresh Repository Analysis
-- Git Commit Genie: Clear Repository Analysis Cache
-- Git Commit Genie: Stop Repository Analysis (visible during analysis)
+- Git Commit Genie: View Repository Analysis (opens analysis as editable Markdown)
+- Git Commit Genie: Refresh Repository Analysis (triggers new analysis)
+- Git Commit Genie: Clear Repository Analysis Cache (clears analysis cache)
+- Git Commit Genie: Cancel Repository Analysis (cancels analysis process)
 - Git Commit Genie: Menu
 - Git Commit Genie: Show Repository Cost
 - Git Commit Genie: Reset Repository Cost

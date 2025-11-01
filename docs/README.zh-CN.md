@@ -53,7 +53,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | 特性                     | 说明                                                                                                 |
 | ------------------------ | ---------------------------------------------------------------------------------------------------- |
 | 多模型提供商             | 支持 OpenAI、DeepSeek、Anthropic、Gemini、Qwen 等。                                                  |
-| 仓库智能分析             | 自动分析项目结构、技术栈和架构，为提交信息生成提供上下文；支持手动刷新、实时更新和手动修改分析报告。 |
+| 仓库智能分析             | AI驱动的仓库分析智能Agent，自主使用智能工具探索代码库；自动理解项目结构、技术栈和架构，为更好的提交信息提供上下文洞察；支持手动刷新、实时更新和可编辑的分析报告。 |
 | Thinking 模式            | 多步：文件级摘要 → 结构化综合 → 校验修复，显著提升准确度与模板贴合度。                               |
 | 用户模板策略             | 内置模板选择和创建功能，支持工作区和用户数据目录，抽取策略影响段落顺序、必填 footers、词汇偏好等。   |
 | Conventional Commit 校验 | 头行格式（type(scope)!: desc），长度 ≤ 72，无句号。                                                  |
@@ -107,6 +107,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `gitCommitGenie.repositoryAnalysis.enabled`         | boolean | true    | 启用仓库分析以提供更好的提交信息生成上下文。                                                                                                         |
 | `gitCommitGenie.repositoryAnalysis.excludePatterns` | array   | []      | 仓库分析扫描时要排除的文件模式（gitignore风格）。                                                                                                    |
 | `gitCommitGenie.repositoryAnalysis.updateThreshold` | number  | 10      | 更新仓库分析的提交次数阈值。                                                                                                                         |
+| `gitCommitGenie.repositoryAnalysis.MaxCount`        | number  | 无上限  | 仓库探索过程中允许的最大分析步数。设置为-1表示无上限（默认）。                                                                                       |
 | `gitCommitGenie.repositoryAnalysis.model`           | enum    | general | 用于仓库分析的模型。可选择所有供应商支持的模型，系统将自动切换到该模型所属的服务商；或选择"使用默认模型"以复用主模型。可通过"管理模型"命令进行配置。 |
 | `gitCommitGenie.commitLanguage`                     | string  | `auto`  | 生成的提交信息目标语言。选项：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。                                       |
 | `gitCommitGenie.typingAnimationSpeed`               | number  | 15      | 提交信息框打字动画速度，单位为每字符毫秒。设置 -1 关闭动画。                                                                                         |  |
@@ -124,10 +125,10 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 - Git Commit Genie: 管理模型
 - Git Commit Genie: 启用 / 禁用链式思考模式
 - Git Commit Genie: 选择/新建模板
-- Git Commit Genie: 查看仓库分析
-- Git Commit Genie: 刷新仓库分析
-- Git Commit Genie: 清理仓库分析缓存
-- Git Commit Genie: 停止仓库分析（分析进行中可见）
+- Git Commit Genie: 查看仓库分析（以可编辑Markdown形式打开分析）
+- Git Commit Genie: 刷新仓库分析（触发新分析）
+- Git Commit Genie: 清理仓库分析缓存（清除分析缓存）
+- Git Commit Genie: 取消仓库分析（取消分析过程）
 - Git Commit Genie: 菜单
 - Git Commit Genie: 查看仓库费用
 - Git Commit Genie: 重置仓库费用
