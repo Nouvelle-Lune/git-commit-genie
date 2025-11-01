@@ -798,10 +798,15 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
             // Local mutable copy of messages to allow validation retry guidance
             let messages: ChatMessage[] = [...history];
+
+            // For OpenAI Responses API
             let currentResponseId = previousResponseId;
+
             const validationSchema = repoAnalysisActionSchema;
             const maxRetries = typeof utils?.getMaxRetries === 'function' ? utils.getMaxRetries() : 2;
             const totalAttempts = Math.max(1, maxRetries + 1);
+
+            // Track cumulative usage across attempts
             const attemptUsages: any[] = [];
 
             for (let attempt = 0; attempt < totalAttempts; attempt++) {
