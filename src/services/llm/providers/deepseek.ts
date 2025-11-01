@@ -9,7 +9,6 @@ import { logger } from '../../logger';
 import { OpenAICompatibleUtils } from './utils/index';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
-import { z } from "zod";
 import {
     fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
     commitMessageSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema

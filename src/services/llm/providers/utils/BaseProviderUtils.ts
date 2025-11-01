@@ -1,9 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { logger } from '../../../logger';
 import { L10N_KEYS as I18N } from '../../../../i18n/keys';
-import { ChatMessage } from '../../llmTypes';
 import { ProviderError } from '../errors/providerError';
 
 /**
