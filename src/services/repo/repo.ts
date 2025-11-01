@@ -11,41 +11,84 @@ import { L10N_KEYS as I18N } from '../../i18n/keys';
 export class RepoService {
     private gitExtension: GitExtension | undefined;
     private gitApi: API | undefined;
+    private initPromise: Promise<void> | undefined;
+    private initialized: boolean = false;
 
     constructor() {
-        this.initialize();
+        this.initPromise = this.initialize();
     }
 
     /**
      * Initialize Git extension and API
      */
-    private initialize(): void {
+    private async initialize(): Promise<void> {
+        if (this.initialized) {
+            return;
+        }
+
         try {
             this.gitExtension = vscode.extensions.getExtension<GitExtension>('vscode.git')?.exports;
             if (this.gitExtension) {
                 this.gitApi = this.gitExtension.getAPI(1);
+
+                // Wait for Git API to be ready and have repositories loaded
+                // The Git extension might need time to discover repositories
+                if (this.gitApi) {
+                    // If repositories are already available, we're good
+                    if (this.gitApi.repositories.length === 0) {
+                        // Wait for repositories to be discovered
+                        await new Promise<void>((resolve) => {
+                            const gitApi = this.gitApi!; // We know it exists here
+
+                            const checkRepositories = () => {
+                                if (gitApi.repositories.length > 0) {
+                                    resolve();
+                                } else {
+                                    // Check again after a short delay
+                                    setTimeout(checkRepositories, 100);
+                                }
+                            };
+
+                            // Also listen to repository changes
+                            const disposable = gitApi.onDidOpenRepository(() => {
+                                disposable.dispose();
+                                resolve();
+                            });
+
+                            // Start checking
+                            setTimeout(checkRepositories, 100);
+
+                            // Set a timeout to prevent infinite waiting
+                            setTimeout(() => {
+                                disposable.dispose();
+                                resolve();
+                            }, 5000); // Wait max 5 seconds
+                        });
+                    }
+                }
+
+                this.initialized = true;
             }
         } catch (error) {
             logger.error('[Genie][RepoService] Failed to initialize Git extension', error);
+            this.initialized = true; // Mark as initialized even on error to prevent infinite retries
         }
     }
 
     /**
      * Get the VS Code Git API
+     * Note: May return undefined if called before initialization completes
      */
     public getGitApi(): API | undefined {
-        if (!this.gitApi) {
-            this.initialize();
-        }
         return this.gitApi;
     }
 
     /**
      * Get all available Git repositories
+     * Note: May return empty array if called before initialization completes
      */
     public getRepositories(): Repository[] {
-        const api = this.getGitApi();
-        return api?.repositories || [];
+        return this.gitApi?.repositories || [];
     }
 
     /**
@@ -53,8 +96,7 @@ export class RepoService {
      */
     public getRepositoryByUri(uri: vscode.Uri): Repository | null {
         try {
-            const api = this.getGitApi();
-            return api?.getRepository(uri) || null;
+            return this.gitApi?.getRepository(uri) || null;
         } catch (error) {
             logger.error('[Genie][RepoService] Failed to get repository by URI', error);
             return null;
@@ -80,7 +122,7 @@ export class RepoService {
             // 2. Try to find repository of active editor
             const activeUri = vscode.window.activeTextEditor?.document?.uri;
             if (activeUri) {
-                const activeRepo = this.getGitApi()?.getRepository(activeUri);
+                const activeRepo = this.gitApi?.getRepository(activeUri);
                 if (activeRepo) {
                     return activeRepo;
                 }
@@ -149,7 +191,7 @@ export class RepoService {
      * Check if Git extension is available
      */
     public isGitAvailable(): boolean {
-        return !!this.getGitApi();
+        return !!this.gitApi;
     }
 
     /**
