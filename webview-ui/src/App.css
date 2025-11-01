@@ -1,0 +1,38 @@
+@import url('https://cdn.jsdelivr.net/npm/@vscode/codicons@0.0.32/dist/codicon.css');
+
+body {
+    padding: 10px;
+    color: var(--vscode-foreground);
+    font-size: var(--vscode-font-size);
+    font-family: var(--vscode-font-family);
+    margin: 0;
+}
+
+.container {
+    max-width: 100%;
+}
+
+h2 {
+    margin-top: 0;
+    margin-bottom: 16px;
+    font-size: 18px;
+    font-weight: 600;
+}
+
+h3 {
+    margin-top: 16px;
+    margin-bottom: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--vscode-descriptionForeground);
+}
+
+.section {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--vscode-widget-border);
+}
+
+.section:last-child {
+    border-bottom: none;
+}

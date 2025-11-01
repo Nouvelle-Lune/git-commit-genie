@@ -95,7 +95,8 @@ export const L10N_KEYS = {
     noWorkspace: 'No workspace folder is open.',
     apiKeyUpdated: '{0} API key updated.',
     generationRunning: 'Generation already running for this repository.',
-    noGitRepository: 'No Git repository found.'
+    noGitRepository: 'No Git repository found.',
+    onlyOneRepository: 'Only one repository available'
   },
   rateLimit: {
     hit: 'Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.'
@@ -171,6 +172,19 @@ export const L10N_KEYS = {
     cancel: 'Cancel',
     resetSuccess: 'Repository cost has been reset to $0.00',
     failedToReset: 'Failed to reset repository cost: {0}'
+  },
+  dashboard: {
+    title: 'Git Commit Genie',
+    quickActions: 'Quick Actions',
+    generateCommit: 'Generate Commit Message',
+    analyzeRepo: 'Analyze Repository',
+    statistics: 'Statistics',
+    todayLabel: 'Today:',
+    totalLabel: 'Total:',
+    currentRepo: 'Current Repository',
+    switchRepo: 'Switch Repository',
+    noRepo: 'No repository',
+    themeColor: 'Theme Color'
   }
 } as const;
 

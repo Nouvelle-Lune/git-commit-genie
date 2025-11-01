@@ -13,7 +13,7 @@ export class ExtensionManager {
     private commandManager: CommandManager;
     private eventManager: EventManager;
     private configManager: ConfigurationManager;
-    private WebviewProvider: WebviewProvider;
+    private WebviewProvider?: WebviewProvider;
 
     constructor(private context: vscode.ExtensionContext) {
         this.serviceRegistry = new ServiceRegistry(context);
@@ -21,7 +21,6 @@ export class ExtensionManager {
         this.statusBarManager = new StatusBarManager(context, this.serviceRegistry, this.configManager);
         this.commandManager = new CommandManager(context, this.serviceRegistry, this.statusBarManager);
         this.eventManager = new EventManager(context, this.serviceRegistry, this.statusBarManager);
-        this.WebviewProvider = new WebviewProvider(context.extensionUri);
     }
 
     async activate(): Promise<void> {
@@ -38,6 +37,8 @@ export class ExtensionManager {
             await this.eventManager.initialize();
 
             // Register webview provider AFTER all services are initialized
+            const repoService = this.serviceRegistry.getRepoService();
+            this.WebviewProvider = new WebviewProvider(this.context.extensionUri, repoService);
 
             const provider = this.WebviewProvider;
 
