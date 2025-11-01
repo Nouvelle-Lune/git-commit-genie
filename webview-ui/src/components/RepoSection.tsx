@@ -1,38 +1,31 @@
 import React from 'react';
+import { useAppContext } from '../context/AppContext';
 import './RepoSection.css';
 
-interface RepoSectionProps {
-    repoName: string;
-    showSwitchButton: boolean;
-    onSwitchRepo: () => void;
-    i18n: {
-        currentRepo: string;
-        switchRepo: string;
-    };
-}
+/**
+ * Repository section component
+ * Displays list of repositories with their costs
+ */
+export const RepoSection: React.FC = () => {
+    const { state } = useAppContext();
 
-export const RepoSection: React.FC<RepoSectionProps> = ({
-    repoName,
-    showSwitchButton,
-    onSwitchRepo,
-    i18n
-}) => {
+    if (state.repositories.length === 0) {
+        return null;
+    }
+
     return (
-        <div className="section repo-section">
-            <div className="repo-info">
-                <div className="repo-label">{i18n.currentRepo}</div>
-                <div className="repo-name">{repoName}</div>
+        <div className="repo-section">
+            <h3 className="repo-title">{state.i18n.repositoryList}</h3>
+            <div className="repo-box">
+                <div className="repo-list">
+                    {state.repositories.map((repo, index) => (
+                        <div key={index} className="repo-item">
+                            <span className="repo-name">{repo.name}</span>
+                            <span className="repo-cost">${repo.cost.toFixed(4)}</span>
+                        </div>
+                    ))}
+                </div>
             </div>
-            {showSwitchButton && (
-                <button
-                    className="switch-repo-button"
-                    onClick={onSwitchRepo}
-                    title={i18n.switchRepo}
-                >
-                    <span className="codicon codicon-git-branch"></span>
-                    {i18n.switchRepo}
-                </button>
-            )}
         </div>
     );
 };

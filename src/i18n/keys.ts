@@ -174,17 +174,7 @@ export const L10N_KEYS = {
     failedToReset: 'Failed to reset repository cost: {0}'
   },
   dashboard: {
-    title: 'Git Commit Genie',
-    quickActions: 'Quick Actions',
-    generateCommit: 'Generate Commit Message',
-    analyzeRepo: 'Analyze Repository',
-    statistics: 'Statistics',
-    todayLabel: 'Today:',
-    totalLabel: 'Total:',
-    repositoryList: 'Repository List',
-    switchRepo: 'Switch Repository',
-    noRepo: 'No repository',
-    themeColor: 'Theme Color'
+    repositoryList: 'Repository List'
   }
 } as const;
 

@@ -1,54 +1,61 @@
 .repo-section {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 12px;
-    background-color: var(--vscode-editor-inactiveSelectionBackground);
-    border-radius: 4px;
+    margin-bottom: 8px;
 }
 
-.repo-info {
-    flex: 1;
-    min-width: 0;
-}
-
-.repo-label {
-    font-size: 11px;
+.repo-title {
+    margin: 0 12px 8px 12px;
+    font-size: 12px;
+    font-weight: 600;
     color: var(--vscode-descriptionForeground);
-    margin-bottom: 4px;
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 
+.repo-box {
+    margin: 8px 12px;
+    padding: 8px;
+    background-color: var(--vscode-editor-inactiveSelectionBackground);
+    border-radius: 4px;
+}
+
+.repo-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.repo-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    background-color: transparent;
+    border-radius: 3px;
+    transition: background-color 0.2s;
+}
+
+.repo-item:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
 .repo-name {
-    font-size: 14px;
-    font-weight: 600;
+    font-size: 13px;
+    font-weight: 500;
     color: var(--vscode-foreground);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    flex: 1;
 }
 
-.switch-repo-button {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 6px 12px;
-    background-color: var(--vscode-button-secondaryBackground);
-    color: var(--vscode-button-secondaryForeground);
-    border: none;
-    border-radius: 3px;
-    cursor: pointer;
-    font-size: 12px;
+.repo-cost {
+    font-size: 11px;
+    background-color: var(--vscode-badge-background);
+    color: var(--vscode-badge-foreground);
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-family: var(--vscode-font-family);
+    font-weight: 500;
     white-space: nowrap;
-    transition: background-color 0.2s;
-}
-
-.switch-repo-button:hover {
-    background-color: var(--vscode-button-secondaryHoverBackground);
-}
-
-.switch-repo-button .codicon {
-    font-size: 14px;
+    margin-left: 8px;
 }

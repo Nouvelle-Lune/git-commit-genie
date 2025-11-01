@@ -1,41 +1,65 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { L10N_KEYS as I18N } from '../i18n/keys';
-import * as path from 'path';
+import { WebviewMessage, ExtensionMessage, RepositoryInfo } from './types/messages';
 
 /**
  * WebviewViewProvider for Git Commit Genie panel
- * Provides a custom webview panel in a dedicated view container with React UI
+ * Displays repository list with costs
  */
 export class WebviewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'gitCommitGenie.panel';
 
     private _view?: vscode.WebviewView;
     private _serviceRegistry: ServiceRegistry;
+    private _disposables: vscode.Disposable[] = [];
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
         serviceRegistry: ServiceRegistry,
     ) {
         this._serviceRegistry = serviceRegistry;
+        this._setupEventListeners();
+    }
 
-        // Listen for repository changes
+    /**
+     * Setup event listeners for repository changes
+     */
+    private _setupEventListeners(): void {
         const gitApi = this._serviceRegistry.getRepoService().getGitApi();
         if (gitApi) {
-            gitApi.onDidOpenRepository(() => {
-                // Update webview when new repositories are opened
-                if (this._view) {
-                    this._sendRepoData().catch(err => console.error('Failed to send repo data on repo open:', err));
-                }
-            });
+            this._disposables.push(
+                gitApi.onDidOpenRepository(() => {
+                    this._handleRepositoryChange();
+                })
+            );
 
-            gitApi.onDidCloseRepository(() => {
-                // Update webview when repositories are closed
-                if (this._view) {
-                    this._sendRepoData().catch(err => console.error('Failed to send repo data on repo close:', err));
-                }
-            });
+            this._disposables.push(
+                gitApi.onDidCloseRepository(() => {
+                    this._handleRepositoryChange();
+                })
+            );
         }
+    }
+
+    /**
+     * Handle repository changes
+     */
+    private _handleRepositoryChange(): void {
+        if (this._view) {
+            this.sendRepositoryData().catch(err =>
+                console.error('Failed to send repository data:', err)
+            );
+        }
+    }
+
+    /**
+     * Dispose resources
+     */
+    public dispose(): void {
+        this._disposables.forEach(d => d.dispose());
+        this._disposables = [];
     }
 
     public resolveWebviewView(
@@ -46,9 +70,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
         this._view = webviewView;
 
         webviewView.webview.options = {
-            // Allow scripts in the webview
             enableScripts: true,
-
             localResourceRoots: [
                 vscode.Uri.joinPath(this._extensionUri, 'dist')
             ]
@@ -56,39 +78,20 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
 
         webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
-        // Send initial data to webview (async)
-        this._sendRepoData().catch(err => console.error('Failed to send repo data:', err));
-
         // Handle messages from the webview
-        webviewView.webview.onDidReceiveMessage(async data => {
-            switch (data.type) {
-                case 'ready':
-                    // Webview is ready, send initial data
-                    await this._sendRepoData();
-                    break;
-                case 'colorSelected':
-                    {
-                        vscode.window.showInformationMessage(`选择了颜色: ${data.value}`);
-                        break;
-                    }
-                case 'generateCommit':
-                    {
-                        vscode.commands.executeCommand('gitCommitGenie.generate');
-                        break;
-                    }
-                case 'analyzeRepo':
-                    {
-                        vscode.commands.executeCommand('gitCommitGenie.repoAnalysis.refresh');
-                        break;
-                    }
-            }
-        });
+        this._disposables.push(
+            webviewView.webview.onDidReceiveMessage(async (data: WebviewMessage) => {
+                if (data.type === 'ready') {
+                    await this.sendRepositoryData();
+                }
+            })
+        );
     }
 
     /**
      * Send message to webview
      */
-    public sendMessage(message: any) {
+    public sendMessage(message: ExtensionMessage): void {
         if (this._view) {
             this._view.webview.postMessage(message);
         }
@@ -97,20 +100,22 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
     /**
      * Update webview content
      */
-    public updateContent() {
-        this._sendRepoData();
+    public updateContent(): void {
+        this.sendRepositoryData();
     }
 
     /**
-     * Send repository data to webview
+     * Get repository data
      */
-    private async _sendRepoData(): Promise<void> {
+    private async getRepositoryData(): Promise<{
+        repositories: RepositoryInfo[];
+        i18n: { repositoryList: string };
+    }> {
         const repoService = this._serviceRegistry.getRepoService();
         const costService = this._serviceRegistry.getCostTrackingService();
         const repositories = repoService.getRepositories();
 
-        // Get all repository costs
-        const repoCosts: Array<{ name: string; path: string; cost: number }> = [];
+        const repoCosts: RepositoryInfo[] = [];
         for (const repo of repositories) {
             const repoPath = repo.rootUri.fsPath;
             const repoName = path.basename(repoPath);
@@ -118,20 +123,22 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
             repoCosts.push({ name: repoName, path: repoPath, cost });
         }
 
-        this.sendMessage({
-            type: 'updateRepo',
+        return {
             repositories: repoCosts,
             i18n: {
-                repositoryList: vscode.l10n.t(I18N.dashboard.repositoryList),
-                switchRepo: vscode.l10n.t(I18N.dashboard.switchRepo),
-                quickActions: vscode.l10n.t(I18N.dashboard.quickActions),
-                generateCommit: vscode.l10n.t(I18N.dashboard.generateCommit),
-                analyzeRepo: vscode.l10n.t(I18N.dashboard.analyzeRepo),
-                statistics: vscode.l10n.t(I18N.dashboard.statistics),
-                todayLabel: vscode.l10n.t(I18N.dashboard.todayLabel),
-                totalLabel: vscode.l10n.t(I18N.dashboard.totalLabel),
-                themeColor: vscode.l10n.t(I18N.dashboard.themeColor)
+                repositoryList: vscode.l10n.t(I18N.dashboard.repositoryList)
             }
+        };
+    }
+
+    /**
+     * Send repository data to webview
+     */
+    public async sendRepositoryData(): Promise<void> {
+        const data = await this.getRepositoryData();
+        this.sendMessage({
+            type: 'updateRepo',
+            ...data
         });
     }
 
