@@ -55,6 +55,14 @@ export const RepoAnalysisActionJSONSchema = {
   required: ['action']
 } as const;
 
+export const CompressionJSONSchema = {
+  type: 'object',
+  properties: {
+    compressed_content: { type: 'string', minLength: 1 }
+  },
+  required: ['compressed_content']
+} as const;
+
 /**
  * Convenience tool descriptors for Anthropic Messages API
  */
@@ -74,6 +82,12 @@ export const AnthropicRepoAnalysisActionTool = {
   name: 'repo_analysis_action',
   description: 'Return an action decision during repository analysis exploration.',
   input_schema: RepoAnalysisActionJSONSchema
+} as const;
+
+export const AnthropicCompressionTool = {
+  name: 'compression',
+  description: 'Return compressed content as JSON: { compressed_content: string }.',
+  input_schema: CompressionJSONSchema
 } as const;
 
 // ----- Additional tools used in chain mode -----

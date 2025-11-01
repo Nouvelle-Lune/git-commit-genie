@@ -15,12 +15,14 @@ import {
 } from './analysisTypes';
 
 import { LLMService, LLMError, ChatMessage } from '../llm/llmTypes';
+import { z } from 'zod';
 import { RepoService } from '../repo/repo';
 import { logger } from '../logger';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
 import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../llm/providers/config/providerConfig';
-import { AnthropicRepoAnalysisActionTool } from '../llm/providers/schemas/anthropicSchemas';
+import { AnthropicRepoAnalysisActionTool, AnthropicCompressionTool } from '../llm/providers/schemas/anthropicSchemas';
 import { GeminiRepoAnalysisFunctionDeclarations } from '../llm/providers/schemas/geminiFunctions';
+import { repoAnalysisActionSchema, compressionResponseSchema } from '../llm/providers/schemas/common';
 
 // Tools
 import { listDirectory } from './tools/directoryTools';
@@ -656,8 +658,17 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
                     // Track compression usage
                     if (compressResult.usage) {
-                        usages.push(compressResult.usage);
-                        logger.usage(repoPath, provider, compressResult.usage, model, `compression-step-${step + 1}`, step + 1, qwenRegion);
+                        if (Array.isArray(compressResult.usage)) {
+                            let tryIdx = 0;
+                            for (const u of compressResult.usage) {
+                                tryIdx += 1;
+                                usages.push(u);
+                                logger.usage(repoPath, provider, u, model, `compression-step-${step + 1}-try-${tryIdx}` as any, step + 1, qwenRegion);
+                            }
+                        } else {
+                            usages.push(compressResult.usage);
+                            logger.usage(repoPath, provider, compressResult.usage, model, `compression-step-${step + 1}`, step + 1, qwenRegion);
+                        }
                     }
 
                     if (compressResult.success && compressResult.data) {
@@ -691,8 +702,17 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
             // Track usage
             if (result.usage) {
-                usages.push(result.usage);
-                logger.usage(repoPath, provider, result.usage, model, `tool-step-${step + 1}`, step + 1, qwenRegion);
+                if (Array.isArray(result.usage)) {
+                    let tryIdx = 0;
+                    for (const u of result.usage) {
+                        tryIdx += 1;
+                        usages.push(u);
+                        logger.usage(repoPath, provider, u, model, `tool-step-${step + 1}-try-${tryIdx}`, step + 1, qwenRegion);
+                    }
+                } else {
+                    usages.push(result.usage);
+                    logger.usage(repoPath, provider, result.usage, model, `tool-step-${step + 1}`, step + 1, qwenRegion);
+                }
             }
 
             // Clear sent tool output after successful call
@@ -776,71 +796,134 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 throw Object.assign(new Error(`${provider} client is not initialized`), { statusCode: 401 });
             }
 
-            // Get provider-specific schema and options
-            let callOptions: any = {
-                model,
-                provider,
-                token: this.currentCancelSource?.token,
-                trackUsage: true
-            };
+            // Local mutable copy of messages to allow validation retry guidance
+            let messages: ChatMessage[] = [...history];
+            let currentResponseId = previousResponseId;
+            const validationSchema = repoAnalysisActionSchema;
+            const maxRetries = typeof utils?.getMaxRetries === 'function' ? utils.getMaxRetries() : 2;
+            const totalAttempts = Math.max(1, maxRetries + 1);
+            const attemptUsages: any[] = [];
 
-            // Apply provider-specific schema handling
-            switch (provider.toLowerCase()) {
-                case 'openai': {
-                    // OpenAI uses requestType for schema mapping
-                    callOptions.requestType = 'repoAnalysisAction';
-                    if (previousResponseId) {
-                        callOptions.previousResponseId = previousResponseId;
-                        callOptions.store = true;
+            for (let attempt = 0; attempt < totalAttempts; attempt++) {
+                // Build provider-specific call options per attempt to include chaining/tool outputs
+                let callOptions: any = {
+                    model,
+                    provider,
+                    token: this.currentCancelSource?.token,
+                    trackUsage: true
+                };
+
+                switch (provider.toLowerCase()) {
+                    case 'openai': {
+                        callOptions.requestType = 'repoAnalysisAction';
+                        if (currentResponseId) {
+                            callOptions.previousResponseId = currentResponseId;
+                            callOptions.store = true;
+                        }
+                        break;
                     }
-                    break;
+                    case 'anthropic': {
+                        callOptions.tools = [AnthropicRepoAnalysisActionTool];
+                        callOptions.toolChoice = { type: 'tool', name: AnthropicRepoAnalysisActionTool.name };
+                        break;
+                    }
+                    case 'gemini': {
+                        callOptions.requestType = 'repoAnalysisAction';
+                        callOptions.functionDeclarations = [...GeminiRepoAnalysisFunctionDeclarations];
+                        break;
+                    }
+                    case 'qwen':
+                    case 'deepseek': {
+                        callOptions.requestType = 'repoAnalysisAction';
+                        break;
+                    }
+                    default: {
+                        callOptions.requestType = 'repoAnalysisAction';
+                        break;
+                    }
                 }
-                case 'anthropic': {
-                    // Use Anthropic schema
-                    callOptions.tools = [AnthropicRepoAnalysisActionTool];
-                    callOptions.toolChoice = { type: 'tool', name: AnthropicRepoAnalysisActionTool.name };
-                    break;
+
+                if (provider.toLowerCase() === 'openai' && openaiToolOutput) {
+                    callOptions.toolOutputs = [openaiToolOutput];
                 }
-                case 'gemini': {
-                    // Prefer Gemini native function calling for repoAnalysisAction
-                    callOptions.requestType = 'repoAnalysisAction';
-                    callOptions.functionDeclarations = [...GeminiRepoAnalysisFunctionDeclarations];
-                    break;
+
+                let result: any;
+                try {
+                    result = await utils.callChatCompletion(client, messages, callOptions);
+                } catch (e: any) {
+                    const em = String(e?.message || '').toLowerCase();
+                    const looksLikeJsonParseErr = em.includes('json') || em.includes('parse') || em.includes('unexpected token') || em.includes('after json');
+                    if (looksLikeJsonParseErr && attempt < totalAttempts - 1) {
+                        // Nudge the model to return strict JSON matching the schema
+                        const jsonSchemaString = JSON.stringify(z.toJSONSchema(validationSchema), null, 2);
+                        messages = [
+                            ...messages,
+                            {
+                                role: 'user',
+                                content: `Your previous response was not valid JSON. Respond with STRICT JSON only matching this schema: ${jsonSchemaString}. Do not include any markdown or explanation.`
+                            }
+                        ];
+                        continue;
+                    }
+                    throw e;
                 }
-                case 'qwen':
-                case 'deepseek': {
-                    // These providers use requestType like OpenAI
-                    callOptions.requestType = 'repoAnalysisAction';
-                    break;
+
+                // Track response id for OpenAI Responses chaining on next attempt
+                currentResponseId = (result as any).responseId || currentResponseId;
+                // Collect usage for this attempt if present
+                if (Array.isArray(result?.usage)) {
+                    for (const u of result.usage) { attemptUsages.push(u); }
+                } else if (result?.usage) {
+                    attemptUsages.push(result.usage);
                 }
-                default: {
-                    // Fallback to requestType
-                    callOptions.requestType = 'repoAnalysisAction';
-                    break;
+
+                // Validate structured action with zod
+                const safe = validationSchema.safeParse(result.parsedResponse);
+                if (safe.success) {
+                    return {
+                        action: safe.data,
+                        usage: attemptUsages,
+                        responseId: (result as any).responseId,
+                        functionCallId: (result as any).functionCallId
+                    };
                 }
+
+                // If not valid and attempts remain, append feedback and retry
+                if (attempt < totalAttempts - 1) {
+                    try {
+                        const jsonSchemaString = JSON.stringify(z.toJSONSchema(validationSchema), null, 2);
+                        const assistantEcho: ChatMessage = (result as any).parsedAssistantResponse || {
+                            role: 'assistant',
+                            content: result.parsedResponse ? JSON.stringify(result.parsedResponse) : ''
+                        };
+                        messages = [
+                            ...messages,
+                            assistantEcho,
+                            {
+                                role: 'user',
+                                content: `The previous response did not conform to the required format, the zod error is ${safe.error}. Please try again and ensure the response matches the specified JSON format: ${jsonSchemaString}.`
+                            }
+                        ];
+                        continue;
+                    } catch {
+                        // If building feedback fails, fall through and throw
+                    }
+                }
+
+                throw new Error(`${provider} structured result failed local validation for repoAnalysisAction after ${totalAttempts} attempts`);
             }
 
-            if (provider.toLowerCase() === 'openai' && openaiToolOutput) {
-                callOptions.toolOutputs = [openaiToolOutput];
-            }
-
-            const result = await utils.callChatCompletion(client, history, callOptions);
-
-            return {
-                action: result.parsedResponse,
-                usage: result.usage,
-                responseId: (result as any).responseId,
-                functionCallId: (result as any).functionCallId
-            };
+            // Should be unreachable
+            throw new Error('Validation loop terminated unexpectedly');
         } catch (err: any) {
             const provider = this.pickRepoAnalysisService().provider;
             if (err?.statusCode) {
                 await this.handleLLMError({ message: err.message, statusCode: err.statusCode }, provider, repoPath);
                 return null;
             }
-            // try to recover by asking again to return valid JSON
-            history.push({ role: 'assistant', content: JSON.stringify({ error: 'Invalid JSON returned. Return a valid action JSON.' }) });
-            return null;
+            // For non-status errors, bubble up a generic failure so the caller can handle gracefully
+            logger.error('[Genie][RepoAnalysis] LLM analysis failed', err?.message || err);
+            throw new Error(err?.message || 'Failed to produce a valid repo analysis action');
         }
     }
 
@@ -900,11 +983,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     const preserveStructure = !!args.preserveStructure;
                     const language = typeof args.language === 'string' ? args.language : undefined;
 
-                    // Track usage for compression call
-                    let compressionUsage: any = undefined;
-
-                    // Create chat function using the same provider utils as analysis
-                    const chatFn = async (messages: ChatMessage[]): Promise<string> => {
+                    const chatFn = async (messages: ChatMessage[]): Promise<{ parsedResponse?: any; usage?: any; parsedAssistantResponse?: ChatMessage }> => {
                         const { provider, service } = this.pickRepoAnalysisService();
                         if (!service) {
                             throw new Error(`${provider} service is not available`);
@@ -918,32 +997,29 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                             throw new Error(`${provider} client is not initialized`);
                         }
 
-                        // Use the same utils.callChatCompletion as other analysis calls
-                        const result = await utils.callChatCompletion(client, messages, {
+                        const callOpts: any = {
                             model,
                             provider,
                             token: this.currentCancelSource?.token,
                             trackUsage: true,
-                            requestType: 'repoAnalysis'
-                        });
-
-                        // Extract compressed text from result
-                        if (result && typeof result.parsedResponse.compressed_content === 'string') {
-                            // Store usage for later logging
-                            compressionUsage = result.usage;
-                            return result.parsedResponse.compressed_content;
+                            requestType: 'compression'
+                        };
+                        if (provider.toLowerCase() === 'gemini') {
+                            callOpts.responseSchema = compressionResponseSchema;
+                        } else if (provider.toLowerCase() === 'anthropic') {
+                            callOpts.tools = [AnthropicCompressionTool];
+                            callOpts.toolChoice = { type: 'tool', name: AnthropicCompressionTool.name };
                         }
-
-                        throw new Error('Unexpected response format from LLM');
+                        const result = await utils.callChatCompletion(client, messages, callOpts);
+                        return result;
                     };
 
-                    const compressionResult = await compressContext(content, chatFn, { targetTokens, preserveStructure, language });
+                    const maxRetries = typeof (this.pickRepoAnalysisService().service as any)?.getUtils?.()?.getMaxRetries === 'function'
+                        ? (this.pickRepoAnalysisService().service as any).getUtils().getMaxRetries()
+                        : 2;
+                    const compressionResult = await compressContext(content, chatFn, { targetTokens, preserveStructure, language, maxRetries });
 
-                    // Return result with usage information
-                    return {
-                        ...compressionResult,
-                        usage: compressionUsage
-                    };
+                    return compressionResult;
                 }
                 default:
                     return { success: false, error: `Unknown tool: ${toolName}` };

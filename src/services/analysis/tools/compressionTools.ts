@@ -6,18 +6,26 @@
  * compression to create meaningful summaries while preserving important information.
  */
 
+import { z } from 'zod';
 import {
     ToolResult,
     CompressContextOptions,
     CompressContextResult
 } from './toolTypes';
 import { ChatMessage } from '../../llm/llmTypes';
+import { compressionResponseSchema } from '../../llm/providers/schemas/common';
 
 /**
  * Interface for LLM chat function dependency injection
  */
+export interface CompressionChatFnResult {
+    parsedResponse?: any;
+    usage?: any;
+    parsedAssistantResponse?: ChatMessage;
+}
+
 export interface CompressionChatFn {
-    (messages: ChatMessage[]): Promise<string>;
+    (messages: ChatMessage[]): Promise<CompressionChatFnResult>;
 }
 
 /**
@@ -49,7 +57,7 @@ export interface CompressionChatFn {
 export async function compressContext(
     content: string,
     chatFn: CompressionChatFn,
-    options: CompressContextOptions = {}
+    options: CompressContextOptions & { maxRetries?: number } = {}
 ): Promise<ToolResult<CompressContextResult>> {
     const {
         targetTokens,
@@ -76,67 +84,96 @@ export async function compressContext(
         );
 
         // Call LLM to perform compression
-        const compressed = await chatFn([
-            {
-                role: 'system',
-                content: 'You are an expert at compressing and summarizing information while preserving essential meaning and context. Your goal is to compress the content window for an AI agent. IMPORTANT: Return ONLY a strict JSON object of the form { "compressed_content": string } with the compressed text. Do NOT include extra fields, code fences, markdown wrappers, or explanations.'
-            },
-            {
-                role: 'user',
-                content: prompt
-            }
-        ]);
+        const validationSchema = compressionResponseSchema;
+        const maxRetries = Math.max(1, options.maxRetries ?? 2);
 
-        // Clean up potential markdown code fences or JSON wrappers
-        let cleanedCompressed = compressed.trim();
+        let msgs: ChatMessage[] = [
+            { role: 'system', content: 'You are an expert at compressing and summarizing information while preserving essential meaning and context. Your goal is to compress the content window for an AI agent. IMPORTANT: Return ONLY a strict JSON object of the form { "compressed_content": string } with the compressed text. Do NOT include extra fields, code fences, markdown wrappers, or explanations.' },
+            { role: 'user', content: prompt }
+        ];
 
-        // Remove markdown code fences if present
-        if (cleanedCompressed.startsWith('```')) {
-            cleanedCompressed = cleanedCompressed
-                .replace(/^```(?:text|markdown|json)?\n?/i, '')
-                .replace(/\n?```$/i, '')
-                .trim();
-        }
+        const allUsages: any[] = [];
 
-        // Remove JSON wrappers if present (e.g., {"compressed": "..."})
-        if (cleanedCompressed.startsWith('{') && cleanedCompressed.endsWith('}')) {
+        for (let attempt = 0; attempt < maxRetries; attempt++) {
+            let result: CompressionChatFnResult | undefined;
             try {
-                const parsed = JSON.parse(cleanedCompressed);
-                if (typeof parsed.compressed === 'string') {
-                    cleanedCompressed = parsed.compressed;
-                } else if (typeof parsed.content === 'string') {
-                    cleanedCompressed = parsed.content;
+                result = await chatFn(msgs);
+            } catch (e: any) {
+                const em = String(e?.message || '').toLowerCase();
+                const looksLikeJsonParseErr = em.includes('json') || em.includes('parse') || em.includes('unexpected token') || em.includes('after json');
+                if (looksLikeJsonParseErr && attempt < maxRetries - 1) {
+                    const jsonSchemaString = JSON.stringify(z.toJSONSchema(validationSchema), null, 2);
+                    msgs = [
+                        ...msgs,
+                        { role: 'user', content: `Your previous response was not valid JSON. Respond with STRICT JSON only matching this schema: ${jsonSchemaString}. Do not include any markdown or explanation.` }
+                    ];
+                    continue;
                 }
-            } catch {
-                // Not valid JSON, keep as is
+                throw e;
             }
+
+            if (Array.isArray(result?.usage)) {
+                for (const u of result!.usage) { allUsages.push(u); }
+            } else if (result?.usage) {
+                allUsages.push(result.usage);
+            }
+
+            const safe = validationSchema.safeParse(result?.parsedResponse);
+            if (safe.success) {
+                let cleanedCompressed = String(safe.data.compressed_content || '').trim();
+
+                // Minimal guard: if model expands, keep original to avoid bloat
+                let compressedSize = cleanedCompressed.length;
+                if (compressedSize >= originalSize) {
+                    cleanedCompressed = content;
+                    compressedSize = originalSize;
+                }
+                const compressionRatio = 1 - (compressedSize / originalSize);
+
+                const summary = generateCompressionSummary(
+                    originalSize,
+                    compressedSize,
+                    preserveStructure
+                );
+
+                return {
+                    success: true,
+                    data: {
+                        compressed: cleanedCompressed,
+                        originalSize,
+                        compressedSize,
+                        compressionRatio,
+                        summary
+                    },
+                    usage: allUsages
+                };
+            }
+
+            if (attempt < maxRetries - 1) {
+                try {
+                    const jsonSchemaString = JSON.stringify(z.toJSONSchema(validationSchema), null, 2);
+                    const assistantEcho: ChatMessage = result?.parsedAssistantResponse || {
+                        role: 'assistant',
+                        content: result?.parsedResponse ? JSON.stringify(result.parsedResponse) : ''
+                    };
+                    msgs = [
+                        ...msgs,
+                        assistantEcho,
+                        {
+                            role: 'user',
+                            content: `The previous response did not conform to the required format, the zod error is ${safe.error}. Please try again and ensure the response matches the specified JSON format: ${jsonSchemaString}.`
+                        }
+                    ];
+                    continue;
+                } catch {
+                    // Fall through
+                }
+            }
+
+            return { success: false, error: 'Compression response failed validation after retries', usage: allUsages };
         }
 
-        // Minimal guard: if model expands, keep original to avoid bloat
-        let compressedSize = cleanedCompressed.length;
-        if (compressedSize >= originalSize) {
-            cleanedCompressed = content;
-            compressedSize = originalSize;
-        }
-        const compressionRatio = 1 - (compressedSize / originalSize);
-
-        // Generate summary of what was done
-        const summary = generateCompressionSummary(
-            originalSize,
-            compressedSize,
-            preserveStructure
-        );
-
-        return {
-            success: true,
-            data: {
-                compressed: cleanedCompressed,
-                originalSize,
-                compressedSize,
-                compressionRatio,
-                summary
-            }
-        };
+        return { success: false, error: 'Compression validation loop terminated unexpectedly', usage: allUsages };
     } catch (error) {
         return {
             success: false,

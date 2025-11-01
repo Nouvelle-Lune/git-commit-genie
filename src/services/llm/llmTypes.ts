@@ -16,6 +16,7 @@ export type RequestType =
     | 'fix'
     | 'repoAnalysis'
     | 'repoAnalysisAction'
+    | 'compression'
     // More granular chain stages for clearer logging
     | 'strictFix'
     | 'enforceLanguage';

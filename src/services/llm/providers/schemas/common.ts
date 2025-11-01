@@ -43,6 +43,11 @@ export const repoAnalysisResponseSchema = z.object({
   insights: z.array(z.string().min(1)).default([]).describe("Key architectural insights about the project")
 } as const);
 
+// Compression tool response schema
+export const compressionResponseSchema = z.object({
+  compressed_content: z.string().min(1)
+} as const);
+
 const toolActionSchema = z.object({
   action: z.literal('tool').describe("Call a tool to continue exploring"),
   toolName: z.enum(['listDirectory', 'searchFiles', 'readFileContent', 'compressContext']).describe("Tool to call"),

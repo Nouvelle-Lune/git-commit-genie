@@ -7,7 +7,7 @@ import { ProviderError } from '../errors/providerError';
 
 import { ChatMessage, RequestType } from "../../llmTypes";
 
-import { commitMessageSchema, fileSummarySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema } from "../schemas/common";
+import { commitMessageSchema, fileSummarySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema, compressionResponseSchema } from "../schemas/common";
 import { OpenAIRepoAnalysisFunctions } from "../schemas/openaiFunctions";
 
 
@@ -163,6 +163,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 ['fix', { schema: validateAndFixResponseSchema, name: 'validateAndFixResponse' }],
                 ['repoAnalysis', { schema: repoAnalysisResponseSchema, name: 'repoAnalysisResponse' }],
                 ['repoAnalysisAction', { schema: repoAnalysisActionSchema, name: 'repoAnalysisAction' }],
+                ['compression', { schema: compressionResponseSchema, name: 'compression' }],
                 // Treat strictFix and enforceLanguage like commitMessage for schema purposes
                 ['strictFix', { schema: commitMessageSchema, name: 'commitMessage' }],
                 ['enforceLanguage', { schema: commitMessageSchema, name: 'commitMessage' }],
