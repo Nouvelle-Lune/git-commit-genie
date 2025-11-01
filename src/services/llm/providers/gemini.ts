@@ -8,13 +8,13 @@ import { generateCommitMessageChain } from '../../chain/chainThinking';
 
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
-import { GeminiUtils } from './utils/GeminiUtils';
+import { GeminiUtils } from './utils/geminiUtils';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
-import { 
-    GeminiCommitMessageSchema, 
-    GeminiFileSummarySchema, 
-    GeminiClassifyAndDraftSchema, 
-    GeminiValidateAndFixSchema, 
+import {
+    GeminiCommitMessageSchema,
+    GeminiFileSummarySchema,
+    GeminiClassifyAndDraftSchema,
+    GeminiValidateAndFixSchema,
     GeminiRepoAnalysisSchema,
     GeminiRepoAnalysisActionSchema
 } from './schemas/geminiSchemas';
