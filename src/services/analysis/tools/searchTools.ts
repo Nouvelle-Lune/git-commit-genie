@@ -52,11 +52,13 @@ export async function searchFiles(
         searchType,
         useRegex = false,
         searchPath = repositoryPath,
-        maxResults = 50,
+        // Tighter defaults to reduce payload; the agent can increase as needed
+        maxResults = 20,
         caseSensitive = false,
         excludePatterns = [],
-        maxMatchesPerFile = 5,
-        contextLines = 2
+        maxMatchesPerFile = 2,
+        // Context lines add a lot of noise; keep 0 by default
+        contextLines = 0
     } = options;
 
     try {

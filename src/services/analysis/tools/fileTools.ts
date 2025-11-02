@@ -56,7 +56,9 @@ export async function readFileContent(
 ): Promise<ToolResult<ReadFileResult>> {
     const {
         startLine = 1,
-        maxLines = 1000,
+        // Reduce default read size to save context tokens; the agent can page
+        // forward with another call when needed.
+        maxLines = 300,
         encoding = 'utf-8'
     } = options || {};
 

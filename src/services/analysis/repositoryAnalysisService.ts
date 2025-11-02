@@ -29,6 +29,7 @@ import { listDirectory } from './tools/directoryTools';
 import { searchFiles } from './tools/searchTools';
 import { readFileContent } from './tools/fileTools';
 import { compressContext } from './tools/compressionTools';
+import { compactToolResultForConversation } from './tools/formattingTools';
 import { DirectoryEntry, SearchFilesResult, ToolResult } from './tools/toolTypes';
 import { getMaxContextByFunction } from './tools/modelContext';
 
@@ -634,7 +635,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             maxSteps = 99999;
         }
         const maxContextTokens = getMaxContextByFunction('repoAnalysis', model);
-        const contextThreshold = maxContextTokens * 0.9; // Force compress at 90% of context limit
+        // Compress earlier to avoid runaway growth
+        const contextThreshold = maxContextTokens * 0.65;
 
         for (let step = 0; step <= maxSteps; step++) {
 
@@ -763,15 +765,18 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
                 const toolResult = await this.runTool(repoPath, toolName, args, userExcludes);
                 this.logToolOutcome(toolName, toolResult);
-                // For OpenAI function calling, queue function_call_output instead of text TOOL_RESULT
+
+                // Build compact representations to minimize token usage
+                const { compactJson, compactText } = compactToolResultForConversation(repoPath, toolName, toolResult);
+
+                // For OpenAI function calling, queue function_call_output with compact JSON
                 if (provider.toLowerCase() === 'openai' && (result as any).functionCallId) {
                     openaiPendingCallId = String((result as any).functionCallId || '');
-                    openaiPendingToolOutput = JSON.stringify(toolResult || {});
-
+                    openaiPendingToolOutput = compactText;
                 } else {
-                    // Other providers: keep text-based conversation
+                    // Other providers: send a concise action echo and compact text output
                     msgs.push({ role: 'assistant', content: JSON.stringify(action) });
-                    msgs.push({ role: 'user', content: `TOOL_RESULT(${toolName}): ${JSON.stringify(toolResult)}` });
+                    msgs.push({ role: 'user', content: compactText });
                 }
                 continue;
             }
@@ -1096,6 +1101,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             }
         } catch { /* ignore logging failures */ }
     }
+
+    // Compacting helpers moved to tools/formattingTools.ts
 
     /**
      * Resolve a candidate path relative to repo root and ensure it stays inside.
