@@ -130,6 +130,9 @@ export class GeminiService extends BaseLLMService {
                 return this.createModelNotSelectedError();
             }
 
+            // Divider in webview: commit generation start
+            try { logger.logGenerationStart(repoPath, config.useChain ? 'thinking' : 'default'); } catch { /* ignore */ }
+
             const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
 
             if (config.useChain) {

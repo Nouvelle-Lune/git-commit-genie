@@ -57,6 +57,8 @@ export const LogSection: React.FC = () => {
                 return 'tools';
             case LogType.AnalysisStart:
                 return 'debug-start';
+            case LogType.GenerationStart:
+                return 'debug-start';
             case LogType.FinalResult:
                 return 'check';
             case LogType.Reason:
@@ -159,8 +161,8 @@ export const LogSection: React.FC = () => {
                 ) : (
                     <div className="log-list" ref={logListRef} onScroll={handleScroll}>
                         {state.logs.map((log: LogEntry) => (
-                            <div key={log.id} className={`log-item ${log.type === LogType.AnalysisStart ? 'log-divider' : ''} ${isSchemaValidationLog(log) ? 'log-error' : ''}`}>
-                                {log.type === LogType.AnalysisStart ? (
+                            <div key={log.id} className={`log-item ${(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? 'log-divider' : ''} ${isSchemaValidationLog(log) ? 'log-error' : ''}`}>
+                                {(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? (
                                     <div className="analysis-start">
                                         <span className={`codicon codicon-${getLogIcon(log.type)}`}></span>
                                         <span className="analysis-start-text">{log.title}</span>

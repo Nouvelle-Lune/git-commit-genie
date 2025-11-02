@@ -71,6 +71,7 @@ export enum LogType {
     ApiRequest = 'apiRequest',
     ToolCall = 'toolCall',
     AnalysisStart = 'analysisStart',
+    GenerationStart = 'generationStart',
     FinalResult = 'finalResult',
     Reason = 'reason'
 }

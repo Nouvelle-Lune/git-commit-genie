@@ -205,6 +205,26 @@ export class Logger {
     }
 
     /**
+     * Log commit message generation start event
+     */
+    public logGenerationStart(repositoryPath: string, mode: 'default' | 'thinking'): void {
+        try {
+            const repoName = repositoryPath.split('/').filter(Boolean).pop() || repositoryPath;
+            const modeLabel = mode === 'thinking' ? 'Thinking' : 'Default';
+
+            const log: LogEntry = {
+                id: `generation-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                timestamp: Date.now(),
+                type: LogType.GenerationStart,
+                title: `Generation Started: ${repoName} — ${modeLabel}`
+            };
+            (log as any).repoPath = repositoryPath;
+            this.sendLogToWebview(log);
+            this.info(`[GenerationStart:${modeLabel}] ${repositoryPath}`);
+        } catch { /* ignore */ }
+    }
+
+    /**
      * Log file read operation
      */
     public logFileRead(filePath: string, reason: string, startLine?: number, endLine?: number, content?: string): void {
