@@ -100,6 +100,56 @@ export const LogSection: React.FC = () => {
         return { name, colorIdx };
     };
 
+    const getStageBadge = (log: LogEntry): { label: string; className: string } | null => {
+        const type = log.type;
+
+        // For ToolCall, extract specific stage from title or content
+        if (type === LogType.ToolCall) {
+            const title = log.title || '';
+
+            // Commit generation stages
+            if (title.includes('Commit stage:')) {
+                const stage = title.replace('Commit stage:', '').trim().toLowerCase();
+                if (stage.includes('summarize')) return { label: 'Sum', className: 'stage-badge-summarize' };
+                if (stage.includes('classify')) return { label: 'Draft', className: 'stage-badge-classify' };
+                if (stage.includes('validate')) return { label: 'Vld', className: 'stage-badge-validate' };
+                if (stage.includes('strict')) return { label: 'Fix', className: 'stage-badge-strict' };
+                if (stage.includes('enforce')) return { label: 'Lang', className: 'stage-badge-language' };
+                if (stage.includes('done')) return { label: 'Done', className: 'stage-badge-done' };
+                // Capitalize first letter for display
+                return { label: stage.charAt(0).toUpperCase() + stage.slice(1), className: 'stage-badge-tool' };
+            }
+
+            // Schema validation
+            if (title.includes('Schema validation')) {
+                return { label: 'Validation', className: 'stage-badge-validation' };
+            }
+
+            // Repository analysis tools
+            if (title.includes('wants to read:')) return { label: 'Read', className: 'stage-badge-read' };
+            if (title.includes('wants to search')) return { label: 'Search', className: 'stage-badge-search' };
+            if (title.includes('wants to explore:')) return { label: 'Explore', className: 'stage-badge-explore' };
+            if (title.includes('compressed context')) return { label: 'Analyze', className: 'stage-badge-analyze' };
+
+            // Default for other tool calls
+            return { label: 'Tool', className: 'stage-badge-tool' };
+        }
+
+        // For other types
+        switch (type) {
+            case LogType.FileRead:
+                return { label: 'Read', className: 'stage-badge-read' };
+            case LogType.ApiRequest:
+                return { label: 'API', className: 'stage-badge-api' };
+            case LogType.Reason:
+                return { label: 'Think', className: 'stage-badge-reason' };
+            case LogType.FinalResult:
+                return { label: 'Result', className: 'stage-badge-result' };
+            default:
+                return null;
+        }
+    };
+
     const formatFunctionCallContent = (content: string): string => {
         try {
             const data = JSON.parse(content);
@@ -193,7 +243,7 @@ export const LogSection: React.FC = () => {
                                             <div className="log-main-content">
                                                 <span className="log-title-text">
                                                     {(() => { const info = getRepoInfoForLog(log); return info ? (<span className={`log-repo-badge repo-badge-c${info.colorIdx}`}>{info.name}</span>) : null; })()}
-                                                    {log.title}
+                                                    {(() => { const badge = getStageBadge(log); return badge ? (<span className={`stage-badge ${badge.className}`}>{badge.label}</span>) : null; })()}
                                                 </span>
                                                 {/* inline reason removed; reason is a separate log */}
                                             </div>
