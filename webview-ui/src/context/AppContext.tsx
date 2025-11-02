@@ -114,6 +114,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     const [state, dispatch] = useReducer(appReducer, initialState);
     // Keep a ref to the latest repositories to avoid stale closure issues
     const repositoriesRef = React.useRef<RepositoryInfo[]>([]);
+    // Track a stable signature of repo paths to avoid unnecessary log flushes
+    const repoSigRef = React.useRef<string>('');
 
     useEffect(() => {
         const handleMessage = (event: MessageEvent<ExtensionMessage>) => {
@@ -148,8 +150,19 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
                         i18n: message.i18n
                     }
                 });
-                // Ask extension to flush logs after repositories are set to avoid cross-workspace leakage
-                try { vscodeApi.postMessage({ type: 'requestFlushLogs' } as any); } catch { /* ignore */ }
+
+                // Only flush logs if the actual repository set has changed
+                try {
+                    const norm = (s: string) => s.replace(/\\\\/g, '/');
+                    const newSig = (message.repositories || [])
+                        .map(r => norm(r.path))
+                        .sort()
+                        .join('|');
+                    if (repoSigRef.current !== newSig) {
+                        repoSigRef.current = newSig;
+                        vscodeApi.postMessage({ type: 'requestFlushLogs' } as any);
+                    }
+                } catch { /* ignore */ }
             } else if (message.type === 'addLog') {
                 if (shouldIncludeLog(message.log)) {
                     dispatch({
