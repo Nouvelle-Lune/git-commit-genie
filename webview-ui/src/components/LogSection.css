@@ -55,7 +55,11 @@
     border-radius: 6px;
     background: var(--vscode-editor-inactiveSelectionBackground);
 }
-.running-banner .running-text { font-size: 12px; color: var(--vscode-foreground); }
+
+.running-banner .running-text {
+    font-size: 12px;
+    color: var(--vscode-foreground);
+}
 
 /* stats card removed */
 
@@ -114,28 +118,20 @@
 .log-item.log-error .log-icon {
     color: var(--vscode-errorForeground);
 }
+
 .log-item.log-error .log-content {
     border-left-color: var(--vscode-errorForeground);
 }
 
 .log-item.log-divider {
-    margin-top: 24px;
-    padding-top: 24px;
-    border-top: 3px solid var(--vscode-editorGroup-border);
+    margin-top: 12px;
+    padding-top: 0;
+    border-top: none;
     position: relative;
 }
 
 .log-item.log-divider::before {
-    content: '';
-    position: absolute;
-    top: -3px;
-    left: -16px;
-    right: -16px;
-    height: 6px;
-    background: linear-gradient(to bottom,
-            var(--vscode-editorGroup-border) 0%,
-            transparent 100%);
-    pointer-events: none;
+    display: none;
 }
 
 .log-item.log-divider:first-child {
@@ -151,40 +147,34 @@
 .analysis-start {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 16px 20px;
-    background: linear-gradient(135deg,
-            var(--vscode-button-background) 0%,
-            var(--vscode-button-hoverBackground) 100%);
-    border-radius: 8px;
-    font-weight: 600;
-    color: var(--vscode-button-foreground);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-    border: 1px solid var(--vscode-button-border);
+    gap: 8px;
+    padding: 6px 0;
+    font-size: 12px;
+    color: var(--vscode-foreground);
+    border-bottom: 1px solid var(--vscode-panel-border);
 }
 
 .analysis-start .codicon {
-    font-size: 20px;
-    color: var(--vscode-button-foreground);
-    opacity: 0.9;
+    font-size: 14px;
+    color: var(--vscode-icon-foreground);
 }
 
 .analysis-start-text {
     flex: 1;
-    font-size: 14px;
-    letter-spacing: 0.3px;
+    font-weight: 500;
 }
 
 .analysis-start .log-time {
     font-size: 11px;
-    color: var(--vscode-button-secondaryForeground);
+    color: var(--vscode-descriptionForeground);
     opacity: 0.8;
     font-weight: 400;
 }
 
 .log-header {
     display: grid;
-    grid-template-columns: auto 1fr auto; /* right cluster contains expand icon */
+    grid-template-columns: auto 1fr auto;
+    /* right cluster contains expand icon */
     align-items: center;
     gap: 8px;
     padding: 8px;
@@ -222,12 +212,30 @@
     vertical-align: middle;
     color: var(--vscode-badge-foreground);
 }
-.repo-badge-c0 { background: #3b82f633; }
-.repo-badge-c1 { background: #22c55e33; }
-.repo-badge-c2 { background: #eab30833; }
-.repo-badge-c3 { background: #a855f733; }
-.repo-badge-c4 { background: #ec489933; }
-.repo-badge-c5 { background: #14b8a633; }
+
+.repo-badge-c0 {
+    background: #3b82f633;
+}
+
+.repo-badge-c1 {
+    background: #22c55e33;
+}
+
+.repo-badge-c2 {
+    background: #eab30833;
+}
+
+.repo-badge-c3 {
+    background: #a855f733;
+}
+
+.repo-badge-c4 {
+    background: #ec489933;
+}
+
+.repo-badge-c5 {
+    background: #14b8a633;
+}
 
 /* removed: inline reason no longer used */
 
@@ -292,11 +300,13 @@
     align-items: center;
     justify-self: end;
     gap: 6px;
-    min-width: 0; /* shrink to content */
+    min-width: 0;
+    /* shrink to content */
 }
 
 .log-submeta {
-    margin: 2px 0 0 32px; /* align under title (icon 16 + gap) */
+    margin: 2px 0 0 32px;
+    /* align under title (icon 16 + gap) */
     font-size: 10px;
     color: var(--vscode-descriptionForeground);
 }
@@ -417,9 +427,25 @@
 
 /* Responsive tweaks for narrow panels */
 @media (max-width: 520px) {
-    .log-time { display: none; }
-    .log-cost { font-size: 9px; padding: 1px 4px; }
-    .log-expand-icon, .log-file-icon { margin-left: 0; }
-    .log-loading { margin-left: 0; }
-    .log-submeta { margin-left: 28px; }
+    .log-time {
+        display: none;
+    }
+
+    .log-cost {
+        font-size: 9px;
+        padding: 1px 4px;
+    }
+
+    .log-expand-icon,
+    .log-file-icon {
+        margin-left: 0;
+    }
+
+    .log-loading {
+        margin-left: 0;
+    }
+
+    .log-submeta {
+        margin-left: 28px;
+    }
 }
