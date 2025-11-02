@@ -49,7 +49,14 @@ function appReducer(state: AppState, action: AppAction): AppState {
             const existingIndex = state.logs.findIndex(log => log.id === action.payload.id);
             if (existingIndex >= 0) {
                 const newLogs = [...state.logs];
-                newLogs[existingIndex] = action.payload;
+                const prev = state.logs[existingIndex];
+                // Merge to preserve cancellation state unless explicitly overridden
+                const merged: LogEntry = {
+                    ...prev,
+                    ...action.payload,
+                    cancelled: (action.payload as any).cancelled !== undefined ? (action.payload as any).cancelled : prev.cancelled
+                } as LogEntry;
+                newLogs[existingIndex] = merged;
                 return {
                     ...state,
                     logs: newLogs

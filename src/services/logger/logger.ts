@@ -69,6 +69,14 @@ export class Logger {
      * Notify webview to mark all pending logs as cancelled
      */
     public cancelPendingLogs(): void {
+        // Update in-memory and persisted buffer so future flushes don't revert UI state
+        try {
+            if (Array.isArray(this.logBuffer) && this.logBuffer.length) {
+                this.logBuffer = this.logBuffer.map(l => (l as any)?.pending ? { ...l, pending: false, cancelled: true } : l);
+                this.persistLogBuffer().catch(() => { });
+            }
+        } catch { /* ignore */ }
+        // Notify active webview
         try { this.webviewProvider?.cancelPendingLogs(); } catch { /* ignore */ }
     }
 
@@ -82,7 +90,7 @@ export class Logger {
             if (this.logBuffer.length > this.maxLogBuffer) {
                 this.logBuffer = this.logBuffer.slice(this.logBuffer.length - this.maxLogBuffer);
             }
-            this.persistLogBuffer().catch(() => {});
+            this.persistLogBuffer().catch(() => { });
         } catch { /* ignore */ }
 
         // Send to active webview if available
@@ -111,7 +119,7 @@ export class Logger {
      */
     public clearLogBuffer(): void {
         this.logBuffer = [];
-        this.persistLogBuffer().catch(() => {});
+        this.persistLogBuffer().catch(() => { });
     }
 
     /**
@@ -151,7 +159,7 @@ export class Logger {
                 return !repoSet.has(rp);
             });
 
-            this.persistLogBuffer().catch(() => {});
+            this.persistLogBuffer().catch(() => { });
         } catch { /* ignore */ }
     }
 
@@ -290,18 +298,15 @@ export class Logger {
     /**
      * Log API request (pending state)
      */
-    public logApiRequest(provider: string, model: string, messages: any[], systemPrompt?: string, isFirstRequest: boolean = false, repoPath?: string): string {
+    public logApiRequest(repoPath?: string): string {
         // Create a unique ID for this request
         const logId = `api-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-        const content = undefined;
 
         const log: LogEntry = {
             id: logId,
             timestamp: Date.now(),
             type: LogType.ApiRequest,
             title: `API Request`,
-            content,
             pending: true
         };
         if (repoPath) { (log as any).repoPath = repoPath; }
@@ -379,8 +384,9 @@ export class Logger {
         if (repoPath) { (log as any).repoPath = repoPath; }
         this.sendLogToWebview(log);
 
-        // Emit a separate Reason log when present and not a final result
-        if (!isFinal && typeof reason === 'string' && reason.trim().length > 0) {
+        // Emit a separate Reason log when present and not a final result.
+        // Suppress reason when the request was cancelled to avoid confusing flip-backs in UI.
+        if (!isFinal && !log.cancelled && typeof reason === 'string' && reason.trim().length > 0) {
             const reasonLog: LogEntry = {
                 id: `reason-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 timestamp: Date.now(),
