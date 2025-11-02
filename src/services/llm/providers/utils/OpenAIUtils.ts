@@ -68,6 +68,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
         const totalAttempts = Math.max(1, retries + 1);
 
         for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            let logId: string | undefined;
             try {
                 const requestOptions = this.buildRequestOptions(options, messages);
 
@@ -75,7 +76,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 const systemMessages = messages.filter(m => m.role === 'system');
                 const systemPrompt = systemMessages.length > 0 ? systemMessages.map(m => m.content).join('\n\n') : undefined;
                 const isFirstRequest = options.isFirstRequest ?? false;
-                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
+                logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
 
                 if (options.provider.toLowerCase() === 'openai') {
                     // Use Responses API with function calling for OpenAI
@@ -205,6 +206,20 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 const code = e?.status || e?.code;
 
                 if (controller.signal.aborted) {
+                    // Mark current attempt as finished to stop spinner
+                    try {
+                        if (logId) {
+                            logger.logApiRequestWithResult(
+                                logId,
+                                options.provider,
+                                options.model,
+                                { error: 'Cancelled by user' },
+                                undefined,
+                                false,
+                                options.repoPath
+                            );
+                        }
+                    } catch {/* ignore */}
                     throw ProviderError.cancelled();
                 }
 
@@ -212,10 +227,38 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                     await this.maybeWarnRateLimit(options.provider, options.model);
                     const wait = this.getRetryDelayMs(e);
                     logger.warn(`[Genie][${options.provider}] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
+                    // Close this attempt's pending spinner so it doesn't hang
+                    try {
+                        if (logId) {
+                            logger.logApiRequestWithResult(
+                                logId,
+                                options.provider,
+                                options.model,
+                                { info: `Rate limited. Retry in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})` },
+                                undefined,
+                                false,
+                                options.repoPath
+                            );
+                        }
+                    } catch {/* ignore */}
                     await this.sleep(wait);
                     continue;
                 }
 
+                // Mark this attempt as failed to avoid stuck spinner
+                try {
+                    if (logId) {
+                        logger.logApiRequestWithResult(
+                            logId,
+                            options.provider,
+                            options.model,
+                            { error: String(e?.message || e) },
+                            undefined,
+                            false,
+                            options.repoPath
+                        );
+                    }
+                } catch {/* ignore */}
                 throw ProviderError.wrap(e, options.provider);
             }
         }

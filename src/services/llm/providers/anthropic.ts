@@ -303,7 +303,8 @@ export class AnthropicService extends BaseLLMService {
                     token: options?.token,
                     trackUsage: true,
                     tools: [AnthropicCommitMessageTool],
-                    toolChoice: { type: 'tool', name: AnthropicCommitMessageTool.name }
+                    toolChoice: { type: 'tool', name: AnthropicCommitMessageTool.name },
+                    repoPath
                 }
             );
 

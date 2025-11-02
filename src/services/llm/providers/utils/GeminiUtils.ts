@@ -71,6 +71,7 @@ export class GeminiUtils extends BaseProviderUtils {
         const retries = this.getMaxRetries();
         const totalAttempts = Math.max(1, retries + 1);
         for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            let logId: string | undefined;
             try {
                 // Convert messages to Gemini format
                 const chatContents: GeminiChatContents = this.convertMessagesToGeminiFormat(messages, options.systemInstruction);
@@ -111,7 +112,7 @@ export class GeminiUtils extends BaseProviderUtils {
                     ? chatContents.systemInstruction
                     : (chatContents.systemInstruction as any)?.parts?.[0]?.text;
                 const isFirstRequest = options.isFirstRequest ?? false;
-                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
+                logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
 
                 const response = await client.models.generateContent({
                     model: options.model,
@@ -183,6 +184,18 @@ export class GeminiUtils extends BaseProviderUtils {
                     }
                     try {
                         parsedResponse = JSON.parse(jsonText);
+                        // Update webview log: mark request as completed and attach cost
+                        try {
+                            logger.logApiRequestWithResult(
+                                logId,
+                                options.provider,
+                                options.model,
+                                parsedResponse,
+                                usage,
+                                false,
+                                options.repoPath
+                            );
+                        } catch { /* ignore logging errors */ }
                     } catch {
                         // Retry on parse failure
                         continue;
@@ -195,6 +208,20 @@ export class GeminiUtils extends BaseProviderUtils {
                 const code = e?.status || e?.statusCode || e?.code;
 
                 if (e.name === 'AbortError' || e.message?.includes('aborted')) {
+                    // stop spinner for this attempt
+                    try {
+                        if (logId) {
+                            logger.logApiRequestWithResult(
+                                logId,
+                                options.provider,
+                                options.model,
+                                { error: 'Cancelled by user' },
+                                undefined,
+                                false,
+                                options.repoPath
+                            );
+                        }
+                    } catch { /* ignore */ }
                     throw new Error('Cancelled');
                 }
 
@@ -202,10 +229,38 @@ export class GeminiUtils extends BaseProviderUtils {
                     await this.maybeWarnRateLimit(options.provider, options.model);
                     const wait = this.getRetryDelayMs(e);
                     logger.warn(`[Genie][${options.provider}] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
+                    // close this attempt's spinner
+                    try {
+                        if (logId) {
+                            logger.logApiRequestWithResult(
+                                logId,
+                                options.provider,
+                                options.model,
+                                { info: `Rate limited. Retry in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})` },
+                                undefined,
+                                false,
+                                options.repoPath
+                            );
+                        }
+                    } catch { /* ignore */ }
                     await this.sleep(wait);
                     continue;
                 }
 
+                // Mark attempt as failed so it doesn't hang in UI
+                try {
+                    if (logId) {
+                        logger.logApiRequestWithResult(
+                            logId,
+                            options.provider,
+                            options.model,
+                            { error: String(e?.message || e) },
+                            undefined,
+                            false,
+                            options.repoPath
+                        );
+                    }
+                } catch { /* ignore */ }
                 throw e;
             }
         }

@@ -43,6 +43,7 @@ export class AnthropicUtils extends BaseProviderUtils {
         const retries = this.getMaxRetries();
         const totalAttempts = Math.max(1, retries + 1);
         for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            let logId: string | undefined;
             try {
                 const requestOptions: any = {
                     model: options.model,
@@ -75,7 +76,7 @@ export class AnthropicUtils extends BaseProviderUtils {
                 // Log API request (pending state) - include system prompt for first request
                 const systemPrompt = systemMessages.length > 0 ? systemMessages.map(m => m.content).join('\n\n') : undefined;
                 const isFirstRequest = options.isFirstRequest ?? false;
-                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
+                logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
 
                 const response = await client.messages.create(requestOptions, {
                     signal: controller.signal
@@ -113,6 +114,20 @@ export class AnthropicUtils extends BaseProviderUtils {
                 const code = e?.status || e?.statusCode || e?.code;
 
                 if (e.name === 'AbortError' || e.message?.includes('aborted')) {
+                    // stop spinner for this attempt
+                    try {
+                        if (logId) {
+                            logger.logApiRequestWithResult(
+                                logId,
+                                options.provider,
+                                options.model,
+                                { error: 'Cancelled by user' },
+                                undefined,
+                                false,
+                                options.repoPath
+                            );
+                        }
+                    } catch { /* ignore */ }
                     throw new Error('Cancelled');
                 }
 
@@ -120,10 +135,38 @@ export class AnthropicUtils extends BaseProviderUtils {
                     await this.maybeWarnRateLimit(options.provider, options.model);
                     const wait = this.getRetryDelayMs(e);
                     logger.warn(`[Genie][${options.provider}] Rate limited. Retrying in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})`);
+                    // close this attempt's spinner
+                    try {
+                        if (logId) {
+                            logger.logApiRequestWithResult(
+                                logId,
+                                options.provider,
+                                options.model,
+                                { info: `Rate limited. Retry in ${wait}ms (attempt ${attempt + 1}/${totalAttempts})` },
+                                undefined,
+                                false,
+                                options.repoPath
+                            );
+                        }
+                    } catch { /* ignore */ }
                     await this.sleep(wait);
                     continue;
                 }
 
+                // mark attempt as failed so the UI doesn't keep loading
+                try {
+                    if (logId) {
+                        logger.logApiRequestWithResult(
+                            logId,
+                            options.provider,
+                            options.model,
+                            { error: String(e?.message || e) },
+                            undefined,
+                            false,
+                            options.repoPath
+                        );
+                    }
+                } catch { /* ignore */ }
                 throw e;
             }
         }

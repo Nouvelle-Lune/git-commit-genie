@@ -311,7 +311,8 @@ export class GeminiService extends BaseLLMService {
                     provider: 'Gemini',
                     responseSchema: GeminiCommitMessageSchema,
                     token: options?.token,
-                    trackUsage: true
+                    trackUsage: true,
+                    repoPath
                 }
             );
 
