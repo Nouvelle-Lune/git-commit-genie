@@ -238,6 +238,10 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     return await this.initializeRepository(repositoryPath);
                 }
 
+                // Emit a divider log entry and info when starting an update run
+                logger.info(`[Genie][RepoAnalysis] Updating for: ${repositoryPath}`);
+                logger.logAnalysisStart(repositoryPath);
+
                 const commitHistory = await this.getCommitHistory(repositoryPath);
                 const recentCommits = commitHistory
                     .slice(0, cfg.updateThreshold)
