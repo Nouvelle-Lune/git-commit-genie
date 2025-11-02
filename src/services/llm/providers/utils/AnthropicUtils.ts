@@ -73,10 +73,8 @@ export class AnthropicUtils extends BaseProviderUtils {
                 // Handle cancellation
                 const controller = this.createAbortController(options.token);
 
-                // Log API request (pending state) - include system prompt for first request
-                const systemPrompt = systemMessages.length > 0 ? systemMessages.map(m => m.content).join('\n\n') : undefined;
-                const isFirstRequest = options.isFirstRequest ?? false;
-                logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
+                // Log API request (pending state)
+                logId = logger.logApiRequest(options.repoPath);
 
                 const response = await client.messages.create(requestOptions, {
                     signal: controller.signal

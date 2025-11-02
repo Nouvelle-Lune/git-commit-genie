@@ -107,12 +107,8 @@ export class GeminiUtils extends BaseProviderUtils {
                 const controller = this.createAbortController(options.token);
                 config.abortSignal = controller.signal;
 
-                // Log API request (pending state) - include system prompt for first request
-                const systemPrompt = typeof chatContents.systemInstruction === 'string'
-                    ? chatContents.systemInstruction
-                    : (chatContents.systemInstruction as any)?.parts?.[0]?.text;
-                const isFirstRequest = options.isFirstRequest ?? false;
-                logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
+                // Log API request (pending state)
+                logId = logger.logApiRequest(options.repoPath);
 
                 const response = await client.models.generateContent({
                     model: options.model,

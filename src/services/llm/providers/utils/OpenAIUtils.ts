@@ -72,11 +72,8 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             try {
                 const requestOptions = this.buildRequestOptions(options, messages);
 
-                // Log API request (pending state) - include system prompt for first request
-                const systemMessages = messages.filter(m => m.role === 'system');
-                const systemPrompt = systemMessages.length > 0 ? systemMessages.map(m => m.content).join('\n\n') : undefined;
-                const isFirstRequest = options.isFirstRequest ?? false;
-                logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
+                // Log API request (pending state)
+                logId = logger.logApiRequest(options.repoPath);
 
                 if (options.provider.toLowerCase() === 'openai') {
                     // Use Responses API with function calling for OpenAI
@@ -219,7 +216,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                                 options.repoPath
                             );
                         }
-                    } catch {/* ignore */}
+                    } catch {/* ignore */ }
                     throw ProviderError.cancelled();
                 }
 
@@ -240,7 +237,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                                 options.repoPath
                             );
                         }
-                    } catch {/* ignore */}
+                    } catch {/* ignore */ }
                     await this.sleep(wait);
                     continue;
                 }
@@ -258,7 +255,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                             options.repoPath
                         );
                     }
-                } catch {/* ignore */}
+                } catch {/* ignore */ }
                 throw ProviderError.wrap(e, options.provider);
             }
         }
