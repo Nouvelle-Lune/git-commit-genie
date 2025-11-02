@@ -3,13 +3,52 @@
     flex-shrink: 0;
 }
 
-.repo-title {
+.repo-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin: 0 12px 8px 12px;
+    gap: 8px;
+}
+
+.repo-title {
+    margin: 0;
     font-size: 12px;
     font-weight: 600;
     color: var(--vscode-descriptionForeground);
     text-transform: uppercase;
     letter-spacing: 0.5px;
+    flex: 1;
+}
+
+.menu-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    color: var(--vscode-foreground);
+    transition: background-color 0.2s;
+    flex-shrink: 0;
+}
+
+.menu-button:hover {
+    background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.menu-button:active {
+    background-color: var(--vscode-toolbar-activeBackground);
+}
+
+.menu-button i.codicon {
+    font-size: 14px;
+    /* Ensure hover/click target is the button so title shows */
+    pointer-events: none;
 }
 
 .repo-box {
@@ -33,10 +72,44 @@
     background-color: transparent;
     border-radius: 3px;
     transition: background-color 0.2s;
+    gap: 8px;
 }
 
 .repo-item:hover {
     background-color: var(--vscode-list-hoverBackground);
+}
+
+.repo-info {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.status-badge i.codicon {
+    font-size: 14px;
+}
+
+.status-analyzing {
+    color: var(--vscode-progressBar-background);
+}
+
+.status-missing {
+    color: var(--vscode-editorWarning-foreground);
+}
+
+.status-idle {
+    color: var(--vscode-testing-iconPassed);
 }
 
 .repo-name {
@@ -49,14 +122,67 @@
     flex: 1;
 }
 
+.repo-name.clickable {
+    cursor: pointer;
+    color: var(--vscode-textLink-foreground);
+}
+
+.repo-name.clickable:hover {
+    text-decoration: underline;
+}
+
+.repo-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
 .repo-cost {
-    font-size: 11px;
-    background-color: var(--vscode-badge-background);
-    color: var(--vscode-badge-foreground);
-    padding: 2px 6px;
-    border-radius: 10px;
-    font-family: var(--vscode-font-family);
-    font-weight: 500;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--vscode-descriptionForeground);
     white-space: nowrap;
-    margin-left: 8px;
+}
+
+.icon-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    color: var(--vscode-foreground);
+    transition: background-color 0.2s;
+}
+
+.icon-button:hover:not(:disabled) {
+    background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.icon-button:active:not(:disabled) {
+    background-color: var(--vscode-toolbar-activeBackground);
+}
+
+.icon-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.icon-button i.codicon {
+    font-size: 14px;
+    /* Allow button to receive hover events for tooltip */
+    pointer-events: none;
+}
+
+.icon-button.cancel-button {
+    color: var(--vscode-errorForeground);
+}
+
+.icon-button.cancel-button:hover {
+    background-color: var(--vscode-inputValidation-errorBackground);
 }

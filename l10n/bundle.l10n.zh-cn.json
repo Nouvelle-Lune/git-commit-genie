@@ -105,5 +105,11 @@
   "Logs": "日志",
   "No logs yet": "暂无日志",
   "Clear logs": "清除日志",
-  "Analyzing {0}…": "正在分析 {0}…"
+  "Analyzing {0}…": "正在分析 {0}…",
+  "Refresh repository analysis": "刷新仓库分析",
+  "Cancel repository analysis": "取消仓库分析",
+  "View analysis": "查看分析",
+  "Analysis missing": "未分析",
+  "Analyzing...": "分析中...",
+  "Up to date": "已就绪"
 }

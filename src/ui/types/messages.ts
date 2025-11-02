@@ -44,17 +44,43 @@ export interface OpenFileMessage {
     filePath: string;
 }
 
-export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage;
+export interface RefreshAnalysisMessage {
+    type: 'refreshAnalysis';
+    repoPath: string;
+}
+
+export interface OpenGenieMenuMessage {
+    type: 'openGenieMenu';
+}
+
+export interface CancelAnalysisMessage {
+    type: 'cancelAnalysis';
+}
+
+export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage | RefreshAnalysisMessage | OpenGenieMenuMessage | CancelAnalysisMessage;
 
 // Data Types
 export interface RepositoryInfo {
     name: string;
     path: string;
     cost: number;
+    analysisStatus: 'missing' | 'analyzing' | 'idle'; // Repository analysis status
+    analysisPath?: string; // Path to analysis markdown file
 }
 
 export interface I18nTexts {
     repositoryList: string;
+    refreshAnalysis: string;
+    cancelAnalysis: string;
+    viewAnalysis: string;
+    analysisStatusMissing: string;
+    analysisStatusAnalyzing: string;
+    analysisStatusIdle: string;
+    logs: string;
+    noLogsYet: string;
+    clearLogs: string;
+    analyzing: string;
+    openSettings: string;
 }
 
 // Log Types

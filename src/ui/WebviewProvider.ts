@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { L10N_KEYS as I18N } from '../i18n/keys';
-import { WebviewMessage, ExtensionMessage, RepositoryInfo } from './types/messages';
+import { WebviewMessage, ExtensionMessage, RepositoryInfo, I18nTexts } from './types/messages';
 import { logger } from '../services/logger';
 import { StatusBarManager } from './StatusBarManager';
 
@@ -51,6 +51,23 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
         const costService = this._serviceRegistry.getCostTrackingService();
         this._disposables.push(
             costService.onCostChanged(() => {
+                this._handleRepositoryChange();
+            })
+        );
+
+        // Listen to analysis running state changes
+        if (this._statusBar) {
+            this._disposables.push(
+                this._statusBar.onAnalysisRunningChanged(() => {
+                    this._handleRepositoryChange();
+                })
+            );
+        }
+
+        // Listen to analysis data changes (e.g., clearAnalysis)
+        const analysisService = this._serviceRegistry.getAnalysisService();
+        this._disposables.push(
+            analysisService.onAnalysisChanged(() => {
                 this._handleRepositoryChange();
             })
         );
@@ -110,12 +127,31 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                     // Open file in editor
                     try {
                         const uri = vscode.Uri.file(data.filePath);
-                        await vscode.window.showTextDocument(uri, { preview: false });
+                        // Check if file exists before opening
+                        try {
+                            await vscode.workspace.fs.stat(uri);
+                            await vscode.window.showTextDocument(uri, { preview: false });
+                        } catch (statError) {
+                            // File doesn't exist
+                            logger.warn(`File does not exist: ${data.filePath}`);
+                            vscode.window.showWarningMessage(
+                                vscode.l10n.t(I18N.repoAnalysis.mdNotFound)
+                            );
+                        }
                     } catch (error) {
                         logger.error('Failed to open file:', error);
                     }
                 } else if ((data as any).type === 'requestFlushLogs') {
                     try { logger.flushLogsToWebview(); } catch { /* ignore */ }
+                } else if (data.type === 'refreshAnalysis') {
+                    // Trigger refresh analysis command for specific repo
+                    vscode.commands.executeCommand('git-commit-genie.refreshRepositoryAnalysis', data.repoPath);
+                } else if (data.type === 'openGenieMenu') {
+                    // Open Genie menu
+                    vscode.commands.executeCommand('git-commit-genie.genieMenu');
+                } else if (data.type === 'cancelAnalysis') {
+                    // Cancel repository analysis
+                    vscode.commands.executeCommand('git-commit-genie.cancelRepositoryAnalysis');
                 }
             })
         );
@@ -185,18 +221,51 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
      */
     private async getRepositoryData(): Promise<{
         repositories: RepositoryInfo[];
-        i18n: { repositoryList: string; logs: string; noLogsYet: string; clearLogs: string; analyzing: string };
+        i18n: I18nTexts;
     }> {
         const repoService = this._serviceRegistry.getRepoService();
         const costService = this._serviceRegistry.getCostTrackingService();
+        const analysisService = this._serviceRegistry.getAnalysisService();
         const repositories = repoService.getRepositories();
+
+        const isRepoAnalysisEnabled = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis').get<boolean>('enabled', true);
+        const runningRepoPath = this._statusBar?.isRepoAnalysisRunning() ? (this._statusBar as any)?.['analysisState']?.runningRepoPath : null;
 
         const repoCosts: RepositoryInfo[] = [];
         for (const repo of repositories) {
             const repoPath = repo.rootUri.fsPath;
             const repoName = path.basename(repoPath);
             const cost = await costService.getRepositoryCost(repoPath);
-            repoCosts.push({ name: repoName, path: repoPath, cost });
+
+            // Determine analysis status
+            let analysisStatus: 'missing' | 'analyzing' | 'idle' = 'missing';
+            let analysisPath: string | undefined;
+
+            if (isRepoAnalysisEnabled) {
+                if (runningRepoPath === repoPath) {
+                    analysisStatus = 'analyzing';
+                } else {
+                    try {
+                        const analysis = await analysisService.getAnalysis(repoPath);
+                        if (analysis) {
+                            analysisStatus = 'idle';
+                            analysisPath = path.join(repoPath, '.gitgenie', 'repository-analysis.md');
+                        }
+                    } catch {
+                        analysisStatus = 'missing';
+                    }
+                }
+            } else {
+                analysisStatus = 'idle'; // If disabled, show as idle
+            }
+
+            repoCosts.push({
+                name: repoName,
+                path: repoPath,
+                cost,
+                analysisStatus,
+                analysisPath
+            });
         }
 
         return {
@@ -206,7 +275,14 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 logs: vscode.l10n.t(I18N.dashboard.logs),
                 noLogsYet: vscode.l10n.t(I18N.dashboard.noLogsYet),
                 clearLogs: vscode.l10n.t(I18N.dashboard.clearLogs),
-                analyzing: vscode.l10n.t(I18N.dashboard.analyzing)
+                analyzing: vscode.l10n.t(I18N.dashboard.analyzing),
+                refreshAnalysis: vscode.l10n.t(I18N.dashboard.refreshAnalysis),
+                cancelAnalysis: vscode.l10n.t(I18N.dashboard.cancelAnalysis),
+                viewAnalysis: vscode.l10n.t(I18N.dashboard.viewAnalysis),
+                analysisStatusMissing: vscode.l10n.t(I18N.dashboard.analysisStatusMissing),
+                analysisStatusAnalyzing: vscode.l10n.t(I18N.dashboard.analysisStatusAnalyzing),
+                analysisStatusIdle: vscode.l10n.t(I18N.dashboard.analysisStatusIdle),
+                openSettings: vscode.l10n.t(I18N.actions.openSettings)
             }
         };
     }

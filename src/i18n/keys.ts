@@ -178,7 +178,13 @@ export const L10N_KEYS = {
     logs: 'Logs',
     noLogsYet: 'No logs yet',
     clearLogs: 'Clear logs',
-    analyzing: 'Analyzing {0}…'
+    analyzing: 'Analyzing {0}…',
+    refreshAnalysis: 'Refresh repository analysis',
+    cancelAnalysis: 'Cancel repository analysis',
+    viewAnalysis: 'View analysis',
+    analysisStatusMissing: 'Analysis missing',
+    analysisStatusAnalyzing: 'Analyzing...',
+    analysisStatusIdle: 'Up to date'
   }
 } as const;
 

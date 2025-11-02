@@ -60,6 +60,10 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     // Promisified exec for git CLI usage
     private static readonly execPromise = util.promisify(exec);
 
+    // Event emitter for analysis changes
+    private readonly _onAnalysisChanged = new vscode.EventEmitter<string>();
+    public readonly onAnalysisChanged = this._onAnalysisChanged.event;
+
     constructor(context: vscode.ExtensionContext, llmService: LLMService | null, repoService: RepoService) {
         this.context = context;
         this.llmService = llmService;
@@ -1514,6 +1518,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 fs.unlinkSync(mdPath);
                 logger.info('[Genie][RepoAnalysis] Deleted analysis markdown file');
             }
+
+            // Fire analysis changed event
+            this._onAnalysisChanged.fire(repositoryPath);
 
         } catch (error) {
             logger.warn('[Genie][RepoAnalysis] Failed to clear analysis data', error as any);

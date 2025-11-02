@@ -200,12 +200,6 @@ export const LogSection: React.FC = () => {
                 <button className="log-clear-btn codicon codicon-clear-all" onClick={handleClearLogs} title={state.i18n.clearLogs} />
             </div>
             <div className="log-box">
-                {state.analysisRunning && (
-                    <div className="running-banner" title={state.runningRepoLabel ? state.i18n.analyzing.replace('{0}', state.runningRepoLabel) : state.i18n.analyzing.replace('{0}', '')}>
-                        <span className="codicon codicon-sync codicon-modifier-spin"></span>
-                        <span className="running-text">{state.runningRepoLabel ? state.i18n.analyzing.replace('{0}', state.runningRepoLabel) : state.i18n.analyzing.replace('{0}', '')}</span>
-                    </div>
-                )}
                 {state.logs.length === 0 ? (
                     <div className="log-empty">{state.i18n.noLogsYet}</div>
                 ) : (

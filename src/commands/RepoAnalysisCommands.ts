@@ -94,15 +94,20 @@ export class RepoAnalysisCommands {
         }
     }
 
-    private async refreshRepositoryAnalysis(): Promise<void> {
+    private async refreshRepositoryAnalysis(repositoryPath?: string): Promise<void> {
         if (!this.isRepoAnalysisEnabled()) {
             return;
         }
 
         const repoService = this.serviceRegistry.getRepoService();
-        const repositoryPath = await repoService.pickRepository();
+
+        // If repositoryPath is not provided, let user pick one
         if (!repositoryPath) {
-            return;
+            const pickedPath = await repoService.pickRepository();
+            if (!pickedPath) {
+                return;
+            }
+            repositoryPath = pickedPath;
         }
 
         try {
@@ -116,7 +121,7 @@ export class RepoAnalysisCommands {
             }, async () => {
                 this.statusBarManager.setRepoAnalysisRunning(true, repositoryPath);
                 try {
-                    updateResult = await analysisService.updateAnalysis(repositoryPath);
+                    updateResult = await analysisService.updateAnalysis(repositoryPath!);
                 } finally {
                     this.statusBarManager.setRepoAnalysisRunning(false);
                 }

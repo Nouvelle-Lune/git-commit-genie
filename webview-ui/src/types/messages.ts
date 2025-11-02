@@ -48,13 +48,28 @@ export interface RequestFlushLogsMessage {
     type: 'requestFlushLogs';
 }
 
-export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage | RequestFlushLogsMessage;
+export interface RefreshAnalysisMessage {
+    type: 'refreshAnalysis';
+    repoPath: string;
+}
+
+export interface OpenGenieMenuMessage {
+    type: 'openGenieMenu';
+}
+
+export interface CancelAnalysisMessage {
+    type: 'cancelAnalysis';
+}
+
+export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage | RequestFlushLogsMessage | RefreshAnalysisMessage | OpenGenieMenuMessage | CancelAnalysisMessage;
 
 // Data Types
 export interface RepositoryInfo {
     name: string;
     path: string;
     cost: number;
+    analysisStatus: 'missing' | 'analyzing' | 'idle';
+    analysisPath?: string;
 }
 
 export interface I18nTexts {
@@ -63,6 +78,13 @@ export interface I18nTexts {
     noLogsYet: string;
     clearLogs: string;
     analyzing: string;
+    refreshAnalysis: string;
+    cancelAnalysis: string;
+    viewAnalysis: string;
+    analysisStatusMissing: string;
+    analysisStatusAnalyzing: string;
+    analysisStatusIdle: string;
+    openSettings: string;
 }
 
 // Log Types
