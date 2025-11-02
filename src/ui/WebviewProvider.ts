@@ -158,7 +158,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Clear logs from the UI only (used by flush flow)
+     * Clear logs from the UI only
      */
     public clearLogs(): void {
         if (this._view) {
@@ -167,7 +167,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Clear logs for current workspace repos from storage and UI (user action)
+     * Clear logs for current workspace repos from storage and UI
      */
     public clearLogsAndStorage(): void {
         try {

@@ -451,12 +451,12 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             {
                 name: 'searchFiles',
                 args: '{ query: string; searchType: "name"|"content"; useRegex?: boolean; searchPath?: string; maxResults?: number; caseSensitive?: boolean; excludePatterns?: string[]; maxMatchesPerFile?: number; contextLines?: number }',
-                desc: 'Search by file name or content; paths must be inside repository.'
+                desc: 'Search by file name or content; for content searches, results include 1-based match line numbers; paths must be inside repository.'
             },
             {
                 name: 'readFileContent',
                 args: '{ filePath: string; startLine?: number; maxLines?: number; encoding?: string }',
-                desc: 'Read a file segment; filePath must be inside repository.'
+                desc: 'Read a file segment; use startLine to jump near lines returned by content search; filePath must be inside repository.'
             },
             {
                 name: 'compressContext',
@@ -473,6 +473,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             'Respond with STRICT JSON only, no markdown code fences.',
             'For every tool action, include a concise English "reason" describing what you will do next (e.g., "I will use searchFiles to look for framework imports").',
             'If your provider supports function calling, always prefer calling the provided tools directly and do not output free-form plans. To finish, call the finalize tool with the final analysis object.',
+            'Efficiency tip: When using searchFiles with searchType="content", results include 1-based line numbers for each match. If you then read the file, prefer calling readFileContent with startLine set near that match (e.g., max(1, line-40)) and a modest maxLines window (e.g., 100–150) to inspect local context instead of reading from the file start.',
             '',
             (isIncremental
                 ? [
