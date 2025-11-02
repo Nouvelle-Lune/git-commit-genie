@@ -139,6 +139,8 @@ export class RepoAnalysisCommands {
         try {
             this.serviceRegistry.getAnalysisService().cancelCurrentAnalysis();
             this.statusBarManager.setRepoAnalysisRunning(false);
+            // Stop any loading spinners in the webview logs and mark as cancelled
+            logger.cancelPendingLogs();
             logger.warn('[Genie][RepoAnalysis] Refresh cancelled by user.');
         } catch {
             // ignore

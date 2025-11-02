@@ -25,6 +25,7 @@ export class AnthropicUtils extends BaseProviderUtils {
             trackUsage?: boolean;
             tools?: any[];
             toolChoice?: any;
+            isFirstRequest?: boolean;
         }
     ): Promise<{ parsedResponse: any; usage?: any; parsedAssistantResponse?: any }> {
         if (!client) {
@@ -70,6 +71,11 @@ export class AnthropicUtils extends BaseProviderUtils {
                 // Handle cancellation
                 const controller = this.createAbortController(options.token);
 
+                // Log API request (pending state) - include system prompt for first request
+                const systemPrompt = systemMessages.length > 0 ? systemMessages.map(m => m.content).join('\n\n') : undefined;
+                const isFirstRequest = options.isFirstRequest ?? false;
+                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest);
+
                 const response = await client.messages.create(requestOptions, {
                     signal: controller.signal
                 });
@@ -77,6 +83,20 @@ export class AnthropicUtils extends BaseProviderUtils {
                 const block = response.content[0] as ToolUseBlock;
 
                 const parsedResponse = block?.input;
+
+                // Update log with function call result
+                if (parsedResponse) {
+                    const isFinal = (parsedResponse as any).action === 'final';
+                    const usage = response.usage;
+                    logger.logApiRequestWithResult(
+                        logId,
+                        options.provider,
+                        options.model,
+                        parsedResponse,
+                        usage,
+                        isFinal
+                    );
+                }
 
                 const parsedAssistantResponse = {
                     role: response.role,

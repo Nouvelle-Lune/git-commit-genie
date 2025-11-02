@@ -48,6 +48,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             previousResponseId?: string;
             store?: boolean;
             toolOutputs?: Array<{ call_id: string; output: string }>; // For OpenAI Responses function_call_output
+            isFirstRequest?: boolean; // Track if this is the first request in analysis
         }
     ): Promise<{ parsedResponse?: any; usage?: any; parsedAssistantResponse?: any; responseId?: string; functionCallId?: string }> {
         if (!client) {
@@ -68,6 +69,12 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
         for (let attempt = 0; attempt < totalAttempts; attempt++) {
             try {
                 const requestOptions = this.buildRequestOptions(options, messages);
+
+                // Log API request (pending state) - include system prompt for first request
+                const systemMessages = messages.filter(m => m.role === 'system');
+                const systemPrompt = systemMessages.length > 0 ? systemMessages.map(m => m.content).join('\n\n') : undefined;
+                const isFirstRequest = options.isFirstRequest ?? false;
+                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest);
 
                 if (options.provider.toLowerCase() === 'openai') {
                     // Use Responses API with function calling for OpenAI
@@ -92,9 +99,25 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                         try { args = JSON.parse(argsStr); } catch { args = {}; }
                         const argReason = typeof args?.reason === 'string' ? args.reason : '';
                         if (argReason) { reasonText = argReason; delete args.reason; }
+
+                        const parsedResult = name === 'finalize'
+                            ? { action: 'final', final: args }
+                            : { action: 'tool', toolName: name, args, reason: reasonText };
+
+                        // Update log with function call result
+                        const isFinal = name === 'finalize';
+                        const usage = (response as any).usage;
+                        logger.logApiRequestWithResult(
+                            logId,
+                            options.provider,
+                            options.model,
+                            parsedResult,
+                            usage,
+                            isFinal
+                        );
+
                         if (name === 'finalize') {
-                            const final = args || {};
-                            return { parsedResponse: { action: 'final', final }, usage: (response as any).usage, responseId: (response as any)?.id, functionCallId: String(fnCall.call_id || fnCall.id || '') };
+                            return { parsedResponse: { action: 'final', final: args }, usage: (response as any).usage, responseId: (response as any)?.id, functionCallId: String(fnCall.call_id || fnCall.id || '') };
                         }
                         return { parsedResponse: { action: 'tool', toolName: name, args, reason: reasonText }, usage: (response as any).usage, responseId: (response as any)?.id, functionCallId: String(fnCall.call_id || fnCall.id || '') };
                     }
@@ -115,6 +138,20 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
 
                     // Token usage logging is handled at provider level to avoid duplication
                     const parsedResponse = content ? JSON.parse(content.trim()) : undefined;
+
+                    // Update log with function call result
+                    if (parsedResponse) {
+                        const isFinal = parsedResponse.action === 'final';
+                        logger.logApiRequestWithResult(
+                            logId,
+                            options.provider,
+                            options.model,
+                            parsedResponse,
+                            usage,
+                            isFinal
+                        );
+                    }
+
                     const parsedAssistantResponse = response.choices[0]?.message;
                     return { parsedResponse, usage, parsedAssistantResponse };
 

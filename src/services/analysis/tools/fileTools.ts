@@ -11,6 +11,7 @@ import {
     ReadFileOptions,
     ReadFileResult
 } from './toolTypes';
+import { logger } from '../../logger';
 
 /**
  * Read file content with support for partial reading
@@ -50,7 +51,8 @@ import {
  */
 export async function readFileContent(
     filePath: string,
-    options?: ReadFileOptions
+    options?: ReadFileOptions,
+    reason?: string
 ): Promise<ToolResult<ReadFileResult>> {
     const {
         startLine = 1,
@@ -106,6 +108,9 @@ export async function readFileContent(
         // Extract requested lines (convert to 0-based index)
         const selectedLines = lines.slice(actualStartLine - 1, actualEndLine);
         const resultContent = selectedLines.join('\n');
+
+        // Log file read to webview AFTER we know the line range
+        logger.logFileRead(filePath, reason || 'Repository analysis', actualStartLine, actualEndLine, resultContent);
 
         const warnings: string[] = [];
 

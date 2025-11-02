@@ -52,6 +52,7 @@ export class GeminiUtils extends BaseProviderUtils {
             // Function calling (Gemini) support
             requestType?: RequestType;
             functionDeclarations?: any[];
+            isFirstRequest?: boolean;
             // If needed later, we can add `functionResponse` parts support
         }
     ): Promise<{ parsedResponse?: any; usage?: any }> {
@@ -105,6 +106,13 @@ export class GeminiUtils extends BaseProviderUtils {
                 const controller = this.createAbortController(options.token);
                 config.abortSignal = controller.signal;
 
+                // Log API request (pending state) - include system prompt for first request
+                const systemPrompt = typeof chatContents.systemInstruction === 'string'
+                    ? chatContents.systemInstruction
+                    : (chatContents.systemInstruction as any)?.parts?.[0]?.text;
+                const isFirstRequest = options.isFirstRequest ?? false;
+                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest);
+
                 const response = await client.models.generateContent({
                     model: options.model,
                     contents: chatContents.content,
@@ -141,6 +149,17 @@ export class GeminiUtils extends BaseProviderUtils {
                     } else {
                         parsedResponse = { action: 'tool', toolName: fnName, args: fnArgs, reason: reasonText };
                     }
+
+                    // Update log with function call result
+                    const isFinal = fnName === 'finalize';
+                    logger.logApiRequestWithResult(
+                        logId,
+                        options.provider,
+                        options.model,
+                        parsedResponse,
+                        usage,
+                        isFinal
+                    );
                 } else if (options.responseSchema) {
                     // Structured output path: extract and parse JSON from candidates
                     let jsonText = '';

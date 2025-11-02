@@ -454,7 +454,9 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.63.0",
     "@google/genai": "^1.16.0",
+    "@vscode/codicons": "^0.0.41",
     "openai": "^5.23.0",
+    "react-markdown": "^10.1.0",
     "zod": "^4.1.11"
   },
   "overrides": {

@@ -136,6 +136,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 }
 
                 logger.info(`[Genie][RepoAnalysis] Initializing for: ${repositoryPath}`);
+                logger.logAnalysisStart(repositoryPath);
+
                 const commitMessageLog = await this.repoService.getRepositoryGitMessageLog(repositoryPath);
 
                 const llmResp = await this.runAgenticAnalysis({
@@ -690,7 +692,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             }
 
             const toolOutputToSend = openaiPendingCallId && openaiPendingToolOutput ? { call_id: openaiPendingCallId, output: openaiPendingToolOutput } : undefined;
-            const result = await this.safeJsonCall(msgs, repoPath, previousResponseId, toolOutputToSend);
+            const isFirstRequest = step === 0; // Mark first iteration as first request
+            const result = await this.safeJsonCall(msgs, repoPath, previousResponseId, toolOutputToSend, isFirstRequest);
             if (!result) { return null; }
 
             const action = result.action;
@@ -746,7 +749,14 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             if (action.action === 'tool') {
                 const toolName = String(action.toolName || '');
                 const args = (action.args || {}) as any;
-                logger.info(`[Genie][RepoAnalysis] Step ${step + 1}: Model chose tool '${toolName}'. Reason: ${String(action.reason || '').slice(0, 500)}`);
+                const reason = String(action.reason || '');
+
+                logger.info(`[Genie][RepoAnalysis] Step ${step + 1}: Model chose tool '${toolName}'. Reason: ${reason.slice(0, 500)}`);
+
+                // Don't log tool call here - readFileContent will call logFileRead internally
+                // For other tools, we can add specific logging if needed
+                // logger.logToolCall(toolName, JSON.stringify(args, null, 2), reason);
+
                 const toolResult = await this.runTool(repoPath, toolName, args, userExcludes);
                 this.logToolOutcome(toolName, toolResult);
                 // For OpenAI function calling, queue function_call_output instead of text TOOL_RESULT
@@ -780,7 +790,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * Ensures temperature and token limits come from settings.
      * Returns both the parsed action and usage statistics.
      */
-    private async safeJsonCall(history: ChatMessage[], repoPath: string, previousResponseId?: string, openaiToolOutput?: { call_id: string; output: string }): Promise<{ action: any; usage?: any; responseId?: string; functionCallId?: string } | null> {
+    private async safeJsonCall(history: ChatMessage[], repoPath: string, previousResponseId?: string, openaiToolOutput?: { call_id: string; output: string }, isFirstRequest: boolean = false): Promise<{ action: any; usage?: any; responseId?: string; functionCallId?: string } | null> {
         try {
             const { provider, service } = this.pickRepoAnalysisService();
             if (!service) {
@@ -815,7 +825,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     model,
                     provider,
                     token: this.currentCancelSource?.token,
-                    trackUsage: true
+                    trackUsage: true,
+                    isFirstRequest: isFirstRequest && attempt === 0 // Only mark first attempt of first call as first request
                 };
 
                 switch (provider.toLowerCase()) {
@@ -979,8 +990,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     const startLine = typeof args.startLine === 'number' ? args.startLine : 1;
                     const maxLines = typeof args.maxLines === 'number' ? args.maxLines : 1000;
                     const encoding = typeof args.encoding === 'string' ? args.encoding : 'utf-8';
+                    const reason = typeof args.reason === 'string' ? args.reason : 'Repository analysis';
                     logger.info(`[Genie][RepoAnalysis] Running readFileContent: filePath='${filePath}', start=${startLine}, maxLines=${maxLines}`);
-                    return await readFileContent(filePath, { startLine, maxLines, encoding });
+                    return await readFileContent(filePath, { startLine, maxLines, encoding }, reason);
                 }
                 case 'compressContext': {
                     const content = String(args.content || '');

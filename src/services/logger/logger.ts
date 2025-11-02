@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { CostTrackingService } from "../cost/costTrackingService";
 import { PRICING_TABLE } from '../cost/pricing';
+import { WebviewProvider } from '../../ui/WebviewProvider';
+import { LogType, LogEntry } from '../../ui/types/messages';
 
 export enum LogLevel {
     Debug = 0,
@@ -19,6 +21,7 @@ export class Logger {
     private lastCallType: string = '';
 
     private costTracker: CostTrackingService | null = null;
+    private webviewProvider: WebviewProvider | null = null;
 
     private constructor() { }
 
@@ -47,6 +50,252 @@ export class Logger {
     public setCostTracker(costTracker: CostTrackingService): void {
         this.costTracker = costTracker;
     }
+
+    /**
+     * setWebviewProvider - for sending logs to webview
+     */
+    public setWebviewProvider(webviewProvider: WebviewProvider): void {
+        this.webviewProvider = webviewProvider;
+    }
+
+    /**
+     * Notify webview to mark all pending logs as cancelled
+     */
+    public cancelPendingLogs(): void {
+        try { this.webviewProvider?.cancelPendingLogs(); } catch { /* ignore */ }
+    }
+
+    /**
+     * Send log entry to webview
+     */
+    private sendLogToWebview(log: LogEntry): void {
+        if (this.webviewProvider) {
+            this.webviewProvider.sendMessage({
+                type: 'addLog',
+                log
+            });
+        }
+    }
+
+    /**
+     * Log analysis start event
+     */
+    public logAnalysisStart(repositoryPath: string): void {
+        // Extract repository name from path
+        const repoName = repositoryPath.split('/').filter(Boolean).pop() || repositoryPath;
+
+        const log: LogEntry = {
+            id: `analysis-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: Date.now(),
+            type: LogType.AnalysisStart,
+            title: `Analysis Started: ${repoName}`
+        };
+        this.sendLogToWebview(log);
+        this.info(`[AnalysisStart] ${repositoryPath}`);
+    }
+
+    /**
+     * Log file read operation
+     */
+    public logFileRead(filePath: string, reason: string, startLine?: number, endLine?: number, content?: string): void {
+        const fileName = filePath.split('/').pop() || filePath;
+        const lineRange = startLine && endLine ? ` (lines ${startLine}-${endLine})` : '';
+
+        const log: LogEntry = {
+            id: `file-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: Date.now(),
+            type: LogType.FileRead,
+            title: `Genie wants to read: ${fileName}${lineRange}`,
+            reason,
+            filePath,
+            fileContent: content,
+            startLine,
+            endLine
+        };
+        this.sendLogToWebview(log);
+        this.debug(`[FileRead] ${filePath} - ${reason}`);
+    }
+
+    /**
+     * Log tool call operation
+     */
+    public logToolCall(toolName: string, args: string, reason?: string): void {
+        // Create a friendly title based on the tool name
+        const friendlyTitle = this.getFriendlyToolTitle(toolName, args);
+
+        const log: LogEntry = {
+            id: `tool-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: Date.now(),
+            type: LogType.ToolCall,
+            title: friendlyTitle,
+            reason: reason || '',
+            content: args
+        };
+        this.sendLogToWebview(log);
+        this.debug(`[ToolCall] ${toolName} - ${args}`);
+    }
+
+    /**
+     * Get friendly title for tool calls
+     */
+    private getFriendlyToolTitle(toolName: string, args: string): string {
+        try {
+            const parsedArgs = JSON.parse(args);
+
+            switch (toolName) {
+                case 'readFileContent':
+                    return `Genie wants to read: ${parsedArgs.path?.split('/').pop() || 'file'}`;
+                case 'searchFiles':
+                    return `Genie wants to search for: ${parsedArgs.pattern || 'files'}`;
+                case 'listDirectory':
+                    return `Genie wants to explore: ${parsedArgs.path?.split('/').pop() || 'directory'}`;
+                case 'searchInFiles':
+                    return `Genie wants to search in files: ${parsedArgs.searchTerm || ''}`;
+                case 'getCompressedContext':
+                    return `Genie wants to analyze compressed context`;
+                default:
+                    return `Genie wants to use: ${toolName}`;
+            }
+        } catch {
+            return `Genie wants to use: ${toolName}`;
+        }
+    }
+
+    /**
+     * Log API request (pending state)
+     */
+    public logApiRequest(provider: string, model: string, messages: any[], systemPrompt?: string, isFirstRequest: boolean = false): string {
+        // Create a unique ID for this request
+        const logId = `api-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        const content = undefined;
+
+        const log: LogEntry = {
+            id: logId,
+            timestamp: Date.now(),
+            type: LogType.ApiRequest,
+            title: `API Request`,
+            content,
+            pending: true
+        };
+        this.sendLogToWebview(log);
+        return logId;
+    }
+
+    /**
+     * Update API request log with function call result
+     */
+    public logApiRequestWithResult(logId: string, provider: string, model: string, result: any, usage?: any, isFinal: boolean = false): void {
+        // Format result as JSON string for parsing in frontend
+        const content = typeof result === 'string' ? result : JSON.stringify(result);
+
+        // Extract reason from result if available
+        let reason: string | undefined;
+        try {
+            const parsed = typeof result === 'string' ? JSON.parse(result) : result;
+            if (parsed && typeof parsed.reason === 'string') {
+                reason = parsed.reason;
+            }
+        } catch {
+            // ignore parsing errors
+        }
+
+        // Calculate cost if usage is provided
+        let cost: number | undefined;
+        if (usage) {
+            const providerLower = provider.toLowerCase();
+            let inputTokens = 0;
+            let outputTokens = 0;
+            let cachedTokens = 0;
+
+            try {
+                if (providerLower === 'openai') {
+                    inputTokens = usage.input_tokens || 0;
+                    outputTokens = usage.output_tokens || 0;
+                    cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
+                    cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
+                } else if (providerLower === 'deepseek') {
+                    inputTokens = usage.prompt_tokens || 0;
+                    outputTokens = usage.completion_tokens || 0;
+                    cachedTokens = usage.prompt_cache_hit_tokens || 0;
+                    cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
+                } else if (providerLower === 'anthropic') {
+                    inputTokens = usage.input_tokens || 0;
+                    outputTokens = usage.output_tokens || 0;
+                    cachedTokens = usage.cache_read_input_tokens || 0;
+                    cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
+                } else if (providerLower === 'gemini') {
+                    inputTokens = usage.promptTokenCount || 0;
+                    outputTokens = usage.candidatesTokenCount || 0;
+                    cachedTokens = usage.cachedContentTokenCount || 0;
+                    cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
+                } else if (providerLower === 'qwen') {
+                    inputTokens = usage.input_tokens || 0;
+                    outputTokens = usage.output_tokens || 0;
+                    cost = this.calculateCost(model, inputTokens, outputTokens);
+                }
+            } catch (err) {
+                // ignore cost calculation errors
+            }
+        }
+
+        const log: LogEntry = {
+            id: logId,
+            timestamp: Date.now(),
+            type: isFinal ? LogType.FinalResult : LogType.ApiRequest,
+            title: isFinal ? `Analysis Result` : `API Request`,
+            content,
+            // inline reason moved to a separate log entry
+            cost,
+            pending: false
+        };
+        this.sendLogToWebview(log);
+
+        // Emit a separate Reason log when present and not a final result
+        if (!isFinal && typeof reason === 'string' && reason.trim().length > 0) {
+            const reasonLog: LogEntry = {
+                id: `reason-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                timestamp: Date.now(),
+                type: LogType.Reason,
+                title: 'Reason',
+                content: reason
+            };
+            this.sendLogToWebview(reasonLog);
+        }
+    }
+
+    /**
+     * Format chat messages as markdown
+     */
+    private formatMessagesAsMarkdown(messages: any[]): string {
+        let markdown = '';
+
+        for (const msg of messages) {
+            const role = msg.role || 'unknown';
+            const content = msg.content || '';
+
+            markdown += `## ${role.toUpperCase()}\n\n`;
+
+            if (typeof content === 'string') {
+                markdown += `${content}\n\n`;
+            } else if (Array.isArray(content)) {
+                for (const part of content) {
+                    if (part.type === 'text' && part.text) {
+                        markdown += `${part.text}\n\n`;
+                    } else if (part.type === 'tool_use' || part.type === 'tool_result') {
+                        markdown += `\`\`\`json\n${JSON.stringify(part, null, 2)}\n\`\`\`\n\n`;
+                    }
+                }
+            } else {
+                markdown += `\`\`\`json\n${JSON.stringify(content, null, 2)}\n\`\`\`\n\n`;
+            }
+
+            markdown += '---\n\n';
+        }
+
+        return markdown;
+    }
+
 
     /**
      * Add cost to repository total using cost tracking service

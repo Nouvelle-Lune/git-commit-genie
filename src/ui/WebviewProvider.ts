@@ -81,7 +81,9 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
         webviewView.webview.options = {
             enableScripts: true,
             localResourceRoots: [
-                vscode.Uri.joinPath(this._extensionUri, 'dist')
+                vscode.Uri.joinPath(this._extensionUri, 'dist'),
+                // Allow loading codicon.css and fonts
+                vscode.Uri.joinPath(this._extensionUri, 'node_modules', '@vscode', 'codicons', 'dist')
             ]
         };
 
@@ -92,9 +94,41 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
             webviewView.webview.onDidReceiveMessage(async (data: WebviewMessage) => {
                 if (data.type === 'ready') {
                     await this.sendRepositoryData();
+                } else if (data.type === 'clearLogs') {
+                    this.clearLogs();
+                } else if (data.type === 'openFile') {
+                    // Open file in editor
+                    try {
+                        const uri = vscode.Uri.file(data.filePath);
+                        await vscode.window.showTextDocument(uri, { preview: false });
+                    } catch (error) {
+                        logger.error('Failed to open file:', error);
+                    }
                 }
             })
         );
+    }
+
+    /**
+     * Clear all logs in webview
+     */
+    public clearLogs(): void {
+        if (this._view) {
+            this._view.webview.postMessage({
+                type: 'clearLogs'
+            });
+        }
+    }
+
+    /**
+     * Mark all pending logs in the webview as cancelled
+     */
+    public cancelPendingLogs(): void {
+        if (this._view) {
+            this._view.webview.postMessage({
+                type: 'cancelPendingLogs'
+            });
+        }
     }
 
     /**
@@ -157,6 +191,11 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
             vscode.Uri.joinPath(this._extensionUri, 'dist', 'webview.js')
         );
 
+        // Get codicon font URI
+        const codiconsUri = webview.asWebviewUri(
+            vscode.Uri.joinPath(this._extensionUri, 'node_modules', '@vscode/codicons', 'dist', 'codicon.css')
+        );
+
         // Use a nonce to only allow specific scripts to be run
         const nonce = getNonce();
 
@@ -164,8 +203,9 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
             <html lang="en">
             <head>
                 <meta charset="UTF-8">
-                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline' https://cdn.jsdelivr.net; font-src ${webview.cspSource} https://cdn.jsdelivr.net; script-src 'nonce-${nonce}';">
+                <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
                 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <link href="${codiconsUri}" rel="stylesheet" />
                 <title>Git Commit Genie</title>
             </head>
             <body>
@@ -184,4 +224,3 @@ function getNonce() {
     }
     return text;
 }
-

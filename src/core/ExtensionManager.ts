@@ -41,12 +41,24 @@ export class ExtensionManager {
 
             const provider = this.WebviewProvider;
 
+            // Connect logger to webview provider
+            logger.setWebviewProvider(provider);
+
             const disposable = vscode.window.registerWebviewViewProvider(
                 WebviewProvider.viewType,
                 provider,
                 { webviewOptions: { retainContextWhenHidden: true } }
             );
             this.context.subscriptions.push(disposable);
+
+            // Register clear logs command
+            this.context.subscriptions.push(
+                vscode.commands.registerCommand('git-commit-genie.clearLogs', () => {
+                    provider.clearLogs();
+                    logger.info('Logs cleared');
+                })
+            );
+
             logger.info('Git Commit Genie activated successfully');
         } catch (error) {
             logger.error('Error during extension activation:', error);

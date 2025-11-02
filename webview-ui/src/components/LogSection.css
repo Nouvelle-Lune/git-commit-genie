@@ -1,0 +1,387 @@
+.log-section {
+    margin-top: 8px;
+    width: 100%;
+}
+
+.log-header-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0 12px 8px 12px;
+}
+
+.log-title {
+    font-size: 11px;
+    font-weight: 600;
+    margin: 0;
+    color: var(--vscode-foreground);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.log-clear-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    color: var(--vscode-icon-foreground);
+    opacity: 0.7;
+    transition: opacity 0.2s;
+    font-size: 16px;
+}
+
+.log-clear-btn:hover {
+    opacity: 1;
+}
+
+.log-box {
+    background: var(--vscode-editor-background);
+    border: 2px solid var(--vscode-panel-border);
+    border-radius: 6px;
+    padding: 16px;
+    margin: 8px 12px 0 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    min-height: 100px;
+    box-sizing: border-box;
+}
+
+/* stats card removed */
+
+.log-empty {
+    color: var(--vscode-descriptionForeground);
+    font-style: italic;
+    text-align: center;
+    padding: 40px 20px;
+    font-size: 13px;
+}
+
+.log-list {
+    max-height: 500px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
+}
+
+.log-list::-webkit-scrollbar {
+    width: 10px;
+}
+
+.log-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.log-list::-webkit-scrollbar-thumb {
+    background-color: var(--vscode-scrollbarSlider-background);
+    border-radius: 5px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+}
+
+.log-list::-webkit-scrollbar-thumb:hover {
+    background-color: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+.log-item {
+    padding: 10px 12px;
+    transition: background-color 0.15s;
+    border-bottom: 1px solid var(--vscode-sideBar-border);
+    box-sizing: border-box;
+    overflow: hidden;
+}
+
+.log-item:last-child {
+    border-bottom: none;
+}
+
+.log-item:hover:not(.log-divider) {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.log-item.log-divider {
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 3px solid var(--vscode-editorGroup-border);
+    position: relative;
+}
+
+.log-item.log-divider::before {
+    content: '';
+    position: absolute;
+    top: -3px;
+    left: -16px;
+    right: -16px;
+    height: 6px;
+    background: linear-gradient(to bottom,
+            var(--vscode-editorGroup-border) 0%,
+            transparent 100%);
+    pointer-events: none;
+}
+
+.log-item.log-divider:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+
+.log-item.log-divider:first-child::before {
+    display: none;
+}
+
+.analysis-start {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg,
+            var(--vscode-button-background) 0%,
+            var(--vscode-button-hoverBackground) 100%);
+    border-radius: 8px;
+    font-weight: 600;
+    color: var(--vscode-button-foreground);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+    border: 1px solid var(--vscode-button-border);
+}
+
+.analysis-start .codicon {
+    font-size: 20px;
+    color: var(--vscode-button-foreground);
+    opacity: 0.9;
+}
+
+.analysis-start-text {
+    flex: 1;
+    font-size: 14px;
+    letter-spacing: 0.3px;
+}
+
+.analysis-start .log-time {
+    font-size: 11px;
+    color: var(--vscode-button-secondaryForeground);
+    opacity: 0.8;
+    font-weight: 400;
+}
+
+.log-header {
+    display: grid;
+    grid-template-columns: auto 1fr auto; /* right cluster contains expand icon */
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 4px;
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s;
+}
+
+.log-header:hover {
+    background: var(--vscode-list-hoverBackground);
+}
+
+.log-main-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.log-title-text {
+    color: var(--vscode-editor-foreground);
+    font-size: 13px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: block;
+}
+
+/* removed: inline reason no longer used */
+
+/* removed duplicate rules */
+
+.log-icon {
+    color: var(--vscode-icon-foreground);
+    flex-shrink: 0;
+    font-size: 16px;
+    line-height: 1;
+    display: inline-block;
+}
+
+.log-cost {
+    font-size: 10px;
+    color: var(--vscode-terminal-ansiGreen);
+    font-weight: 600;
+    font-family: var(--vscode-editor-font-family);
+    flex-shrink: 0;
+    padding: 2px 6px;
+    background-color: var(--vscode-badge-background);
+    border-radius: 3px;
+}
+
+.log-time {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family);
+    flex-shrink: 0;
+    margin-left: 0;
+}
+
+.log-loading {
+    font-size: 14px;
+    color: var(--vscode-icon-foreground);
+    flex-shrink: 0;
+    margin-left: 0;
+    display: flex;
+    align-items: center;
+}
+
+.log-expand-icon {
+    color: var(--vscode-icon-foreground);
+    flex-shrink: 0;
+    font-size: 12px;
+    margin-left: 4px;
+    line-height: 1;
+    display: inline-block;
+}
+
+.log-cancelled {
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+    font-family: var(--vscode-editor-font-family);
+    flex-shrink: 0;
+    margin-left: 0;
+}
+
+/* Right-side chip cluster */
+.log-trailing {
+    display: flex;
+    align-items: center;
+    justify-self: end;
+    gap: 6px;
+    min-width: 0; /* shrink to content */
+}
+
+.log-submeta {
+    margin: 2px 0 0 32px; /* align under title (icon 16 + gap) */
+    font-size: 10px;
+    color: var(--vscode-descriptionForeground);
+}
+
+.log-reason-block {
+    margin: 6px 0 0 32px;
+    font-size: 12px;
+    color: var(--vscode-foreground);
+}
+
+.log-file-icon {
+    color: var(--vscode-textLink-foreground);
+    flex-shrink: 0;
+    font-size: 14px;
+    margin-left: 4px;
+    line-height: 1;
+    display: inline-block;
+}
+
+.log-file-icon:hover {
+    color: var(--vscode-textLink-activeForeground);
+}
+
+.log-reason {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--vscode-descriptionForeground);
+    padding-left: 24px;
+    line-height: 1.4;
+}
+
+.log-content {
+    margin-top: 8px;
+    margin-left: 24px;
+    padding: 12px;
+    background-color: var(--vscode-textCodeBlock-background);
+    border-left: 3px solid var(--vscode-textLink-foreground);
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: var(--vscode-editor-font-family);
+    max-height: 400px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    word-break: break-word;
+}
+
+.log-content::-webkit-scrollbar {
+    width: 8px;
+}
+
+.log-content::-webkit-scrollbar-thumb {
+    background-color: var(--vscode-scrollbarSlider-background);
+    border-radius: 4px;
+}
+
+.log-content strong {
+    color: var(--vscode-textPreformat-foreground);
+    font-weight: 600;
+}
+
+.log-content p {
+    margin: 0 0 8px 0;
+    color: var(--vscode-foreground);
+    line-height: 1.5;
+}
+
+.log-content ul,
+.log-content ol {
+    margin: 0 0 8px 0;
+    padding-left: 20px;
+}
+
+.log-content li {
+    margin: 4px 0;
+    line-height: 1.5;
+}
+
+.log-content code {
+    background-color: var(--vscode-textBlockQuote-background);
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    color: var(--vscode-textPreformat-foreground);
+}
+
+.log-content pre {
+    background-color: var(--vscode-textBlockQuote-background);
+    padding: 8px;
+    border-radius: 3px;
+    overflow-x: auto;
+    margin: 8px 0;
+}
+
+.log-content pre code {
+    background-color: transparent;
+    padding: 0;
+}
+
+.file-content-preview {
+    margin: 0;
+    padding: 12px;
+    background-color: var(--vscode-editor-background);
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--vscode-editor-foreground);
+    font-family: var(--vscode-editor-font-family);
+    white-space: pre;
+}
+
+.file-content-preview code {
+    background: transparent;
+    padding: 0;
+    color: inherit;
+}
+
+/* Responsive tweaks for narrow panels */
+@media (max-width: 520px) {
+    .log-time { display: none; }
+    .log-cost { font-size: 9px; padding: 1px 4px; }
+    .log-expand-icon, .log-file-icon { margin-left: 0; }
+    .log-loading { margin-left: 0; }
+    .log-submeta { margin-left: 28px; }
+}
