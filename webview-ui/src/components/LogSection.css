@@ -466,14 +466,26 @@
 }
 
 .log-cost {
-    font-size: 9px;
-    color: var(--vscode-terminal-ansiGreen);
+    font-size: 8px;
+    line-height: 1;
+    color: var(--vscode-badge-foreground);
     font-weight: 600;
     font-family: var(--vscode-editor-font-family);
     flex-shrink: 0;
     padding: 1px 4px;
-    background-color: var(--vscode-badge-background);
-    border-radius: 2px;
+    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+    border-radius: 3px;
+    letter-spacing: 0.2px;
+    min-width: 50px;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+    opacity: 0.9;
+    transition: opacity 0.2s ease;
+    vertical-align: middle;
+}
+
+.log-cost:hover {
+    opacity: 1;
 }
 
 .log-time {

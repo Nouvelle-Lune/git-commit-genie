@@ -16,10 +16,34 @@ export const LogSection: React.FC = () => {
     const [autoScroll, setAutoScroll] = useState<boolean>(true);
     const [showNewLogsIndicator, setShowNewLogsIndicator] = useState<boolean>(false);
     const logListRef = useRef<HTMLDivElement>(null);
+    const bottomSentinelRef = useRef<HTMLDivElement>(null);
     const isAutoScrollingRef = useRef<boolean>(false);
     const lastLogCountRef = useRef<number>(0);
     const userHasManuallyScrolledRef = useRef<boolean>(false);
     const hasMountedRef = useRef<boolean>(false);
+    const lastScrollHeightRef = useRef<number>(0);
+
+    const BOTTOM_THRESHOLD = 24; // px tolerance for bottom detection
+
+    const startSmoothGuardUntilBottom = (el: HTMLDivElement) => {
+        // Keep ignoring scroll events while smooth animation is in progress
+        // Ends when we reach bottom or a timeout occurs
+        const start = Date.now();
+        const check = () => {
+            const atBottom = (el.scrollHeight - el.clientHeight - el.scrollTop) <= BOTTOM_THRESHOLD;
+            if (atBottom) {
+                isAutoScrollingRef.current = false;
+                return;
+            }
+            if (Date.now() - start > 1200) {
+                // safety release
+                isAutoScrollingRef.current = false;
+                return;
+            }
+            requestAnimationFrame(check);
+        };
+        requestAnimationFrame(check);
+    };
 
     useLayoutEffect(() => {
         const el = logListRef.current;
@@ -31,8 +55,14 @@ export const LogSection: React.FC = () => {
 
         if (autoScroll) {
             isAutoScrollingRef.current = true;
-            el.scrollTop = el.scrollHeight;
-            requestAnimationFrame(() => { isAutoScrollingRef.current = false; });
+            // Prefer sentinel for accurate bottom pinning
+            if (bottomSentinelRef.current) {
+                bottomSentinelRef.current.scrollIntoView({ block: 'end', behavior: 'smooth' });
+            } else {
+                el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+            }
+            // Hold guard while smooth animation is in progress
+            startSmoothGuardUntilBottom(el);
             if (showNewLogsIndicator) setShowNewLogsIndicator(false);
         } else if (userHasManuallyScrolledRef.current && hasNewItems) {
             if (!showNewLogsIndicator) setShowNewLogsIndicator(true);
@@ -40,6 +70,7 @@ export const LogSection: React.FC = () => {
 
         // Update count after handling
         lastLogCountRef.current = currCount;
+        lastScrollHeightRef.current = el.scrollHeight;
     }, [state.logs, autoScroll, showNewLogsIndicator]);
 
     // mark that initial mount has occurred so we don't animate initial batch
@@ -56,7 +87,7 @@ export const LogSection: React.FC = () => {
             return;
         }
 
-        const isScrolledToBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 10;
+        const isScrolledToBottom = (element.scrollHeight - element.clientHeight - element.scrollTop) <= BOTTOM_THRESHOLD;
 
         // Track if user has manually scrolled away from bottom
         userHasManuallyScrolledRef.current = !isScrolledToBottom;
@@ -74,14 +105,39 @@ export const LogSection: React.FC = () => {
     const scrollToBottom = () => {
         if (logListRef.current) {
             isAutoScrollingRef.current = true;
-            logListRef.current.scrollTop = logListRef.current.scrollHeight;
-            // Release the guard and re-enable auto-scroll
-            requestAnimationFrame(() => { isAutoScrollingRef.current = false; });
+            // Smooth for user-initiated jump
+            logListRef.current.scrollTo({ top: logListRef.current.scrollHeight, behavior: 'smooth' });
+            // Hold guard while smooth animation is in progress
+            startSmoothGuardUntilBottom(logListRef.current);
             setAutoScroll(true);
             setShowNewLogsIndicator(false);
             userHasManuallyScrolledRef.current = false;
         }
     };
+
+    // While auto-scroll is enabled, keep pinned if scrollHeight grows (e.g., async content sizing)
+    useEffect(() => {
+        if (!autoScroll) return;
+        const el = logListRef.current;
+        if (!el) return;
+        let rafId: number | null = null;
+        const interval = window.setInterval(() => {
+            if (!autoScroll) return; // extra guard inside interval
+            const current = el.scrollHeight;
+            if (current !== lastScrollHeightRef.current) {
+                isAutoScrollingRef.current = true;
+                el.scrollTo({ top: current, behavior: 'auto' });
+                lastScrollHeightRef.current = current;
+                // release guard next frame
+                rafId = requestAnimationFrame(() => { isAutoScrollingRef.current = false; });
+            }
+        }, 150);
+        return () => {
+            window.clearInterval(interval);
+            if (rafId) cancelAnimationFrame(rafId);
+        };
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [autoScroll]);
 
     const toggleExpand = (logId: string) => {
         setExpandedLog(expandedLog === logId ? null : logId);
@@ -351,6 +407,7 @@ export const LogSection: React.FC = () => {
                                     </div>
                                 );
                             })}
+                            <div ref={bottomSentinelRef} />
                         </div>
                         {showNewLogsIndicator && (
                             <button className="new-logs-indicator" onClick={scrollToBottom} title="Scroll to latest logs">
