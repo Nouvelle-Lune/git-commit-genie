@@ -196,8 +196,10 @@ export const LogSection: React.FC = () => {
     return (
         <div className="log-section">
             <div className="log-header-bar">
-                <h3 className="log-title">{state.i18n.logs}</h3>
-                <button className="log-clear-btn codicon codicon-clear-all" onClick={handleClearLogs} title={state.i18n.clearLogs} />
+                <div className="log-title">{state.i18n.logs}</div>
+                <button className="log-clear-btn" onClick={handleClearLogs} title={state.i18n.clearLogs}>
+                    <i className="codicon codicon-trash"></i>
+                </button>
             </div>
             <div className="log-box">
                 {state.logs.length === 0 ? (
