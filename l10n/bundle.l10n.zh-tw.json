@@ -101,5 +101,9 @@
   "Failed to create template directory": "建立模板目錄失敗",
   "Repository analysis request limit reached, reset request count and continue task?": "倉庫分析請求次數已達到上限，是否重置請求計數並繼續任務？",
   "Reset and continue": "重置並繼續",
-  "Repository List": "倉庫列表"
+  "Repository List": "倉庫列表",
+  "Logs": "日誌",
+  "No logs yet": "暫無日誌",
+  "Clear logs": "清除日誌",
+  "Analyzing {0}…": "正在分析 {0}…"
 }

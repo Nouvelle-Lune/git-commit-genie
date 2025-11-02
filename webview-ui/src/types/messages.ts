@@ -59,6 +59,10 @@ export interface RepositoryInfo {
 
 export interface I18nTexts {
     repositoryList: string;
+    logs: string;
+    noLogsYet: string;
+    clearLogs: string;
+    analyzing: string;
 }
 
 // Log Types

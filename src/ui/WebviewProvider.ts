@@ -185,7 +185,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
      */
     private async getRepositoryData(): Promise<{
         repositories: RepositoryInfo[];
-        i18n: { repositoryList: string };
+        i18n: { repositoryList: string; logs: string; noLogsYet: string; clearLogs: string; analyzing: string };
     }> {
         const repoService = this._serviceRegistry.getRepoService();
         const costService = this._serviceRegistry.getCostTrackingService();
@@ -202,7 +202,11 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
         return {
             repositories: repoCosts,
             i18n: {
-                repositoryList: vscode.l10n.t(I18N.dashboard.repositoryList)
+                repositoryList: vscode.l10n.t(I18N.dashboard.repositoryList),
+                logs: vscode.l10n.t(I18N.dashboard.logs),
+                noLogsYet: vscode.l10n.t(I18N.dashboard.noLogsYet),
+                clearLogs: vscode.l10n.t(I18N.dashboard.clearLogs),
+                analyzing: vscode.l10n.t(I18N.dashboard.analyzing)
             }
         };
     }

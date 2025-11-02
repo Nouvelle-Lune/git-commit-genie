@@ -98,5 +98,9 @@
   "No Git repository found.": "No Git repository found.",
   "Failed to create template directory": "Failed to create template directory",
   "Repository analysis request limit reached, reset request count and continue task?": "Repository analysis request limit reached, reset request count and continue task?",
-  "Reset and continue": "Reset and continue"
+  "Reset and continue": "Reset and continue",
+  "Logs": "Logs",
+  "No logs yet": "No logs yet",
+  "Clear logs": "Clear logs",
+  "Analyzing {0}…": "Analyzing {0}…"
 }

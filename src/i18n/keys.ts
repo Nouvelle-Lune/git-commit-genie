@@ -174,7 +174,11 @@ export const L10N_KEYS = {
     failedToReset: 'Failed to reset repository cost: {0}'
   },
   dashboard: {
-    repositoryList: 'Repository List'
+    repositoryList: 'Repository List',
+    logs: 'Logs',
+    noLogsYet: 'No logs yet',
+    clearLogs: 'Clear logs',
+    analyzing: 'Analyzing {0}…'
   }
 } as const;
 

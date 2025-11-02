@@ -144,18 +144,18 @@ export const LogSection: React.FC = () => {
     return (
         <div className="log-section">
             <div className="log-header-bar">
-                <h3 className="log-title">Analysis Logs</h3>
-                <button className="log-clear-btn codicon codicon-clear-all" onClick={handleClearLogs} title="Clear logs" />
+                <h3 className="log-title">{state.i18n.logs}</h3>
+                <button className="log-clear-btn codicon codicon-clear-all" onClick={handleClearLogs} title={state.i18n.clearLogs} />
             </div>
             <div className="log-box">
                 {state.analysisRunning && (
-                    <div className="running-banner" title={state.runningRepoLabel ? `Analyzing ${state.runningRepoLabel}…` : 'Repository analysis in progress…'}>
+                    <div className="running-banner" title={state.runningRepoLabel ? state.i18n.analyzing.replace('{0}', state.runningRepoLabel) : state.i18n.analyzing.replace('{0}', '')}>
                         <span className="codicon codicon-sync codicon-modifier-spin"></span>
-                        <span className="running-text">{state.runningRepoLabel ? `Analyzing ${state.runningRepoLabel}…` : 'Repository analysis in progress…'}</span>
+                        <span className="running-text">{state.runningRepoLabel ? state.i18n.analyzing.replace('{0}', state.runningRepoLabel) : state.i18n.analyzing.replace('{0}', '')}</span>
                     </div>
                 )}
                 {state.logs.length === 0 ? (
-                    <div className="log-empty">No analysis logs yet</div>
+                    <div className="log-empty">{state.i18n.noLogsYet}</div>
                 ) : (
                     <div className="log-list" ref={logListRef} onScroll={handleScroll}>
                         {state.logs.map((log: LogEntry) => (
@@ -175,7 +175,7 @@ export const LogSection: React.FC = () => {
                                                 if (log.type === LogType.Reason) { return; }
                                                 // Allow expanding even when pending/cancelled if there is content
                                                 if ((log.pending || log.cancelled) && !(log.content || log.fileContent)) { return; }
-                                                
+
                                                 // For file reads with content, allow expanding instead of opening
                                                 if (log.type === LogType.FileRead && log.fileContent) {
                                                     toggleExpand(log.id);

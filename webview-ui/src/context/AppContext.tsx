@@ -24,7 +24,11 @@ type AppAction =
 const initialState: AppState = {
     repositories: [],
     i18n: {
-        repositoryList: 'Repository List'
+        repositoryList: 'Repository List',
+        logs: 'Logs',
+        noLogsYet: 'No logs yet',
+        clearLogs: 'Clear logs',
+        analyzing: 'Analyzing {0}…'
     },
     logs: [],
     analysisRunning: false
