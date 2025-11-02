@@ -103,10 +103,18 @@
     scrollbar-width: thin;
     scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
     scroll-behavior: smooth;
-    /* Prevent layout shift during scroll */
     contain: layout style paint;
-    /* Use GPU acceleration for smoother scrolling */
     will-change: scroll-position;
+}
+
+/* Hide scrollbar while auto-scrolling (pinned to bottom) */
+.log-list.auto-scroll {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.log-list.auto-scroll::-webkit-scrollbar {
+    display: none;
 }
 
 .log-list::-webkit-scrollbar {
@@ -148,12 +156,14 @@
     transition: all 0.2s ease;
     z-index: 10;
     animation: slideUp 0.3s ease-out;
+    opacity: 0.85;
 }
 
 .new-logs-indicator:hover {
     background: var(--vscode-button-hoverBackground);
     transform: translateX(-50%) translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    opacity: 0.7;
 }
 
 .new-logs-indicator:active {
@@ -195,6 +205,24 @@
     border-bottom: 1px solid var(--vscode-sideBar-border);
     box-sizing: border-box;
     overflow: hidden;
+}
+
+/* New log enter animation */
+.log-item-new {
+    animation: logItemEnter 180ms ease-out;
+    will-change: opacity, transform;
+}
+
+@keyframes logItemEnter {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
 
 .log-item:last-child {

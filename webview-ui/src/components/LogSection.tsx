@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { LogEntry, LogType } from '../types/messages';
 import { vscodeApi } from '../utils/vscode';
@@ -16,86 +16,72 @@ export const LogSection: React.FC = () => {
     const [autoScroll, setAutoScroll] = useState<boolean>(true);
     const [showNewLogsIndicator, setShowNewLogsIndicator] = useState<boolean>(false);
     const logListRef = useRef<HTMLDivElement>(null);
-    const scrollTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-    const isUserScrollingRef = useRef<boolean>(false);
+    const isAutoScrollingRef = useRef<boolean>(false);
     const lastLogCountRef = useRef<number>(0);
     const userHasManuallyScrolledRef = useRef<boolean>(false);
+    const hasMountedRef = useRef<boolean>(false);
 
-    // Auto-scroll to bottom when new logs are added
-    useEffect(() => {
-        if (!logListRef.current) return;
+    useLayoutEffect(() => {
+        const el = logListRef.current;
+        if (!el) return;
 
-        const logCount = state.logs.length;
-        const hasNewLogs = logCount > lastLogCountRef.current;
-        lastLogCountRef.current = logCount;
+        const prevCount = lastLogCountRef.current;
+        const currCount = state.logs.length;
+        const hasNewItems = currCount > prevCount;
 
-        if (!hasNewLogs) return;
-
-        // If auto-scroll is enabled and user is not currently scrolling
-        if (autoScroll && !isUserScrollingRef.current) {
-            // Use requestAnimationFrame to ensure DOM is updated
-            requestAnimationFrame(() => {
-                if (logListRef.current) {
-                    logListRef.current.scrollTop = logListRef.current.scrollHeight;
-                }
-            });
-            setShowNewLogsIndicator(false);
-        } else if (userHasManuallyScrolledRef.current) {
-            // User has manually scrolled away, show indicator
-            setShowNewLogsIndicator(true);
+        if (autoScroll) {
+            isAutoScrollingRef.current = true;
+            el.scrollTop = el.scrollHeight;
+            requestAnimationFrame(() => { isAutoScrollingRef.current = false; });
+            if (showNewLogsIndicator) setShowNewLogsIndicator(false);
+        } else if (userHasManuallyScrolledRef.current && hasNewItems) {
+            if (!showNewLogsIndicator) setShowNewLogsIndicator(true);
         }
-    }, [state.logs, autoScroll]);
 
-    // Detect user scroll to disable auto-scroll (with debounce)
+        // Update count after handling
+        lastLogCountRef.current = currCount;
+    }, [state.logs, autoScroll, showNewLogsIndicator]);
+
+    // mark that initial mount has occurred so we don't animate initial batch
+    useEffect(() => {
+        hasMountedRef.current = true;
+    }, []);
+
+    // Detect user scroll to toggle auto-scroll based on proximity to bottom
     const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
         const element = e.currentTarget;
 
-        // Mark that user is scrolling
-        isUserScrollingRef.current = true;
-
-        // Clear existing timeout
-        if (scrollTimeoutRef.current) {
-            clearTimeout(scrollTimeoutRef.current);
+        // Ignore scroll events initiated by our own auto-scrolling
+        if (isAutoScrollingRef.current) {
+            return;
         }
 
-        // Debounce the auto-scroll state update to prevent flickering
-        scrollTimeoutRef.current = setTimeout(() => {
-            const isScrolledToBottom = Math.abs(element.scrollHeight - element.scrollTop - element.clientHeight) < 10;
+        const isScrolledToBottom = element.scrollTop + element.clientHeight >= element.scrollHeight - 10;
 
-            // Track if user has manually scrolled away from bottom
-            if (!isScrolledToBottom) {
-                userHasManuallyScrolledRef.current = true;
-                // Only disable auto-scroll if user scrolled away from bottom
-                setAutoScroll(false);
-            } else {
-                // User scrolled back to bottom - re-enable auto-scroll
-                userHasManuallyScrolledRef.current = false;
-                setAutoScroll(true);
-                setShowNewLogsIndicator(false);
-            }
+        // Track if user has manually scrolled away from bottom
+        userHasManuallyScrolledRef.current = !isScrolledToBottom;
 
-            isUserScrollingRef.current = false;
-        }, 150);
+        // Toggle auto-scroll based on position
+        if (isScrolledToBottom) {
+            setAutoScroll(true);
+            setShowNewLogsIndicator(false);
+        } else {
+            setAutoScroll(false);
+        }
     };
 
     // Scroll to bottom when clicking the indicator
     const scrollToBottom = () => {
         if (logListRef.current) {
+            isAutoScrollingRef.current = true;
             logListRef.current.scrollTop = logListRef.current.scrollHeight;
+            // Release the guard and re-enable auto-scroll
+            requestAnimationFrame(() => { isAutoScrollingRef.current = false; });
             setAutoScroll(true);
             setShowNewLogsIndicator(false);
             userHasManuallyScrolledRef.current = false;
         }
     };
-
-    // Cleanup timeout on unmount
-    useEffect(() => {
-        return () => {
-            if (scrollTimeoutRef.current) {
-                clearTimeout(scrollTimeoutRef.current);
-            }
-        };
-    }, []);
 
     const toggleExpand = (logId: string) => {
         setExpandedLog(expandedLog === logId ? null : logId);
@@ -273,9 +259,11 @@ export const LogSection: React.FC = () => {
                     <div className="log-empty">{state.i18n.noLogsYet}</div>
                 ) : (
                     <>
-                        <div className="log-list" ref={logListRef} onScroll={handleScroll}>
-                            {state.logs.map((log: LogEntry) => (
-                                <div key={log.id} className={`log-item ${(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? 'log-divider' : ''} ${isSchemaValidationLog(log) ? 'log-error' : ''}`}>
+                        <div className={`log-list ${autoScroll ? 'auto-scroll' : ''}`} ref={logListRef} onScroll={handleScroll}>
+                            {state.logs.map((log: LogEntry, idx: number) => {
+                                const isNew = hasMountedRef.current && idx >= lastLogCountRef.current;
+                                return (
+                                <div key={log.id} className={`log-item ${(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? 'log-divider' : ''} ${isSchemaValidationLog(log) ? 'log-error' : ''} ${isNew ? 'log-item-new' : ''}`}>
                                     {(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? (
                                         <div className="analysis-start">
                                             <span className={`codicon codicon-${getLogIcon(log.type)}`}></span>
@@ -361,7 +349,8 @@ export const LogSection: React.FC = () => {
                                         </>
                                     )}
                                 </div>
-                            ))}
+                                );
+                            })}
                         </div>
                         {showNewLogsIndicator && (
                             <button className="new-logs-indicator" onClick={scrollToBottom} title="Scroll to latest logs">
