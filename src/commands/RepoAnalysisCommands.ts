@@ -115,7 +115,7 @@ export class RepoAnalysisCommands {
 
             let updateResult = 'skipped';
             await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
+                location: vscode.ProgressLocation.Window,
                 title: vscode.l10n.t(I18N.repoAnalysis.refreshingTitle),
                 cancellable: false
             }, async () => {
@@ -126,9 +126,7 @@ export class RepoAnalysisCommands {
                     this.statusBarManager.setRepoAnalysisRunning(false);
                 }
             });
-            if (updateResult === 'success') {
-                vscode.window.showInformationMessage(vscode.l10n.t(I18N.repoAnalysis.refreshed));
-            }
+            // Avoid bottom-right notifications on manual refresh; rely on status bar/logs
         } catch (error: any) {
             const msg = String(error?.message || error || '');
             const cancelled = /abort|cancel/i.test(msg);
