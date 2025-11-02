@@ -598,7 +598,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 role: 'user', content: [
                     `Repository root: ${repoPath}`,
                     userExcludes.length ? `Exclude patterns (from settings, optional): ${JSON.stringify(userExcludes)}` : undefined,
-                    input.previousAnalysis ? `Previous summary: ${this.truncateTo(input.previousAnalysis.summary || '', 800)}` : undefined,
+                    input.previousAnalysis ? `Previous summary: ${input.previousAnalysis.summary || ''}` : undefined,
                     input.previousAnalysis ? `Previous technologies: ${(input.previousAnalysis.technologies || []).join(', ')}` : undefined,
                     input.previousAnalysis ? `Previous insights: ${(input.previousAnalysis.insights || []).join('; ')}` : undefined,
                     isIncremental ? `Analysis mode: incremental (review at most ${commitWindowSize} commits; update only if material change).` : 'Analysis mode: initial',
@@ -1294,23 +1294,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 void vscode.commands.executeCommand('git-commit-genie.manageModels');
             }
         } catch { }
-    }
-
-
-    /**
-     * Truncates a string to a maximum character length
-     * 
-     * Ensures strings don't exceed a specified character limit by
-     * truncating them and adding a truncation indicator.
-     * 
-     * @param s The string to truncate
-     * @param maxChars Maximum number of characters allowed
-     * @returns The truncated string with indicator if needed
-     */
-    private truncateTo(s: string, maxChars: number): string {
-        if (!s) { return ''; }
-        if (s.length <= maxChars) { return s; }
-        return s.slice(0, Math.max(0, maxChars - 8)) + '\n...[truncated]';
     }
 
     /**

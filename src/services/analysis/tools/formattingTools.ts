@@ -11,9 +11,9 @@ export function compactToolResultForConversation(
 	toolName: string,
 	result: ToolResult<any>
 ): { compactJson: any; compactText: string } {
-	const MAX_LIST_LINES = 300;
-	const MAX_SNIPPET_CHARS = 160;
-	const MAX_CONTENT_CHARS = 8000; // for readFileContent payloads
+	const MAX_LIST_LINES = 3000;
+	const MAX_SNIPPET_CHARS = 8000;
+	const MAX_CONTENT_CHARS = 40000; // for readFileContent payloads
 
 	try {
 		if (!result || (result as any).success === false) {
