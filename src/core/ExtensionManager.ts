@@ -37,7 +37,7 @@ export class ExtensionManager {
             await this.eventManager.initialize();
 
             // Register webview provider AFTER all services are initialized
-            this.WebviewProvider = new WebviewProvider(this.context.extensionUri, this.serviceRegistry);
+            this.WebviewProvider = new WebviewProvider(this.context.extensionUri, this.serviceRegistry, this.statusBarManager);
 
             const provider = this.WebviewProvider;
 
@@ -51,10 +51,19 @@ export class ExtensionManager {
             );
             this.context.subscriptions.push(disposable);
 
+            // Keep webview in sync with running state
+            try {
+                const disp = this.statusBarManager.onAnalysisRunningChanged((e: any) => {
+                    provider.sendAnalysisRunning(!!e?.running, e?.label);
+                });
+                this.context.subscriptions.push(disp as any);
+            } catch { /* ignore */ }
+
             // Register clear logs command
             this.context.subscriptions.push(
                 vscode.commands.registerCommand('git-commit-genie.clearLogs', () => {
                     provider.clearLogs();
+                    logger.clearLogBuffer();
                     logger.info('Logs cleared');
                 })
             );

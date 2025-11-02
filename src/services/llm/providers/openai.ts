@@ -186,7 +186,8 @@ export class OpenAIService extends BaseLLMService {
                     provider: 'OpenAI',
                     token: options?.token,
                     trackUsage: true,
-                    requestType: _options!.requestType
+                    requestType: _options!.requestType,
+                    repoPath
                 });
 
                 callCount += 1;
@@ -206,6 +207,7 @@ export class OpenAIService extends BaseLLMService {
                     }
                     if (attempt < totalAttempts - 1) {
                         this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
+                        try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
                         messages = this.buildSchemaValidationRetryMessages(
                             messages,
                             result,
@@ -215,6 +217,7 @@ export class OpenAIService extends BaseLLMService {
                         );
                         continue;
                     }
+                    try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
                     throw new Error(`OpenAI structured result failed local validation for ${reqType} after ${totalAttempts} attempts`);
                 }
 
@@ -239,7 +242,11 @@ export class OpenAIService extends BaseLLMService {
                 {
                     maxParallel: config.chainMaxParallel,
                     onStage: (event) => {
-                        try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+                        try {
+                            stageNotifications.update({ type: event.type as any, data: event.data });
+                            const payload = { stage: event.type, data: event.data ?? {} };
+                            try { logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath); } catch { /* ignore */ }
+                        } catch { /* ignore */ }
                     }
                 }
             );
@@ -282,7 +289,8 @@ export class OpenAIService extends BaseLLMService {
                     provider: 'OpenAI',
                     token: options?.token,
                     trackUsage: true,
-                    requestType: 'commitMessage'
+                    requestType: 'commitMessage',
+                    repoPath
                 }
             );
 
@@ -300,6 +308,7 @@ export class OpenAIService extends BaseLLMService {
             lastError = safe.error;
             if (attempt < totalAttempts - 1) {
                 this.logSchemaValidationRetry('commitMessage', attempt, totalAttempts);
+                try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'commitMessage', attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
                 messages = this.buildSchemaValidationRetryMessages(
                     messages,
                     result,
@@ -309,6 +318,7 @@ export class OpenAIService extends BaseLLMService {
                 );
                 continue;
             }
+            try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'commitMessage', finalFailure: true, error: String(lastError) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
         }
 
         return { message: 'Failed to validate structured commit message from OpenAI.', statusCode: 500 };

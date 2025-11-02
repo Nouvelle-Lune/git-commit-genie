@@ -198,7 +198,8 @@ export class AnthropicService extends BaseLLMService {
                     token: options?.token,
                     trackUsage: true,
                     tools: mapping ? [mapping.tool] : undefined,
-                    toolChoice: mapping ? { type: 'tool', name: mapping.tool.name } : undefined
+                    toolChoice: mapping ? { type: 'tool', name: mapping.tool.name } : undefined,
+                    repoPath
                 });
 
                 callCount += 1;
@@ -217,6 +218,7 @@ export class AnthropicService extends BaseLLMService {
 
                     if (attempt < totalAttempts - 1) {
                         this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
+                        try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
                         messages = this.buildSchemaValidationRetryMessages(
                             messages,
                             result,
@@ -226,6 +228,7 @@ export class AnthropicService extends BaseLLMService {
                         );
                         continue;
                     }
+                    try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
 
                     throw new Error(`Anthropic tool result failed local validation for ${reqType} after ${totalAttempts} attempts`);
                 }
@@ -252,7 +255,11 @@ export class AnthropicService extends BaseLLMService {
                 {
                     maxParallel: config.chainMaxParallel,
                     onStage: (event) => {
-                        try { stageNotifications.update({ type: event.type as any, data: event.data }); } catch { /* ignore */ }
+                        try {
+                            stageNotifications.update({ type: event.type as any, data: event.data });
+                            const payload = { stage: event.type, data: event.data ?? {} };
+                            try { logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath); } catch { /* ignore */ }
+                        } catch { /* ignore */ }
                     }
                 }
             );
@@ -328,5 +335,3 @@ export class AnthropicService extends BaseLLMService {
         return { message: 'Failed to validate structured commit message from Anthropic.', statusCode: 500 };
     }
 }
-
-

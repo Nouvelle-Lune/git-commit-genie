@@ -865,13 +865,14 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
                 let result: any;
                 try {
-                    result = await utils.callChatCompletion(client, messages, callOptions);
+                    result = await utils.callChatCompletion(client, messages, { ...callOptions, repoPath: repoPath });
                 } catch (e: any) {
                     const em = String(e?.message || '').toLowerCase();
                     const looksLikeJsonParseErr = em.includes('json') || em.includes('parse') || em.includes('unexpected token') || em.includes('after json');
                     if (looksLikeJsonParseErr && attempt < totalAttempts - 1) {
                         // Nudge the model to return strict JSON matching the schema
                         const jsonSchemaString = JSON.stringify(z.toJSONSchema(validationSchema), null, 2);
+                        try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'repoAnalysisAction', attempt: attempt + 1, totalAttempts, error: String(e?.message || e) }), 'Schema validation failed (JSON parse)', repoPath); } catch { /* ignore */ }
                         messages = [
                             ...messages,
                             {
@@ -912,6 +913,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                             role: 'assistant',
                             content: result.parsedResponse ? JSON.stringify(result.parsedResponse) : ''
                         };
+                        try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'repoAnalysisAction', attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
                         messages = [
                             ...messages,
                             assistantEcho,
@@ -926,6 +928,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     }
                 }
 
+                try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'repoAnalysisAction', finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
                 throw new Error(`${provider} structured result failed local validation for repoAnalysisAction after ${totalAttempts} attempts`);
             }
 

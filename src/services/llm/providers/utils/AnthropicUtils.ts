@@ -26,6 +26,7 @@ export class AnthropicUtils extends BaseProviderUtils {
             tools?: any[];
             toolChoice?: any;
             isFirstRequest?: boolean;
+            repoPath?: string;
         }
     ): Promise<{ parsedResponse: any; usage?: any; parsedAssistantResponse?: any }> {
         if (!client) {
@@ -74,7 +75,7 @@ export class AnthropicUtils extends BaseProviderUtils {
                 // Log API request (pending state) - include system prompt for first request
                 const systemPrompt = systemMessages.length > 0 ? systemMessages.map(m => m.content).join('\n\n') : undefined;
                 const isFirstRequest = options.isFirstRequest ?? false;
-                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest);
+                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
 
                 const response = await client.messages.create(requestOptions, {
                     signal: controller.signal
@@ -94,7 +95,8 @@ export class AnthropicUtils extends BaseProviderUtils {
                         options.model,
                         parsedResponse,
                         usage,
-                        isFinal
+                        isFinal,
+                        options.repoPath
                     );
                 }
 

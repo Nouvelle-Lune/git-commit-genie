@@ -12,18 +12,18 @@
  */
 export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   // OpenAI
-  'gpt-5': 200_000,
-  'gpt-5-mini': 200_000,
-  'gpt-5-nano': 200_000,
-  'gpt-4.1': 128_000,
-  'gpt-4.1-mini': 128_000,
+  'gpt-5': 400_000,
+  'gpt-5-mini': 400_000,
+  'gpt-5-nano': 400_000,
+  'gpt-4.1': 1_047_576,
+  'gpt-4.1-mini': 1_047_576,
   'gpt-4o': 128_000,
   'gpt-4o-mini': 128_000,
-  'o4-mini': 128_000,
+  'o4-mini': 200_000,
 
   // DeepSeek
-  'deepseek-chat': 64_000,
-  'deepseek-reasoner': 64_000,
+  'deepseek-chat': 128_000,
+  'deepseek-reasoner': 128_000,
 
   // Anthropic
   'claude-3-5-haiku-20241022': 200_000,
@@ -35,18 +35,18 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'claude-opus-4-20250514': 200_000,
 
   // Google Gemini
-  'gemini-2.5-flash': 1_000_000,
-  'gemini-2.5-flash-preview-09-2025': 1_000_000,
-  'gemini-2.5-pro': 1_000_000,
+  'gemini-2.5-flash': 1_048_576,
+  'gemini-2.5-flash-preview-09-2025': 1_048_576,
+  'gemini-2.5-pro': 1_048_576,
 
   // Qwen
-  'qwen3-max': 128_000,
-  'qwen3-max-preview': 128_000,
-  'qwen-plus': 128_000,
-  'qwen-plus-latest': 128_000,
-  'qwen3-coder-plus': 128_000,
-  'qwen-flash': 128_000,
-  'qwen3-coder-flash': 128_000,
+  'qwen3-max': 262_144,
+  'qwen3-max-preview': 262_144,
+  'qwen-plus': 1_000_000,
+  'qwen-plus-latest': 1_000_000,
+  'qwen3-coder-plus': 1_000_000,
+  'qwen-flash': 1_000_000,
+  'qwen3-coder-flash': 1_000_000,
 };
 
 /**

@@ -4,6 +4,7 @@ import { ServiceRegistry } from '../core/ServiceRegistry';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { WebviewMessage, ExtensionMessage, RepositoryInfo } from './types/messages';
 import { logger } from '../services/logger';
+import { StatusBarManager } from './StatusBarManager';
 
 /**
  * WebviewViewProvider for Git Commit Genie panel
@@ -14,13 +15,16 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
 
     private _view?: vscode.WebviewView;
     private _serviceRegistry: ServiceRegistry;
+    private _statusBar?: StatusBarManager;
     private _disposables: vscode.Disposable[] = [];
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
         serviceRegistry: ServiceRegistry,
+        statusBar?: StatusBarManager,
     ) {
         this._serviceRegistry = serviceRegistry;
+        this._statusBar = statusBar;
         this._setupEventListeners();
     }
 
@@ -94,6 +98,12 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
             webviewView.webview.onDidReceiveMessage(async (data: WebviewMessage) => {
                 if (data.type === 'ready') {
                     await this.sendRepositoryData();
+                    // Send current running state
+                    try {
+                        const running = !!this._statusBar?.isRepoAnalysisRunning();
+                        const label = (this._statusBar as any)?.['analysisState']?.runningRepoLabel || undefined;
+                        this.sendMessage({ type: 'analysisRunning', running, repoLabel: label } as any);
+                    } catch { /* ignore */ }
                 } else if (data.type === 'clearLogs') {
                     this.clearLogs();
                 } else if (data.type === 'openFile') {
@@ -104,6 +114,8 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                     } catch (error) {
                         logger.error('Failed to open file:', error);
                     }
+                } else if ((data as any).type === 'requestFlushLogs') {
+                    try { logger.flushLogsToWebview(); } catch { /* ignore */ }
                 }
             })
         );
@@ -138,6 +150,13 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
         if (this._view) {
             this._view.webview.postMessage(message);
         }
+    }
+
+    /**
+     * Send analysis running state to webview
+     */
+    public sendAnalysisRunning(running: boolean, repoLabel?: string): void {
+        this.sendMessage({ type: 'analysisRunning', running, repoLabel } as any);
     }
 
     /**

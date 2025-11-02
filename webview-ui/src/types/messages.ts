@@ -22,7 +22,13 @@ export interface CancelPendingLogsMessage {
     type: 'cancelPendingLogs';
 }
 
-export type ExtensionMessage = UpdateRepoMessage | AddLogMessage | ClearLogsMessage | CancelPendingLogsMessage;
+export interface AnalysisRunningMessage {
+    type: 'analysisRunning';
+    running: boolean;
+    repoLabel?: string;
+}
+
+export type ExtensionMessage = UpdateRepoMessage | AddLogMessage | ClearLogsMessage | CancelPendingLogsMessage | AnalysisRunningMessage;
 
 // Webview -> Extension Messages
 export interface ReadyMessage {
@@ -38,7 +44,11 @@ export interface OpenFileMessage {
     filePath: string;
 }
 
-export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage;
+export interface RequestFlushLogsMessage {
+    type: 'requestFlushLogs';
+}
+
+export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage | RequestFlushLogsMessage;
 
 // Data Types
 export interface RepositoryInfo {
@@ -69,6 +79,7 @@ export interface LogEntry {
     reason?: string;
     content?: string; // For API requests (markdown format)
     filePath?: string; // For file reads
+    repoPath?: string; // Repository root path for this log
     fileContent?: string; // For file read content preview
     startLine?: number; // For file read start line
     endLine?: number; // For file read end line

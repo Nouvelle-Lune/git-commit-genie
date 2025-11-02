@@ -66,6 +66,38 @@ export const LogSection: React.FC = () => {
         }
     };
 
+    const isSchemaValidationLog = (log: LogEntry) => {
+        const t = (log.title || '').toLowerCase();
+        const r = (log.reason || '').toLowerCase();
+        return log.type === LogType.ToolCall && (t.includes('schema validation') || r.includes('schema validation'));
+    };
+
+    const getRepoInfoForLog = (log: LogEntry): { name: string; colorIdx: number } | null => {
+        const repos = state.repositories || [];
+        const norm = (s: string) => s.replace(/\\/g, '/');
+        let repoPath: string | undefined = (log as any).repoPath as any;
+        if (!repoPath && log.filePath) {
+            const fp = norm(log.filePath);
+            // choose the longest matching repo path
+            let best: string | undefined;
+            for (const r of repos) {
+                const rp = norm(r.path);
+                if (fp === rp || fp.startsWith(rp + '/')) {
+                    if (!best || rp.length > best.length) { best = rp; }
+                }
+            }
+            repoPath = best;
+        }
+        if (!repoPath) { return null; }
+        const r = repos.find(rr => norm(rr.path) === norm(repoPath!));
+        const name = r?.name || repoPath.split('/').filter(Boolean).pop() || 'repo';
+        // small hash for color index
+        let h = 0; const str = repoPath;
+        for (let i = 0; i < str.length; i++) { h = (h * 31 + str.charCodeAt(i)) >>> 0; }
+        const colorIdx = h % 6; // 6 color variants
+        return { name, colorIdx };
+    };
+
     const formatFunctionCallContent = (content: string): string => {
         try {
             const data = JSON.parse(content);
@@ -116,12 +148,18 @@ export const LogSection: React.FC = () => {
                 <button className="log-clear-btn codicon codicon-clear-all" onClick={handleClearLogs} title="Clear logs" />
             </div>
             <div className="log-box">
+                {state.analysisRunning && (
+                    <div className="running-banner" title={state.runningRepoLabel ? `Analyzing ${state.runningRepoLabel}…` : 'Repository analysis in progress…'}>
+                        <span className="codicon codicon-sync codicon-modifier-spin"></span>
+                        <span className="running-text">{state.runningRepoLabel ? `Analyzing ${state.runningRepoLabel}…` : 'Repository analysis in progress…'}</span>
+                    </div>
+                )}
                 {state.logs.length === 0 ? (
                     <div className="log-empty">No analysis logs yet</div>
                 ) : (
                     <div className="log-list" ref={logListRef} onScroll={handleScroll}>
                         {state.logs.map((log: LogEntry) => (
-                            <div key={log.id} className={`log-item ${log.type === LogType.AnalysisStart ? 'log-divider' : ''}`}>
+                            <div key={log.id} className={`log-item ${log.type === LogType.AnalysisStart ? 'log-divider' : ''} ${isSchemaValidationLog(log) ? 'log-error' : ''}`}>
                                 {log.type === LogType.AnalysisStart ? (
                                     <div className="analysis-start">
                                         <span className={`codicon codicon-${getLogIcon(log.type)}`}></span>
@@ -149,9 +187,10 @@ export const LogSection: React.FC = () => {
                                             }}
                                             style={{ cursor: (log.type === LogType.Reason || ((log.pending || log.cancelled) && !(log.content || log.fileContent))) ? 'default' : 'pointer' }}
                                         >
-                                            <span className={`codicon codicon-${getLogIcon(log.type)} log-icon`}></span>
+                                            <span className={`codicon codicon-${isSchemaValidationLog(log) ? 'error' : getLogIcon(log.type)} log-icon`}></span>
                                             <div className="log-main-content">
                                                 <span className="log-title-text">
+                                                    {(() => { const info = getRepoInfoForLog(log); return info ? (<span className={`log-repo-badge repo-badge-c${info.colorIdx}`}>{info.name}</span>) : null; })()}
                                                     {log.title}
                                                 </span>
                                                 {/* inline reason removed; reason is a separate log */}
@@ -190,12 +229,16 @@ export const LogSection: React.FC = () => {
                                                         <code>{log.fileContent}</code>
                                                     </pre>
                                                 ) : (
-                                                    <ReactMarkdown>
-                                                        {log.type === LogType.ApiRequest || log.type === LogType.ToolCall || log.type === LogType.FinalResult
-                                                            ? formatFunctionCallContent(log.content!)
-                                                            : log.content!
-                                                        }
-                                                    </ReactMarkdown>
+                                                    log.type === LogType.ToolCall ? (
+                                                        <pre><code>{(() => { try { return JSON.stringify(JSON.parse(log.content!), null, 2); } catch { return String(log.content || ''); } })()}</code></pre>
+                                                    ) : (
+                                                        <ReactMarkdown>
+                                                            {log.type === LogType.ApiRequest || log.type === LogType.FinalResult
+                                                                ? formatFunctionCallContent(log.content!)
+                                                                : log.content!
+                                                            }
+                                                        </ReactMarkdown>
+                                                    )
                                                 )}
                                             </div>
                                         )}

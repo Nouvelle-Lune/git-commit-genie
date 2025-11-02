@@ -22,6 +22,10 @@ export class Logger {
 
     private costTracker: CostTrackingService | null = null;
     private webviewProvider: WebviewProvider | null = null;
+    private context: vscode.ExtensionContext | null = null;
+    private static readonly LOGS_STATE_KEY = 'gitCommitGenie.webview.logs';
+    private logBuffer: LogEntry[] = [];
+    private readonly maxLogBuffer = 99;
 
     private constructor() { }
 
@@ -33,9 +37,12 @@ export class Logger {
         return Logger.instance;
     }
 
-    public initialize(outputChannel: vscode.OutputChannel, logLevel: LogLevel = LogLevel.Info): void {
+    public initialize(outputChannel: vscode.OutputChannel, logLevel: LogLevel = LogLevel.Info, context?: vscode.ExtensionContext): void {
         this.outputChannel = outputChannel;
         this.logLevel = logLevel;
+        if (context) {
+            this.context = context;
+        }
 
         this.info('Logger initialized');
     }
@@ -69,12 +76,65 @@ export class Logger {
      * Send log entry to webview
      */
     private sendLogToWebview(log: LogEntry): void {
-        if (this.webviewProvider) {
-            this.webviewProvider.sendMessage({
-                type: 'addLog',
-                log
-            });
-        }
+        // Always buffer
+        try {
+            this.logBuffer.push(log);
+            if (this.logBuffer.length > this.maxLogBuffer) {
+                this.logBuffer = this.logBuffer.slice(this.logBuffer.length - this.maxLogBuffer);
+            }
+            this.persistLogBuffer().catch(() => {});
+        } catch { /* ignore */ }
+
+        // Send to active webview if available
+        try {
+            if (this.webviewProvider) {
+                this.webviewProvider.sendMessage({ type: 'addLog', log });
+            }
+        } catch { /* ignore */ }
+    }
+
+    /**
+     * Flush buffered logs to webview (clears current webview list first)
+     */
+    public flushLogsToWebview(): void {
+        if (!this.webviewProvider) { return; }
+        try {
+            this.webviewProvider.clearLogs();
+            for (const entry of this.logBuffer) {
+                this.webviewProvider.sendMessage({ type: 'addLog', log: entry });
+            }
+        } catch { /* ignore */ }
+    }
+
+    /**
+     * Clear internal log buffer (used when user clears logs)
+     */
+    public clearLogBuffer(): void {
+        this.logBuffer = [];
+        this.persistLogBuffer().catch(() => {});
+    }
+
+    public async loadPersistedLogs(): Promise<void> {
+        try {
+            // Prefer globalState (shared across all workspaces)
+            let arr = await this.context?.globalState.get<LogEntry[]>(Logger.LOGS_STATE_KEY);
+            // Migration: fallback from old workspaceState if global is empty
+            if ((!arr || !Array.isArray(arr) || arr.length === 0) && this.context) {
+                const legacy = await this.context.workspaceState.get<LogEntry[]>(Logger.LOGS_STATE_KEY);
+                if (Array.isArray(legacy) && legacy.length) {
+                    arr = legacy;
+                    // Write once to global for future use
+                    try { await this.context.globalState.update(Logger.LOGS_STATE_KEY, arr); } catch { /* ignore */ }
+                }
+            }
+            if (Array.isArray(arr)) {
+                this.logBuffer = arr.slice(-this.maxLogBuffer);
+            }
+        } catch { /* ignore */ }
+    }
+
+    private async persistLogBuffer(): Promise<void> {
+        try { await this.context?.globalState.update(Logger.LOGS_STATE_KEY, this.logBuffer); } catch { /* ignore */ }
     }
 
     /**
@@ -90,6 +150,7 @@ export class Logger {
             type: LogType.AnalysisStart,
             title: `Analysis Started: ${repoName}`
         };
+        (log as any).repoPath = repositoryPath;
         this.sendLogToWebview(log);
         this.info(`[AnalysisStart] ${repositoryPath}`);
     }
@@ -112,6 +173,19 @@ export class Logger {
             startLine,
             endLine
         };
+        try {
+            // Derive repoPath from workspace folders to enable filtering/badge in webview
+            const folders = vscode.workspace.workspaceFolders || [];
+            const norm = (s: string) => s.replace(/\\\\/g, '/');
+            const fp = norm(filePath);
+            for (const f of folders) {
+                const rp = norm(f.uri.fsPath);
+                if (fp === rp || fp.startsWith(rp + '/')) {
+                    (log as any).repoPath = f.uri.fsPath;
+                    break;
+                }
+            }
+        } catch { /* ignore */ }
         this.sendLogToWebview(log);
         this.debug(`[FileRead] ${filePath} - ${reason}`);
     }
@@ -119,7 +193,7 @@ export class Logger {
     /**
      * Log tool call operation
      */
-    public logToolCall(toolName: string, args: string, reason?: string): void {
+    public logToolCall(toolName: string, args: string, reason?: string, repoPath?: string): void {
         // Create a friendly title based on the tool name
         const friendlyTitle = this.getFriendlyToolTitle(toolName, args);
 
@@ -131,6 +205,7 @@ export class Logger {
             reason: reason || '',
             content: args
         };
+        if (repoPath) { (log as any).repoPath = repoPath; }
         this.sendLogToWebview(log);
         this.debug(`[ToolCall] ${toolName} - ${args}`);
     }
@@ -153,6 +228,16 @@ export class Logger {
                     return `Genie wants to search in files: ${parsedArgs.searchTerm || ''}`;
                 case 'getCompressedContext':
                     return `Genie wants to analyze compressed context`;
+                case 'commitStage': {
+                    const stage = String(parsedArgs.stage || '').replace(/([A-Z])/g, ' $1').trim();
+                    return `Commit stage: ${stage || 'unknown'}`;
+                }
+                case 'schemaValidation': {
+                    const stage = String(parsedArgs.stage || '').replace(/([A-Z])/g, ' $1').trim();
+                    const final = !!parsedArgs.finalFailure;
+                    const prefix = final ? 'Schema validation failed' : 'Schema validation retry';
+                    return `${prefix}: ${stage || 'unknown'}`;
+                }
                 default:
                     return `Genie wants to use: ${toolName}`;
             }
@@ -164,7 +249,7 @@ export class Logger {
     /**
      * Log API request (pending state)
      */
-    public logApiRequest(provider: string, model: string, messages: any[], systemPrompt?: string, isFirstRequest: boolean = false): string {
+    public logApiRequest(provider: string, model: string, messages: any[], systemPrompt?: string, isFirstRequest: boolean = false, repoPath?: string): string {
         // Create a unique ID for this request
         const logId = `api-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
@@ -178,6 +263,7 @@ export class Logger {
             content,
             pending: true
         };
+        if (repoPath) { (log as any).repoPath = repoPath; }
         this.sendLogToWebview(log);
         return logId;
     }
@@ -185,7 +271,7 @@ export class Logger {
     /**
      * Update API request log with function call result
      */
-    public logApiRequestWithResult(logId: string, provider: string, model: string, result: any, usage?: any, isFinal: boolean = false): void {
+    public logApiRequestWithResult(logId: string, provider: string, model: string, result: any, usage?: any, isFinal: boolean = false, repoPath?: string): void {
         // Format result as JSON string for parsing in frontend
         const content = typeof result === 'string' ? result : JSON.stringify(result);
 
@@ -249,6 +335,7 @@ export class Logger {
             cost,
             pending: false
         };
+        if (repoPath) { (log as any).repoPath = repoPath; }
         this.sendLogToWebview(log);
 
         // Emit a separate Reason log when present and not a final result
@@ -260,6 +347,7 @@ export class Logger {
                 title: 'Reason',
                 content: reason
             };
+            if (repoPath) { (reasonLog as any).repoPath = repoPath; }
             this.sendLogToWebview(reasonLog);
         }
     }

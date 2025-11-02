@@ -53,7 +53,7 @@ export class GeminiUtils extends BaseProviderUtils {
             requestType?: RequestType;
             functionDeclarations?: any[];
             isFirstRequest?: boolean;
-            // If needed later, we can add `functionResponse` parts support
+            repoPath?: string;
         }
     ): Promise<{ parsedResponse?: any; usage?: any }> {
 
@@ -111,7 +111,7 @@ export class GeminiUtils extends BaseProviderUtils {
                     ? chatContents.systemInstruction
                     : (chatContents.systemInstruction as any)?.parts?.[0]?.text;
                 const isFirstRequest = options.isFirstRequest ?? false;
-                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest);
+                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
 
                 const response = await client.models.generateContent({
                     model: options.model,
@@ -158,7 +158,8 @@ export class GeminiUtils extends BaseProviderUtils {
                         options.model,
                         parsedResponse,
                         usage,
-                        isFinal
+                        isFinal,
+                        options.repoPath
                     );
                 } else if (options.responseSchema) {
                     // Structured output path: extract and parse JSON from candidates

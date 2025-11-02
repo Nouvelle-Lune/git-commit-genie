@@ -7,6 +7,8 @@ export interface AppState {
     repositories: RepositoryInfo[];
     i18n: I18nTexts;
     logs: LogEntry[];
+    analysisRunning: boolean;
+    runningRepoLabel?: string;
 }
 
 // Action Types
@@ -15,7 +17,8 @@ type AppAction =
     | { type: 'ADD_LOG'; payload: LogEntry }
     | { type: 'UPDATE_LOG'; payload: LogEntry }
     | { type: 'CLEAR_LOGS' }
-    | { type: 'CANCEL_PENDING_LOGS' };
+    | { type: 'CANCEL_PENDING_LOGS' }
+    | { type: 'SET_ANALYSIS_RUNNING'; payload: { running: boolean; label?: string } };
 
 // Initial State
 const initialState: AppState = {
@@ -23,7 +26,8 @@ const initialState: AppState = {
     i18n: {
         repositoryList: 'Repository List'
     },
-    logs: []
+    logs: [],
+    analysisRunning: false
 };
 
 // Reducer
@@ -65,6 +69,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
                 ...state,
                 logs: state.logs.map(log => log.pending ? { ...log, pending: false, cancelled: true } : log)
             };
+        case 'SET_ANALYSIS_RUNNING':
+            return {
+                ...state,
+                analysisRunning: action.payload.running,
+                runningRepoLabel: action.payload.label
+            };
         default:
             return state;
     }
@@ -88,6 +98,26 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     useEffect(() => {
         const handleMessage = (event: MessageEvent<ExtensionMessage>) => {
             const message = event.data;
+            const shouldIncludeLog = (log: LogEntry): boolean => {
+                try {
+                    const repos = state.repositories || [];
+                    // If repositories are not loaded yet, allow (updateRepo typically arrives immediately before logs)
+                    if (repos.length === 0) { return true; }
+                    const norm = (s: string) => s.replace(/\\\\/g, '/');
+                    if ((log as any).repoPath) {
+                        const rp = norm((log as any).repoPath as string);
+                        return repos.some(r => norm(r.path) === rp);
+                    }
+                    if (log.filePath) {
+                        const fp = norm(log.filePath);
+                        return repos.some(r => {
+                            const rp = norm(r.path);
+                            return fp.startsWith(rp + '/') || fp === rp;
+                        });
+                    }
+                } catch { /* ignore */ }
+                return false;
+            };
             if (message.type === 'updateRepo') {
                 dispatch({
                     type: 'SET_REPOSITORIES',
@@ -96,17 +126,25 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
                         i18n: message.i18n
                     }
                 });
+                // Ask extension to flush logs after repositories are set to avoid cross-workspace leakage
+                try { vscodeApi.postMessage({ type: 'requestFlushLogs' } as any); } catch { /* ignore */ }
             } else if (message.type === 'addLog') {
-                dispatch({
-                    type: 'UPDATE_LOG',
-                    payload: message.log
-                });
+                if (shouldIncludeLog(message.log)) {
+                    dispatch({
+                        type: 'UPDATE_LOG',
+                        payload: message.log
+                    });
+                }
             } else if (message.type === 'clearLogs') {
                 dispatch({
                     type: 'CLEAR_LOGS'
                 });
             } else if (message.type === 'cancelPendingLogs') {
                 dispatch({ type: 'CANCEL_PENDING_LOGS' });
+            } else if (message.type === 'analysisRunning') {
+                const running = (message as any).running === true;
+                const label = (message as any).repoLabel as string | undefined;
+                dispatch({ type: 'SET_ANALYSIS_RUNNING', payload: { running, label } });
             }
         };
 

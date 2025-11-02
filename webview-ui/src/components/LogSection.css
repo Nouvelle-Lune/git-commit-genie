@@ -45,6 +45,18 @@
     box-sizing: border-box;
 }
 
+.running-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    margin: -4px 0 8px 0;
+    border: 1px dashed var(--vscode-panel-border);
+    border-radius: 6px;
+    background: var(--vscode-editor-inactiveSelectionBackground);
+}
+.running-banner .running-text { font-size: 12px; color: var(--vscode-foreground); }
+
 /* stats card removed */
 
 .log-empty {
@@ -95,6 +107,15 @@
 
 .log-item:hover:not(.log-divider) {
     background-color: var(--vscode-list-hoverBackground);
+}
+
+/* Emphasize error logs (e.g., schema validation failures) */
+.log-item.log-error .log-title-text,
+.log-item.log-error .log-icon {
+    color: var(--vscode-errorForeground);
+}
+.log-item.log-error .log-content {
+    border-left-color: var(--vscode-errorForeground);
 }
 
 .log-item.log-divider {
@@ -190,6 +211,23 @@
     text-overflow: ellipsis;
     display: block;
 }
+
+.log-repo-badge {
+    display: inline-block;
+    font-size: 10px;
+    line-height: 1;
+    padding: 2px 6px;
+    border-radius: 999px;
+    margin-right: 8px;
+    vertical-align: middle;
+    color: var(--vscode-badge-foreground);
+}
+.repo-badge-c0 { background: #3b82f633; }
+.repo-badge-c1 { background: #22c55e33; }
+.repo-badge-c2 { background: #eab30833; }
+.repo-badge-c3 { background: #a855f733; }
+.repo-badge-c4 { background: #ec489933; }
+.repo-badge-c5 { background: #14b8a633; }
 
 /* removed: inline reason no longer used */
 

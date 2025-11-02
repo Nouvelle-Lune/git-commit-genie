@@ -49,6 +49,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             store?: boolean;
             toolOutputs?: Array<{ call_id: string; output: string }>; // For OpenAI Responses function_call_output
             isFirstRequest?: boolean; // Track if this is the first request in analysis
+            repoPath?: string;
         }
     ): Promise<{ parsedResponse?: any; usage?: any; parsedAssistantResponse?: any; responseId?: string; functionCallId?: string }> {
         if (!client) {
@@ -74,7 +75,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 const systemMessages = messages.filter(m => m.role === 'system');
                 const systemPrompt = systemMessages.length > 0 ? systemMessages.map(m => m.content).join('\n\n') : undefined;
                 const isFirstRequest = options.isFirstRequest ?? false;
-                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest);
+                const logId = logger.logApiRequest(options.provider, options.model, messages, systemPrompt, isFirstRequest, options.repoPath);
 
                 if (options.provider.toLowerCase() === 'openai') {
                     // Use Responses API with function calling for OpenAI
@@ -85,44 +86,86 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                     const output: any[] = (response as any)?.output || [];
                     // Find first function call item, if any
                     const fnCall = output.find((it: any) => it?.type === 'function_call');
-                    // Try to capture a brief reason from any assistant message in this response
-                    let reasonText = '';
-                    const msg = output.filter((it: any) => it?.type === 'message').pop();
-                    if (msg && Array.isArray(msg.content)) {
-                        const texts = msg.content.filter((c: any) => c?.type === 'output_text').map((c: any) => c?.text || '').filter(Boolean);
-                        reasonText = texts.join('\n').slice(0, 500);
-                    }
-                    if (fnCall && fnCall?.name) {
-                        const name = String(fnCall.name);
-                        const argsStr = String(fnCall.arguments || '{}');
-                        let args: any = {};
-                        try { args = JSON.parse(argsStr); } catch { args = {}; }
-                        const argReason = typeof args?.reason === 'string' ? args.reason : '';
-                        if (argReason) { reasonText = argReason; delete args.reason; }
 
-                        const parsedResult = name === 'finalize'
-                            ? { action: 'final', final: args }
-                            : { action: 'tool', toolName: name, args, reason: reasonText };
-
-                        // Update log with function call result
-                        const isFinal = name === 'finalize';
-                        const usage = (response as any).usage;
-                        logger.logApiRequestWithResult(
-                            logId,
-                            options.provider,
-                            options.model,
-                            parsedResult,
-                            usage,
-                            isFinal
-                        );
-
-                        if (name === 'finalize') {
-                            return { parsedResponse: { action: 'final', final: args }, usage: (response as any).usage, responseId: (response as any)?.id, functionCallId: String(fnCall.call_id || fnCall.id || '') };
+                    // For repoAnalysisAction we require a function call; for others we parse text output
+                    if (options.requestType === 'repoAnalysisAction') {
+                        // Try to capture a brief reason from any assistant message in this response
+                        let reasonText = '';
+                        const msgForReason = output.filter((it: any) => it?.type === 'message').pop();
+                        if (msgForReason && Array.isArray(msgForReason.content)) {
+                            const texts = msgForReason.content.filter((c: any) => c?.type === 'output_text' || c?.type === 'text').map((c: any) => c?.text || '').filter(Boolean);
+                            reasonText = texts.join('\n').slice(0, 500);
                         }
-                        return { parsedResponse: { action: 'tool', toolName: name, args, reason: reasonText }, usage: (response as any).usage, responseId: (response as any)?.id, functionCallId: String(fnCall.call_id || fnCall.id || '') };
+
+                        if (fnCall && fnCall?.name) {
+                            const name = String(fnCall.name);
+                            const argsStr = String(fnCall.arguments || '{}');
+                            let args: any = {};
+                            try { args = JSON.parse(argsStr); } catch { args = {}; }
+                            const argReason = typeof args?.reason === 'string' ? args.reason : '';
+                            if (argReason) { reasonText = argReason; try { delete args.reason; } catch { /* ignore */ } }
+
+                            const parsedResult = name === 'finalize'
+                                ? { action: 'final', final: args }
+                                : { action: 'tool', toolName: name, args, reason: reasonText };
+
+                            // Update log with function call result
+                            const isFinal = name === 'finalize';
+                            const usage = (response as any).usage;
+                            logger.logApiRequestWithResult(
+                                logId,
+                                options.provider,
+                                options.model,
+                                parsedResult,
+                                usage,
+                                isFinal,
+                                options.repoPath
+                            );
+
+                            if (name === 'finalize') {
+                                return { parsedResponse: { action: 'final', final: args }, usage: (response as any).usage, responseId: (response as any)?.id, functionCallId: String(fnCall.call_id || fnCall.id || '') };
+                            }
+                            return { parsedResponse: { action: 'tool', toolName: name, args, reason: reasonText }, usage: (response as any).usage, responseId: (response as any)?.id, functionCallId: String(fnCall.call_id || fnCall.id || '') };
+                        }
+
+                        // If no function call for repoAnalysisAction, treat as an error
+                        throw new Error('OpenAI did not return a function call.');
                     }
-                    // If no function call, treat as an error 
-                    throw new Error('OpenAI did not return a function call.');
+
+                    // Non-function-calling path: parse assistant message text
+                    const msg = output.filter((it: any) => it?.type === 'message').pop();
+                    let textOut = '';
+                    if (msg && Array.isArray(msg.content)) {
+                        const texts = msg.content
+                            .filter((c: any) => c?.type === 'output_text' || c?.type === 'text')
+                            .map((c: any) => c?.text || '')
+                            .filter(Boolean);
+                        textOut = texts.join('\n');
+                    }
+                    const usage = (response as any).usage;
+                    // Try JSON parse first; if fails, return raw text
+                    let parsedResponse: any = undefined;
+                    if (textOut) {
+                        const trimmed = textOut.trim();
+                        if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+                            try { parsedResponse = JSON.parse(trimmed); } catch { parsedResponse = undefined; }
+                        }
+                    }
+                    if (parsedResponse === undefined && textOut) {
+                        parsedResponse = { text: textOut };
+                    }
+                    // Log the result content for visibility in webview
+                    logger.logApiRequestWithResult(
+                        logId,
+                        options.provider,
+                        options.model,
+                        parsedResponse ?? textOut ?? '',
+                        usage,
+                        false,
+                        options.repoPath
+                    );
+
+                    return { parsedResponse, usage, responseId: (response as any)?.id };
                 }
                 if (options.provider.toLowerCase() === 'deepseek' || options.provider.toLowerCase() === 'qwen') {
                     const response = await client.chat.completions.create(
@@ -148,7 +191,8 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                             options.model,
                             parsedResponse,
                             usage,
-                            isFinal
+                            isFinal,
+                            options.repoPath
                         );
                     }
 

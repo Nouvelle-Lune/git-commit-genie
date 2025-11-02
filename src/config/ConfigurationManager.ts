@@ -10,7 +10,8 @@ export class ConfigurationManager {
         const config = vscode.workspace.getConfiguration('gitCommitGenie');
         const logLevel = config.get<string>('logLevel', 'info');
         const level = this.getLogLevel(logLevel);
-        logger.initialize(outputChannel, level);
+        logger.initialize(outputChannel, level, this.context);
+        await logger.loadPersistedLogs();
         this.context.subscriptions.push(outputChannel);
 
         // Set initial context values

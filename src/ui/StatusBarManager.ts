@@ -50,6 +50,10 @@ export class StatusBarManager {
         repoLabel: ''
     };
 
+    // Event: analysis running state changed
+    private readonly _onAnalysisRunningChanged = new vscode.EventEmitter<{ running: boolean; label?: string | null }>();
+    public readonly onAnalysisRunningChanged = this._onAnalysisRunningChanged.event;
+
     constructor(
         private context: vscode.ExtensionContext,
         private serviceRegistry: ServiceRegistry,
@@ -95,6 +99,7 @@ export class StatusBarManager {
 
         vscode.commands.executeCommand('setContext', 'gitCommitGenie.analysisRunning', running);
         this.updateStatusBar();
+        try { this._onAnalysisRunningChanged.fire({ running, label: this.analysisState.runningRepoLabel }); } catch { /* ignore */ }
     }
 
     isRepoAnalysisRunning(): boolean {

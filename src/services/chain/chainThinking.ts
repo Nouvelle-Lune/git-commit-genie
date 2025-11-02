@@ -213,10 +213,15 @@ export async function generateCommitMessageChain(
 		while (queue.length) {
 			const item = queue.shift();
 			if (!item) { break; };
-			const summary = await summarizeSingleFile(item, chat);
-			results.push(summary);
-            // progress update
-            try { options?.onStage?.({ type: 'summarizeProgress', data: { current: results.length, total: diffs.length } }); } catch { /* ignore */ }
+            const summary = await summarizeSingleFile(item, chat);
+            results.push(summary);
+            // progress update + last summary text for visibility
+            try {
+                options?.onStage?.({
+                    type: 'summarizeProgress',
+                    data: { current: results.length, total: diffs.length, file: summary.file, summary: summary.summary, breaking: !!summary.breaking }
+                });
+            } catch { /* ignore */ }
 		}
 	}
 
@@ -225,30 +230,31 @@ export async function generateCommitMessageChain(
 	// Waiting for all workers to complete
 	await Promise.all(workers);
 
-	const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat);
-    try { options?.onStage?.({ type: 'classifyDraft' }); } catch { /* ignore */ }
-	const { validMessage, notes: validationNotes } = await validateAndFix(draft, inputs.validationChecklist ?? '', chat, inputs.userTemplate);
-    try { options?.onStage?.({ type: 'validateFix' }); } catch { /* ignore */ }
+    const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat);
+    try { options?.onStage?.({ type: 'classifyDraft', data: { draft } }); } catch { /* ignore */ }
+    const { validMessage, notes: validationNotes } = await validateAndFix(draft, inputs.validationChecklist ?? '', chat, inputs.userTemplate);
+    try { options?.onStage?.({ type: 'validateFix', data: { validMessage } }); } catch { /* ignore */ }
 
 	// Local strict check; if still not conforming, ask LLM for a minimal strict fix
 	let finalMessage = validMessage;
 	const check = localStrictCheck(finalMessage);
     if (!check.ok) {
-        try { options?.onStage?.({ type: 'strictFix' }); } catch { /* ignore */ }
         finalMessage = await enforceStrictWithLLM(finalMessage, check.problems, chat, inputs.userTemplate);
+        try { options?.onStage?.({ type: 'strictFix', data: { message: finalMessage } }); } catch { /* ignore */ }
     }
 
 	// Enforce target language strictly while preserving tokens/structure
     try {
         if ((inputs.targetLanguage || '').trim()) {
-            try { options?.onStage?.({ type: 'enforceLanguage' }); } catch { /* ignore */ }
+            const out = await enforceTargetLanguageForCommit(finalMessage, inputs.targetLanguage, chat, inputs.userTemplate);
+            finalMessage = out;
+            try { options?.onStage?.({ type: 'enforceLanguage', data: { message: finalMessage } }); } catch { /* ignore */ }
         }
-		finalMessage = await enforceTargetLanguageForCommit(finalMessage, inputs.targetLanguage, chat, inputs.userTemplate);
-	} catch (error) {
-		// ignore
-	}
+    } catch (error) {
+        // ignore
+    }
 
-	try { options?.onStage?.({ type: 'done' }); } catch { /* ignore */ }
+    try { options?.onStage?.({ type: 'done', data: { finalMessage } }); } catch { /* ignore */ }
 
 	return {
 		commitMessage: finalMessage,
