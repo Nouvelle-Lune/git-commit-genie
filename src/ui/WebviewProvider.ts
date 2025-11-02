@@ -26,26 +26,16 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
         this._serviceRegistry = serviceRegistry;
         this._statusBar = statusBar;
         this._setupEventListeners();
+        // Ensure Git listeners are registered even if Git API isn't ready at construction time
+        // Fire and forget; internal method handles waiting.
+        void this._setupGitListenersWhenReady();
     }
 
     /**
      * Setup event listeners for repository changes
      */
     private _setupEventListeners(): void {
-        const gitApi = this._serviceRegistry.getRepoService().getGitApi();
-        if (gitApi) {
-            this._disposables.push(
-                gitApi.onDidOpenRepository(() => {
-                    this._handleRepositoryChange();
-                })
-            );
-
-            this._disposables.push(
-                gitApi.onDidCloseRepository(() => {
-                    this._handleRepositoryChange();
-                })
-            );
-        }
+        // Non-Git listeners
 
         // Listen to cost changes
         const costService = this._serviceRegistry.getCostTrackingService();
@@ -71,6 +61,48 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 this._handleRepositoryChange();
             })
         );
+    }
+
+    /**
+     * Register Git listeners once the Git API is available. If Git isn't ready yet,
+     * waits for RepoService initialization first to avoid missing repository events.
+     */
+    private async _setupGitListenersWhenReady(): Promise<void> {
+        const repoService = this._serviceRegistry.getRepoService();
+
+        // Try immediate registration first
+        let gitApi = repoService.getGitApi();
+        if (!gitApi) {
+            // Await Git initialization (with internal timeout) and retry
+            await (repoService as any).whenReady?.();
+            gitApi = repoService.getGitApi();
+        }
+
+        if (!gitApi) {
+            // As a last resort, poll briefly to catch late initialization
+            const start = Date.now();
+            while (!gitApi && Date.now() - start < 3000) {
+                await new Promise(r => setTimeout(r, 150));
+                gitApi = repoService.getGitApi();
+            }
+        }
+
+        if (gitApi) {
+            this._disposables.push(
+                gitApi.onDidOpenRepository(() => {
+                    this._handleRepositoryChange();
+                })
+            );
+
+            this._disposables.push(
+                gitApi.onDidCloseRepository(() => {
+                    this._handleRepositoryChange();
+                })
+            );
+
+            // After listeners are in place, push initial data in case repos became available
+            this._handleRepositoryChange();
+        }
     }
 
     /**
@@ -114,7 +146,8 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
         this._disposables.push(
             webviewView.webview.onDidReceiveMessage(async (data: WebviewMessage) => {
                 if (data.type === 'ready') {
-                    await this.sendRepositoryData();
+                    // Delay initial data send until Git is likely ready to avoid empty repos/logs
+                    await this._sendRepositoryDataWithDelay();
                     // Send current running state
                     try {
                         const running = !!this._statusBar?.isRepoAnalysisRunning();
@@ -155,6 +188,31 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 }
             })
         );
+    }
+
+    /**
+     * Attempt to wait for Git to be ready and repositories to be discovered before sending data.
+     * Falls back to sending immediately if waiting times out.
+     */
+    private async _sendRepositoryDataWithDelay(): Promise<void> {
+        try {
+            const repoService = this._serviceRegistry.getRepoService();
+
+            // If no repositories yet, wait for initialization and a short grace period
+            const hasRepos = () => (repoService.getRepositories() || []).length > 0;
+            if (!hasRepos()) {
+                await (repoService as any).whenReady?.();
+
+                const start = Date.now();
+                while (!hasRepos() && Date.now() - start < 2000) {
+                    await new Promise(r => setTimeout(r, 150));
+                }
+            }
+        } catch {
+            // ignore waiting errors
+        }
+
+        await this.sendRepositoryData();
     }
 
     /**

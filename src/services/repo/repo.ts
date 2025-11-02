@@ -19,6 +19,25 @@ export class RepoService {
     }
 
     /**
+     * Returns a promise that resolves when initial Git API initialization completes.
+     * Note: Repositories may still be empty if none are detected within the internal timeout.
+     */
+    public async whenReady(): Promise<void> {
+        try {
+            await this.initPromise;
+        } catch {
+            // Swallow errors to avoid blocking callers; callers should handle missing API gracefully
+        }
+    }
+
+    /**
+     * Indicates whether the Git API has been initialized.
+     */
+    public isInitialized(): boolean {
+        return this.initialized && !!this.gitApi;
+    }
+
+    /**
      * Initialize Git extension and API
      */
     private async initialize(): Promise<void> {
