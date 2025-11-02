@@ -1,6 +1,11 @@
 .log-section {
     margin-top: 8px;
     width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
 }
 
 .log-header-bar {
@@ -8,6 +13,7 @@
     align-items: center;
     justify-content: space-between;
     margin: 0 12px 8px 12px;
+    flex-shrink: 0;
 }
 
 .log-title {
@@ -39,10 +45,15 @@
     border: 2px solid var(--vscode-panel-border);
     border-radius: 6px;
     padding: 16px;
-    margin: 8px 12px 0 12px;
+    margin: 8px 12px 12px 12px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     min-height: 100px;
     box-sizing: border-box;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    min-height: 0;
 }
 
 .running-banner {

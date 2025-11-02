@@ -1,5 +1,6 @@
 .repo-section {
     margin-bottom: 8px;
+    flex-shrink: 0;
 }
 
 .repo-title {

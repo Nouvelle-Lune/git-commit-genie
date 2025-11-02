@@ -10,8 +10,10 @@ import './App.css';
 export const App: React.FC = () => {
     return (
         <AppProvider>
-            <RepoSection />
-            <LogSection />
+            <div className="container">
+                <RepoSection />
+                <LogSection />
+            </div>
         </AppProvider>
     );
 };
