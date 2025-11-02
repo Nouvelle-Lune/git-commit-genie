@@ -94,15 +94,17 @@ interface AppProviderProps {
 
 export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
     const [state, dispatch] = useReducer(appReducer, initialState);
+    // Keep a ref to the latest repositories to avoid stale closure issues
+    const repositoriesRef = React.useRef<RepositoryInfo[]>([]);
 
     useEffect(() => {
         const handleMessage = (event: MessageEvent<ExtensionMessage>) => {
             const message = event.data;
             const shouldIncludeLog = (log: LogEntry): boolean => {
                 try {
-                    const repos = state.repositories || [];
-                    // If repositories are not loaded yet, allow (updateRepo typically arrives immediately before logs)
-                    if (repos.length === 0) { return true; }
+                    const repos = repositoriesRef.current || [];
+                    // If repositories are not loaded yet, skip including to avoid cross-workspace leakage
+                    if (repos.length === 0) { return false; }
                     const norm = (s: string) => s.replace(/\\\\/g, '/');
                     if ((log as any).repoPath) {
                         const rp = norm((log as any).repoPath as string);
@@ -119,6 +121,8 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
                 return false;
             };
             if (message.type === 'updateRepo') {
+                // Update repositories ref first, then state
+                repositoriesRef.current = message.repositories;
                 dispatch({
                     type: 'SET_REPOSITORIES',
                     payload: {
@@ -154,7 +158,7 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
         return () => {
             window.removeEventListener('message', handleMessage);
         };
-    }, []); // Remove state.logs dependency to prevent infinite loop
+    }, []); // Intentional empty deps: use repositoriesRef to avoid stale state
 
     return (
         <AppContext.Provider value={{ state }}>
