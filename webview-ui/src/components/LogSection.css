@@ -68,6 +68,7 @@
     flex-direction: column;
     overflow: hidden;
     min-height: 0;
+    position: relative;
 }
 
 .running-banner {
@@ -101,6 +102,11 @@
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--vscode-scrollbarSlider-background) transparent;
+    scroll-behavior: smooth;
+    /* Prevent layout shift during scroll */
+    contain: layout style paint;
+    /* Use GPU acceleration for smoother scrolling */
+    will-change: scroll-position;
 }
 
 .log-list::-webkit-scrollbar {
@@ -120,6 +126,67 @@
 
 .log-list::-webkit-scrollbar-thumb:hover {
     background-color: var(--vscode-scrollbarSlider-hoverBackground);
+}
+
+.new-logs-indicator {
+    position: absolute;
+    bottom: 12px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: 1px solid var(--vscode-button-border);
+    border-radius: 16px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    transition: all 0.2s ease;
+    z-index: 10;
+    animation: slideUp 0.3s ease-out;
+}
+
+.new-logs-indicator:hover {
+    background: var(--vscode-button-hoverBackground);
+    transform: translateX(-50%) translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.new-logs-indicator:active {
+    transform: translateX(-50%) translateY(0);
+}
+
+.new-logs-indicator i.codicon {
+    font-size: 14px;
+    animation: bounce 1s ease-in-out infinite;
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+@keyframes bounce {
+
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+
+    50% {
+        transform: translateY(-3px);
+    }
 }
 
 .log-item {
