@@ -247,12 +247,12 @@
 
 .stage-badge-api {
     background: #0891b2;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-tool {
     background: #f97316;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-reason {
@@ -270,53 +270,53 @@
 /* Commit generation stages */
 .stage-badge-summarize {
     background: #8b5cf6;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-classify {
     background: #3b82f6;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-validate {
     background: #06b6d4;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-strict {
     background: #f59e0b;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-language {
     background: #ec4899;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-done {
     background: #22c55e;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-validation {
     background: #ef4444;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 /* Repository analysis tool stages */
 .stage-badge-search {
     background: #0ea5e9;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-explore {
     background: #14b8a6;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-analyze {
     background: #6366f1;
-    color: #ffffff;
+    color: var(--vscode-badge-foreground);
 }
 
 
