@@ -62,9 +62,8 @@ export class ExtensionManager {
             // Register clear logs command
             this.context.subscriptions.push(
                 vscode.commands.registerCommand('git-commit-genie.clearLogs', () => {
-                    provider.clearLogs();
-                    logger.clearLogBuffer();
-                    logger.info('Logs cleared');
+                    provider.clearLogsAndStorage();
+                    logger.info('Logs cleared for current workspace');
                 })
             );
 

@@ -114,6 +114,47 @@ export class Logger {
         this.persistLogBuffer().catch(() => {});
     }
 
+    /**
+     * Clear logs that belong to the specified repository paths only.
+     * Supports multi-root workspaces by accepting multiple repo paths.
+     */
+    public clearLogBufferForRepositories(repoPaths: string[]): void {
+        try {
+            if (!Array.isArray(repoPaths) || repoPaths.length === 0) {
+                return;
+            }
+            const norm = (s: string) => (s || '').replace(/\\/g, '/');
+            const repoSet = new Set(repoPaths.map(p => norm(p)));
+
+            const deriveRepoPathForLog = (log: LogEntry): string | null => {
+                try {
+                    const rp = (log as any).repoPath as string | undefined;
+                    if (rp) { return norm(rp); }
+                    if (log.filePath) {
+                        const fp = norm(log.filePath);
+                        // pick the longest matching repo path
+                        let best: string | null = null;
+                        for (const r of repoSet) {
+                            if (fp === r || fp.startsWith(r + '/')) {
+                                if (!best || r.length > best.length) { best = r; }
+                            }
+                        }
+                        return best;
+                    }
+                } catch { /* ignore */ }
+                return null;
+            };
+
+            this.logBuffer = (this.logBuffer || []).filter(log => {
+                const rp = deriveRepoPathForLog(log);
+                if (!rp) { return true; }
+                return !repoSet.has(rp);
+            });
+
+            this.persistLogBuffer().catch(() => {});
+        } catch { /* ignore */ }
+    }
+
     public async loadPersistedLogs(): Promise<void> {
         try {
             // Prefer globalState (shared across all workspaces)

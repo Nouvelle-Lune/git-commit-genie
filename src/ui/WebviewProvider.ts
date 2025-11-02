@@ -105,7 +105,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                         this.sendMessage({ type: 'analysisRunning', running, repoLabel: label } as any);
                     } catch { /* ignore */ }
                 } else if (data.type === 'clearLogs') {
-                    this.clearLogs();
+                    this.clearLogsAndStorage();
                 } else if (data.type === 'openFile') {
                     // Open file in editor
                     try {
@@ -122,14 +122,28 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
     }
 
     /**
-     * Clear all logs in webview
+     * Clear logs from the UI only (used by flush flow)
      */
     public clearLogs(): void {
         if (this._view) {
-            this._view.webview.postMessage({
-                type: 'clearLogs'
-            });
+            this._view.webview.postMessage({ type: 'clearLogs' });
         }
+    }
+
+    /**
+     * Clear logs for current workspace repos from storage and UI (user action)
+     */
+    public clearLogsAndStorage(): void {
+        try {
+            const repos = this._serviceRegistry.getRepoService().getRepositories() || [];
+            const repoPaths = repos.map(r => r.rootUri.fsPath).filter(Boolean);
+            if (repoPaths.length > 0) {
+                logger.clearLogBufferForRepositories(repoPaths);
+            } else {
+                logger.clearLogBuffer();
+            }
+        } catch { /* ignore */ }
+        this.clearLogs();
     }
 
     /**

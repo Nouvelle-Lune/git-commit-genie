@@ -753,10 +753,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
                 logger.info(`[Genie][RepoAnalysis] Step ${step + 1}: Model chose tool '${toolName}'. Reason: ${reason.slice(0, 500)}`);
 
-                // Don't log tool call here - readFileContent will call logFileRead internally
-                // For other tools, we can add specific logging if needed
-                // logger.logToolCall(toolName, JSON.stringify(args, null, 2), reason);
-
                 const toolResult = await this.runTool(repoPath, toolName, args, userExcludes);
                 this.logToolOutcome(toolName, toolResult);
                 // For OpenAI function calling, queue function_call_output instead of text TOOL_RESULT
