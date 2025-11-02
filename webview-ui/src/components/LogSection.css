@@ -360,22 +360,22 @@
 }
 
 .stage-badge-validate {
-    background: #06b6d4;
+    background: #b75889;
     color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-strict {
-    background: #f59e0b;
+    background: #d97706;
     color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-language {
-    background: #ec4899;
+    background: #ffa1df;
     color: var(--vscode-badge-foreground);
 }
 
 .stage-badge-done {
-    background: #22c55e;
+    background: #16a34a;
     color: var(--vscode-badge-foreground);
 }
 
