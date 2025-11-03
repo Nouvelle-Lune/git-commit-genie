@@ -11,11 +11,11 @@ import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { AnthropicUtils } from './utils/anthropicUtils';
 import { ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from '../baseLLMService';
-import { 
-    AnthropicCommitMessageTool, 
-    AnthropicFileSummaryTool, 
-    AnthropicClassifyAndDraftTool, 
-    AnthropicValidateAndFixTool, 
+import {
+    AnthropicCommitMessageTool,
+    AnthropicFileSummaryTool,
+    AnthropicClassifyAndDraftTool,
+    AnthropicValidateAndFixTool,
     AnthropicRepoAnalysisTool,
     AnthropicRepoAnalysisActionTool
 } from './schemas/anthropicSchemas';

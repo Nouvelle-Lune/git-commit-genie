@@ -377,9 +377,9 @@ export class Logger {
                     cachedTokens = usage.cache_read_input_tokens || 0;
                     cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
                 } else if (providerLower === 'gemini') {
-                    inputTokens = usage.promptTokenCount || 0;
-                    outputTokens = usage.candidatesTokenCount || 0;
-                    cachedTokens = usage.cachedContentTokenCount || 0;
+                    inputTokens = usage.prompt_tokens || 0;
+                    outputTokens = usage.completion_tokens || 0;
+                    cachedTokens = usage.cached_content_tokens || 0;
                     cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
                 } else if (providerLower === 'qwen') {
                     inputTokens = usage.input_tokens || 0;
@@ -540,10 +540,10 @@ export class Logger {
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
             if (providerLower === 'gemini') {
-                inputTokens = usage.prompt_tokens ?? 0;
-                outputTokens = usage.completion_tokens ?? 0;
+                inputTokens = usage.prompt_tokens || 0;
+                outputTokens = usage.completion_tokens || 0;
+                cachedTokens = usage.cached_content_tokens || 0;
                 totalTokens = usage.total_tokens ?? (inputTokens + outputTokens);
-                cachedTokens = usage.cached_content_tokens ?? 0;
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
@@ -696,9 +696,9 @@ export class Logger {
                     outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
                     cachedTokens = usage.cached_tokens ?? usage.input_tokens_details?.cached_tokens ?? 0;
                 } else if (providerLower === 'gemini') {
-                    inputTokens = usage.prompt_tokens ?? 0;
-                    outputTokens = usage.completion_tokens ?? 0;
-                    cachedTokens = usage.cached_content_tokens ?? 0;
+                    inputTokens = usage.prompt_tokens || 0;
+                    outputTokens = usage.completion_tokens || 0;
+                    cachedTokens = usage.cached_content_tokens || 0;
                 } else if (providerLower === 'qwen') {
                     inputTokens = usage.prompt_tokens || 0;
                     outputTokens = usage.completion_tokens || 0;
