@@ -205,6 +205,8 @@
     border-bottom: 1px solid var(--vscode-sideBar-border);
     box-sizing: border-box;
     overflow: hidden;
+    container-type: inline-size;
+    container-name: log-item;
 }
 
 /* New log enter animation */
@@ -293,7 +295,7 @@
 
 .log-header {
     display: grid;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
     /* right cluster contains expand icon */
     align-items: center;
     gap: 5px;
@@ -471,17 +473,23 @@
     color: var(--vscode-badge-foreground);
     font-weight: 600;
     font-family: var(--vscode-editor-font-family);
-    flex-shrink: 0;
     padding: 1px 4px;
     background: linear-gradient(135deg, #10b981 0%, #059669 100%);
     border-radius: 3px;
     letter-spacing: 0.2px;
-    min-width: 50px;
     text-align: center;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
     opacity: 0.9;
-    transition: opacity 0.2s ease;
+    transition: opacity 0.1s ease;
     vertical-align: middle;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+@container log-item (max-width: 200px) {
+    .log-cost {
+        display: none;
+    }
 }
 
 .log-cost:hover {
@@ -530,6 +538,15 @@
     gap: 4px;
     min-width: 0;
     /* shrink to content */
+}
+
+.log-trailing>* {
+    flex-shrink: 0;
+}
+
+.log-trailing .log-cost {
+    flex-shrink: 1;
+    min-width: 0;
 }
 
 .log-submeta {
@@ -657,11 +674,6 @@
 @media (max-width: 520px) {
     .log-time {
         display: none;
-    }
-
-    .log-cost {
-        font-size: 9px;
-        padding: 1px 4px;
     }
 
     .log-expand-icon,
