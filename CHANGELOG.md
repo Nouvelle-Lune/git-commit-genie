@@ -1,5 +1,10 @@
 # Changelog
 
+## [3.0.0]
+- feat: Add a webview-based dashboard for genie.
+- feat: The new repository analysis system will be agentic and function-calling-driven.
+- fix: Removed support for Gemini 2.5 flash-lite and flash-lite-preview-09-2025; the performance of these models is not satisfactory.
+
 ## [2.3.1]
 - fix: Fixed some text display issues.
 
