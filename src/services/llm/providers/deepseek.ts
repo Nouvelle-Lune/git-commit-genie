@@ -300,6 +300,15 @@ export class DeepSeekService extends BaseLLMService {
 
             const safe = commitMessageSchema.safeParse(result.parsedResponse);
             if (safe.success) {
+                // Emit a final "done" stage in webview logs for default mode
+                try {
+                    logger.logToolCall(
+                        'commitStage',
+                        JSON.stringify({ stage: 'done', data: { finalMessage: safe.data.commitMessage } }),
+                        'Commit generation stage',
+                        repoPath
+                    );
+                } catch { /* ignore */ }
                 return { content: safe.data.commitMessage };
             }
             lastError = safe.error;
