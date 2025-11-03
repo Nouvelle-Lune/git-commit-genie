@@ -10,23 +10,24 @@ English version: [English README](../README.md)
 
 Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / DeepSeek / Anthropic / Gemini / Qwen）自动生成高质量的 Conventional Commits 风格提交信息。内置仓库智能分析功能，自动理解项目结构和技术栈，为提交信息生成提供更好的上下文。支持可选"Thinking 模式"（多步推理）与"用户模板"策略，显著提升结构一致性与团队风格统一。
 
-优势：
-- 避免在提交语句格式/措辞上反复纠结。
-- 严格符合 Conventional Commits（类型、scope、BREAKING CHANGE）。
-- 通过一个简单的模板文件定义 Body / Footers / 语气 / 词汇偏好。
-- 支持多模型动态切换，快速选择最适合的提供商与模型。
-
-## 使用演示
-
-<div align="center">
-  <img src="../media/demo1.gif" width="300" alt="使用演示"/>
-</div>
-
-#### 状态栏显示
-
-<div align="center">
-  <img src="../media/status-bar.png" width="300" alt="状态栏"/>
-</div>
+<table style="width: 100%; border-spacing: 10px;">
+  <tr>
+    <td width="50%" align="center" style="vertical-align: top;">
+      <strong>Commit message generate</strong><br/><br/>
+      <img src="../media/demo1.gif" width="100%" alt="Usage Demo" style="display: block;"/>
+    </td>
+    <td width="50%" rowspan="2" align="center" style="vertical-align: top;">
+      <strong>Log dashboard</strong><br/><br/>
+      <img src="../media/dashboard-view.png" width="100%" alt="Dashboard view" style="display: block;"/>
+    </td>
+  </tr>
+  <tr>
+    <td align="center" style="vertical-align: top;">
+      <strong>Status Bar Display</strong><br/><br/>
+      <img src="../media/status-bar.png" width="100%" alt="Status Bar" style="display: block;"/>
+    </td>
+  </tr>
+</table>
 
 ## 格式
 
@@ -50,48 +51,25 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 
 ## 核心特性
 
-| 特性                     | 说明                                                                                                 |
-| ------------------------ | ---------------------------------------------------------------------------------------------------- |
-| 多模型提供商             | 支持 OpenAI、DeepSeek、Anthropic、Gemini、Qwen 等。                                                  |
+| 特性                     | 说明                                                                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 多模型提供商             | 支持 OpenAI、DeepSeek、Anthropic、Gemini、Qwen 等。                                                                                                               |
 | 仓库智能分析             | AI驱动的仓库分析智能Agent，自主使用智能工具探索代码库；自动理解项目结构、技术栈和架构，为更好的提交信息提供上下文洞察；支持手动刷新、实时更新和可编辑的分析报告。 |
-| Thinking 模式            | 多步：文件级摘要 → 结构化综合 → 校验修复，显著提升准确度与模板贴合度。                               |
-| 用户模板策略             | 内置模板选择和创建功能，支持工作区和用户数据目录，抽取策略影响段落顺序、必填 footers、词汇偏好等。   |
-| Conventional Commit 校验 | 头行格式（type(scope)!: desc），长度 ≤ 72，无句号。                                                  |
-| Diff 感知                | 仅读取"已暂存"更改；自动推断类型（feat / fix / docs / refactor 等）。                                |
-| Token 与速率保护         | 429 自动退避重试；Gemini 软限本地节流；并发可配置。                                                  |
-| 状态栏集成               | 显示当前模型和分析状态，点击可访问功能菜单。                                                         |
-| 生成取消                 | SCM 标题栏按钮可实时取消正在进行的生成。                                                             |
-| 安全存储                 | API Key 使用 VS Code SecretStorage，不写入明文设置。                                                 |
-| 国际化支持               | 内置英文、简体中文、繁体中文等多语言支持。                                                           |
-| 阶段通知                 | 右下角展示链式阶段进度，支持开关配置。                                                               |
+| Thinking 模式            | 多步：文件级摘要 → 结构化综合 → 校验修复，显著提升准确度与模板贴合度。                                                                                            |
+| 用户模板策略             | 内置模板选择和创建功能，支持工作区和用户数据目录，抽取策略影响段落顺序、必填 footers、词汇偏好等。                                                                |
+| Conventional Commit 校验 | 头行格式（type(scope)!: desc），长度 ≤ 72，无句号。                                                                                                               |
+| Diff 感知                | 仅读取"已暂存"更改；自动推断类型（feat / fix / docs / refactor 等）。                                                                                             |
+| 状态栏集成               | 显示当前模型和分析状态，点击可访问功能菜单。                                                                                                                      |
+| 生成取消                 | SCM 标题栏按钮可实时取消正在进行的生成。                                                                                                                          |
+| 安全存储                 | API Key 使用 VS Code SecretStorage，不写入明文设置。                                                                                                              |
+| 国际化支持               | 内置英文、简体中文、繁体中文等多语言支持。                                                                                                                        |
+| 阶段通知                 | 右下角展示链式阶段进度，支持开关配置。                                                                                                                            |
 
 ## 工作流程
 
 1. 暂存（Stage）你的变更。
 2. 执行命令：`Git Commit Genie: 生成提交信息`（SCM 顶部按钮或命令面板）。
-3. 若开启 Thinking 模式：
-   - 并行生成文件级摘要
-   - 综合分析类型与 scope
-   - 应用模板策略（若有效）
-   - 结构 + 风格自检与最小修复
-4. 输出写入仓库提交框，可人工微调后提交。
-
-未开启 Thinking：使用单轮提示 → 更低延迟，但结构与风格细腻度稍弱。
-
-## 安装
-
-1. VS Code 市场搜索 “Git Commit Genie” 安装，或使用打包 `.vsix` 手动安装。
-2. 命令面板运行 `Git Commit Genie: Manage Models` 选择 Provider、输入/替换 API Key、选择模型。
-3. （可选）使用命令 `Git Commit Genie: Select/Create Template` 选择或创建模板文件。
-
-## 运行要求
-
-| 项       | 说明                        |
-| -------- | --------------------------- |
-| VS Code  | 版本需满足引擎 `^1.103.0`。 |
-| Git 扩展 | 内置 `vscode.git`，需启用。 |
-| 网络访问 | 调用所选 LLM 提供商。       |
-| API Key  | 使用的每个提供商都需要。    |
+3. 输出写入仓库提交框，可人工微调后提交。
 
 ## 配置项
 
@@ -157,7 +135,6 @@ Minimal Template
 
 - API Key 使用 SecretStorage，不以明文写入 settings.json， 不会以任何形式上传到互联网，仅保存在本地。
 - 仅发送“已暂存 diff”中的文件名与修改上下文；不包括未暂存或未跟踪文件。
-- 无遥测 / 分析数据收集。
 
 ## 许可证
 
