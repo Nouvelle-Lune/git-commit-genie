@@ -245,7 +245,7 @@ export class Logger {
         try {
             // Derive repoPath from workspace folders to enable filtering/badge in webview
             const folders = vscode.workspace.workspaceFolders || [];
-            const norm = (s: string) => s.replace(/\\\\/g, '/');
+            const norm = (s: string) => s.replace(/\\/g, '/');
             const fp = norm(filePath);
             for (const f of folders) {
                 const rp = norm(f.uri.fsPath);

@@ -3,6 +3,7 @@ import { useAppContext } from '../context/AppContext';
 import { LogEntry, LogType } from '../types/messages';
 import { vscodeApi } from '../utils/vscode';
 import './LogSection.css';
+import { GenieCheckIcon, GenieCloudIcon, GenieReadIcon, GenieReasonIcon, GenieToolIcon, GenieWarningIcon } from './icons';
 // @ts-ignore - react-markdown types
 import ReactMarkdown from 'react-markdown';
 
@@ -156,24 +157,46 @@ export const LogSection: React.FC = () => {
         return date.toLocaleTimeString();
     };
 
-    const getLogIcon = (type: LogType) => {
-        switch (type) {
+    const isCommitStageDone = (log: LogEntry) => {
+        if (log.type !== LogType.ToolCall) return false;
+        const title = (log.title || '').toLowerCase();
+        return title.includes('commit stage:') && title.includes('done');
+    };
+
+    const isFailureLog = (log: LogEntry) => {
+        if (isSchemaValidationLog(log)) return true;
+        const t = (log.title || '').toLowerCase();
+        const r = (log.reason || '').toLowerCase();
+        return t.includes('error') || t.includes('failed') || t.includes('retry') || r.includes('error') || r.includes('failed') || r.includes('retry');
+    };
+
+    const isSuccessLog = (log: LogEntry) => {
+        return log.type === LogType.FinalResult || isCommitStageDone(log);
+    };
+
+    const renderLogIcon = (log: LogEntry) => {
+        if (isSchemaValidationLog(log)) {
+            return <GenieWarningIcon size={14} />;
+        }
+        switch (log.type) {
             case LogType.FileRead:
-                return 'file';
+                return <GenieReadIcon size={14} />;
             case LogType.ApiRequest:
-                return 'cloud';
+                return <GenieCloudIcon size={14} />;
             case LogType.ToolCall:
-                return 'tools';
+                return isCommitStageDone(log) ? <GenieCheckIcon size={14} /> : <GenieToolIcon size={14} />;
             case LogType.AnalysisStart:
-                return 'debug-start';
+                // restore play button for started
+                return <i className="codicon codicon-debug-start"></i>;
             case LogType.GenerationStart:
-                return 'debug-start';
+                // restore play button for started
+                return <i className="codicon codicon-debug-start"></i>;
             case LogType.FinalResult:
-                return 'check';
+                return <GenieCheckIcon size={14} />;
             case LogType.Reason:
-                return 'comment-discussion';
+                return <GenieReasonIcon size={14} />;
             default:
-                return 'info';
+                return <GenieToolIcon size={14} />;
         }
     };
 
@@ -186,10 +209,11 @@ export const LogSection: React.FC = () => {
     const getRepoInfoForLog = (log: LogEntry): { name: string; colorIdx: number } | null => {
         const repos = state.repositories || [];
         const norm = (s: string) => s.replace(/\\/g, '/');
-        let repoPath: string | undefined = (log as any).repoPath as any;
-        if (!repoPath && log.filePath) {
+
+        // Prefer resolving from filePath
+        let resolvedPath: string | undefined;
+        if (log.filePath) {
             const fp = norm(log.filePath);
-            // choose the longest matching repo path
             let best: string | undefined;
             for (const r of repos) {
                 const rp = norm(r.path);
@@ -197,13 +221,25 @@ export const LogSection: React.FC = () => {
                     if (!best || rp.length > best.length) { best = rp; }
                 }
             }
-            repoPath = best;
+            resolvedPath = best;
         }
-        if (!repoPath) { return null; }
-        const r = repos.find(rr => norm(rr.path) === norm(repoPath!));
-        const name = r?.name || repoPath.split('/').filter(Boolean).pop() || 'repo';
+
+        // Fallback to explicit repoPath when it maps to a known repo
+        if (!resolvedPath && (log as any)?.repoPath) {
+            const rp = norm((log as any).repoPath as string);
+            const match = repos.find(rr => norm(rr.path) === rp);
+            if (match) {
+                resolvedPath = match.path;
+            }
+        }
+
+        // If still unknown, bail
+        if (!resolvedPath) { return null; }
+
+        const r = repos.find(rr => norm(rr.path) === norm(resolvedPath!));
+        const name = r?.name || resolvedPath.split('/').filter(Boolean).pop() || 'repo';
         // small hash for color index
-        let h = 0; const str = repoPath;
+        let h = 0; const str = resolvedPath;
         for (let i = 0; i < str.length; i++) { h = (h * 31 + str.charCodeAt(i)) >>> 0; }
         const colorIdx = h % 6; // 6 color variants
         return { name, colorIdx };
@@ -231,7 +267,7 @@ export const LogSection: React.FC = () => {
 
             // Schema validation
             if (title.includes('Schema validation')) {
-                return { label: 'Validation', className: 'stage-badge-validation' };
+                return { label: 'FAILED', className: 'stage-badge-validation' };
             }
 
             // Repository analysis tools
@@ -318,11 +354,13 @@ export const LogSection: React.FC = () => {
                         <div className={`log-list ${autoScroll ? 'auto-scroll' : ''}`} ref={logListRef} onScroll={handleScroll}>
                             {state.logs.map((log: LogEntry, idx: number) => {
                                 const isNew = hasMountedRef.current && idx >= lastLogCountRef.current;
+                                const success = isSuccessLog(log);
+                                const failure = isFailureLog(log);
                                 return (
-                                    <div key={log.id} className={`log-item ${(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? 'log-divider' : ''} ${isSchemaValidationLog(log) ? 'log-error' : ''} ${isNew ? 'log-item-new' : ''}`}>
+                                    <div key={log.id} className={`log-item ${(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? 'log-divider' : ''} ${failure ? 'log-error' : ''} ${success ? 'log-success' : ''} ${isNew ? 'log-item-new' : ''}`}>
                                         {(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? (
                                             <div className="analysis-start">
-                                                <span className={`codicon codicon-${getLogIcon(log.type)}`}></span>
+                                                <span className="log-icon">{renderLogIcon(log)}</span>
                                                 <span className="analysis-start-text">{log.title}</span>
                                                 <span className="log-time">{formatTime(log.timestamp)}</span>
                                             </div>
@@ -347,7 +385,7 @@ export const LogSection: React.FC = () => {
                                                     }}
                                                     style={{ cursor: (log.type === LogType.Reason || ((log.pending || log.cancelled) && !(log.content || log.fileContent))) ? 'default' : 'pointer' }}
                                                 >
-                                                    <span className={`codicon codicon-${isSchemaValidationLog(log) ? 'error' : getLogIcon(log.type)} log-icon`}></span>
+                                                    <span className="log-icon">{renderLogIcon(log)}</span>
                                                     <div className="log-main-content">
                                                         <span className="log-title-text">
                                                             {(() => { const info = getRepoInfoForLog(log); return info ? (<span className={`log-repo-badge repo-badge-c${info.colorIdx}`}>{info.name}</span>) : null; })()}
@@ -367,7 +405,7 @@ export const LogSection: React.FC = () => {
                                                             <span className="log-cancelled">Cancelled</span>
                                                         ) : null}
                                                         {log.type === LogType.FileRead && log.filePath && !log.fileContent && (
-                                                            <span className="codicon codicon-go-to-file log-file-icon" title="Open file"></span>
+                                                            <span className="log-file-icon" title="Open file"><GenieReadIcon size={12} /></span>
                                                         )}
                                                         {(log.content || log.fileContent) && log.type !== LogType.Reason && (
                                                             <span className={`codicon codicon-chevron-${expandedLog === log.id ? 'down' : 'right'} log-expand-icon`}></span>

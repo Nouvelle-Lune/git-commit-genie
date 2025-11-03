@@ -99,6 +99,11 @@
 .status-badge i.codicon {
     font-size: 12px;
 }
+/* Support custom Genie SVG icons */
+.status-badge .genie-icon {
+    width: 12px;
+    height: 12px;
+}
 
 .status-analyzing {
     color: var(--vscode-progressBar-background);
@@ -177,6 +182,10 @@
     font-size: 12px;
     /* Allow button to receive hover events for tooltip */
     pointer-events: none;
+}
+.icon-button .genie-icon {
+    width: 12px;
+    height: 12px;
 }
 
 .icon-button.cancel-button {

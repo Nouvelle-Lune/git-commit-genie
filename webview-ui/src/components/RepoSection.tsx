@@ -2,6 +2,7 @@ import React from 'react';
 import { useAppContext } from '../context/AppContext';
 import { vscodeApi } from '../utils/vscode';
 import './RepoSection.css';
+import { GenieCheckIcon, GenieWarningIcon, GenieKillIcon } from './icons';
 
 /**
  * Repository section component
@@ -56,13 +57,13 @@ export const RepoSection: React.FC = () => {
             case 'missing':
                 return (
                     <span className="status-badge status-missing" title={state.i18n.analysisStatusMissing}>
-                        <i className="codicon codicon-warning"></i>
+                        <GenieWarningIcon size={12} />
                     </span>
                 );
             case 'idle':
                 return (
                     <span className="status-badge status-idle" title={state.i18n.analysisStatusIdle}>
-                        <i className="codicon codicon-pass-filled"></i>
+                        <GenieCheckIcon size={12} />
                     </span>
                 );
         }
@@ -104,7 +105,7 @@ export const RepoSection: React.FC = () => {
                                         aria-label={state.i18n.cancelAnalysis}
                                         title={state.i18n.cancelAnalysis}
                                     >
-                                        <i className="codicon codicon-close"></i>
+                                        <GenieKillIcon size={12} />
                                     </button>
                                 ) : (
                                     <button
