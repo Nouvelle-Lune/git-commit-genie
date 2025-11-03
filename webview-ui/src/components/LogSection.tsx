@@ -171,7 +171,7 @@ export const LogSection: React.FC = () => {
     };
 
     const isSuccessLog = (log: LogEntry) => {
-        return log.type === LogType.FinalResult || isCommitStageDone(log);
+        return isCommitStageDone(log);
     };
 
     const renderLogIcon = (log: LogEntry) => {
@@ -192,7 +192,8 @@ export const LogSection: React.FC = () => {
                 // restore play button for started
                 return <i className="codicon codicon-debug-start"></i>;
             case LogType.FinalResult:
-                return <GenieCheckIcon size={14} />;
+                // Use "think" icon for final result to match desired style
+                return <GenieReasonIcon size={14} />;
             case LogType.Reason:
                 return <GenieReasonIcon size={14} />;
             default:

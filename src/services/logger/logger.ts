@@ -404,6 +404,17 @@ export class Logger {
         if (repoPath) { (log as any).repoPath = repoPath; }
         this.sendLogToWebview(log);
 
+        try {
+            if (isFinal) {
+                this.logToolCall(
+                    'commitStage',
+                    JSON.stringify({ stage: 'done' }),
+                    'Commit generation stage',
+                    repoPath
+                );
+            }
+        } catch { /* ignore */ }
+
         // Emit a separate Reason log when present and not a final result.
         // Suppress reason when the request was cancelled to avoid confusing flip-backs in UI.
         if (!isFinal && !log.cancelled && typeof reason === 'string' && reason.trim().length > 0) {
