@@ -49,6 +49,10 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     'claude-3-5-sonnet-20240620': { input: 3.0, output: 15.0, cached: 0.3 },
     'claude-3-5-haiku-20241022': { input: 0.8, output: 4.0, cached: 0.08 },
 
+    'claude-haiku-4-5-20251001': { input: 1.0, output: 5.0, cached: 0.10 },
+    'claude-sonnet-4-5-20250929': { input: 3.0, output: 15.0, cached: 0.3 },
+    'claude-opus-4-5-20251101': { input: 5.0, output: 25.0, cached: 0.5 },
+
     // Google Gemini (USD)
     'gemini-2.5-pro': {
         tiers: [

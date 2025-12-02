@@ -64,6 +64,10 @@ export class AnthropicService extends BaseLLMService {
 
     public listSupportedModels(): string[] {
         return [
+            'claude-haiku-4-5-20251001',
+            'claude-sonnet-4-5-20250929',
+            'claude-opus-4-5-20251101',
+
             'claude-3-5-haiku-20241022',
             'claude-sonnet-4-20250514',
             'claude-3-7-sonnet-20250219',
@@ -71,6 +75,7 @@ export class AnthropicService extends BaseLLMService {
             'claude-3-5-sonnet-20240620',
             'claude-opus-4-1-20250805',
             'claude-opus-4-20250514'
+
         ];
     }
 
