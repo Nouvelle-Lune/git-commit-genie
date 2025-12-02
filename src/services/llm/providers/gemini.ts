@@ -68,6 +68,8 @@ export class GeminiService extends BaseLLMService {
             'gemini-2.5-flash-preview-09-2025',
             'gemini-2.5-pro',
 
+            'gemini-3-pro-preview'
+
         ];
     }
 

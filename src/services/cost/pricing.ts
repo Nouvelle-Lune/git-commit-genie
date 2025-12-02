@@ -62,6 +62,14 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     },
     'gemini-2.5-flash': { input: 0.30, output: 2.50, cached: 0.075 },
     'gemini-2.5-flash-preview-09-2025': { input: 0.30, output: 2.50, cached: 0.075 },
+
+    'gemini-3-pro-preview': {
+        tiers: [
+            { maxInputTokens: 200000, input: 2.0, output: 12.0, cached: 0.2 },     // prompts <= 200k
+            { maxInputTokens: Infinity, input: 4.0, output: 18.0, cached: 0.4 }     // prompts > 200k
+        ]
+    },
+
     // lite variants removed
 
     // DeepSeek (USD)
