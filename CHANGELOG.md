@@ -1,5 +1,14 @@
 # Changelog
 
+## [3.0.1]
+- feat: Added support for new Claude 4.5 series models:
+  - `claude-haiku-4-5-20251001`
+  - `claude-sonnet-4-5-20250929`
+  - `claude-opus-4-5-20251101`
+- feat: Added support for new Gemini models:
+  - `gemini-3-pro-preview`
+- fix: Fixed SCM title buttons not displaying in newer VS Code versions.
+
 ## [3.0.0]
 - feat: Add a webview-based dashboard for genie.
 - feat: The new repository analysis system will be agentic and function-calling-driven.
