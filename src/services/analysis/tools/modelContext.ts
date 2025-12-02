@@ -33,11 +33,17 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'claude-sonnet-4-20250514': 200_000,
   'claude-opus-4-1-20250805': 200_000,
   'claude-opus-4-20250514': 200_000,
+  'claude-haiku-4-5-20251001': 200_000,
+  'claude-sonnet-4-5-20250929': 200_000,
+  'claude-opus-4-5-20251101': 200_000,
+
+
 
   // Google Gemini
   'gemini-2.5-flash': 1_048_576,
   'gemini-2.5-flash-preview-09-2025': 1_048_576,
   'gemini-2.5-pro': 1_048_576,
+  'gemini-3-pro-preview': 1_048_576,
 
   // Qwen
   'qwen3-max': 262_144,
