@@ -208,6 +208,9 @@
             "claude-3-5-sonnet-20240620",
             "claude-opus-4-1-20250805",
             "claude-opus-4-20250514",
+            "claude-haiku-4-5-20251001",
+            "claude-sonnet-4-5-20250929",
+            "claude-opus-4-5-20251101",
             "gemini-2.5-flash",
             "gemini-2.5-flash-preview-09-2025",
             "gemini-2.5-pro"
@@ -224,6 +227,9 @@
             "OpenAI",
             "DeepSeek",
             "DeepSeek",
+            "Anthropic",
+            "Anthropic",
+            "Anthropic",
             "Anthropic",
             "Anthropic",
             "Anthropic",
@@ -379,12 +385,12 @@
         {
           "command": "git-commit-genie.generateCommitMessage",
           "when": "scmProvider == 'git' && gitCommitGenie.generating != true",
-          "group": "navigation@1000"
+          "group": "inline"
         },
         {
           "command": "git-commit-genie.cancelGeneration",
           "when": "scmProvider == 'git' && gitCommitGenie.generating == true",
-          "group": "navigation@1000"
+          "group": "inline"
         }
       ],
       "commandPalette": [
