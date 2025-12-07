@@ -3,7 +3,7 @@
   "displayName": "%displayName%",
   "publisher": "Lune-99",
   "description": "%description%",
-  "version": "3.0.1",
+  "version": "3.0.2",
   "license": "MIT",
   "engines": {
     "vscode": "^1.103.0"
@@ -387,12 +387,12 @@
         {
           "command": "git-commit-genie.generateCommitMessage",
           "when": "scmProvider == 'git' && gitCommitGenie.generating != true",
-          "group": "inline"
+          "group": "navigation"
         },
         {
           "command": "git-commit-genie.cancelGeneration",
           "when": "scmProvider == 'git' && gitCommitGenie.generating == true",
-          "group": "inline"
+          "group": "navigation"
         }
       ],
       "commandPalette": [
