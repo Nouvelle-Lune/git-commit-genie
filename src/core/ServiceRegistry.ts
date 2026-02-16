@@ -60,6 +60,9 @@ export class ServiceRegistry {
             this.llmServices.set('gemini', this.geminiService);
             this.llmServices.set('qwen', this.qwenService);
 
+            // Migrate stale model selections (e.g., removed/unsupported models after extension updates)
+            await this.migrateUnsupportedModelSelections();
+
             // Set initial LLM service
             this.currentLLMService = this.pickService();
             this.analysisService.setLLMService(this.currentLLMService);
@@ -154,5 +157,98 @@ export class ServiceRegistry {
             }
         }
         return getProviderFromSecretKey(secretKey);
+    }
+
+    private getPreferredFallbackModel(provider: string, supportedModels: string[]): string {
+        if (!supportedModels.length) {
+            return '';
+        }
+
+        const preferredByProvider: Record<string, string[]> = {
+            openai: ['gpt-5-mini', 'gpt-5', 'gpt-5.2', 'gpt-5-nano', 'gpt-5.2-pro'],
+            deepseek: ['deepseek-chat', 'deepseek-reasoner'],
+            anthropic: ['claude-sonnet-4-20250514'],
+            gemini: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+            qwen: ['qwen-plus-latest', 'qwen-plus', 'qwen3-max-preview', 'qwen3-max']
+        };
+
+        const preferred = preferredByProvider[provider.toLowerCase()] || [];
+        for (const candidate of preferred) {
+            if (supportedModels.includes(candidate)) {
+                return candidate;
+            }
+        }
+
+        return supportedModels[0];
+    }
+
+    private async migrateUnsupportedModelSelections(): Promise<void> {
+        const migrated: string[] = [];
+
+        for (const [provider, service] of this.llmServices.entries()) {
+            const modelKey = getProviderModelStateKey(provider);
+            const selected = (this.context.globalState.get<string>(modelKey, '') || '').trim();
+            if (!selected) {
+                continue;
+            }
+
+            const supported = service.listSupportedModels();
+            if (!supported.length || supported.includes(selected)) {
+                continue;
+            }
+
+            const fallback = this.getPreferredFallbackModel(provider, supported);
+            if (!fallback) {
+                continue;
+            }
+
+            await this.context.globalState.update(modelKey, fallback);
+            migrated.push(`${provider}: ${selected} -> ${fallback}`);
+            logger.warn(`[Genie][ModelMigration] Migrated unsupported ${provider} model '${selected}' to '${fallback}'.`);
+        }
+
+        // Also migrate repository analysis model override if it points to an unsupported model.
+        try {
+            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+            const selected = (cfg.get<string>('model', 'general') || 'general').trim();
+            if (selected && selected !== 'general') {
+                let supportedByAny = false;
+                for (const service of this.llmServices.values()) {
+                    if (service.listSupportedModels().includes(selected)) {
+                        supportedByAny = true;
+                        break;
+                    }
+                }
+
+                if (!supportedByAny) {
+                    await cfg.update('model', 'general', vscode.ConfigurationTarget.Global);
+                    migrated.push(`repositoryAnalysis: ${selected} -> general`);
+                    logger.warn(`[Genie][ModelMigration] Migrated unsupported repository analysis model '${selected}' to 'general'.`);
+                }
+            }
+        } catch (error) {
+            logger.warn(`[Genie][ModelMigration] Failed to migrate repository analysis model: ${error}`);
+        }
+
+        if (!migrated.length) {
+            return;
+        }
+
+        const details = migrated.join(', ');
+        const actionManage = 'Manage Models';
+        const actionDismiss = 'Dismiss';
+        void vscode.window.showWarningMessage(
+            `Git Commit Genie migrated unsupported model selections after update: ${details}.`,
+            actionManage,
+            actionDismiss
+        ).then(async (choice) => {
+            if (choice === actionManage) {
+                try {
+                    await vscode.commands.executeCommand('git-commit-genie.manageModels');
+                } catch {
+                    // Ignore command execution failures during startup race conditions.
+                }
+            }
+        });
     }
 }

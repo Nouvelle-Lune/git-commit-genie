@@ -1160,7 +1160,16 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         try {
             const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
             const selected = (cfg.get<string>('model', 'general') || 'general').trim();
-            if (selected && selected !== 'general') { return selected; }
+            if (selected && selected !== 'general') {
+                const svc = this.resolveLLMService?.(provider) || this.llmService;
+                try {
+                    if (svc?.listSupportedModels().includes(selected)) {
+                        return selected;
+                    }
+                } catch {
+                    // Ignore and fallback to provider's configured model below.
+                }
+            }
             const modelKey = getProviderModelStateKey(provider);
             return this.context.globalState.get<string>(modelKey, '');
         } catch { return undefined; }

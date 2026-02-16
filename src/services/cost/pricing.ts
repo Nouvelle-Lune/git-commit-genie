@@ -32,13 +32,11 @@ export type ModelPricing = FlatPricing | TieredPricing;
 export const PRICING_TABLE: Record<string, ModelPricing> = {
     // OpenAI (USD)
     'gpt-5': { input: 1.25, output: 10.0, cached: 0.125 },
+    'gpt-5.2': { input: 1.75, output: 14.0, cached: 0.175 },
+    // OpenAI pricing currently lists no cached-input rate for gpt-5.2-pro.
+    'gpt-5.2-pro': { input: 21.0, output: 168.0, cached: 0 },
     'gpt-5-mini': { input: 0.25, output: 2.0, cached: 0.025 },
     'gpt-5-nano': { input: 0.05, output: 0.4, cached: 0.005 },
-    'gpt-4.1': { input: 2.0, output: 8.0, cached: 0.5 },
-    'gpt-4.1-mini': { input: 0.4, output: 1.6, cached: 0.1 },
-    'gpt-4o': { input: 2.5, output: 10.0, cached: 1.25 },
-    'gpt-4o-mini': { input: 0.15, output: 0.6, cached: 0.075 },
-    'o4-mini': { input: 1.10, output: 4.40, cached: 0.275 },
 
     // Anthropic Claude (USD)
     'claude-opus-4-1-20250805': { input: 15.0, output: 75.0, cached: 1.5 },

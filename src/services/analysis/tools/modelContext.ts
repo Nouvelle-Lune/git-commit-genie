@@ -13,13 +13,10 @@
 export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   // OpenAI
   'gpt-5': 400_000,
+  'gpt-5.2': 400_000,
+  'gpt-5.2-pro': 400_000,
   'gpt-5-mini': 400_000,
   'gpt-5-nano': 400_000,
-  'gpt-4.1': 1_047_576,
-  'gpt-4.1-mini': 1_047_576,
-  'gpt-4o': 128_000,
-  'gpt-4o-mini': 128_000,
-  'o4-mini': 200_000,
 
   // DeepSeek
   'deepseek-chat': 128_000,

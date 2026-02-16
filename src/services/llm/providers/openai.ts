@@ -53,14 +53,11 @@ export class OpenAIService extends BaseLLMService {
 
     public listSupportedModels(): string[] {
         return [
-            'gpt-5',
             'gpt-5-mini',
             'gpt-5-nano',
-            'gpt-4.1',
-            'gpt-4.1-mini',
-            'gpt-4o',
-            'gpt-4o-mini',
-            'o4-mini'
+            'gpt-5',
+            'gpt-5.2',
+            'gpt-5.2-pro',
         ];
     }
 
@@ -109,6 +106,37 @@ export class OpenAIService extends BaseLLMService {
         return this.utils.getProviderConfig('gitCommitGenie', 'openaiModel');
     }
 
+    private getPreferredFallbackModel(supported: string[]): string {
+        const preferred = ['gpt-5-mini', 'gpt-5', 'gpt-5.2', 'gpt-5-nano', 'gpt-5.2-pro'];
+        for (const model of preferred) {
+            if (supported.includes(model)) {
+                return model;
+            }
+        }
+        return supported[0] || '';
+    }
+
+    private async ensureSupportedModel(model: string): Promise<string> {
+        const selected = (model || '').trim();
+        if (!selected) {
+            return selected;
+        }
+
+        const supported = this.listSupportedModels();
+        if (supported.includes(selected)) {
+            return selected;
+        }
+
+        const fallback = this.getPreferredFallbackModel(supported);
+        if (!fallback) {
+            return selected;
+        }
+
+        await this.context.globalState.update('gitCommitGenie.openaiModel', fallback);
+        logger.warn(`[Genie][OpenAI] Model '${selected}' is unsupported. Auto-switched to '${fallback}'.`);
+        return fallback;
+    }
+
     async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {
         if (!this.openai) {
             return this.createApiKeyNotSetError();
@@ -116,6 +144,7 @@ export class OpenAIService extends BaseLLMService {
 
         try {
             const config = this.getConfig();
+            config.model = await this.ensureSupportedModel(config.model);
             const rules = this.utils.getRules();
             const repoPath = this.getRepoPathForLogging(options?.targetRepo);
 
