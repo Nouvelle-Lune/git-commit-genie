@@ -34,7 +34,9 @@ export class GenerateCommands {
     private async cancelGeneration(arg?: any): Promise<void> {
         // Cancel for the repository where the command was invoked
         const repoService = this.serviceRegistry.getRepoService();
-        const repo = repoService.getRepositoryByUri(arg.rootUri) || undefined;
+        const repo = arg?.rootUri
+            ? (repoService.getRepositoryByUri(arg.rootUri) || undefined)
+            : (repoService.getActiveRepository() || undefined);
         const key = repo?.rootUri?.fsPath;
         if (!key) { return; }
         const cts = this.inFlight.get(key);
@@ -45,7 +47,6 @@ export class GenerateCommands {
 
     private async generateCommitMessage(arg?: any): Promise<void> {
         // First-time UX: if provider or model not configured, jump to Manage Models instead of erroring
-        console.log('arg:', arg, 'typeof:', typeof arg);
         const provider = this.serviceRegistry.getProvider().toLowerCase();
         const secretKeyName = this.getSecretKeyName(provider);
         const existingKey = await this.context.secrets.get(secretKeyName);

@@ -70,23 +70,24 @@ export class DiffService {
 			}
 		}
 
-		const diffDataPromises: Promise<DiffData | null>[] = [];
-		for (const change of indexChanges) {
-			diffDataPromises.push(this.processChange(repo, change));
-		}
-		const diffs = await Promise.all(diffDataPromises);
-
-		// Restore index if we temporarily staged files
-		if (stagedTemporarily) {
-			try {
-				await runGit(['reset', '-q', 'HEAD', '--', '.']);
-				await repo.status();
-			} catch (e2) {
-				logger.warn('[Genie] Auto-stage cleanup failed:', e2);
+		try {
+			const diffDataPromises: Promise<DiffData | null>[] = [];
+			for (const change of indexChanges) {
+				diffDataPromises.push(this.processChange(repo, change));
+			}
+			const diffs = await Promise.all(diffDataPromises);
+			return diffs.filter((d): d is DiffData => d !== null && d.status !== 'ignored');
+		} finally {
+			// Restore index if we temporarily staged files
+			if (stagedTemporarily) {
+				try {
+					await runGit(['reset', '-q', 'HEAD', '--', '.']);
+					await repo.status();
+				} catch (e2) {
+					logger.warn('[Genie] Auto-stage cleanup failed:', e2);
+				}
 			}
 		}
-
-		return diffs.filter((d): d is DiffData => d !== null && d.status !== 'ignored');
 	}
 
 	// Close outer block if any lingering scopes existed (no-op stylistically)
@@ -160,10 +161,10 @@ export class DiffService {
 
 					// If extraction fails, fall back to the original method
 					if (!rawDiff) {
-						rawDiff = await repo.diffIndexWithHEAD(change.uri.fsPath);
+						rawDiff = await this.diffIndexWithHeadSafe(repo, change.uri.fsPath);
 					}
 				} else {
-					rawDiff = await repo.diffIndexWithHEAD(change.uri.fsPath);
+					rawDiff = await this.diffIndexWithHeadSafe(repo, change.uri.fsPath);
 				}
 			} else {
 				logger.error(`Unstaged diff not implemented for ${fileName}`);
@@ -235,6 +236,46 @@ export class DiffService {
 			'bin', 'iso', 'dll', 'so', 'dylib', 'exe', 'o', 'a', 'class', 'wasm'
 		]);
 		return binaryExts.has(ext);
+	}
+
+	/**
+	 * Convert a file system path to a git path relative to repository root.
+	 * Falls back to the original absolute path if conversion escapes the repo.
+	 */
+	private toRepoRelativeGitPath(repo: Repository, filePath: string): string {
+		const repoRoot = path.resolve(repo.rootUri.fsPath);
+		const absPath = path.resolve(filePath);
+		const relativePath = path.relative(repoRoot, absPath).replace(/\\/g, '/');
+		if (!relativePath || relativePath === '.') {
+			return path.basename(absPath).replace(/\\/g, '/');
+		}
+		if (relativePath.startsWith('../') || relativePath === '..') {
+			return absPath;
+		}
+		return relativePath;
+	}
+
+	/**
+	 * Get staged diff with path fallbacks to support different git API expectations.
+	 */
+	private async diffIndexWithHeadSafe(repo: Repository, filePath: string): Promise<string> {
+		const repoRelativePath = this.toRepoRelativeGitPath(repo, filePath);
+		const absPath = path.resolve(filePath);
+		const candidates = Array.from(new Set([repoRelativePath, absPath, filePath]));
+
+		let lastError: unknown;
+		for (const candidate of candidates) {
+			try {
+				return await repo.diffIndexWithHEAD(candidate);
+			} catch (err) {
+				lastError = err;
+			}
+		}
+
+		if (lastError instanceof Error) {
+			throw lastError;
+		}
+		throw new Error(`Failed to get staged diff for ${filePath}`);
 	}
 
 	/**
