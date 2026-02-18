@@ -39,6 +39,7 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   // Google Gemini
   'gemini-2.5-flash': 1_048_576,
   'gemini-2.5-flash-preview-09-2025': 1_048_576,
+  'gemini-3-flash-preview': 1_048_576,
   'gemini-2.5-pro': 1_048_576,
   'gemini-3-pro-preview': 1_048_576,
 

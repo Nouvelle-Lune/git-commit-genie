@@ -60,6 +60,8 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     },
     'gemini-2.5-flash': { input: 0.30, output: 2.50, cached: 0.075 },
     'gemini-2.5-flash-preview-09-2025': { input: 0.30, output: 2.50, cached: 0.075 },
+    // Gemini 3 Flash preview pricing for text/image/video.
+    'gemini-3-flash-preview': { input: 0.50, output: 3.00, cached: 0.05 },
 
     'gemini-3-pro-preview': {
         tiers: [

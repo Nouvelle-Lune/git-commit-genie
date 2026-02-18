@@ -168,7 +168,7 @@ export class ServiceRegistry {
             openai: ['gpt-5-mini', 'gpt-5', 'gpt-5.2', 'gpt-5-nano', 'gpt-5.2-pro'],
             deepseek: ['deepseek-chat', 'deepseek-reasoner'],
             anthropic: ['claude-sonnet-4-20250514'],
-            gemini: ['gemini-2.5-flash', 'gemini-2.5-pro'],
+            gemini: ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-pro-preview'],
             qwen: ['qwen-plus-latest', 'qwen-plus', 'qwen3-max-preview', 'qwen3-max']
         };
 
