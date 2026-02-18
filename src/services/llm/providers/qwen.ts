@@ -105,6 +105,7 @@ export class QwenService extends BaseLLMService {
             'qwen3-max',
             'qwen3-max-preview',
 
+            'qwen3.5-plus',
             'qwen-plus',
             'qwen-plus-latest',
 

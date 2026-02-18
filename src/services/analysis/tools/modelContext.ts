@@ -46,6 +46,7 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   // Qwen
   'qwen3-max': 262_144,
   'qwen3-max-preview': 262_144,
+  'qwen3.5-plus': 128_000,
   'qwen-plus': 1_000_000,
   'qwen-plus-latest': 1_000_000,
   'qwen3-coder-plus': 1_000_000,

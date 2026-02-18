@@ -94,6 +94,14 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
             { maxInputTokens: Infinity, input: 3.0, output: 15.0, cached: 0.6 }
         ]
     },
+    // qwen3.5-plus pricing currently uses <=128K tier from dashboard;
+    // apply the same rates for larger contexts until official tier deltas are confirmed.
+    'qwen3.5-plus:intl': {
+        tiers: [
+            { maxInputTokens: 128000, input: 0.115, output: 0.689, cached: 0.0115 },
+            { maxInputTokens: Infinity, input: 0.115, output: 0.689, cached: 0.0115 }
+        ]
+    },
     'qwen-plus:intl': {
         tiers: [
             { maxInputTokens: 256000, input: 0.4, output: 1.2, cached: 0.08 },      // 0-256K (non-reasoning mode)
@@ -164,6 +172,14 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
             { maxInputTokens: 128000, input: 1.434, output: 5.735, cached: 0.2868 },
             { maxInputTokens: 252000, input: 2.151, output: 8.602, cached: 0.4302 },
             { maxInputTokens: Infinity, input: 2.151, output: 8.602, cached: 0.4302 }
+        ]
+    },
+    // qwen3.5-plus pricing currently uses <=128K tier from dashboard;
+    // apply the same rates for larger contexts until official tier deltas are confirmed.
+    'qwen3.5-plus:china': {
+        tiers: [
+            { maxInputTokens: 128000, input: 0.115, output: 0.689, cached: 0.0115 },
+            { maxInputTokens: Infinity, input: 0.115, output: 0.689, cached: 0.0115 }
         ]
     },
     'qwen-plus:china': {

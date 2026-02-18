@@ -169,7 +169,7 @@ export class ServiceRegistry {
             deepseek: ['deepseek-chat', 'deepseek-reasoner'],
             anthropic: ['claude-sonnet-4-20250514'],
             gemini: ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-pro-preview'],
-            qwen: ['qwen-plus-latest', 'qwen-plus', 'qwen3-max-preview', 'qwen3-max']
+            qwen: ['qwen3.5-plus', 'qwen-plus-latest', 'qwen-plus', 'qwen3-max-preview', 'qwen3-max']
         };
 
         const preferred = preferredByProvider[provider.toLowerCase()] || [];

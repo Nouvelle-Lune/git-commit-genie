@@ -382,9 +382,12 @@ export class Logger {
                     cachedTokens = usage.cached_content_tokens || 0;
                     cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
                 } else if (providerLower === 'qwen') {
-                    inputTokens = usage.input_tokens || 0;
-                    outputTokens = usage.output_tokens || 0;
-                    cost = this.calculateCost(model, inputTokens, outputTokens);
+                    // Qwen OpenAI-compatible chat completions expose prompt/completion token fields.
+                    inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+                    outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
+                    cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
+                    const qwenRegion = this.context?.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
+                    cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens, qwenRegion);
                 }
             } catch (err) {
                 // ignore cost calculation errors
@@ -622,6 +625,24 @@ export class Logger {
             // Append thinking mode suffix if enabled for qwen-plus models
             if (thinkingMode && modelName.includes('qwen-plus')) {
                 pricingKey = `${pricingKey}:thinking`;
+            }
+        }
+
+        // Fallback for Qwen paths that did not pass region explicitly.
+        // Use current configured region first, then try intl/china aliases.
+        if (!region && modelName.startsWith('qwen') && !PRICING_TABLE[pricingKey]) {
+            const configuredRegion = this.context?.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
+            const candidates = [
+                configuredRegion ? `${modelName}:${configuredRegion}` : '',
+                `${modelName}:intl`,
+                `${modelName}:china`
+            ].filter(Boolean);
+            const matched = candidates.find((key) => !!PRICING_TABLE[key]);
+            if (matched) {
+                pricingKey = matched;
+                if (thinkingMode && modelName.includes('qwen-plus') && PRICING_TABLE[`${pricingKey}:thinking`]) {
+                    pricingKey = `${pricingKey}:thinking`;
+                }
             }
         }
 
