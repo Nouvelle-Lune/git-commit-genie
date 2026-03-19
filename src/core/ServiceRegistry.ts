@@ -165,7 +165,7 @@ export class ServiceRegistry {
         }
 
         const preferredByProvider: Record<string, string[]> = {
-            openai: ['gpt-5-mini', 'gpt-5', 'gpt-5.2', 'gpt-5-nano', 'gpt-5.2-pro'],
+            openai: ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-5', 'gpt-5.2', 'gpt-5-nano'],
             deepseek: ['deepseek-chat', 'deepseek-reasoner'],
             anthropic: ['claude-sonnet-4-20250514'],
             gemini: ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-pro-preview'],

@@ -12,6 +12,9 @@
  */
 export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   // OpenAI
+  'gpt-5.4': 1_050_000,
+  'gpt-5.4-mini': 400_000,
+  'gpt-5.4-nano': 400_000,
   'gpt-5': 400_000,
   'gpt-5.2': 400_000,
   'gpt-5.2-pro': 400_000,

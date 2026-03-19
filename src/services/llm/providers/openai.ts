@@ -53,11 +53,13 @@ export class OpenAIService extends BaseLLMService {
 
     public listSupportedModels(): string[] {
         return [
+            'gpt-5.4-mini',
+            'gpt-5.4',
+            'gpt-5.4-nano',
             'gpt-5-mini',
-            'gpt-5-nano',
             'gpt-5',
             'gpt-5.2',
-            'gpt-5.2-pro',
+            'gpt-5-nano',
         ];
     }
 
@@ -107,7 +109,7 @@ export class OpenAIService extends BaseLLMService {
     }
 
     private getPreferredFallbackModel(supported: string[]): string {
-        const preferred = ['gpt-5-mini', 'gpt-5', 'gpt-5.2', 'gpt-5-nano', 'gpt-5.2-pro'];
+        const preferred = ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-5', 'gpt-5.2', 'gpt-5-nano'];
         for (const model of preferred) {
             if (supported.includes(model)) {
                 return model;

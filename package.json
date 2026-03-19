@@ -3,7 +3,7 @@
   "displayName": "%displayName%",
   "publisher": "Lune-99",
   "description": "%description%",
-  "version": "3.0.3",
+  "version": "3.0.4",
   "license": "MIT",
   "engines": {
     "vscode": "^1.103.0"
@@ -191,9 +191,11 @@
           "default": "general",
           "enum": [
             "general",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.4-nano",
             "gpt-5",
             "gpt-5.2",
-            "gpt-5.2-pro",
             "gpt-5-mini",
             "gpt-5-nano",
             "deepseek-chat",
@@ -216,6 +218,8 @@
           ],
           "enumDescriptions": [
             "%config.repositoryAnalysis.model.general%",
+            "OpenAI",
+            "OpenAI",
             "OpenAI",
             "OpenAI",
             "OpenAI",

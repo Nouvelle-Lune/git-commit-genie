@@ -31,6 +31,9 @@ export type ModelPricing = FlatPricing | TieredPricing;
 
 export const PRICING_TABLE: Record<string, ModelPricing> = {
     // OpenAI (USD)
+    'gpt-5.4': { input: 2.5, output: 15.0, cached: 0.25 },
+    'gpt-5.4-mini': { input: 0.75, output: 4.5, cached: 0.075 },
+    'gpt-5.4-nano': { input: 0.2, output: 1.25, cached: 0.02 },
     'gpt-5': { input: 1.25, output: 10.0, cached: 0.125 },
     'gpt-5.2': { input: 1.75, output: 14.0, cached: 0.175 },
     // OpenAI pricing currently lists no cached-input rate for gpt-5.2-pro.

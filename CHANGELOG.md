@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.0.4]
+- feat: Added support for new OpenAI frontier models:
+  - `gpt-5.4`
+  - `gpt-5.4-mini`
+  - `gpt-5.4-nano`
+- fix: Removed `gpt-5.2-pro` from selectable OpenAI models to avoid structured-output incompatibility.
+- feat: Updated OpenAI model fallback priority, context window mapping, and pricing table for GPT-5.4 series.
+
 ## [3.0.1]
 - feat: Added support for new Claude 4.5 series models:
   - `claude-haiku-4-5-20251001`
