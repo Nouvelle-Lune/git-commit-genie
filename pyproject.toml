@@ -1,0 +1,10 @@
+[project]
+name = "git-commit-genie"
+version = "0.1.0"
+description = ""
+readme = "README.md"
+requires-python = ">=3.12.7"
+dependencies = []
+
+[tool.fastapi]
+entrypoint = "src.services.rag.main:app"
