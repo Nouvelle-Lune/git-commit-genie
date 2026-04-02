@@ -859,7 +859,10 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         break;
                     }
                     case 'qwen':
-                    case 'deepseek': {
+                    case 'deepseek':
+                    case 'glm':
+                    case 'kimi':
+                    case 'openrouter': {
                         callOptions.requestType = 'repoAnalysisAction';
                         break;
                     }

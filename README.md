@@ -8,7 +8,7 @@ Chinese version: [中文说明](./docs/README.zh-CN.md)
 
 ## Overview
 
-Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using mainstream LLM providers (OpenAI / DeepSeek / Anthropic / Gemini / Qwen). Features intelligent repository analysis that understands your project structure and tech stack to provide better context for commit generation. Supports optional multi‑step Thinking mode and user template strategy to improve structural consistency and style alignment.
+Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using mainstream LLM providers (OpenAI / DeepSeek / Anthropic / Gemini / Qwen / GLM / Kimi / OpenRouter). Features intelligent repository analysis that understands your project structure and tech stack to provide better context for commit generation. Supports optional multi‑step Thinking mode and user template strategy to improve structural consistency and style alignment.
 
 <table style="width: 100%; border-spacing: 10px;">
   <tr>
@@ -53,7 +53,7 @@ Basic format:
 
 | Feature                         | Description                                                                                                                                                                                                                                                                                                            |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Multi‑provider LLM support      | Supports OpenAI, DeepSeek, Anthropic, Gemini, Qwen.                                                                                                                                                                                                                                                                    |
+| Multi‑provider LLM support      | Supports OpenAI, DeepSeek, Anthropic, Gemini, Qwen, GLM, Kimi, OpenRouter.                                                                                                                                                                                                                                             |
 | Repository Intelligence         | AI-powered repository analysis agent that autonomously explores your codebase using intelligent tools; automatically understands project structure, tech stack, and architecture to provide contextual insights for better commit messages; supports manual refresh, real-time updates, and editable analysis reports. |
 | Thinking Mode                   | Optional multi‑step pipeline: per‑file summaries → structured synthesis → validation & minimal fix‑ups (improves accuracy & template adherence).                                                                                                                                                                       |
 | User Template Strategy          | Built-in template selection and creation, supports workspace and user data directory storage, extracts strategy affecting structure, required footers, and vocabulary preferences.                                                                                                                                     |
@@ -82,7 +82,7 @@ All settings are under: `Git Commit Genie`.
 | `gitCommitGenie.chain.enabled`                      | boolean | false     | Enable multi-step Thinking mode for commit generation (more detailed and accurate, better template adherence, but higher latency and token usage).                                                                                                                  |
 | `gitCommitGenie.chain.maxParallel`                  | number  | 2         | Maximum parallel LLM calls used by Thinking mode across all providers. Increase carefully to avoid provider rate limits.                                                                                                                                            |
 | `gitCommitGenie.llm.maxRetries`                     | number  | 2         | Max retry attempts for API request failures.                                                                                                                                                                                                                        |
-| `gitCommitGenie.llm.temperature`                    | number  | 0.2       | Temperature (0–2). Default 0.2.                                                                                                                                                                                                                                     |
+| `gitCommitGenie.llm.temperature`                    | number  | 1         | Temperature (0–2). Default 1. Some provider/model combinations only accept 1; changing this value may trigger invalid-temperature errors or less stable outputs.                                                                                                  |
 | `gitCommitGenie.repositoryAnalysis.enabled`         | boolean | true      | Enable repository analysis to provide better context for commit message generation.                                                                                                                                                                                 |
 | `gitCommitGenie.repositoryAnalysis.excludePatterns` | array   | []        | File patterns to exclude from repository analysis scanning (gitignore-style).                                                                                                                                                                                       |
 | `gitCommitGenie.repositoryAnalysis.updateThreshold` | number  | 10        | Number of commits after which to update the repository analysis.                                                                                                                                                                                                    |
@@ -144,7 +144,7 @@ MIT
 ## Acknowledgements
 
 - [Conventional Commits](https://conventionalcommits.org/) - https://github.com/conventional-commits/conventionalcommits.org
-- OpenAI / DeepSeek / Anthropic / Gemini / Qwen model ecosystems.
+- OpenAI / DeepSeek / Anthropic / Gemini / Qwen / GLM / Kimi / OpenRouter model ecosystems.
 
 ---
 

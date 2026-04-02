@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+- feat: Added full provider support for `GLM`, `Kimi`, and `OpenRouter` across model management, status bar integration, commit generation, and repository analysis model selection.
+- refactor: Introduced a shared OpenAI-compatible chat-completions provider base and migrated `DeepSeek`/`Qwen` onto the unified implementation path.
+- feat: Added OpenRouter model mapping registry for request-model to canonical-pricing alias normalization, and integrated this mapping into usage logging/cost tracking.
+- feat: Added static curated model sets for GLM 4.7 (`glm-4.7`, `glm-4.7-flashx`, `glm-4.7-flash`) and Kimi K2 (`kimi-k2.5`, `kimi-k2`, `kimi-k2-thinking`).
+
 ## [3.0.4]
 - feat: Added support for new OpenAI frontier models:
   - `gpt-5.4`

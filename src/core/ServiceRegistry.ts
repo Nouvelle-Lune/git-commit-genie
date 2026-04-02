@@ -5,6 +5,9 @@ import { DeepSeekService } from '../services/llm/providers/deepseek';
 import { AnthropicService } from '../services/llm/providers/anthropic';
 import { GeminiService } from '../services/llm/providers/gemini';
 import { QwenService } from '../services/llm/providers/qwen';
+import { GLMService } from '../services/llm/providers/glm';
+import { KimiService } from '../services/llm/providers/kimi';
+import { OpenRouterService } from '../services/llm/providers/openrouter';
 import { TemplateService } from '../template/templateService';
 import { RepositoryAnalysisService } from '../services/analysis';
 import { LLMService } from '../services/llm/llmTypes';
@@ -22,6 +25,9 @@ export class ServiceRegistry {
     private anthropicService!: AnthropicService;
     private geminiService!: GeminiService;
     private qwenService!: QwenService;
+    private glmService!: GLMService;
+    private kimiService!: KimiService;
+    private openrouterService!: OpenRouterService;
     private llmServices: Map<string, LLMService>;
     private currentLLMService!: LLMService;
     private repoService!: RepoService;
@@ -52,6 +58,9 @@ export class ServiceRegistry {
             this.anthropicService = new AnthropicService(this.context, this.templateService, this.analysisService);
             this.geminiService = new GeminiService(this.context, this.templateService, this.analysisService);
             this.qwenService = new QwenService(this.context, this.templateService, this.analysisService);
+            this.glmService = new GLMService(this.context, this.templateService, this.analysisService);
+            this.kimiService = new KimiService(this.context, this.templateService, this.analysisService);
+            this.openrouterService = new OpenRouterService(this.context, this.templateService, this.analysisService);
 
             // Setup LLM services map
             this.llmServices.set('openai', this.openAIService);
@@ -59,6 +68,9 @@ export class ServiceRegistry {
             this.llmServices.set('anthropic', this.anthropicService);
             this.llmServices.set('gemini', this.geminiService);
             this.llmServices.set('qwen', this.qwenService);
+            this.llmServices.set('glm', this.glmService);
+            this.llmServices.set('kimi', this.kimiService);
+            this.llmServices.set('openrouter', this.openrouterService);
 
             // Migrate stale model selections (e.g., removed/unsupported models after extension updates)
             await this.migrateUnsupportedModelSelections();
@@ -169,7 +181,10 @@ export class ServiceRegistry {
             deepseek: ['deepseek-chat', 'deepseek-reasoner'],
             anthropic: ['claude-sonnet-4-20250514'],
             gemini: ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-pro-preview'],
-            qwen: ['qwen3.5-plus', 'qwen-plus-latest', 'qwen-plus', 'qwen3-max-preview', 'qwen3-max']
+            qwen: ['qwen3.5-plus', 'qwen-plus-latest', 'qwen-plus', 'qwen3-max-preview', 'qwen3-max'],
+            glm: ['glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.5', 'glm-4.7-flashx', 'glm-4.5-air', 'glm-4.7-flash'],
+            kimi: ['kimi-k2.5', 'kimi-k2-thinking', 'kimi-k2'],
+            openrouter: ['openai/gpt-5.4-mini', 'openai/gpt-5.4', 'openai/gpt-5-mini', 'anthropic/claude-sonnet-4', 'deepseek/deepseek-chat']
         };
 
         const preferred = preferredByProvider[provider.toLowerCase()] || [];

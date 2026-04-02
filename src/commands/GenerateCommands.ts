@@ -133,6 +133,10 @@ export class GenerateCommands {
     }
 
     private getSecretKeyName(provider: string): string {
+        if (provider === 'qwen') {
+            const region = this.context.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
+            return getProviderSecretKey(provider, region);
+        }
         return getProviderSecretKey(provider);
     }
 

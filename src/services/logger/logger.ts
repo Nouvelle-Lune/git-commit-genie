@@ -3,6 +3,7 @@ import { CostTrackingService } from "../cost/costTrackingService";
 import { PRICING_TABLE } from '../cost/pricing';
 import { WebviewProvider } from '../../ui/WebviewProvider';
 import { LogType, LogEntry } from '../../ui/types/messages';
+import { normalizeOpenRouterPricingAlias } from '../llm/providers/config/openrouterModels';
 
 export enum LogLevel {
     Debug = 0,
@@ -366,11 +367,12 @@ export class Logger {
                     outputTokens = usage.output_tokens || 0;
                     cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
                     cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
-                } else if (providerLower === 'deepseek') {
-                    inputTokens = usage.prompt_tokens || 0;
-                    outputTokens = usage.completion_tokens || 0;
-                    cachedTokens = usage.prompt_cache_hit_tokens || 0;
-                    cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
+                } else if (providerLower === 'deepseek' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter') {
+                    inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+                    outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
+                    cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
+                    const pricingModel = this.normalizePricingModelForProvider(providerLower, model);
+                    cost = this.calculateCost(pricingModel, inputTokens, outputTokens, cachedTokens);
                 } else if (providerLower === 'anthropic') {
                     inputTokens = usage.input_tokens || 0;
                     outputTokens = usage.output_tokens || 0;
@@ -537,14 +539,6 @@ export class Logger {
                 totalTokens = usage.total_tokens || (inputTokens + outputTokens);
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens);
             }
-            if (providerLower === 'deepseek') {
-                inputTokens = usage.prompt_tokens || 0;
-                outputTokens = usage.completion_tokens || 0;
-                cachedTokens = usage.prompt_cache_hit_tokens || 0;
-                totalTokens = inputTokens + outputTokens;
-                cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
-                cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
-            }
             if (providerLower === 'anthropic') {
                 inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
                 outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
@@ -561,13 +555,18 @@ export class Logger {
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
-            if (providerLower === 'qwen') {
-                inputTokens = usage.prompt_tokens || 0;
-                outputTokens = usage.completion_tokens || 0;
-                cachedTokens = usage.prompt_tokens_details?.cached_tokens || 0;
+            if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter') {
+                inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+                outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
+                cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
                 totalTokens = inputTokens + outputTokens;
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
-                cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens, region, thinkingMode);
+                const pricingModel = this.normalizePricingModelForProvider(providerLower, modelName || 'unknown');
+                if (providerLower === 'qwen') {
+                    cost = this.calculateCost(pricingModel, inputTokens, outputTokens, cachedTokens, region, thinkingMode);
+                } else {
+                    cost = this.calculateCost(pricingModel, inputTokens, outputTokens, cachedTokens);
+                }
             }
         } catch (e) {
             this.warn(`Failed to parse token usage for ${modelName}: ${e}`);
@@ -677,6 +676,20 @@ export class Logger {
     }
 
     /**
+     * Normalize pricing model names for provider-specific aliases.
+     */
+    private normalizePricingModelForProvider(providerLower: string, modelName: string): string {
+        if (providerLower !== 'openrouter') {
+            return modelName;
+        }
+        const canonical = normalizeOpenRouterPricingAlias(modelName);
+        if (canonical.startsWith('qwen') && !canonical.includes(':')) {
+            return `${canonical}:intl`;
+        }
+        return canonical;
+    }
+
+    /**
      * Log summarized token usage from multiple API calls
      * Consolidates multiple usage objects into a single summary with total cost calculation
      */
@@ -719,10 +732,6 @@ export class Logger {
                     inputTokens = usage.input_tokens || 0;
                     outputTokens = usage.output_tokens || 0;
                     cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
-                } else if (providerLower === 'deepseek') {
-                    inputTokens = usage.prompt_tokens || 0;
-                    outputTokens = usage.completion_tokens || 0;
-                    cachedTokens = usage.prompt_cache_hit_tokens || 0;
                 } else if (providerLower === 'anthropic') {
                     inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
                     outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
@@ -731,10 +740,10 @@ export class Logger {
                     inputTokens = usage.prompt_tokens || 0;
                     outputTokens = usage.completion_tokens || 0;
                     cachedTokens = usage.cached_content_tokens || 0;
-                } else if (providerLower === 'qwen') {
-                    inputTokens = usage.prompt_tokens || 0;
-                    outputTokens = usage.completion_tokens || 0;
-                    cachedTokens = usage.prompt_tokens_details?.cached_tokens || 0;
+                } else if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter') {
+                    inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
+                    outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
+                    cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
                 }
                 else {
                     this.warn(`Unknown provider for usage summary: ${provider}`);
@@ -748,7 +757,12 @@ export class Logger {
                 totalTokens += usage.total_tokens || (inputTokens + outputTokens);
 
                 // Calculate cost for this usage
-                totalCost += this.calculateCost(modelName, inputTokens, outputTokens, cachedTokens, region, thinkingMode);
+                const pricingModel = this.normalizePricingModelForProvider(providerLower, modelName);
+                if (providerLower === 'qwen') {
+                    totalCost += this.calculateCost(pricingModel, inputTokens, outputTokens, cachedTokens, region, thinkingMode);
+                } else {
+                    totalCost += this.calculateCost(pricingModel, inputTokens, outputTokens, cachedTokens);
+                }
             } catch (e) {
                 this.warn(`Failed to parse token usage in summary for ${modelName}: ${e}`);
                 continue;

@@ -3,7 +3,17 @@
  * Single source of truth for all provider-related metadata
  */
 
-export type ProviderKey = 'openai' | 'deepseek' | 'anthropic' | 'gemini' | 'qwen';
+export type ProviderApiStyle = 'openai-responses' | 'openai-chat' | 'anthropic' | 'gemini';
+
+export type ProviderKey =
+    | 'openai'
+    | 'deepseek'
+    | 'anthropic'
+    | 'gemini'
+    | 'qwen'
+    | 'glm'
+    | 'kimi'
+    | 'openrouter';
 
 export interface ProviderMetadata {
     /** Provider key (internal identifier) */
@@ -16,6 +26,10 @@ export interface ProviderMetadata {
     modelStateKey: string;
     /** Whether this provider has regional variants */
     hasRegionalVariants?: boolean;
+    /** API protocol family used by provider */
+    apiStyle: ProviderApiStyle;
+    /** Optional base URL used by OpenAI-compatible SDK clients */
+    baseUrl?: string;
 }
 
 /**
@@ -52,32 +66,64 @@ export const PROVIDER_CONFIGS: Record<ProviderKey, ProviderMetadata> = {
         key: 'openai',
         label: 'OpenAI',
         secretKey: 'gitCommitGenie.secret.openaiApiKey',
-        modelStateKey: 'gitCommitGenie.openaiModel'
+        modelStateKey: 'gitCommitGenie.openaiModel',
+        apiStyle: 'openai-responses'
     },
     deepseek: {
         key: 'deepseek',
         label: 'DeepSeek',
         secretKey: 'gitCommitGenie.secret.deepseekApiKey',
-        modelStateKey: 'gitCommitGenie.deepseekModel'
+        modelStateKey: 'gitCommitGenie.deepseekModel',
+        apiStyle: 'openai-chat',
+        baseUrl: 'https://api.deepseek.com'
     },
     anthropic: {
         key: 'anthropic',
         label: 'Anthropic',
         secretKey: 'gitCommitGenie.secret.anthropicApiKey',
-        modelStateKey: 'gitCommitGenie.anthropicModel'
+        modelStateKey: 'gitCommitGenie.anthropicModel',
+        apiStyle: 'anthropic'
     },
     gemini: {
         key: 'gemini',
         label: 'Gemini',
         secretKey: 'gitCommitGenie.secret.geminiApiKey',
-        modelStateKey: 'gitCommitGenie.geminiModel'
+        modelStateKey: 'gitCommitGenie.geminiModel',
+        apiStyle: 'gemini'
     },
     qwen: {
         key: 'qwen',
         label: 'Qwen',
         secretKey: 'gitCommitGenie.secret.qwenApiKey', // Default key (fallback)
         modelStateKey: 'gitCommitGenie.qwenModel',
+        hasRegionalVariants: true,
+        apiStyle: 'openai-chat'
+    },
+    glm: {
+        key: 'glm',
+        label: 'GLM',
+        secretKey: 'gitCommitGenie.secret.glmApiKey',
+        modelStateKey: 'gitCommitGenie.glmModel',
+        apiStyle: 'openai-chat',
+        baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
         hasRegionalVariants: true
+    },
+    kimi: {
+        key: 'kimi',
+        label: 'Kimi',
+        secretKey: 'gitCommitGenie.secret.kimiApiKey',
+        modelStateKey: 'gitCommitGenie.kimiModel',
+        apiStyle: 'openai-chat',
+        baseUrl: 'https://api.moonshot.ai/v1',
+        hasRegionalVariants: true
+    },
+    openrouter: {
+        key: 'openrouter',
+        label: 'OpenRouter',
+        secretKey: 'gitCommitGenie.secret.openrouterApiKey',
+        modelStateKey: 'gitCommitGenie.openrouterModel',
+        apiStyle: 'openai-chat',
+        baseUrl: 'https://openrouter.ai/api/v1'
     }
 };
 
@@ -119,6 +165,34 @@ export function getProviderSecretKey(provider: string, region?: string): string 
  */
 export function getProviderModelStateKey(provider: string): string {
     return getProviderConfig(provider).modelStateKey;
+}
+
+/**
+ * Get provider API style family
+ */
+export function getProviderApiStyle(provider: string): ProviderApiStyle {
+    return getProviderConfig(provider).apiStyle;
+}
+
+/**
+ * Get provider base URL for OpenAI-compatible SDK clients
+ */
+export function getProviderBaseUrl(provider: string): string | undefined {
+    return getProviderConfig(provider).baseUrl;
+}
+
+/**
+ * Whether provider should use OpenAI-compatible chat/completions style
+ */
+export function isOpenAIChatProvider(provider: string): boolean {
+    return getProviderApiStyle(provider) === 'openai-chat';
+}
+
+/**
+ * Whether provider should use OpenAI Responses API style
+ */
+export function isOpenAIResponsesProvider(provider: string): boolean {
+    return getProviderApiStyle(provider) === 'openai-responses';
 }
 
 /**

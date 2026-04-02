@@ -79,6 +79,48 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     'deepseek-chat': { input: 0.274, output: 0.411, cached: 0.027 },
     'deepseek-reasoner': { input: 0.274, output: 0.411, cached: 0.027 },
 
+    // GLM (USD)
+    // Converted from RMB pricing snapshot shared by user on 2026-04-02.
+    // Fixed conversion used here: 1 CNY = 0.145 USD.
+    'glm-5-turbo': {
+        tiers: [
+            { maxInputTokens: 32000, input: 0.725, output: 3.19, cached: 0.174 },     // CNY: 5 / 22 / 1.2
+            { maxInputTokens: Infinity, input: 1.015, output: 3.77, cached: 0.261 }   // CNY: 7 / 26 / 1.8
+        ]
+    },
+    'glm-5': {
+        tiers: [
+            { maxInputTokens: 32000, input: 0.58, output: 2.61, cached: 0.145 },      // CNY: 4 / 18 / 1.0
+            { maxInputTokens: Infinity, input: 0.87, output: 3.19, cached: 0.218 }    // CNY: 6 / 22 / 1.5
+        ]
+    },
+    // Official table for glm-4.7 also has output-length sub-tiers; we use the higher output tier
+    // for <=32K input to keep cost estimates conservative.
+    'glm-4.7': {
+        tiers: [
+            { maxInputTokens: 32000, input: 0.435, output: 2.03, cached: 0.087 },     // CNY: 3 / 14 / 0.6
+            { maxInputTokens: 200000, input: 0.58, output: 2.32, cached: 0.116 },     // CNY: 4 / 16 / 0.8
+            { maxInputTokens: Infinity, input: 0.58, output: 2.32, cached: 0.116 }
+        ]
+    },
+    'glm-4.7-flashx': { input: 0.073, output: 0.435, cached: 0.015 },                 // CNY: 0.5 / 3 / 0.1
+    'glm-4.7-flash': { input: 0, output: 0, cached: 0 },                               // Officially free
+    // glm-4.5 price was not present in the provided screenshot; keep prior value for now.
+    'glm-4.5': { input: 0.38, output: 1.98, cached: 0.076 },
+    // For glm-4.5-air, <=32K has two output-length tiers (2 / 6 CNY output). Use higher tier conservatively.
+    'glm-4.5-air': {
+        tiers: [
+            { maxInputTokens: 32000, input: 0.116, output: 0.87, cached: 0.023 },     // CNY: 0.8 / 6 / 0.16
+            { maxInputTokens: 128000, input: 0.174, output: 1.16, cached: 0.035 },    // CNY: 1.2 / 8 / 0.24
+            { maxInputTokens: Infinity, input: 0.174, output: 1.16, cached: 0.035 }
+        ]
+    },
+
+    // Kimi (USD)
+    'kimi-k2.5': { input: 0.60, output: 3.00, cached: 0.10 },
+    'kimi-k2': { input: 0.60, output: 2.50, cached: 0.15 },
+    'kimi-k2-thinking': { input: 0.60, output: 2.50, cached: 0.15 },
+
     // Qwen International (Singapore) - USD
     // Cache price is 20% of input price for all Qwen models
     'qwen3-max:intl': {

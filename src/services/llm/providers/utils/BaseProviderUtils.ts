@@ -171,7 +171,7 @@ export abstract class BaseProviderUtils {
         if (typeof v === 'number' && !isNaN(v)) {
             return v;
         }
-        return 0.2;
+        return 1;
     }
 
     /**

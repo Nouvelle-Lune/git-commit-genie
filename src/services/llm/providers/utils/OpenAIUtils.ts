@@ -4,6 +4,7 @@ import { zodTextFormat } from './openAiZodPatch';
 import { BaseProviderUtils } from './baseProviderUtils';
 import { logger } from '../../../logger';
 import { ProviderError } from '../errors/providerError';
+import { isOpenAIChatProvider, isOpenAIResponsesProvider } from '../config/providerConfig';
 
 import { ChatMessage, RequestType } from "../../llmTypes";
 
@@ -66,16 +67,17 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
         let lastErr: any;
         const retries = this.getMaxRetries();
         const totalAttempts = Math.max(1, retries + 1);
+        let forceTemperatureOne = false;
 
         for (let attempt = 0; attempt < totalAttempts; attempt++) {
             let logId: string | undefined;
             try {
-                const requestOptions = this.buildRequestOptions(options, messages);
+                const requestOptions = this.buildRequestOptions(options, messages, { forceTemperatureOne });
 
                 // Log API request (pending state)
                 logId = logger.logApiRequest(options.repoPath);
 
-                if (options.provider.toLowerCase() === 'openai') {
+                if (isOpenAIResponsesProvider(options.provider)) {
                     // Use Responses API with function calling for OpenAI
                     const response = await client.responses.create(
                         requestOptions as any,
@@ -165,7 +167,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
 
                     return { parsedResponse, usage, responseId: (response as any)?.id };
                 }
-                if (options.provider.toLowerCase() === 'deepseek' || options.provider.toLowerCase() === 'qwen') {
+                if (isOpenAIChatProvider(options.provider)) {
                     const response = await client.chat.completions.create(
                         requestOptions,
                         {
@@ -201,6 +203,18 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             } catch (e: any) {
                 lastErr = e;
                 const code = e?.status || e?.code;
+                const message = String(e?.message || e || '');
+                const lowerMessage = message.toLowerCase();
+                const hasTemperatureHint = lowerMessage.includes('temperature');
+                const hasTemperatureEqualsOneHint =
+                    lowerMessage.includes('only 1') ||
+                    lowerMessage.includes('must be 1') ||
+                    lowerMessage.includes('supported value is 1') ||
+                    (lowerMessage.includes('temperature must be') && lowerMessage.includes('1'));
+                const invalidTemperatureOnlyOne = (
+                    code === 400 &&
+                    (hasTemperatureHint || hasTemperatureEqualsOneHint)
+                );
 
                 if (controller.signal.aborted) {
                     // Mark current attempt as finished to stop spinner
@@ -242,6 +256,25 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                     continue;
                 }
 
+                if (invalidTemperatureOnlyOne && !forceTemperatureOne && attempt < totalAttempts - 1) {
+                    forceTemperatureOne = true;
+                    logger.warn(`[Genie][${options.provider}] Provider requires temperature=1 for model '${options.model}'. Retrying with forced temperature.`);
+                    try {
+                        if (logId) {
+                            logger.logApiRequestWithResult(
+                                logId,
+                                options.provider,
+                                options.model,
+                                { info: 'Retrying with temperature=1 due to provider model constraint.' },
+                                undefined,
+                                false,
+                                options.repoPath
+                            );
+                        }
+                    } catch { /* ignore */ }
+                    continue;
+                }
+
                 // Mark this attempt as failed to avoid stuck spinner
                 try {
                     if (logId) {
@@ -274,9 +307,12 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             store?: boolean;
             toolOutputs?: Array<{ call_id: string; output: string }>;
         },
-        messages: ChatMessage[]
+        messages: ChatMessage[],
+        runtimeOptions?: {
+            forceTemperatureOne?: boolean;
+        }
     ) {
-        if (options.provider.toLowerCase() === 'openai') {
+        if (isOpenAIResponsesProvider(options.provider)) {
             const requestTypeSchemaMap = new Map<RequestType, { schema: any; name: string }>([
                 ['commitMessage', { schema: commitMessageSchema, name: 'commitMessage' }],
                 ['summary', { schema: fileSummarySchema, name: 'fileSummary' }],
@@ -314,7 +350,8 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
 
             // gpt-5 models do not support temperature
             if (!options.model.includes('gpt-5')) {
-                (baseOptions as OpenAIRequestOptions).temperature = options.temperature ?? this.getTemperature();
+                const resolvedTemperature = runtimeOptions?.forceTemperatureOne ? 1 : (options.temperature ?? this.getTemperature());
+                (baseOptions as OpenAIRequestOptions).temperature = resolvedTemperature;
             }
 
             const schemaConfig = requestTypeSchemaMap.get(options.requestType);
@@ -343,11 +380,12 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             return baseOptions;
         }
 
-        if (options.provider.toLowerCase() === 'deepseek' || options.provider.toLowerCase() === 'qwen') {
+        if (isOpenAIChatProvider(options.provider)) {
+            const resolvedTemperature = runtimeOptions?.forceTemperatureOne ? 1 : (options.temperature ?? this.getTemperature());
             const baseOptions: any = {
                 model: options.model,
                 messages: messages,
-                temperature: options.temperature ?? this.getTemperature(),
+                temperature: resolvedTemperature,
                 response_format: {
                     'type': 'json_object'
                 }

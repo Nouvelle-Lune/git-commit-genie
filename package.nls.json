@@ -21,7 +21,7 @@
   "config.chain.enabled.desc": "Enable multi-step chain prompting for commit generation (It makes the generated commit messages more detailed and accurate, and better aligns with the user's template, but it will increase latency and token consumption).",
   "config.chain.maxParallel.desc": "Maximum parallel LLM calls used by chain prompting across all providers. Increase carefully to avoid provider rate limits.",
   "config.llm.maxRetries.desc": "Max retry attempts for API request failures.",
-  "config.llm.temperature.desc": "Temperature (0–2). Default 0.2.",
+  "config.llm.temperature.desc": "Temperature (0–2). Default 1. Some provider/model combinations only accept 1; changing this value may cause 400 errors (invalid temperature) or less stable outputs.",
   "config.repositoryAnalysis.enabled.desc": "Enable repository analysis to provide better context for commit message generation.",
   "config.rag.enabled.desc": "Enable RAG to keep commit message generation style consistent (requires a sufficient number of historical commit messages in the repository to build a vector database).",
   "config.repositoryAnalysis.excludePatterns.desc": "File patterns to exclude from repository analysis scanning.",
