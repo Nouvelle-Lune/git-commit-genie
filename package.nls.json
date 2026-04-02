@@ -23,6 +23,7 @@
   "config.llm.maxRetries.desc": "Max retry attempts for API request failures.",
   "config.llm.temperature.desc": "Temperature (0–2). Default 0.2.",
   "config.repositoryAnalysis.enabled.desc": "Enable repository analysis to provide better context for commit message generation.",
+  "config.rag.enabled.desc": "Enable RAG to keep commit message generation style consistent (requires a sufficient number of historical commit messages in the repository to build a vector database).",
   "config.repositoryAnalysis.excludePatterns.desc": "File patterns to exclude from repository analysis scanning.",
   "config.repositoryAnalysis.updateThreshold.desc": "Number of commits after which to update the repository analysis.",
   "config.repositoryAnalysis.MaxCount.desc": "Maximum requests for repository analysis model, set -1 for unlimited.",

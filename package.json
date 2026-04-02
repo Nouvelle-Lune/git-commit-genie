@@ -178,6 +178,15 @@
           "default": true,
           "markdownDescription": "%config.ui.stageNotifications.enabled.desc%"
         },
+        "gitCommitGenie.rag.enabled": {
+          "order": 14,
+          "type": "boolean",
+          "default": false,
+          "tags": [
+            "experimental"
+          ],
+          "markdownDescription": "%config.rag.enabled.desc%"
+        },
         "gitCommitGenie.repositoryAnalysis.MaxCount": {
           "order": 9,
           "type": "number",

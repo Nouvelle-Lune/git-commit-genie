@@ -38,6 +38,7 @@
   "config.commitLanguage.ru": "俄文",
   "config.commitLanguage.it": "義大利文",
   "config.repositoryAnalysis.enabled.desc": "啟用倉庫分析以提供更好的提交資訊生成上下文。",
+  "config.rag.enabled.desc": "啟用 RAG 以保持 commit message 生成風格一致性（需要倉庫中有一定數量的歷史 commit message 來建構向量資料庫）。",
   "config.repositoryAnalysis.excludePatterns.desc": "倉庫分析掃描時要排除的檔案模式。",
   "config.repositoryAnalysis.updateThreshold.desc": "更新倉庫分析的提交次數閾值。",
   "config.repositoryAnalysis.MaxCount.desc": "倉庫分析的模型最大請求次數，設定-1為無上限。",

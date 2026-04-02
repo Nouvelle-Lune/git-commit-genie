@@ -25,6 +25,7 @@ export interface ChainInputs {
     userTemplate?: string;
     targetLanguage?: string;
     validationChecklist?: string;
+    repositoryPath?: string;
     // Optional repository analysis (can be string for backward compatibility or structured object)
     repositoryAnalysis?: string | RepositoryAnalysis;
 }
@@ -36,9 +37,40 @@ export interface FileSummary {
     breaking: boolean;
 }
 
+export interface ChangeSetSummary {
+    text: string;
+    dominantType?: string;
+    dominantScope?: string | null;
+    areas: string[];
+    fileKinds: string[];
+    changeActions: string[];
+    entities: string[];
+}
+
+export interface RetrievalFeatures {
+    predictedType?: string;
+    predictedScope?: string | null;
+    areas: string[];
+    fileKinds: string[];
+    changeActions: string[];
+    entities: string[];
+    touchedPaths: string[];
+    fileExtensions: string[];
+    statusMix: DiffData['status'][];
+    fileCount: number;
+    hasDocs: boolean;
+    hasTests: boolean;
+    hasConfig: boolean;
+    hasRenames: boolean;
+    isCrossLayer: boolean;
+    breakingLike: boolean;
+}
+
 export interface ChainOutputs {
     commitMessage: string;
     fileSummaries: FileSummary[];
+    changeSetSummary?: ChangeSetSummary;
+    retrievalFeatures?: RetrievalFeatures;
     raw?: {
         draft?: string;
         classificationNotes?: string;

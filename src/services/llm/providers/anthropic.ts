@@ -16,12 +16,13 @@ import {
     AnthropicFileSummaryTool,
     AnthropicClassifyAndDraftTool,
     AnthropicValidateAndFixTool,
+    AnthropicRagPreparationTool,
     AnthropicRepoAnalysisTool,
     AnthropicRepoAnalysisActionTool
 } from './schemas/anthropicSchemas';
 import {
     fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
-    commitMessageSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
+    commitMessageSchema, ragPreparationResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
 } from './schemas/common';
 
 const SECRET_ANTHROPIC_API_KEY = 'gitCommitGenie.secret.anthropicApiKey';
@@ -175,6 +176,7 @@ export class AnthropicService extends BaseLLMService {
                     case 'summary': return 'summarize';
                     case 'draft': return 'draft';
                     case 'fix': return 'validate-fix';
+                    case 'ragPreparation': return 'rag-prep';
                     case 'strictFix': return 'strict-fix';
                     case 'enforceLanguage': return 'lang-fix';
                     case 'commitMessage': return 'build-commit-msg';
@@ -188,6 +190,7 @@ export class AnthropicService extends BaseLLMService {
                 summary: { tool: AnthropicFileSummaryTool, schema: fileSummarySchema },
                 draft: { tool: AnthropicClassifyAndDraftTool, schema: classifyAndDraftResponseSchema },
                 fix: { tool: AnthropicValidateAndFixTool, schema: validateAndFixResponseSchema },
+                ragPreparation: { tool: AnthropicRagPreparationTool, schema: ragPreparationResponseSchema },
                 commitMessage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
                 strictFix: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
                 enforceLanguage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
@@ -257,6 +260,7 @@ export class AnthropicService extends BaseLLMService {
                     userTemplate: parsedInput?.['user-template'],
                     targetLanguage: parsedInput?.['target-language'],
                     validationChecklist: rules.checklistText,
+                    repositoryPath: repoPath,
                     repositoryAnalysis: parsedInput?.['repository-analysis']
                 },
                 chat,

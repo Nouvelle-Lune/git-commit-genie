@@ -10,6 +10,8 @@ import {
 } from "./chainChatPrompts";
 
 import { normalizeLanguageCode, extractNarrativeTextForLanguageCheck, isLikelyTargetLanguage } from "./langDetector";
+import { isRagPreparationEnabled, prepareRagContext } from "./ragPreparation";
+import { logger } from "../logger";
 
 
 async function summarizeSingleFile(diff: DiffData, chat: ChatFn): Promise<FileSummary> {
@@ -230,6 +232,26 @@ export async function generateCommitMessageChain(
 	// Waiting for all workers to complete
 	await Promise.all(workers);
 
+    let changeSetSummary = undefined;
+    let retrievalFeatures = undefined;
+
+    if (isRagPreparationEnabled()) {
+        try {
+            const ragContext = await prepareRagContext(diffs, results, chat);
+            changeSetSummary = ragContext.changeSetSummary;
+            retrievalFeatures = ragContext.retrievalFeatures;
+        } catch (error) {
+            const errorMessage = String((error as any)?.message || error || 'Unknown error');
+            logger.warn('[Genie][Chain] RAG preparation failed; continuing without RAG context.', error);
+            try {
+                options?.onStage?.({
+                    type: 'ragPreparationSkipped',
+                    data: { error: errorMessage }
+                });
+            } catch { /* ignore */ }
+        }
+    }
+
     const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat);
     try { options?.onStage?.({ type: 'classifyDraft', data: { draft } }); } catch { /* ignore */ }
     const { validMessage, notes: validationNotes } = await validateAndFix(draft, inputs.validationChecklist ?? '', chat, inputs.userTemplate);
@@ -259,6 +281,8 @@ export async function generateCommitMessageChain(
 	return {
 		commitMessage: finalMessage,
 		fileSummaries: results,
+        changeSetSummary,
+        retrievalFeatures,
 		raw: {
 			draft,
 			classificationNotes: classificationNotes ?? '',

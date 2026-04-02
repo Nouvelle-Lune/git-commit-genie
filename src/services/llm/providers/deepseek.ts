@@ -11,7 +11,7 @@ import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import {
     fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
-    commitMessageSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
+    commitMessageSchema, ragPreparationResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
 } from './schemas/common';
 
 const DEEPSEEK_API_URL = 'https://api.deepseek.com';
@@ -154,6 +154,7 @@ export class DeepSeekService extends BaseLLMService {
                     case 'summary': return 'summarize';
                     case 'draft': return 'draft';
                     case 'fix': return 'validate-fix';
+                    case 'ragPreparation': return 'rag-prep';
                     case 'strictFix': return 'strict-fix';
                     case 'enforceLanguage': return 'lang-fix';
                     case 'commitMessage': return 'build-commit-msg';
@@ -166,6 +167,7 @@ export class DeepSeekService extends BaseLLMService {
                 summary: fileSummarySchema,
                 draft: classifyAndDraftResponseSchema,
                 fix: validateAndFixResponseSchema,
+                ragPreparation: ragPreparationResponseSchema,
                 commitMessage: commitMessageSchema,
                 strictFix: commitMessageSchema,
                 enforceLanguage: commitMessageSchema,
@@ -232,6 +234,7 @@ export class DeepSeekService extends BaseLLMService {
                     userTemplate: parsed?.["user-template"],
                     targetLanguage: parsed?.["target-language"],
                     validationChecklist: rules.checklistText,
+                    repositoryPath: repoPath,
                     repositoryAnalysis: parsed?.["repository-analysis"]
                 },
                 chat,

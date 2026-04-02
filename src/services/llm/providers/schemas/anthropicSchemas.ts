@@ -139,6 +139,48 @@ export const ValidateAndFixJSONSchema = {
   required: ['status', 'commitMessage', 'violations', 'notes']
 } as const;
 
+export const RagPreparationJSONSchema = {
+  type: 'object',
+  properties: {
+    changeSetSummary: {
+      type: 'object',
+      properties: {
+        text: { type: 'string', minLength: 1 },
+        dominantType: { type: ['string', 'null'] },
+        dominantScope: { type: ['string', 'null'] },
+        areas: { type: 'array', items: { type: 'string' } },
+        fileKinds: { type: 'array', items: { type: 'string' } },
+        changeActions: { type: 'array', items: { type: 'string' } },
+        entities: { type: 'array', items: { type: 'string' } }
+      },
+      required: ['text', 'dominantType', 'dominantScope', 'areas', 'fileKinds', 'changeActions', 'entities']
+    },
+    retrievalFeatures: {
+      type: 'object',
+      properties: {
+        predictedType: { type: ['string', 'null'] },
+        predictedScope: { type: ['string', 'null'] },
+        areas: { type: 'array', items: { type: 'string' } },
+        fileKinds: { type: 'array', items: { type: 'string' } },
+        changeActions: { type: 'array', items: { type: 'string' } },
+        entities: { type: 'array', items: { type: 'string' } },
+        touchedPaths: { type: 'array', items: { type: 'string' } },
+        fileExtensions: { type: 'array', items: { type: 'string' } },
+        statusMix: { type: 'array', items: { type: 'string', enum: ['added', 'modified', 'deleted', 'renamed', 'untracked', 'ignored'] } },
+        fileCount: { type: 'number', minimum: 0 },
+        hasDocs: { type: 'boolean' },
+        hasTests: { type: 'boolean' },
+        hasConfig: { type: 'boolean' },
+        hasRenames: { type: 'boolean' },
+        isCrossLayer: { type: 'boolean' },
+        breakingLike: { type: 'boolean' }
+      },
+      required: ['predictedType', 'predictedScope', 'areas', 'fileKinds', 'changeActions', 'entities', 'touchedPaths', 'fileExtensions', 'statusMix', 'fileCount', 'hasDocs', 'hasTests', 'hasConfig', 'hasRenames', 'isCrossLayer', 'breakingLike']
+    }
+  },
+  required: ['changeSetSummary', 'retrievalFeatures']
+} as const;
+
 export const AnthropicFileSummaryTool = {
   name: 'file_summary',
   description: 'Return a structured summary for a single file diff.',
@@ -155,4 +197,10 @@ export const AnthropicValidateAndFixTool = {
   name: 'validate_and_fix',
   description: 'Validate and optionally fix a commit message; return JSON.',
   input_schema: ValidateAndFixJSONSchema
+} as const;
+
+export const AnthropicRagPreparationTool = {
+  name: 'rag_preparation',
+  description: 'Return structured changeSetSummary and retrievalFeatures for future RAG retrieval.',
+  input_schema: RagPreparationJSONSchema
 } as const;

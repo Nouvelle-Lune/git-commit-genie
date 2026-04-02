@@ -14,6 +14,7 @@ export type RequestType =
     | 'summary'
     | 'draft'
     | 'fix'
+    | 'ragPreparation'
     | 'repoAnalysis'
     | 'repoAnalysisAction'
     | 'compression'

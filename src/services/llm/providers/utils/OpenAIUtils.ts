@@ -7,7 +7,7 @@ import { ProviderError } from '../errors/providerError';
 
 import { ChatMessage, RequestType } from "../../llmTypes";
 
-import { commitMessageSchema, fileSummarySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema, compressionResponseSchema } from "../schemas/common";
+import { commitMessageSchema, fileSummarySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, ragPreparationResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema, compressionResponseSchema } from "../schemas/common";
 import { OpenAIRepoAnalysisFunctions } from "../schemas/openaiFunctions";
 
 
@@ -282,6 +282,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 ['summary', { schema: fileSummarySchema, name: 'fileSummary' }],
                 ['draft', { schema: classifyAndDraftResponseSchema, name: 'classifyAndDraftResponse' }],
                 ['fix', { schema: validateAndFixResponseSchema, name: 'validateAndFixResponse' }],
+                ['ragPreparation', { schema: ragPreparationResponseSchema, name: 'ragPreparationResponse' }],
                 ['repoAnalysis', { schema: repoAnalysisResponseSchema, name: 'repoAnalysisResponse' }],
                 ['repoAnalysisAction', { schema: repoAnalysisActionSchema, name: 'repoAnalysisAction' }],
                 ['compression', { schema: compressionResponseSchema, name: 'compression' }],

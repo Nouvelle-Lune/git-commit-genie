@@ -118,6 +118,49 @@ export const GeminiValidateAndFixSchema = {
     propertyOrdering: ['status', 'commitMessage', 'violations', 'notes']
 };
 
+export const GeminiRagPreparationSchema = {
+    type: Type.OBJECT,
+    properties: {
+        changeSetSummary: {
+            type: Type.OBJECT,
+            properties: {
+                text: createStringType('Compact retrieval summary for the whole change set'),
+                dominantType: createStringType('Likely dominant Conventional Commit type, or null if unclear'),
+                dominantScope: createStringType('Likely dominant scope, or null if unclear'),
+                areas: createArrayType(createStringType(), 'Broad functional areas'),
+                fileKinds: createArrayType(createStringType(), 'Stable file kind buckets'),
+                changeActions: createArrayType(createStringType(), 'Concise change verbs'),
+                entities: createArrayType(createStringType(), 'Concrete technical nouns')
+            },
+            required: ['text', 'areas', 'fileKinds', 'changeActions', 'entities']
+        },
+        retrievalFeatures: {
+            type: Type.OBJECT,
+            properties: {
+                predictedType: createStringType('Likely Conventional Commit type, or null if unclear'),
+                predictedScope: createStringType('Likely scope, or null if unclear'),
+                areas: createArrayType(createStringType(), 'Broad functional areas'),
+                fileKinds: createArrayType(createStringType(), 'Stable file kind buckets'),
+                changeActions: createArrayType(createStringType(), 'Concise change verbs'),
+                entities: createArrayType(createStringType(), 'Concrete technical nouns'),
+                touchedPaths: createArrayType(createStringType(), 'Changed file paths'),
+                fileExtensions: createArrayType(createStringType(), 'Observed file extensions'),
+                statusMix: createArrayType(createEnumType(['added', 'modified', 'deleted', 'renamed', 'untracked', 'ignored']), 'Observed status values'),
+                fileCount: createNumberType('Number of changed files', 0),
+                hasDocs: createBooleanType('Whether docs files are present'),
+                hasTests: createBooleanType('Whether test files are present'),
+                hasConfig: createBooleanType('Whether config files are present'),
+                hasRenames: createBooleanType('Whether renamed files are present'),
+                isCrossLayer: createBooleanType('Whether changes span multiple functional areas'),
+                breakingLike: createBooleanType('Whether inputs suggest a breaking change')
+            },
+            required: ['areas', 'fileKinds', 'changeActions', 'entities', 'touchedPaths', 'fileExtensions', 'statusMix', 'fileCount', 'hasDocs', 'hasTests', 'hasConfig', 'hasRenames', 'isCrossLayer', 'breakingLike']
+        }
+    },
+    required: ['changeSetSummary', 'retrievalFeatures'],
+    propertyOrdering: ['changeSetSummary', 'retrievalFeatures']
+};
+
 /**
  * Schema for repository analysis response
  */

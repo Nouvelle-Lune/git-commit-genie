@@ -36,6 +36,36 @@ export const validateAndFixResponseSchema = z.object({
   notes: z.string().nullable().default(null)
 } as const);
 
+export const ragPreparationResponseSchema = z.object({
+  changeSetSummary: z.object({
+    text: z.string().min(1),
+    dominantType: z.string().nullable().default(null),
+    dominantScope: z.string().nullable().default(null),
+    areas: z.array(z.string().min(1)).default([]),
+    fileKinds: z.array(z.string().min(1)).default([]),
+    changeActions: z.array(z.string().min(1)).default([]),
+    entities: z.array(z.string().min(1)).default([]),
+  }),
+  retrievalFeatures: z.object({
+    predictedType: z.string().nullable().default(null),
+    predictedScope: z.string().nullable().default(null),
+    areas: z.array(z.string().min(1)).default([]),
+    fileKinds: z.array(z.string().min(1)).default([]),
+    changeActions: z.array(z.string().min(1)).default([]),
+    entities: z.array(z.string().min(1)).default([]),
+    touchedPaths: z.array(z.string().min(1)).default([]),
+    fileExtensions: z.array(z.string().min(1)).default([]),
+    statusMix: z.array(z.enum(['added', 'modified', 'deleted', 'renamed', 'untracked', 'ignored'])).default([]),
+    fileCount: z.number().int().min(0),
+    hasDocs: z.boolean(),
+    hasTests: z.boolean(),
+    hasConfig: z.boolean(),
+    hasRenames: z.boolean(),
+    isCrossLayer: z.boolean(),
+    breakingLike: z.boolean(),
+  })
+} as const);
+
 export const repoAnalysisResponseSchema = z.object({
   summary: z.string().min(1).describe("Brief but comprehensive summary of the repository purpose and architecture"),
   projectType: z.string().min(1).default('Unknown Project').describe("Main project type (e.g., Web App, Library, CLI Tool, etc.)"),

@@ -15,6 +15,7 @@ import {
     GeminiFileSummarySchema,
     GeminiClassifyAndDraftSchema,
     GeminiValidateAndFixSchema,
+    GeminiRagPreparationSchema,
     GeminiRepoAnalysisSchema,
     GeminiRepoAnalysisActionSchema
 } from './schemas/geminiSchemas';
@@ -25,6 +26,7 @@ import {
     fileSummarySchema,
     classifyAndDraftResponseSchema,
     validateAndFixResponseSchema,
+    ragPreparationResponseSchema,
     repoAnalysisResponseSchema,
     repoAnalysisActionSchema
 } from "./schemas/common";
@@ -170,6 +172,7 @@ export class GeminiService extends BaseLLMService {
                     case 'summary': return 'summarize';
                     case 'draft': return 'draft';
                     case 'fix': return 'validate-fix';
+                    case 'ragPreparation': return 'rag-prep';
                     case 'strictFix': return 'strict-fix';
                     case 'enforceLanguage': return 'lang-fix';
                     case 'commitMessage': return 'build-commit-msg';
@@ -183,6 +186,7 @@ export class GeminiService extends BaseLLMService {
                 summary: GeminiFileSummarySchema,
                 draft: GeminiClassifyAndDraftSchema,
                 fix: GeminiValidateAndFixSchema,
+                ragPreparation: GeminiRagPreparationSchema,
                 commitMessage: GeminiCommitMessageSchema,
                 strictFix: GeminiCommitMessageSchema,
                 enforceLanguage: GeminiCommitMessageSchema,
@@ -194,6 +198,7 @@ export class GeminiService extends BaseLLMService {
                 summary: fileSummarySchema,
                 draft: classifyAndDraftResponseSchema,
                 fix: validateAndFixResponseSchema,
+                ragPreparation: ragPreparationResponseSchema,
                 commitMessage: commitMessageSchema,
                 strictFix: commitMessageSchema,
                 enforceLanguage: commitMessageSchema,
@@ -265,6 +270,7 @@ export class GeminiService extends BaseLLMService {
                     userTemplate: parsedInput?.['user-template'],
                     targetLanguage: parsedInput?.['target-language'],
                     validationChecklist: rules.checklistText,
+                    repositoryPath: repoPath,
                     repositoryAnalysis: parsedInput?.['repository-analysis']
                 },
                 chat,

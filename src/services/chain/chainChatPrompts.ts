@@ -206,6 +206,99 @@ export function buildClassifyAndDraftMessages(
     return [system, user];
 }
 
+export function buildRagPreparationMessages(
+    summaries: FileSummary[],
+    diffs: DiffData[]
+): ChatMessage[] {
+    const system: ChatMessage = {
+        role: 'system',
+        content: [
+            '<role>',
+            'You prepare structured retrieval context for a commit-message RAG flow.',
+            '</role>',
+            '',
+            '<critical>',
+            'Return STRICT JSON only.',
+            'Use the provided file summaries and paths as your only evidence.',
+            'Prefer stable, reusable labels over verbose prose.',
+            'Do not invent details that are not supported by the input.',
+            '</critical>'
+        ].join('\n')
+    };
+
+    const payload = summaries.map(summary => {
+        const matchingDiff = diffs.find(diff => diff.fileName === summary.file);
+        return {
+            file: summary.file,
+            status: summary.status,
+            summary: summary.summary,
+            breaking: summary.breaking,
+            extension: matchingDiff?.fileName.match(/\.[^./\\]+$/)?.[0] ?? '',
+        };
+    });
+
+    const user: ChatMessage = {
+        role: 'user',
+        content: [
+            '<instructions>',
+            'Generate two outputs for future retrieval:',
+            '1. changeSetSummary: a compact natural-language summary of the whole change set.',
+            '2. retrievalFeatures: structured tags that can be used for filtering, recall, and reranking.',
+            '',
+            'Requirements:',
+            '- dominantType and predictedType should only be set when the change strongly suggests a likely Conventional Commit type.',
+            '- dominantScope and predictedScope should be short and codebase-oriented when justified, otherwise null.',
+            '- areas should represent broad functional areas inferred from paths and summaries.',
+            '- fileKinds should be stable buckets like code, docs, test, config, asset.',
+            '- changeActions should be concise verbs like add, fix, refactor, validate, rename, remove, optimize, document.',
+            '- entities should be concrete technical nouns from the input, not vague abstractions.',
+            '- touchedPaths should preserve the most informative changed file paths.',
+            '- fileExtensions and statusMix must reflect the actual input exactly.',
+            '- fileCount must equal the number of changed files in input.',
+            '- breakingLike should be true only if the inputs indicate possible breaking behavior.',
+            '</instructions>',
+            '',
+            '<schema>',
+            '{',
+            '  "changeSetSummary": {',
+            '    "text": string,',
+            '    "dominantType": string|null,',
+            '    "dominantScope": string|null,',
+            '    "areas": string[],',
+            '    "fileKinds": string[],',
+            '    "changeActions": string[],',
+            '    "entities": string[]',
+            '  },',
+            '  "retrievalFeatures": {',
+            '    "predictedType": string|null,',
+            '    "predictedScope": string|null,',
+            '    "areas": string[],',
+            '    "fileKinds": string[],',
+            '    "changeActions": string[],',
+            '    "entities": string[],',
+            '    "touchedPaths": string[],',
+            '    "fileExtensions": string[],',
+            '    "statusMix": string[],',
+            '    "fileCount": number,',
+            '    "hasDocs": boolean,',
+            '    "hasTests": boolean,',
+            '    "hasConfig": boolean,',
+            '    "hasRenames": boolean,',
+            '    "isCrossLayer": boolean,',
+            '    "breakingLike": boolean',
+            '  }',
+            '}',
+            '</schema>',
+            '',
+            '<input>',
+            JSON.stringify(payload, null, 2),
+            '</input>'
+        ].join('\n')
+    };
+
+    return [system, user];
+}
+
 export function buildValidateAndFixMessages(commitMessage: string, checklistText?: string, userTemplate?: string): ChatMessage[] {
     const system: ChatMessage = {
         role: 'system',
