@@ -48,8 +48,10 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
 
   // Qwen
   'qwen3-max': 262_144,
+  'qwen3.6-plus': 256_000,
   'qwen3-max-preview': 262_144,
   'qwen3.5-plus': 128_000,
+  'qwen3.5-flash': 128_000,
   'qwen-plus': 1_000_000,
   'qwen-plus-latest': 1_000_000,
   'qwen3-coder-plus': 1_000_000,
@@ -94,7 +96,10 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'google/gemini-3-flash-preview': 1_048_576,
   'google/gemini-3-pro-preview': 1_048_576,
   'qwen/qwen3-max': 262_144,
+  'qwen/qwen3.6-plus': 256_000,
+  'qwen/qwen3.6-plus-preview:free': 256_000,
   'qwen/qwen3-235b-a22b': 128_000,
+  'qwen/qwen3.5-flash': 128_000,
   'qwen/qwen-plus': 1_000_000,
   'qwen/qwen3-coder-plus': 1_000_000,
   'qwen/qwen-turbo': 1_000_000,

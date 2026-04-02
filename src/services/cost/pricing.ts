@@ -122,7 +122,7 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     'kimi-k2-thinking': { input: 0.60, output: 2.50, cached: 0.15 },
 
     // Qwen International (Singapore) - USD
-    // Cache price is 20% of input price for all Qwen models
+    // Cache-hit pricing follows the dashboard rates for each Qwen model/tier.
     'qwen3-max:intl': {
         tiers: [
             { maxInputTokens: 32000, input: 1.2, output: 6.0, cached: 0.24 },      // 0-32K
@@ -131,6 +131,16 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
             { maxInputTokens: Infinity, input: 3.0, output: 15.0, cached: 0.6 }    // >252K (same as tier 3)
         ]
     },
+    // qwen3.6-plus pricing currently uses <=256K tier from dashboard;
+    // apply the same rates for larger contexts until official tier deltas are confirmed.
+    'qwen3.6-plus:intl': {
+        tiers: [
+            { maxInputTokens: 256000, input: 2.0, output: 12.0, cached: 0.2 },
+            { maxInputTokens: Infinity, input: 2.0, output: 12.0, cached: 0.2 }
+        ]
+    },
+    // OpenRouter free-tier alias.
+    'qwen3.6-plus-preview:free': { input: 0, output: 0, cached: 0 },
     'qwen3-max-preview:intl': {
         tiers: [
             { maxInputTokens: 32000, input: 1.2, output: 6.0, cached: 0.24 },
@@ -145,6 +155,14 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
         tiers: [
             { maxInputTokens: 128000, input: 0.115, output: 0.689, cached: 0.0115 },
             { maxInputTokens: Infinity, input: 0.115, output: 0.689, cached: 0.0115 }
+        ]
+    },
+    // qwen3.5-flash pricing currently uses <=128K tier from dashboard;
+    // apply the same rates for larger contexts until official tier deltas are confirmed.
+    'qwen3.5-flash:intl': {
+        tiers: [
+            { maxInputTokens: 128000, input: 0.2, output: 2.0, cached: 0.02 },
+            { maxInputTokens: Infinity, input: 0.2, output: 2.0, cached: 0.02 }
         ]
     },
     'qwen-plus:intl': {
@@ -202,7 +220,7 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     },
 
     // Qwen China (Beijing) - USD
-    // Cache price is 20% of input price for all Qwen models
+    // Cache-hit pricing follows the dashboard rates for each Qwen model/tier.
     'qwen3-max:china': {
         tiers: [
             { maxInputTokens: 32000, input: 0.861, output: 3.441, cached: 0.1722 },   // 0-32K

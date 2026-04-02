@@ -181,7 +181,7 @@ export class ServiceRegistry {
             deepseek: ['deepseek-chat', 'deepseek-reasoner'],
             anthropic: ['claude-sonnet-4-20250514'],
             gemini: ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-pro-preview'],
-            qwen: ['qwen3.5-plus', 'qwen-plus-latest', 'qwen-plus', 'qwen3-max-preview', 'qwen3-max'],
+            qwen: ['qwen3.6-plus', 'qwen3.5-plus', 'qwen3.5-flash', 'qwen-plus-latest', 'qwen-plus', 'qwen3-max-preview', 'qwen3-max'],
             glm: ['glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.5', 'glm-4.7-flashx', 'glm-4.5-air', 'glm-4.7-flash'],
             kimi: ['kimi-k2.5', 'kimi-k2-thinking', 'kimi-k2'],
             openrouter: ['openai/gpt-5.4-mini', 'openai/gpt-5.4', 'openai/gpt-5-mini', 'anthropic/claude-sonnet-4', 'deepseek/deepseek-chat']

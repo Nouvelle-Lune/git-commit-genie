@@ -42,7 +42,10 @@ export const OPENROUTER_MODEL_ALIAS_MAP: Readonly<Record<string, string>> = Obje
 
     // Qwen family
     'qwen/qwen3-max': 'qwen3-max',
+    'qwen/qwen3.6-plus': 'qwen3.6-plus',
+    'qwen/qwen3.6-plus-preview:free': 'qwen3.6-plus-preview:free',
     'qwen/qwen3-235b-a22b': 'qwen3.5-plus',
+    'qwen/qwen3.5-flash': 'qwen3.5-flash',
     'qwen/qwen-plus': 'qwen-plus',
     'qwen/qwen3-coder-plus': 'qwen3-coder-plus',
     'qwen/qwen-turbo': 'qwen-flash',
