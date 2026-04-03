@@ -89,7 +89,6 @@ export class QwenService extends OpenAIChatCompletionsService {
         return [
             'qwen3-max',
             'qwen3-max-preview',
-            'qwen3.6-plus',
             'qwen3.5-plus',
             'qwen3.5-flash',
             'qwen-plus',

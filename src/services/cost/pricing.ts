@@ -131,16 +131,6 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
             { maxInputTokens: Infinity, input: 3.0, output: 15.0, cached: 0.6 }    // >252K (same as tier 3)
         ]
     },
-    // qwen3.6-plus pricing currently uses <=256K tier from dashboard;
-    // apply the same rates for larger contexts until official tier deltas are confirmed.
-    'qwen3.6-plus:intl': {
-        tiers: [
-            { maxInputTokens: 256000, input: 2.0, output: 12.0, cached: 0.2 },
-            { maxInputTokens: Infinity, input: 2.0, output: 12.0, cached: 0.2 }
-        ]
-    },
-    // OpenRouter free-tier alias.
-    'qwen3.6-plus-preview:free': { input: 0, output: 0, cached: 0 },
     'qwen3-max-preview:intl': {
         tiers: [
             { maxInputTokens: 32000, input: 1.2, output: 6.0, cached: 0.24 },

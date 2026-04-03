@@ -16,7 +16,7 @@ import { logger } from "../logger";
 
 async function summarizeSingleFile(diff: DiffData, chat: ChatFn): Promise<FileSummary> {
 	const messages = buildSummarizeFileMessages(diff);
-    const parsed = await chat(messages, { requestType: 'summary' });
+	const parsed = await chat(messages, { requestType: 'summary' });
 
 	if (!parsed || !parsed.file || !parsed.summary) {
 		return {
@@ -46,7 +46,7 @@ async function classifyAndDraft(
 	}
 }> {
 	const messages = buildClassifyAndDraftMessages(summaries, inputs);
-    const parsed = await chat(messages, { requestType: 'draft' });
+	const parsed = await chat(messages, { requestType: 'draft' });
 
 	let draft = parsed?.commitMessage || '';
 	// Fallback: assemble from structured fields if provided
@@ -93,13 +93,13 @@ async function classifyAndDraft(
 }
 
 async function validateAndFix(
-    commitMessage: string,
-    checklistText: string,
-    chat: ChatFn,
-    userTemplate?: string
+	commitMessage: string,
+	checklistText: string,
+	chat: ChatFn,
+	userTemplate?: string
 ): Promise<{ validMessage: string; notes?: string; violations?: string[] }> {
 	const messages = buildValidateAndFixMessages(commitMessage, checklistText, userTemplate);
-    const parsed = await chat(messages, { requestType: 'fix' });
+	const parsed = await chat(messages, { requestType: 'fix' });
 
 	if (parsed?.status === 'fixed') {
 		return { validMessage: parsed.commitMessage, notes: parsed.notes, violations: parsed.violations };
@@ -130,14 +130,14 @@ function localStrictCheck(msg: string): { ok: boolean; problems: string[] } {
 }
 
 async function enforceStrictWithLLM(
-    current: string,
-    problems: string[],
-    chat: ChatFn,
-    userTemplate?: string
+	current: string,
+	problems: string[],
+	chat: ChatFn,
+	userTemplate?: string
 ): Promise<string> {
-    const messages = buildEnforceStrictFixMessages(current, problems, userTemplate);
-    const parsed = await chat(messages, { requestType: 'strictFix' });
-    return parsed?.commitMessage || current;
+	const messages = buildEnforceStrictFixMessages(current, problems, userTemplate);
+	const parsed = await chat(messages, { requestType: 'strictFix' });
+	return parsed?.commitMessage || current;
 }
 
 
@@ -189,7 +189,7 @@ async function enforceTargetLanguageForCommit(
 
 	try {
 		const messages = buildEnforceLanguageMessages(commitMessage, lang, userTemplate);
-        const parsed = await chat(messages, { requestType: 'enforceLanguage' });
+		const parsed = await chat(messages, { requestType: 'enforceLanguage' });
 		return parsed?.commitMessage?.trim() || commitMessage;
 	} catch (error) {
 		return commitMessage;
@@ -198,32 +198,32 @@ async function enforceTargetLanguageForCommit(
 
 
 export async function generateCommitMessageChain(
-    inputs: ChainInputs,
-    chat: ChatFn,
-    options?: { maxParallel?: number; onStage?: (event: { type: string; data?: any }) => void }
+	inputs: ChainInputs,
+	chat: ChatFn,
+	options?: { maxParallel?: number; onStage?: (event: { type: string; data?: any }) => void }
 ): Promise<ChainOutputs> {
-    const { diffs } = inputs;
+	const { diffs } = inputs;
 	const maxParallel = options?.maxParallel ?? Math.max(4, Math.min(8, diffs.length));
 
 	const queue = [...diffs];
 	const results: FileSummary[] = [];
 
-    // Notify: summarizing has started
-    try { options?.onStage?.({ type: 'summarizeStart' }); } catch { /* ignore */ }
+	// Notify: summarizing has started
+	try { options?.onStage?.({ type: 'summarizeStart' }); } catch { /* ignore */ }
 
 	async function worker() {
 		while (queue.length) {
 			const item = queue.shift();
 			if (!item) { break; };
-            const summary = await summarizeSingleFile(item, chat);
-            results.push(summary);
-            // progress update + last summary text for visibility
-            try {
-                options?.onStage?.({
-                    type: 'summarizeProgress',
-                    data: { current: results.length, total: diffs.length, file: summary.file, summary: summary.summary, breaking: !!summary.breaking }
-                });
-            } catch { /* ignore */ }
+			const summary = await summarizeSingleFile(item, chat);
+			results.push(summary);
+			// progress update + last summary text for visibility
+			try {
+				options?.onStage?.({
+					type: 'summarizeProgress',
+					data: { current: results.length, total: diffs.length, file: summary.file, summary: summary.summary, breaking: !!summary.breaking }
+				});
+			} catch { /* ignore */ }
 		}
 	}
 
@@ -232,57 +232,61 @@ export async function generateCommitMessageChain(
 	// Waiting for all workers to complete
 	await Promise.all(workers);
 
-    let changeSetSummary = undefined;
-    let retrievalFeatures = undefined;
+	let changeSetSummary = undefined;
+	let retrievalFeatures = undefined;
 
-    if (isRagPreparationEnabled()) {
-        try {
-            const ragContext = await prepareRagContext(diffs, results, chat);
-            changeSetSummary = ragContext.changeSetSummary;
-            retrievalFeatures = ragContext.retrievalFeatures;
-        } catch (error) {
-            const errorMessage = String((error as any)?.message || error || 'Unknown error');
-            logger.warn('[Genie][Chain] RAG preparation failed; continuing without RAG context.', error);
-            try {
-                options?.onStage?.({
-                    type: 'ragPreparationSkipped',
-                    data: { error: errorMessage }
-                });
-            } catch { /* ignore */ }
-        }
-    }
+	if (isRagPreparationEnabled()) {
+		try {
+			const ragContext = await prepareRagContext(diffs, results, chat);
+			changeSetSummary = ragContext.changeSetSummary;
+			retrievalFeatures = ragContext.retrievalFeatures;
+		} catch (error) {
+			const errorMessage = String((error as any)?.message || error || 'Unknown error');
+			logger.warn('[Genie][Chain] RAG preparation failed; continuing without RAG context.', error);
+			try {
+				options?.onStage?.({
+					type: 'ragPreparationSkipped',
+					data: { error: errorMessage }
+				});
+			} catch { /* ignore */ }
+		}
+	}
 
-    const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat);
-    try { options?.onStage?.({ type: 'classifyDraft', data: { draft } }); } catch { /* ignore */ }
-    const { validMessage, notes: validationNotes } = await validateAndFix(draft, inputs.validationChecklist ?? '', chat, inputs.userTemplate);
-    try { options?.onStage?.({ type: 'validateFix', data: { validMessage } }); } catch { /* ignore */ }
+	const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat);
+
+	try {
+		options?.onStage?.({ type: 'classifyDraft', data: { draft } });
+	} catch { /* ignore */ }
+
+	const { validMessage, notes: validationNotes } = await validateAndFix(draft, inputs.validationChecklist ?? '', chat, inputs.userTemplate);
+	try { options?.onStage?.({ type: 'validateFix', data: { validMessage } }); } catch { /* ignore */ }
 
 	// Local strict check; if still not conforming, ask LLM for a minimal strict fix
 	let finalMessage = validMessage;
 	const check = localStrictCheck(finalMessage);
-    if (!check.ok) {
-        finalMessage = await enforceStrictWithLLM(finalMessage, check.problems, chat, inputs.userTemplate);
-        try { options?.onStage?.({ type: 'strictFix', data: { message: finalMessage } }); } catch { /* ignore */ }
-    }
+	if (!check.ok) {
+		finalMessage = await enforceStrictWithLLM(finalMessage, check.problems, chat, inputs.userTemplate);
+		try { options?.onStage?.({ type: 'strictFix', data: { message: finalMessage } }); } catch { /* ignore */ }
+	}
 
 	// Enforce target language strictly while preserving tokens/structure
-    try {
-        if ((inputs.targetLanguage || '').trim()) {
-            const out = await enforceTargetLanguageForCommit(finalMessage, inputs.targetLanguage, chat, inputs.userTemplate);
-            finalMessage = out;
-            try { options?.onStage?.({ type: 'enforceLanguage', data: { message: finalMessage } }); } catch { /* ignore */ }
-        }
-    } catch (error) {
-        // ignore
-    }
+	try {
+		if ((inputs.targetLanguage || '').trim()) {
+			const out = await enforceTargetLanguageForCommit(finalMessage, inputs.targetLanguage, chat, inputs.userTemplate);
+			finalMessage = out;
+			try { options?.onStage?.({ type: 'enforceLanguage', data: { message: finalMessage } }); } catch { /* ignore */ }
+		}
+	} catch (error) {
+		// ignore
+	}
 
-    try { options?.onStage?.({ type: 'done', data: { finalMessage } }); } catch { /* ignore */ }
+	try { options?.onStage?.({ type: 'done', data: { finalMessage } }); } catch { /* ignore */ }
 
 	return {
 		commitMessage: finalMessage,
 		fileSummaries: results,
-        changeSetSummary,
-        retrievalFeatures,
+		changeSetSummary,
+		retrievalFeatures,
 		raw: {
 			draft,
 			classificationNotes: classificationNotes ?? '',
