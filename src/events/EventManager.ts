@@ -20,6 +20,7 @@ export class EventManager {
         await this.setupFileWatchers();
         await this.setupGitWatchers();
         await this.initializeRepositoryAnalysis();
+        await this.initializeRagIndexes();
     }
 
     async dispose(): Promise<void> {
@@ -132,6 +133,7 @@ export class EventManager {
                         if (next && next !== prev) {
                             this.lastHeadByRepo.set(repoPath, next);
                             this.runAnalysisCheck(repo, 'HEADChanged');
+                            void this.ensureRagIndex(repo, 'HEADChanged');
                         }
                     } catch {
                         // noop
@@ -150,6 +152,7 @@ export class EventManager {
                 attachRepoListeners(repo);
                 // Try to initialize analysis when a new repository is detected
                 this.initializeRepositoryAnalysis();
+                void this.ensureRagIndex(repo, 'repositoryOpened');
             });
             this.context.subscriptions.push(onDidOpenRepo);
         } catch {
@@ -259,6 +262,30 @@ export class EventManager {
             this.initializationAttempted = true;
         } catch (error) {
             logger.error('Error during repository analysis initialization:', error);
+        }
+    }
+
+    private async initializeRagIndexes(): Promise<void> {
+        try {
+            const enabled = vscode.workspace.getConfiguration('gitCommitGenie.rag').get<boolean>('enabled', false);
+            if (!enabled) {
+                return;
+            }
+            await this.serviceRegistry.getRagHistoricalIndexService().ensureAllRepositoriesIndexed('startup');
+        } catch (error) {
+            logger.warn('[Genie][RAG] Failed to initialize background indexes', error as any);
+        }
+    }
+
+    private async ensureRagIndex(repo: Repository, reason: string): Promise<void> {
+        try {
+            const enabled = vscode.workspace.getConfiguration('gitCommitGenie.rag').get<boolean>('enabled', false);
+            if (!enabled) {
+                return;
+            }
+            await this.serviceRegistry.getRagHistoricalIndexService().ensureRepositoryIndexed(repo, reason);
+        } catch (error) {
+            logger.warn(`[Genie][RAG] Failed to ensure background index (${reason})`, error as any);
         }
     }
 

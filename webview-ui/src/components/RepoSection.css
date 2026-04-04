@@ -136,6 +136,105 @@
     text-decoration: underline;
 }
 
+.rag-status-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    max-width: 140px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border: 1px solid transparent;
+    flex-shrink: 0;
+}
+
+.rag-tooltip-anchor {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.rag-tooltip-anchor::after {
+    content: attr(data-tooltip);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 8px);
+    transform: translateX(-50%) translateY(4px);
+    min-width: max-content;
+    max-width: 240px;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: var(--vscode-editorHoverWidget-background);
+    color: var(--vscode-editorHoverWidget-foreground);
+    border: 1px solid var(--vscode-editorHoverWidget-border);
+    box-shadow: 0 4px 14px rgba(0, 0, 0, 0.22);
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.35;
+    letter-spacing: 0;
+    white-space: normal;
+    text-align: left;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+    z-index: 20;
+    transition: opacity 0.12s ease, transform 0.12s ease, visibility 0.12s ease;
+}
+
+.rag-tooltip-anchor:hover::after,
+.rag-tooltip-anchor:focus-within::after {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.rag-status-icon-only {
+    min-width: 18px;
+    padding: 1px 4px;
+}
+
+.rag-status-badge .codicon {
+    font-size: 11px;
+    line-height: 1;
+}
+
+.rag-status-idle {
+    color: var(--vscode-descriptionForeground);
+    background-color: color-mix(in srgb, var(--vscode-editor-inactiveSelectionBackground) 70%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-descriptionForeground) 35%, transparent);
+}
+
+.rag-status-importing,
+.rag-status-preparing {
+    color: var(--vscode-button-foreground);
+    background-color: color-mix(in srgb, var(--vscode-button-background) 88%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-button-background) 55%, transparent);
+}
+
+.rag-status-embedding {
+    color: var(--vscode-editorWarning-foreground);
+    background-color: color-mix(in srgb, var(--vscode-editorWarning-foreground) 18%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-editorWarning-foreground) 42%, transparent);
+}
+
+.rag-status-ready {
+    color: var(--vscode-testing-iconPassed);
+    background-color: color-mix(in srgb, var(--vscode-testing-iconPassed) 16%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-testing-iconPassed) 38%, transparent);
+}
+
+.rag-status-error {
+    color: var(--vscode-errorForeground);
+    background-color: color-mix(in srgb, var(--vscode-errorForeground) 14%, transparent);
+    border-color: color-mix(in srgb, var(--vscode-errorForeground) 36%, transparent);
+}
+
 .repo-actions {
     display: flex;
     align-items: center;

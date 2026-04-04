@@ -257,6 +257,7 @@ export const LogSection: React.FC = () => {
             if (title.includes('Commit stage:')) {
                 const stage = title.replace('Commit stage:', '').trim().toLowerCase();
                 if (stage.includes('summarize')) return { label: 'Sum', className: 'stage-badge-summarize' };
+                if (stage.includes('rag')) return { label: 'RAG', className: 'stage-badge-tool' };
                 if (stage.includes('classify')) return { label: 'Draft', className: 'stage-badge-classify' };
                 if (stage.includes('validate')) return { label: 'Vld', className: 'stage-badge-validate' };
                 if (stage.includes('strict')) return { label: 'Fix', className: 'stage-badge-strict' };

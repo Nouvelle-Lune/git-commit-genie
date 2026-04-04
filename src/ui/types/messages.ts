@@ -66,6 +66,11 @@ export interface RepositoryInfo {
     cost: number;
     analysisStatus: 'missing' | 'analyzing' | 'idle'; // Repository analysis status
     analysisPath?: string; // Path to analysis markdown file
+    ragStatus?: {
+        kind: 'disabled' | 'idle' | 'preparing' | 'importing' | 'embedding' | 'ready' | 'error';
+        text: string;
+        detail?: string;
+    };
 }
 
 export interface I18nTexts {

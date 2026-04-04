@@ -70,6 +70,11 @@ export interface RepositoryInfo {
     cost: number;
     analysisStatus: 'missing' | 'analyzing' | 'idle';
     analysisPath?: string;
+    ragStatus?: {
+        kind: 'disabled' | 'idle' | 'preparing' | 'importing' | 'embedding' | 'ready' | 'error';
+        text: string;
+        detail?: string;
+    };
 }
 
 export interface I18nTexts {

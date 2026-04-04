@@ -1,6 +1,7 @@
 // Types related to chain-of-thought prompting and chat interactions
 
 import { DiffData } from "../git/gitTypes";
+import { Repository } from "../git/git";
 
 
 export type NormalizedLang =
@@ -26,8 +27,10 @@ export interface ChainInputs {
     targetLanguage?: string;
     validationChecklist?: string;
     repositoryPath?: string;
+    targetRepo?: Repository;
     // Optional repository analysis (can be string for backward compatibility or structured object)
     repositoryAnalysis?: string | RepositoryAnalysis;
+    ragStyleReferences?: RagStyleReference[];
 }
 
 export interface FileSummary {
@@ -66,11 +69,24 @@ export interface RetrievalFeatures {
     breakingLike: boolean;
 }
 
+export interface RagStyleReference {
+    commitHash: string;
+    message: string;
+    subject: string;
+    body?: string;
+    committedAt?: string;
+    matchedBy: Array<'hybrid' | 'typeScope'>;
+    styleReason: string;
+    type?: string | null;
+    scope?: string | null;
+}
+
 export interface ChainOutputs {
     commitMessage: string;
     fileSummaries: FileSummary[];
     changeSetSummary?: ChangeSetSummary;
     retrievalFeatures?: RetrievalFeatures;
+    ragStyleReferences?: RagStyleReference[];
     raw?: {
         draft?: string;
         classificationNotes?: string;

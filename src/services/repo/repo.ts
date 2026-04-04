@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
+import { execFile } from 'child_process';
 import { GitExtension, API, Repository, Commit, LogOptions } from '../git/git';
 import { logger } from '../logger';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
@@ -173,6 +174,34 @@ export class RepoService {
     }
 
     /**
+     * Resolve the repository's actual git directory. This must not assume
+     * repoRoot/.git because worktrees and submodules can use indirection.
+     */
+    public async getRepositoryGitDir(repo: Repository): Promise<string | null> {
+        try {
+            const cwd = repo?.rootUri?.fsPath;
+            if (!cwd) {
+                return null;
+            }
+
+            const gitPath = this.gitApi?.git?.path || 'git';
+            const gitDir = await this.execGit(gitPath, cwd, ['rev-parse', '--absolute-git-dir']);
+            return gitDir || null;
+        } catch (error) {
+            logger.error('[Genie][RepoService] Failed to resolve repository git dir', error);
+            return null;
+        }
+    }
+
+    public async getActiveRepositoryGitDir(): Promise<string | null> {
+        const repo = this.getActiveRepository();
+        if (!repo) {
+            return null;
+        }
+        return this.getRepositoryGitDir(repo);
+    }
+
+    /**
      * Get the input box value of the active repository
      */
     public getRepoInputBoxValue(): string {
@@ -204,6 +233,18 @@ export class RepoService {
             logger.error('[Genie][RepoService] Failed to get repository label', error);
             return '';
         }
+    }
+
+    private async execGit(gitPath: string, cwd: string, args: string[]): Promise<string> {
+        return await new Promise<string>((resolve, reject) => {
+            execFile(gitPath, args, { cwd, maxBuffer: 64 * 1024 * 1024 }, (error, stdout, stderr) => {
+                if (error) {
+                    reject(new Error(stderr || error.message));
+                    return;
+                }
+                resolve(String(stdout || '').trim());
+            });
+        });
     }
 
     /**
@@ -260,22 +301,10 @@ export class RepoService {
 
     public async getRepositoryGitMessageLog(repositoryPath?: string): Promise<string[]> {
         try {
-
-            let repo: Repository | null = null;
-
-
-            if (repositoryPath) {
-                try {
-                    const uri = vscode.Uri.file(repositoryPath);
-                    repo = this.getRepositoryByUri(uri);
-                } catch { repo = null; }
-            }
-
-            if (!repo) {
+            const commits = await this.getRepositoryCommits(undefined, repositoryPath);
+            if (!commits.length) {
                 return [];
             }
-            const commits: Commit[] = await repo.log();
-
             return commits.map(commit => commit.message.trim());
         } catch (error) {
             logger.error('Failed to get git commit log:', error);
@@ -289,26 +318,114 @@ export class RepoService {
      * @param options Optional log options such as maxEntries.
      */
     public async getRepositoryCommits(options?: LogOptions, repositoryPath?: string): Promise<Commit[]> {
+        const repoPath = repositoryPath || this.getRepositoryPath(this.getActiveRepository() as Repository);
+        if (!repoPath) { return []; }
+
         try {
-
-            let repo: Repository | null = null;
-
-            if (repositoryPath) {
-                try {
-                    const uri = vscode.Uri.file(repositoryPath);
-                    repo = this.getRepositoryByUri(uri);
-
-                } catch { repo = null; }
-            }
-
-            if (!repo) { return []; }
-
-            const commits: Commit[] = await repo.log(options);
-            return commits || [];
+            const gitPath = this.gitApi?.git?.path || 'git';
+            const args = this.buildGitLogArgs(options);
+            const output = await this.execGit(gitPath, repoPath, args);
+            return this.parseGitLogOutput(output);
         } catch (error) {
             logger.error('Failed to get git commits:', error);
+            throw error;
+        }
+    }
+
+    public async getRepositoryCommitCount(repositoryPath?: string): Promise<number> {
+        const repoPath = repositoryPath || this.getRepositoryPath(this.getActiveRepository() as Repository);
+        if (!repoPath) {
+            return 0;
+        }
+
+        try {
+            const gitPath = this.gitApi?.git?.path || 'git';
+            const output = await this.execGit(gitPath, repoPath, ['rev-list', '--count', 'HEAD']);
+            const count = Number.parseInt(output, 10);
+            return Number.isFinite(count) && count > 0 ? count : 0;
+        } catch (error) {
+            logger.error('Failed to get repository commit count:', error);
+            return 0;
+        }
+    }
+
+    private buildGitLogArgs(options?: LogOptions): string[] {
+        const args = ['log', '--format=%H%x1f%P%x1f%aI%x1f%an%x1f%ae%x1f%cI%x1f%B%x1e'];
+
+        if (options?.reverse) {
+            args.push('--reverse');
+        }
+        if (options?.sortByAuthorDate) {
+            args.push('--author-date-order');
+        }
+        if (typeof options?.maxEntries === 'number' && options.maxEntries > 0) {
+            args.push(`-n${options.maxEntries}`);
+        }
+        if (typeof options?.skip === 'number' && options.skip > 0) {
+            args.push(`--skip=${options.skip}`);
+        }
+        if (typeof options?.maxParents === 'number') {
+            args.push(`--max-parents=${options.maxParents}`);
+        }
+        if (options?.author) {
+            args.push(`--author=${options.author}`);
+        }
+        if (options?.grep) {
+            args.push(`--grep=${options.grep}`);
+        }
+        if (options?.refNames?.length) {
+            args.push(...options.refNames);
+        } else if (options?.range) {
+            args.push(options.range);
+        }
+        if (options?.path) {
+            args.push('--', options.path);
+        }
+
+        return args;
+    }
+
+    private parseGitLogOutput(output: string): Commit[] {
+        if (!output.trim()) {
             return [];
         }
+
+        const records = output
+            .split('\x1e')
+            .map(record => record.trim())
+            .filter(Boolean);
+
+        return records.map((record) => {
+            const fields = record.split('\x1f');
+            const [
+                hash = '',
+                parentsRaw = '',
+                authorDateRaw = '',
+                authorName = '',
+                authorEmail = '',
+                commitDateRaw = '',
+                ...messageParts
+            ] = fields;
+
+            const message = messageParts.join('\x1f').trim();
+            return {
+                hash,
+                parents: parentsRaw ? parentsRaw.split(' ').filter(Boolean) : [],
+                authorDate: this.parseGitDate(authorDateRaw),
+                authorName: authorName || undefined,
+                authorEmail: authorEmail || undefined,
+                commitDate: this.parseGitDate(commitDateRaw),
+                message,
+            } as Commit;
+        });
+    }
+
+    private parseGitDate(value: string): Date | undefined {
+        if (!value) {
+            return undefined;
+        }
+        const date = new Date(value);
+        return Number.isNaN(date.getTime()) ? undefined : date;
     }
 
 }

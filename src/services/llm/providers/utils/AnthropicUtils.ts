@@ -27,6 +27,7 @@ export class AnthropicUtils extends BaseProviderUtils {
             toolChoice?: any;
             isFirstRequest?: boolean;
             repoPath?: string;
+            suppressApiLogs?: boolean;
         }
     ): Promise<{ parsedResponse: any; usage?: any; parsedAssistantResponse?: any }> {
         if (!client) {
@@ -74,7 +75,9 @@ export class AnthropicUtils extends BaseProviderUtils {
                 const controller = this.createAbortController(options.token);
 
                 // Log API request (pending state)
-                logId = logger.logApiRequest(options.repoPath);
+                if (!options.suppressApiLogs) {
+                    logId = logger.logApiRequest(options.repoPath);
+                }
 
                 const response = await client.messages.create(requestOptions, {
                     signal: controller.signal
@@ -88,7 +91,8 @@ export class AnthropicUtils extends BaseProviderUtils {
                 if (parsedResponse) {
                     const isFinal = (parsedResponse as any).action === 'final';
                     const usage = response.usage;
-                    logger.logApiRequestWithResult(
+                    if (logId) {
+                        logger.logApiRequestWithResult(
                         logId,
                         options.provider,
                         options.model,
@@ -96,7 +100,8 @@ export class AnthropicUtils extends BaseProviderUtils {
                         usage,
                         isFinal,
                         options.repoPath
-                    );
+                        );
+                    }
                 }
 
                 const parsedAssistantResponse = {

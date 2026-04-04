@@ -15,6 +15,9 @@ import { RepoService } from "../services/repo/repo";
 import { CostTrackingService } from "../services/cost/costTrackingService";
 import { logger } from '../services/logger';
 import { getProviderModelStateKey, getProviderFromSecretKey, QWEN_REGIONS } from '../services/llm/providers/config/providerConfig';
+import { RagRuntimeService } from '../services/rag/ragRuntimeService';
+import { RagHistoricalIndexService } from '../services/rag/ragHistoricalIndexService';
+import { RagRetrievalService } from '../services/rag/ragRetrievalService';
 
 export class ServiceRegistry {
     private diffService!: DiffService;
@@ -32,6 +35,9 @@ export class ServiceRegistry {
     private currentLLMService!: LLMService;
     private repoService!: RepoService;
     private costTrackingService!: CostTrackingService;
+    private ragRuntimeService!: RagRuntimeService;
+    private ragHistoricalIndexService!: RagHistoricalIndexService;
+    private ragRetrievalService!: RagRetrievalService;
 
     constructor(private context: vscode.ExtensionContext) {
         this.llmServices = new Map();
@@ -46,6 +52,15 @@ export class ServiceRegistry {
             this.diffService = new DiffService(this.repoService);
             this.templateService = new TemplateService(this.context);
             this.costTrackingService = new CostTrackingService(this.context);
+            this.ragRuntimeService = new RagRuntimeService(this.context, this.repoService);
+            this.ragHistoricalIndexService = new RagHistoricalIndexService(
+                this.repoService,
+                this.ragRuntimeService,
+            );
+            this.ragRetrievalService = new RagRetrievalService(this.context);
+            this.ragRuntimeService.setBackgroundEnsureCallback((reason: string) =>
+                this.ragHistoricalIndexService.ensureAllRepositoriesIndexed(reason)
+            );
 
             logger.setCostTracker(this.costTrackingService);
 
@@ -61,7 +76,6 @@ export class ServiceRegistry {
             this.glmService = new GLMService(this.context, this.templateService, this.analysisService);
             this.kimiService = new KimiService(this.context, this.templateService, this.analysisService);
             this.openrouterService = new OpenRouterService(this.context, this.templateService, this.analysisService);
-
             // Setup LLM services map
             this.llmServices.set('openai', this.openAIService);
             this.llmServices.set('deepseek', this.deepseekService);
@@ -80,6 +94,8 @@ export class ServiceRegistry {
             this.analysisService.setLLMService(this.currentLLMService);
             // Provide resolver so analysis can pick provider based on setting
             this.analysisService.setLLMResolver((provider: string) => this.llmServices.get(provider));
+            await this.ragRuntimeService.initialize();
+            await this.ragRuntimeService.refreshFromSettings();
 
             // Keep in-memory provider clients in sync with SecretStorage changes
             const secretDisp = this.context.secrets.onDidChange(async (e) => {
@@ -108,7 +124,11 @@ export class ServiceRegistry {
     }
 
     async dispose(): Promise<void> {
-        // Cleanup services if needed
+        try {
+            await this.ragRuntimeService?.dispose();
+        } catch (error) {
+            logger.warn('[Genie][RAG] Failed to dispose runtime service', error as any);
+        }
     }
 
     // Service getters
@@ -138,6 +158,18 @@ export class ServiceRegistry {
 
     getCostTrackingService(): CostTrackingService {
         return this.costTrackingService;
+    }
+
+    getRagRuntimeService(): RagRuntimeService {
+        return this.ragRuntimeService;
+    }
+
+    getRagHistoricalIndexService(): RagHistoricalIndexService {
+        return this.ragHistoricalIndexService;
+    }
+
+    getRagRetrievalService(): RagRetrievalService {
+        return this.ragRetrievalService;
     }
 
     // Provider and model management

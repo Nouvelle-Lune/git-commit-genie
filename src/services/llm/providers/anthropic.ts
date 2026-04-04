@@ -17,12 +17,13 @@ import {
     AnthropicClassifyAndDraftTool,
     AnthropicValidateAndFixTool,
     AnthropicRagPreparationTool,
+    AnthropicRagRerankTool,
     AnthropicRepoAnalysisTool,
     AnthropicRepoAnalysisActionTool
 } from './schemas/anthropicSchemas';
 import {
     fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
-    commitMessageSchema, ragPreparationResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
+    commitMessageSchema, ragPreparationResponseSchema, ragRerankResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
 } from './schemas/common';
 
 const SECRET_ANTHROPIC_API_KEY = 'gitCommitGenie.secret.anthropicApiKey';
@@ -177,6 +178,7 @@ export class AnthropicService extends BaseLLMService {
                     case 'draft': return 'draft';
                     case 'fix': return 'validate-fix';
                     case 'ragPreparation': return 'rag-prep';
+                    case 'ragRerank': return 'rag-rerank';
                     case 'strictFix': return 'strict-fix';
                     case 'enforceLanguage': return 'lang-fix';
                     case 'commitMessage': return 'build-commit-msg';
@@ -191,6 +193,7 @@ export class AnthropicService extends BaseLLMService {
                 draft: { tool: AnthropicClassifyAndDraftTool, schema: classifyAndDraftResponseSchema },
                 fix: { tool: AnthropicValidateAndFixTool, schema: validateAndFixResponseSchema },
                 ragPreparation: { tool: AnthropicRagPreparationTool, schema: ragPreparationResponseSchema },
+                ragRerank: { tool: AnthropicRagRerankTool, schema: ragRerankResponseSchema },
                 commitMessage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
                 strictFix: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
                 enforceLanguage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
@@ -261,11 +264,23 @@ export class AnthropicService extends BaseLLMService {
                     targetLanguage: parsedInput?.['target-language'],
                     validationChecklist: rules.checklistText,
                     repositoryPath: repoPath,
+                    targetRepo: options?.targetRepo,
                     repositoryAnalysis: parsedInput?.['repository-analysis']
                 },
                 chat,
                 {
                     maxParallel: config.chainMaxParallel,
+                    retrieveRagExamples: async (context) => {
+                        if (!options?.ragRetrievalService || !options?.targetRepo) {
+                            return [];
+                        }
+                        return await options.ragRetrievalService.retrieveStyleReferences({
+                            repo: options.targetRepo,
+                            changeSetSummary: context.changeSetSummary,
+                            retrievalFeatures: context.retrievalFeatures,
+                            chat,
+                        });
+                    },
                     onStage: (event) => {
                         try {
                             stageNotifications.update({ type: event.type as any, data: event.data });
@@ -283,7 +298,15 @@ export class AnthropicService extends BaseLLMService {
             logger.usageSummary(repoPath, 'Anthropic', usages, config.model, 'thinking', undefined, false);
         }
 
-        return { content: out.commitMessage };
+        return {
+            content: out.commitMessage,
+            ragMetadata: {
+                fileSummaries: out.fileSummaries,
+                changeSetSummary: out.changeSetSummary,
+                retrievalFeatures: out.retrievalFeatures,
+                ragStyleReferences: out.ragStyleReferences,
+            }
+        };
     }
 
     /**

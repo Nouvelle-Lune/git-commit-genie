@@ -1,6 +1,6 @@
 import { DiffData } from "../git/gitTypes";
 import { ChatFn } from "../llm/llmTypes";
-import { ChainInputs, FileSummary, ChainOutputs } from "./chainTypes";
+import { ChainInputs, ChangeSetSummary, FileSummary, ChainOutputs, RagStyleReference, RetrievalFeatures } from "./chainTypes";
 import {
 	buildSummarizeFileMessages,
 	buildClassifyAndDraftMessages,
@@ -200,7 +200,14 @@ async function enforceTargetLanguageForCommit(
 export async function generateCommitMessageChain(
 	inputs: ChainInputs,
 	chat: ChatFn,
-	options?: { maxParallel?: number; onStage?: (event: { type: string; data?: any }) => void }
+	options?: {
+		maxParallel?: number;
+		onStage?: (event: { type: string; data?: any }) => void;
+		retrieveRagExamples?: (context: {
+			changeSetSummary: ChangeSetSummary;
+			retrievalFeatures: RetrievalFeatures;
+		}) => Promise<RagStyleReference[]>;
+	}
 ): Promise<ChainOutputs> {
 	const { diffs } = inputs;
 	const maxParallel = options?.maxParallel ?? Math.max(4, Math.min(8, diffs.length));
@@ -234,6 +241,7 @@ export async function generateCommitMessageChain(
 
 	let changeSetSummary = undefined;
 	let retrievalFeatures = undefined;
+	let ragStyleReferences: RagStyleReference[] = [];
 
 	if (isRagPreparationEnabled()) {
 		try {
@@ -252,7 +260,31 @@ export async function generateCommitMessageChain(
 		}
 	}
 
-	const { draft, notes: classificationNotes } = await classifyAndDraft(results, inputs, chat);
+	if (changeSetSummary && retrievalFeatures && options?.retrieveRagExamples) {
+		try {
+			ragStyleReferences = await options.retrieveRagExamples({ changeSetSummary, retrievalFeatures });
+			try {
+				options?.onStage?.({
+					type: 'ragRetrieved',
+					data: {
+						count: ragStyleReferences.length,
+						messages: ragStyleReferences.map(reference => reference.message),
+					}
+				});
+			} catch { /* ignore */ }
+		} catch (error) {
+			const errorMessage = String((error as any)?.message || error || 'Unknown error');
+			logger.warn('[Genie][Chain] RAG retrieval failed; continuing without style references.', error);
+			try {
+				options?.onStage?.({
+					type: 'ragRetrievalSkipped',
+					data: { error: errorMessage }
+				});
+			} catch { /* ignore */ }
+		}
+	}
+
+	const { draft, notes: classificationNotes } = await classifyAndDraft(results, { ...inputs, ragStyleReferences }, chat);
 
 	try {
 		options?.onStage?.({ type: 'classifyDraft', data: { draft } });
@@ -287,6 +319,7 @@ export async function generateCommitMessageChain(
 		fileSummaries: results,
 		changeSetSummary,
 		retrievalFeatures,
+		ragStyleReferences,
 		raw: {
 			draft,
 			classificationNotes: classificationNotes ?? '',

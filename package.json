@@ -3,7 +3,7 @@
   "displayName": "%displayName%",
   "publisher": "Lune-99",
   "description": "%description%",
-  "version": "3.0.4",
+  "version": "3.1.4",
   "license": "MIT",
   "engines": {
     "vscode": "^1.103.0"
@@ -190,6 +190,39 @@
             "experimental"
           ],
           "markdownDescription": "%config.rag.enabled.desc%"
+        },
+        "gitCommitGenie.rag.embedding.baseUrl": {
+          "order": 15,
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%config.rag.embedding.baseUrl.desc%"
+        },
+        "gitCommitGenie.rag.embedding.model": {
+          "order": 16,
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%config.rag.embedding.model.desc%"
+        },
+        "gitCommitGenie.rag.embedding.apiKey": {
+          "order": 17,
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%config.rag.embedding.apiKey.desc%"
+        },
+        "gitCommitGenie.rag.embedding.dimensions": {
+          "order": 18,
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "%config.rag.embedding.dimensions.desc%"
+        },
+        "gitCommitGenie.rag.embedding.batchSize": {
+          "order": 19,
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 512,
+          "markdownDescription": "%config.rag.embedding.batchSize.desc%"
         },
         "gitCommitGenie.repositoryAnalysis.MaxCount": {
           "order": 9,
@@ -442,6 +475,32 @@
         "icon": "$(gear)"
       },
       {
+        "command": "git-commit-genie.configureRagEmbeddingApiKey",
+        "title": "%command.configureRagEmbeddingApiKey%",
+        "category": "%category.title%",
+        "icon": "$(key)"
+      },
+      {
+        "command": "git-commit-genie.clearRagEmbeddingApiKey",
+        "title": "%command.clearRagEmbeddingApiKey%",
+        "category": "%category.title%",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "git-commit-genie.startRagIndexing",
+        "title": "%command.startRagIndexing%",
+        "category": "%category.title%",
+        "icon": "$(play)",
+        "enablement": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true"
+      },
+      {
+        "command": "git-commit-genie.cancelRagIndexing",
+        "title": "%command.cancelRagIndexing%",
+        "category": "%category.title%",
+        "icon": "$(debug-stop)",
+        "enablement": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true && gitCommitGenie.ragIndexing == true"
+      },
+      {
         "command": "git-commit-genie.toggleChainMode",
         "title": "%command.toggleChain%",
         "category": "%category.title%",
@@ -518,6 +577,14 @@
         {
           "command": "git-commit-genie.clearRepositoryAnalysisCache",
           "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
+        },
+        {
+          "command": "git-commit-genie.startRagIndexing",
+          "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true"
+        },
+        {
+          "command": "git-commit-genie.cancelRagIndexing",
+          "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true && gitCommitGenie.ragIndexing == true"
         },
         {
           "command": "git-commit-genie.cancelRepositoryAnalysis",

@@ -12,11 +12,13 @@ import { StatusBarManager } from './StatusBarManager';
  */
 export class WebviewProvider implements vscode.WebviewViewProvider {
     public static readonly viewType = 'gitCommitGenie.panel';
+    private static readonly REPO_UPDATE_DEBOUNCE_MS = 150;
 
     private _view?: vscode.WebviewView;
     private _serviceRegistry: ServiceRegistry;
     private _statusBar?: StatusBarManager;
     private _disposables: vscode.Disposable[] = [];
+    private _repoUpdateTimer?: NodeJS.Timeout;
 
     constructor(
         private readonly _extensionUri: vscode.Uri,
@@ -56,8 +58,14 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
 
         // Listen to analysis data changes (e.g., clearAnalysis)
         const analysisService = this._serviceRegistry.getAnalysisService();
+        const ragRuntimeService = this._serviceRegistry.getRagRuntimeService();
         this._disposables.push(
             analysisService.onAnalysisChanged(() => {
+                this._handleRepositoryChange();
+            })
+        );
+        this._disposables.push(
+            ragRuntimeService.onDidRepositoryStatusChange(() => {
                 this._handleRepositoryChange();
             })
         );
@@ -110,9 +118,15 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
      */
     private _handleRepositoryChange(): void {
         if (this._view) {
-            this.sendRepositoryData().catch(err =>
-                logger.error('[WebviewProvider] Failed to send repository data:', err)
-            );
+            if (this._repoUpdateTimer) {
+                clearTimeout(this._repoUpdateTimer);
+            }
+            this._repoUpdateTimer = setTimeout(() => {
+                this._repoUpdateTimer = undefined;
+                this.sendRepositoryData().catch(err =>
+                    logger.error('[WebviewProvider] Failed to send repository data:', err)
+                );
+            }, WebviewProvider.REPO_UPDATE_DEBOUNCE_MS);
         }
     }
 
@@ -120,6 +134,10 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
      * Dispose resources
      */
     public dispose(): void {
+        if (this._repoUpdateTimer) {
+            clearTimeout(this._repoUpdateTimer);
+            this._repoUpdateTimer = undefined;
+        }
         this._disposables.forEach(d => d.dispose());
         this._disposables = [];
     }
@@ -284,9 +302,11 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
         const repoService = this._serviceRegistry.getRepoService();
         const costService = this._serviceRegistry.getCostTrackingService();
         const analysisService = this._serviceRegistry.getAnalysisService();
+        const ragRuntimeService = this._serviceRegistry.getRagRuntimeService();
         const repositories = repoService.getRepositories();
 
         const isRepoAnalysisEnabled = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis').get<boolean>('enabled', true);
+        const isRagEnabled = vscode.workspace.getConfiguration('gitCommitGenie.rag').get<boolean>('enabled', false);
         const runningRepoPath = this._statusBar?.isRepoAnalysisRunning() ? (this._statusBar as any)?.['analysisState']?.runningRepoPath : null;
 
         const repoCosts: RepositoryInfo[] = [];
@@ -322,7 +342,14 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 path: repoPath,
                 cost,
                 analysisStatus,
-                analysisPath
+                analysisPath,
+                ragStatus: (() => {
+                    if (!isRagEnabled) {
+                        return undefined;
+                    }
+                    const status = ragRuntimeService.getRepositoryStatus(repoPath);
+                    return status ? { kind: status.kind, text: status.text, detail: status.detail } : undefined;
+                })()
             });
         }
 

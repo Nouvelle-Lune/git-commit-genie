@@ -66,6 +66,14 @@ export const ragPreparationResponseSchema = z.object({
   })
 } as const);
 
+export const ragRerankResponseSchema = z.object({
+  selected: z.array(z.object({
+    commitHash: z.string().min(1),
+    reason: z.string().min(1),
+  })).default([]),
+  notes: z.string().nullable().default(null),
+} as const);
+
 export const repoAnalysisResponseSchema = z.object({
   summary: z.string().min(1).describe("Brief but comprehensive summary of the repository purpose and architecture"),
   projectType: z.string().min(1).default('Unknown Project').describe("Main project type (e.g., Web App, Library, CLI Tool, etc.)"),

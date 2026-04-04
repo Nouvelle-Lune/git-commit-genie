@@ -90,6 +90,32 @@ export class DiffService {
 		}
 	}
 
+	public async getCommitDiff(repo: Repository, commitHash: string): Promise<DiffData[]> {
+		const api = this.repoService.getGitApi();
+		if (!api) { return []; }
+
+		const gitPath = api.git.path;
+		const cwd = repo.rootUri.fsPath;
+
+		const [fullDiff, nameStatus] = await Promise.all([
+			this.runGitCapture(gitPath, cwd, ['show', '--format=', '--find-renames', '--patch', '--unified=3', commitHash]),
+			this.runGitCapture(gitPath, cwd, ['show', '--format=', '--name-status', '--find-renames', commitHash])
+		]);
+
+		const records = this.parseCommitNameStatus(nameStatus);
+		const out: DiffData[] = [];
+		for (const record of records) {
+			const rawDiff = this.extractFileDiffFromFullDiff(fullDiff, record.path) || this.buildSyntheticCommitDiff(record);
+			out.push({
+				fileName: record.path,
+				status: record.status,
+				diffHunks: this.parseDiff(rawDiff),
+				rawDiff,
+			});
+		}
+		return out;
+	}
+
 	// Close outer block if any lingering scopes existed (no-op stylistically)
 
 
@@ -278,6 +304,21 @@ export class DiffService {
 		throw new Error(`Failed to get staged diff for ${filePath}`);
 	}
 
+	private async runGitCapture(gitPath: string, cwd: string, args: string[]): Promise<string> {
+		return await new Promise<string>((resolve, reject) => {
+			const child = spawn(gitPath, args, { cwd });
+			let stdout = '';
+			let stderr = '';
+			child.stdout.on('data', d => { stdout += String(d); });
+			child.stderr.on('data', d => { stderr += String(d); });
+			child.on('error', reject);
+			child.on('close', (code) => {
+				if (code === 0) { resolve(stdout); }
+				else { reject(new Error(`git ${args.join(' ')} failed with code ${code}: ${stderr}`)); }
+			});
+		});
+	}
+
 	/**
 	 * Extracts the diff for a specific file from the full diff output.
 	 */
@@ -321,6 +362,71 @@ export class DiffService {
 		}
 
 		return lines.slice(startIndex, endIndex).join('\n');
+	}
+
+	private extractFileDiffFromFullDiff(fullDiff: string, relativeFilePath: string): string {
+		const lines = fullDiff.split('\n');
+		let startIndex = -1;
+		let endIndex = -1;
+		const escapedPath = relativeFilePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+		for (let i = 0; i < lines.length; i++) {
+			const line = lines[i];
+			const exactMatchA = new RegExp(`^diff --git a/${escapedPath} b/`);
+			const exactMatchB = new RegExp(`^diff --git a/.* b/${escapedPath}\\s*$`);
+			if (line.startsWith('diff --git') && (exactMatchA.test(line) || exactMatchB.test(line))) {
+				startIndex = i;
+				break;
+			}
+		}
+
+		if (startIndex === -1) {
+			return '';
+		}
+		for (let i = startIndex + 1; i < lines.length; i++) {
+			if (lines[i].startsWith('diff --git')) {
+				endIndex = i;
+				break;
+			}
+		}
+		if (endIndex === -1) {
+			endIndex = lines.length;
+		}
+		return lines.slice(startIndex, endIndex).join('\n');
+	}
+
+	private parseCommitNameStatus(raw: string): Array<{ path: string; status: DiffStatus; previousPath?: string }> {
+		const out: Array<{ path: string; status: DiffStatus; previousPath?: string }> = [];
+		for (const line of raw.split('\n')) {
+			const trimmed = line.trim();
+			if (!trimmed) { continue; }
+			const parts = trimmed.split('\t');
+			const token = (parts[0] || '').toUpperCase();
+			if (token.startsWith('R') && parts.length >= 3) {
+				out.push({ path: parts[2], previousPath: parts[1], status: 'renamed' });
+				continue;
+			}
+			if (parts.length < 2) { continue; }
+			const status = token.startsWith('A')
+				? 'added'
+				: token.startsWith('D')
+					? 'deleted'
+					: 'modified';
+			out.push({ path: parts[1], status });
+		}
+		return out;
+	}
+
+	private buildSyntheticCommitDiff(record: { path: string; status: DiffStatus; previousPath?: string }): string {
+		const lines = [
+			'== Historical commit file change ==',
+			`File: ${record.path}`,
+			`Status: ${record.status}`
+		];
+		if (record.previousPath) {
+			lines.push(`Previous: ${record.previousPath}`);
+		}
+		return lines.join('\n');
 	}
 
 	/**
