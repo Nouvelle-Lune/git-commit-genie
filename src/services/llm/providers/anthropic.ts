@@ -8,7 +8,7 @@ import { generateCommitMessageChain } from '../../chain/chainThinking';
 import { DiffData } from '../../git/gitTypes';
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
-import { AnthropicUtils } from './utils/anthropicUtils';
+import { AnthropicUtils } from './utils/AnthropicUtils';
 import { ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from '../baseLLMService';
 import {

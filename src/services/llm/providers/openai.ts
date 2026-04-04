@@ -8,7 +8,7 @@ import { generateCommitMessageChain } from "../../chain/chainThinking";
 import { logger } from '../../logger';
 import { IRepositoryAnalysisService } from "../../analysis/analysisTypes";
 import { stageNotifications } from '../../../ui/StageNotificationManager';
-import { OpenAICompatibleUtils } from './utils/openAIUtils';
+import { OpenAICompatibleUtils } from './utils/OpenAIUtils';
 import {
     fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
     commitMessageSchema, ragPreparationResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
