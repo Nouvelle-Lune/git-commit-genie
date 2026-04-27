@@ -1,14 +1,24 @@
 /**
  * LLM API Pricing Configuration
- * All prices are in USD per 1M tokens
- * 
+ * All prices are in USD per 1M tokens.
+ *
  * For flat pricing models, use: { input, output, cached }
  * For tiered pricing models, use: { tiers: [{ maxInputTokens, input, output, cached }] }
- * 
+ *
  * For Qwen Plus models with thinking mode support:
  * - Use model name with `:thinking` suffix (e.g., 'qwen-plus:intl:thinking')
  * - Thinking mode has higher output costs
+ *
+ * CNY-priced providers (GLM, Qwen China, DeepSeek, etc.) are converted to USD
+ * using a fixed exchange rate of 1 CNY = 0.145 USD. The rate is captured
+ * as `CNY_TO_USD` below and is intentionally fixed so that historical cost
+ * estimates do not shift when the FX rate moves.
  */
+
+/** Fixed conversion rate for CNY → USD pricing entries. */
+const CNY_TO_USD = 0.145;
+/** Helper for declaring CNY-denominated rates inline. */
+const cny = (amount: number): number => Number((amount * CNY_TO_USD).toFixed(4));
 
 export interface FlatPricing {
     input: number;
@@ -78,13 +88,12 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
 
     // lite variants removed
 
-    // DeepSeek (USD)
-    // Converted from official CNY pricing using the same fixed rate as GLM
-    // (1 CNY = 0.145 USD). DeepSeek-V4-Pro uses the original (non-discounted)
-    // rate; the limited-time 2.5-折 promotion is intentionally ignored so that
-    // cost estimates remain stable after the promotion ends.
-    'deepseek-v4-flash': { input: 0.145, output: 0.29, cached: 0.0029 },   // CNY: 1 / 2 / 0.02
-    'deepseek-v4-pro': { input: 1.74, output: 3.48, cached: 0.0145 },      // CNY: 12 / 24 / 0.1
+    // DeepSeek (CNY → USD via CNY_TO_USD).
+    // DeepSeek-V4-Pro uses the original (non-discounted) rate; the limited
+    // 2.5-折 promotion is intentionally ignored so cost estimates stay stable
+    // after the promotion ends.
+    'deepseek-v4-flash': { input: cny(1), output: cny(2), cached: cny(0.02) },
+    'deepseek-v4-pro': { input: cny(12), output: cny(24), cached: cny(0.1) },
 
     // GLM (USD)
     // Converted from RMB pricing snapshot shared by user on 2026-04-02.
