@@ -1136,28 +1136,23 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * @returns Object containing the provider name and service instance
      */
     private pickRepoAnalysisService(): { provider: string, service: LLMService | null } {
-        try {
-            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-            const selectedModel = (cfg.get<string>('model', 'general') || 'general').trim();
-            if (!selectedModel || selectedModel === 'general') {
-                const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
-                return { provider: p, service: this.llmService };
-            }
-            const candidates = getAllProviderKeys();
-            for (const p of candidates) {
-                const svc = this.resolveLLMService?.(p);
-                try {
-                    if (svc && svc.listSupportedModels().includes(selectedModel)) {
-                        return { provider: p, service: svc };
-                    }
-                } catch { /* ignore */ }
-            }
-            const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
-            return { provider: p, service: this.llmService };
-        } catch {
-            const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
-            return { provider: p, service: this.llmService };
+        const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+        const selectedModel = (cfg.get<string>('model', 'general') || 'general').trim();
+        const defaultProvider = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
+
+        if (!selectedModel || selectedModel === 'general') {
+            return { provider: defaultProvider, service: this.llmService };
         }
+
+        for (const p of getAllProviderKeys()) {
+            const svc = this.resolveLLMService?.(p);
+            if (svc && svc.listSupportedModels().includes(selectedModel)) {
+                return { provider: p, service: svc };
+            }
+        }
+
+        // Selected model is not registered with any provider; fall back to the user's default provider.
+        return { provider: defaultProvider, service: this.llmService };
     }
 
     /**
