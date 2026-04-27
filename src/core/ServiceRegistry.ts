@@ -66,8 +66,10 @@ export class ServiceRegistry {
 
             logger.setCostTracker(this.costTrackingService);
 
-            // Initialize repository analysis service with placeholder LLM service
-            this.analysisService = new RepositoryAnalysisService(this.context, null, this.repoService);
+            // Initialize repository analysis service. The LLM service is wired
+            // in below once provider services have been constructed; analysis
+            // calls before then are guarded by an internal null-check.
+            this.analysisService = new RepositoryAnalysisService(this.context, this.repoService);
 
             // Initialize LLM services
             this.openAIService = new OpenAIService(this.context, this.templateService, this.analysisService);
