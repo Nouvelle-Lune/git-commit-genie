@@ -10,6 +10,7 @@ import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { AnthropicUtils } from './utils/AnthropicUtils';
 import { safeRun } from '../../../utils/safeRun';
+import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
 import { ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from '../baseLLMService';
 import {
@@ -22,10 +23,7 @@ import {
     AnthropicRepoAnalysisTool,
     AnthropicRepoAnalysisActionTool
 } from './schemas/anthropicSchemas';
-import {
-    fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
-    commitMessageSchema, ragPreparationResponseSchema, ragRerankResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
-} from './schemas/common';
+import { commitMessageSchema } from './schemas/common';
 
 const SECRET_ANTHROPIC_API_KEY = 'gitCommitGenie.secret.anthropicApiKey';
 
@@ -171,86 +169,53 @@ export class AnthropicService extends BaseLLMService {
         const usages: Array<any> = [];
         let callCount = 0;
 
+        // Map request type to provider-specific tool definition. The
+        // validation schema is shared across providers and resolved via
+        // getValidationSchemaFor.
+        const toolMap: Record<string, any> = {
+            summary: AnthropicFileSummaryTool,
+            draft: AnthropicClassifyAndDraftTool,
+            fix: AnthropicValidateAndFixTool,
+            ragPreparation: AnthropicRagPreparationTool,
+            ragRerank: AnthropicRagRerankTool,
+            commitMessage: AnthropicCommitMessageTool,
+            strictFix: AnthropicCommitMessageTool,
+            enforceLanguage: AnthropicCommitMessageTool,
+            repoAnalysis: AnthropicRepoAnalysisTool,
+            repoAnalysisAction: AnthropicRepoAnalysisActionTool,
+        };
+
         const chat: ChatFn = async (messages, chainOptions) => {
             const reqType = chainOptions?.requestType;
-            const labelFor = (t?: string) => {
-                switch (t) {
-                    case 'summary': return 'summarize';
-                    case 'draft': return 'draft';
-                    case 'fix': return 'validate-fix';
-                    case 'ragPreparation': return 'rag-prep';
-                    case 'ragRerank': return 'rag-rerank';
-                    case 'strictFix': return 'strict-fix';
-                    case 'enforceLanguage': return 'lang-fix';
-                    case 'commitMessage': return 'build-commit-msg';
-                    case 'repoAnalysis': return 'repo-analysis';
-                    case 'repoAnalysisAction': return 'repo-analysis-action';
-                    default: return 'thinking';
-                }
-            };
-            // Map request type to tool and schema
-            const toolMap: Record<string, { tool: any, schema: any }> = {
-                summary: { tool: AnthropicFileSummaryTool, schema: fileSummarySchema },
-                draft: { tool: AnthropicClassifyAndDraftTool, schema: classifyAndDraftResponseSchema },
-                fix: { tool: AnthropicValidateAndFixTool, schema: validateAndFixResponseSchema },
-                ragPreparation: { tool: AnthropicRagPreparationTool, schema: ragPreparationResponseSchema },
-                ragRerank: { tool: AnthropicRagRerankTool, schema: ragRerankResponseSchema },
-                commitMessage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
-                strictFix: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
-                enforceLanguage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
-                repoAnalysis: { tool: AnthropicRepoAnalysisTool, schema: repoAnalysisResponseSchema },
-                repoAnalysisAction: { tool: AnthropicRepoAnalysisActionTool, schema: repoAnalysisActionSchema },
-            };
-
-            const mapping = reqType ? toolMap[reqType] : undefined;
             const retries = config.maxRetries ?? 2;
             const totalAttempts = Math.max(1, retries + 1);
+            const tool = reqType ? toolMap[reqType] : undefined;
 
-            for (let attempt = 0; attempt < totalAttempts; attempt++) {
-                const result = await this.utils.callChatCompletion(this.client!, messages, {
+            return await this.runValidatedChatCall({
+                reqType,
+                totalAttempts,
+                initialMessages: messages,
+                repoPath,
+                validationSchema: getValidationSchemaFor(reqType),
+                callOnce: (msgs) => this.utils.callChatCompletion(this.client!, msgs, {
                     model: config.model,
                     provider: 'Anthropic',
                     token: options?.token,
                     trackUsage: true,
-                    tools: mapping ? [mapping.tool] : undefined,
-                    toolChoice: mapping ? { type: 'tool', name: mapping.tool.name } : undefined,
-                    repoPath
-                });
-
-                callCount += 1;
-                if (result.usage) {
-                    usages.push(result.usage);
-                    logger.usage(repoPath, 'Anthropic', result.usage, config.model, labelFor(reqType), callCount);
-                } else {
-                    logger.usage(repoPath, 'Anthropic', undefined, config.model, labelFor(reqType), callCount);
-                }
-
-                if (mapping) {
-                    const safe = mapping.schema.safeParse(result.parsedResponse);
-                    if (safe.success) {
-                        return safe.data;
+                    tools: tool ? [tool] : undefined,
+                    toolChoice: tool ? { type: 'tool', name: tool.name } : undefined,
+                    repoPath,
+                }),
+                onUsage: (usage) => {
+                    callCount += 1;
+                    if (usage) {
+                        usages.push(usage);
+                        logger.usage(repoPath, 'Anthropic', usage, config.model, getRequestTypeLabel(reqType), callCount);
+                    } else {
+                        logger.usage(repoPath, 'Anthropic', undefined, config.model, getRequestTypeLabel(reqType), callCount);
                     }
-
-                    if (attempt < totalAttempts - 1) {
-                        this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
-                        safeRun('Anthropic.logSchemaValidationRetry', () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath));
-                        messages = this.buildSchemaValidationRetryMessages(
-                            messages,
-                            result,
-                            safe.error,
-                            mapping.schema,
-                            reqType
-                        );
-                        continue;
-                    }
-                    safeRun('Anthropic.logSchemaValidationFinal', () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath));
-
-                    throw new Error(`Anthropic tool result failed local validation for ${reqType} after ${totalAttempts} attempts`);
-                }
-
-                // Fallback: return raw content text (should not happen in our chain)
-                return result.parsedResponse;
-            }
+                },
+            });
         };
 
         // Start bottom-right stage notifications

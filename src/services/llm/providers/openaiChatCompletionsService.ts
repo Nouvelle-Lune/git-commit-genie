@@ -10,10 +10,8 @@ import { OpenAICompatibleUtils } from './utils/index';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { safeRun } from '../../../utils/safeRun';
-import {
-    fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
-    commitMessageSchema, ragPreparationResponseSchema, ragRerankResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
-} from './schemas/common';
+import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
+import { commitMessageSchema } from './schemas/common';
 
 interface OpenAIChatProviderOptions {
     providerName: string;
@@ -234,80 +232,34 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
 
         const chat: ChatFn = async (messages, _options) => {
             const reqType = _options?.requestType;
-            const labelFor = (t?: string) => {
-                switch (t) {
-                    case 'summary': return 'summarize';
-                    case 'draft': return 'draft';
-                    case 'fix': return 'validate-fix';
-                    case 'ragPreparation': return 'rag-prep';
-                    case 'ragRerank': return 'rag-rerank';
-                    case 'strictFix': return 'strict-fix';
-                    case 'enforceLanguage': return 'lang-fix';
-                    case 'commitMessage': return 'build-commit-msg';
-                    case 'repoAnalysis': return 'repo-analysis';
-                    case 'repoAnalysisAction': return 'repo-analysis-action';
-                    default: return 'thinking';
-                }
-            };
-            const schemaMap: Record<string, any> = {
-                summary: fileSummarySchema,
-                draft: classifyAndDraftResponseSchema,
-                fix: validateAndFixResponseSchema,
-                ragPreparation: ragPreparationResponseSchema,
-                ragRerank: ragRerankResponseSchema,
-                commitMessage: commitMessageSchema,
-                strictFix: commitMessageSchema,
-                enforceLanguage: commitMessageSchema,
-                repoAnalysis: repoAnalysisResponseSchema,
-                repoAnalysisAction: repoAnalysisActionSchema,
-            };
-
-            const validationSchema = reqType ? schemaMap[reqType] : undefined;
             const retries = this.utils.getMaxRetries();
             const totalAttempts = Math.max(1, retries + 1);
 
-            for (let attempt = 0; attempt < totalAttempts; attempt++) {
-                const result = await this.utils.callChatCompletion(this.openai!, messages, {
+            return await this.runValidatedChatCall({
+                reqType,
+                totalAttempts,
+                initialMessages: messages,
+                repoPath,
+                validationSchema: getValidationSchemaFor(reqType),
+                callOnce: (msgs) => this.utils.callChatCompletion(this.openai!, msgs, {
                     model: config.model,
                     provider: providerName,
                     token: options?.token,
                     trackUsage: true,
                     requestType: _options!.requestType,
-                    repoPath
-                });
-
-                callCount += 1;
-                if (result.usage) {
-                    usages.push(result.usage);
-                    result.usage.model = config.model;
-                    logger.usage(repoPath, providerName, result.usage, config.model, labelFor(reqType), callCount, usageRegion);
-                } else {
-                    logger.usage(repoPath, providerName, undefined, config.model, labelFor(reqType), callCount, usageRegion);
-                }
-
-                if (validationSchema) {
-                    const safe = validationSchema.safeParse(result.parsedResponse);
-                    if (safe.success) {
-                        return safe.data;
+                    repoPath,
+                }),
+                onUsage: (usage) => {
+                    callCount += 1;
+                    if (usage) {
+                        usages.push(usage);
+                        usage.model = config.model;
+                        logger.usage(repoPath, providerName, usage, config.model, getRequestTypeLabel(reqType), callCount, usageRegion);
+                    } else {
+                        logger.usage(repoPath, providerName, undefined, config.model, getRequestTypeLabel(reqType), callCount, usageRegion);
                     }
-                    if (attempt < totalAttempts - 1) {
-                        this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
-                        safeRun(`${providerName}.logSchemaValidationRetry`, () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath));
-                        messages = this.buildSchemaValidationRetryMessages(
-                            messages,
-                            result,
-                            safe.error,
-                            validationSchema,
-                            reqType
-                        );
-                        continue;
-                    }
-                    safeRun(`${providerName}.logSchemaValidationFinal`, () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath));
-                    throw new Error(`${providerName} structured result failed local validation for ${reqType} after ${totalAttempts} attempts`);
-                }
-
-                return result.parsedResponse;
-            }
+                },
+            });
         };
 
         safeRun(`${providerName}.stageNotifications.begin`, () => stageNotifications.begin());
