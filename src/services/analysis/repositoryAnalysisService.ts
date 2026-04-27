@@ -769,7 +769,12 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 this.logToolOutcome(toolName, toolResult);
 
                 // Build compact representations to minimize token usage
-                const { compactJson, compactText } = compactToolResultForConversation(repoPath, toolName, toolResult);
+                const compactCfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis.toolResult');
+                const { compactJson, compactText } = compactToolResultForConversation(repoPath, toolName, toolResult, {
+                    maxContentChars: compactCfg.get<number>('maxContentChars'),
+                    maxListLines: compactCfg.get<number>('maxListLines'),
+                    maxSnippetChars: compactCfg.get<number>('maxSnippetChars')
+                });
 
                 // For OpenAI function calling, queue function_call_output with compact JSON
                 if (provider.toLowerCase() === 'openai' && (result as any).functionCallId) {
