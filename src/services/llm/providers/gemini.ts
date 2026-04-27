@@ -84,14 +84,14 @@ export class GeminiService extends BaseLLMService {
     /**
      * Get the Gemini client instance
      */
-    protected getClient(): GoogleGenAI | null {
+    public getClient(): GoogleGenAI | null {
         return this.client;
     }
 
     /**
      * Get the Gemini utils instance
      */
-    protected getUtils(): GeminiUtils {
+    public getUtils(): GeminiUtils {
         return this.utils;
     }
 

@@ -45,13 +45,13 @@ export abstract class BaseLLMService implements LLMService {
      * Get the LLM client instance for raw chat operations
      * @returns Client instance or null if not initialized
      */
-    protected abstract getClient(): any | null;
+    public abstract getClient(): unknown | null;
 
     /**
      * Get the provider utils instance for chat operations
      * @returns Utils instance with callChatCompletion method
      */
-    protected abstract getUtils(): any;
+    public abstract getUtils(): unknown;
 
     /**
      * Get the provider name for error messages

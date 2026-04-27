@@ -159,14 +159,14 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
     /**
      * Get the provider client instance
      */
-    protected getClient(): OpenAI | null {
+    public getClient(): OpenAI | null {
         return this.openai;
     }
 
     /**
      * Get provider utils instance
      */
-    protected getUtils(): OpenAICompatibleUtils {
+    public getUtils(): OpenAICompatibleUtils {
         return this.utils;
     }
 
