@@ -8,6 +8,7 @@ import { Repository } from '../git/git';
 import { RepoService } from '../repo/repo';
 import { ProviderError } from './providers/errors/providerError';
 import { logger } from '../logger';
+import { safeRun } from '../../utils/safeRun';
 import {
     LLMService,
     LLMResponse,
@@ -144,6 +145,78 @@ export abstract class BaseLLMService implements LLMService {
      */
     protected logSchemaValidationRetry(requestType: string, attempt: number, totalAttempts: number): void {
         logger.warn(`[Genie][${this.getProviderName()}] Schema validation failed for ${requestType} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
+    }
+
+    /**
+     * Run a single chain step with retry-on-validation-failure semantics.
+     *
+     * The provider supplies a `callOnce` adapter that performs one provider-specific
+     * LLM call and returns the parsed response. This base method handles:
+     *   - looping up to `totalAttempts` times
+     *   - delegating usage telemetry via `onUsage`
+     *   - validating the parsed response against `validationSchema` if provided
+     *   - rebuilding messages with retry feedback when validation fails
+     *   - logging schema-validation retries and final failures via the logger
+     *
+     * Returns the validated data when validation succeeds, the raw parsed response
+     * when no schema is provided, or throws after the final retry attempt.
+     */
+    protected async runValidatedChatCall(params: {
+        reqType: string | undefined;
+        totalAttempts: number;
+        initialMessages: ChatMessage[];
+        repoPath: string;
+        validationSchema: z.ZodTypeAny | undefined;
+        callOnce: (messages: ChatMessage[]) => Promise<{ parsedResponse?: any; parsedAssistantResponse?: ChatMessage; usage?: any }>;
+        onUsage?: (usage: any | undefined) => void;
+    }): Promise<any> {
+        const { reqType, totalAttempts, repoPath, validationSchema, callOnce, onUsage } = params;
+        let messages = params.initialMessages;
+        const providerName = this.getProviderName();
+
+        for (let attempt = 0; attempt < totalAttempts; attempt++) {
+            const result = await callOnce(messages);
+            onUsage?.(result.usage);
+
+            if (!validationSchema) {
+                return result.parsedResponse;
+            }
+
+            const safe = validationSchema.safeParse(result.parsedResponse);
+            if (safe.success) {
+                return safe.data;
+            }
+
+            if (attempt < totalAttempts - 1) {
+                this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
+                safeRun(`${providerName}.logSchemaValidationRetry`, () => logger.logToolCall(
+                    'schemaValidation',
+                    JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }),
+                    'Schema validation failed',
+                    repoPath,
+                ));
+                messages = this.buildSchemaValidationRetryMessages(
+                    messages,
+                    result,
+                    safe.error,
+                    validationSchema,
+                    reqType,
+                );
+                continue;
+            }
+
+            safeRun(`${providerName}.logSchemaValidationFinal`, () => logger.logToolCall(
+                'schemaValidation',
+                JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }),
+                'Schema validation failed',
+                repoPath,
+            ));
+            throw new Error(`${providerName} structured result failed local validation for ${reqType ?? 'unknown'} after ${totalAttempts} attempts`);
+        }
+
+        // Should be unreachable: the loop above either returns or throws on the
+        // final attempt. Throw a clear error here to fail loudly if reached.
+        throw new Error(`${providerName} runValidatedChatCall exited loop unexpectedly`);
     }
 
     protected getRepositoryPath(repo?: Repository | null): string | null {

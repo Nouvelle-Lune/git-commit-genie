@@ -10,6 +10,7 @@ import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { GeminiUtils } from './utils/GeminiUtils';
 import { safeRun } from '../../../utils/safeRun';
+import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import {
     GeminiCommitMessageSchema,
@@ -22,17 +23,7 @@ import {
     GeminiRepoAnalysisActionSchema
 } from './schemas/geminiSchemas';
 
-import {
-    // Shared Zod schemas used to check structured output
-    commitMessageSchema,
-    fileSummarySchema,
-    classifyAndDraftResponseSchema,
-    validateAndFixResponseSchema,
-    ragPreparationResponseSchema,
-    ragRerankResponseSchema,
-    repoAnalysisResponseSchema,
-    repoAnalysisActionSchema
-} from "./schemas/common";
+import { commitMessageSchema } from './schemas/common';
 
 const SECRET_GEMINI_API_KEY = 'gitCommitGenie.secret.geminiApiKey';
 
@@ -168,101 +159,50 @@ export class GeminiService extends BaseLLMService {
         const usages: Array<any> = [];
         let callCount = 0;
 
+        // Map request type to Gemini's response schema (provider-specific).
+        const responseSchemaMap: Record<string, any> = {
+            summary: GeminiFileSummarySchema,
+            draft: GeminiClassifyAndDraftSchema,
+            fix: GeminiValidateAndFixSchema,
+            ragPreparation: GeminiRagPreparationSchema,
+            ragRerank: GeminiRagRerankSchema,
+            commitMessage: GeminiCommitMessageSchema,
+            strictFix: GeminiCommitMessageSchema,
+            enforceLanguage: GeminiCommitMessageSchema,
+            repoAnalysis: GeminiRepoAnalysisSchema,
+            repoAnalysisAction: GeminiRepoAnalysisActionSchema,
+        };
+
         const chat: ChatFn = async (messages, chainOptions) => {
             const reqType = chainOptions?.requestType;
-            const labelFor = (t?: string) => {
-                switch (t) {
-                    case 'summary': return 'summarize';
-                    case 'draft': return 'draft';
-                    case 'fix': return 'validate-fix';
-                    case 'ragPreparation': return 'rag-prep';
-                    case 'ragRerank': return 'rag-rerank';
-                    case 'strictFix': return 'strict-fix';
-                    case 'enforceLanguage': return 'lang-fix';
-                    case 'commitMessage': return 'build-commit-msg';
-                    case 'repoAnalysis': return 'repo-analysis';
-                    case 'repoAnalysisAction': return 'repo-analysis-action';
-                    default: return 'thinking';
-                }
-            };
-            // Map request type to schema
-            const schemaMap: Record<string, any> = {
-                summary: GeminiFileSummarySchema,
-                draft: GeminiClassifyAndDraftSchema,
-                fix: GeminiValidateAndFixSchema,
-                ragPreparation: GeminiRagPreparationSchema,
-                ragRerank: GeminiRagRerankSchema,
-                commitMessage: GeminiCommitMessageSchema,
-                strictFix: GeminiCommitMessageSchema,
-                enforceLanguage: GeminiCommitMessageSchema,
-                repoAnalysis: GeminiRepoAnalysisSchema,
-                repoAnalysisAction: GeminiRepoAnalysisActionSchema,
-            };
-
-            const schemaMapValidation: Record<string, any> = {
-                summary: fileSummarySchema,
-                draft: classifyAndDraftResponseSchema,
-                fix: validateAndFixResponseSchema,
-                ragPreparation: ragPreparationResponseSchema,
-                ragRerank: ragRerankResponseSchema,
-                commitMessage: commitMessageSchema,
-                strictFix: commitMessageSchema,
-                enforceLanguage: commitMessageSchema,
-                repoAnalysis: repoAnalysisResponseSchema,
-                repoAnalysisAction: repoAnalysisActionSchema,
-            };
-
-            const schema = reqType ? schemaMap[reqType] : undefined;
             const retries = config.maxRetries ?? 2;
             const totalAttempts = Math.max(1, retries + 1);
+            const responseSchema = reqType ? responseSchemaMap[reqType] : undefined;
 
-            for (let attempt = 0; attempt < totalAttempts; attempt++) {
-                const result = await this.utils.callChatCompletion(this.client!, messages, {
+            return await this.runValidatedChatCall({
+                reqType,
+                totalAttempts,
+                initialMessages: messages,
+                repoPath,
+                validationSchema: getValidationSchemaFor(reqType),
+                callOnce: (msgs) => this.utils.callChatCompletion(this.client!, msgs, {
                     model: config.model,
                     provider: 'Gemini',
-                    responseSchema: schema,
+                    responseSchema,
                     token: options?.token,
                     trackUsage: true,
-                    repoPath
-                });
-
-                callCount += 1;
-                if (result.usage) {
-                    usages.push(result.usage);
-                    logger.usage(repoPath, 'Gemini', result.usage, config.model, labelFor(reqType), callCount);
-                } else {
-                    logger.usage(repoPath, 'Gemini', undefined, config.model, labelFor(reqType), callCount);
-                }
-
-                // Validate structured output if schema is defined
-                const validationSchema = reqType ? schemaMapValidation[reqType] : undefined;
-
-                if (validationSchema) {
-                    const safe = validationSchema.safeParse(result.parsedResponse);
-                    if (safe.success) {
-                        return safe.data;
+                    repoPath,
+                }),
+                onUsage: (usage) => {
+                    callCount += 1;
+                    if (usage) {
+                        usages.push(usage);
+                        logger.usage(repoPath, 'Gemini', usage, config.model, getRequestTypeLabel(reqType), callCount);
+                    } else {
+                        logger.usage(repoPath, 'Gemini', undefined, config.model, getRequestTypeLabel(reqType), callCount);
                     }
-
-                    if (attempt < totalAttempts - 1) {
-                        this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
-                        safeRun('Gemini.logSchemaValidationRetry', () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath));
-                        messages = this.buildSchemaValidationRetryMessages(
-                            messages,
-                            result,
-                            safe.error,
-                            validationSchema,
-                            reqType
-                        );
-                        continue;
-                    }
-                    safeRun('Gemini.logSchemaValidationFinal', () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath));
-
-                    throw new Error(`Gemini structured result failed local validation for ${reqType} after ${totalAttempts} attempts`);
-                }
-
-                // Fallback: return raw data
-                return result.parsedResponse;
-            }
+                },
+            });
         };
 
         // Start bottom-right stage notifications
