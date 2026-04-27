@@ -298,7 +298,7 @@ async function searchFile(
  * A NULL byte anywhere in that prefix is a strong indicator (text formats
  * never contain 0x00), and we treat such files as binary for content search.
  */
-async function isLikelyBinary(filePath: string): Promise<boolean> {
+export async function isLikelyBinary(filePath: string): Promise<boolean> {
     const SNIFF_BYTES = 8192;
     const handle = await fs.promises.open(filePath, 'r');
     try {

@@ -154,3 +154,36 @@ export function estimateCharBudget(tokens: number, fraction = 0.6): number {
   // Rough heuristic: ~4 chars per token; keep headroom via fraction
   return Math.floor((tokens * 4) * Math.max(0.1, Math.min(1, fraction)));
 }
+
+/**
+ * Estimate token count using a CJK-aware heuristic.
+ *
+ * CJK characters are roughly ~1.5 chars/token; ASCII/Latin text ~4 chars/token.
+ * Handles CJK Unified Ideographs, Hiragana, Katakana, Hangul Syllables,
+ * plus common CJK punctuation/symbols and fullwidth forms.
+ */
+export function estimateTokens(text: string): number {
+  if (!text) {
+    return 0;
+  }
+  let cjk = 0;
+  let other = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (
+      (code >= 0x3000 && code <= 0x303f) ||
+      (code >= 0x3040 && code <= 0x309f) ||
+      (code >= 0x30a0 && code <= 0x30ff) ||
+      (code >= 0x3400 && code <= 0x4dbf) ||
+      (code >= 0x4e00 && code <= 0x9fff) ||
+      (code >= 0xac00 && code <= 0xd7af) ||
+      (code >= 0xf900 && code <= 0xfaff) ||
+      (code >= 0xff00 && code <= 0xffef)
+    ) {
+      cjk++;
+    } else {
+      other++;
+    }
+  }
+  return cjk / 1.5 + other / 4;
+}

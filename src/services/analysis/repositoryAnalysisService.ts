@@ -32,7 +32,7 @@ import { compressContext } from './tools/compressionTools';
 import { compactToolResultForConversation } from './tools/formattingTools';
 import { shouldExclude } from './tools/utils';
 import { DirectoryEntry, SearchFilesResult, ToolResult } from './tools/toolTypes';
-import { getMaxContextByFunction } from './tools/modelContext';
+import { getMaxContextByFunction, estimateTokens } from './tools/modelContext';
 
 /**
  * Structural shape of provider utils used by the repo analysis flow.
@@ -654,7 +654,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             }
 
             // Check context size and force compression if needed
-            const estimatedTokens = msgs.reduce((sum, m) => sum + this.estimateTokens(m.content), 0);
+            const estimatedTokens = msgs.reduce((sum, m) => sum + estimateTokens(m.content), 0);
 
             if (estimatedTokens > contextThreshold) {
                 logger.warn(`[Genie][RepoAnalysis] Context at ${Math.round((estimatedTokens / maxContextTokens) * 100)}% (${Math.round(estimatedTokens)}/${maxContextTokens} tokens), forcing compression...`);
@@ -693,7 +693,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         }
                         newMsgs.push({ role: 'user', content: `Here is the compressed Exploration History for last conversation, Continue exploring: \n\n${compressResult.data.compressed}` });
                         msgs = newMsgs;
-                        const newTokens = msgs.reduce((sum, m) => sum + this.estimateTokens(m.content), 0);
+                        const newTokens = msgs.reduce((sum, m) => sum + estimateTokens(m.content), 0);
                         logger.info(`[Genie][RepoAnalysis] Compression successful: ${Math.round(estimatedTokens)} → ${Math.round(newTokens)} tokens (${(compressResult.data.compressionRatio * 100).toFixed(1)}% reduction)`);
                     } else {
                         logger.warn(`[Genie][RepoAnalysis] Compression failed: ${compressResult.error || 'Unknown error'}`);
@@ -1121,35 +1121,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     }
 
     // Compacting helpers moved to tools/formattingTools.ts
-
-    /**
-     * Estimate token count using a CJK-aware heuristic.
-     * CJK characters are roughly ~1.5 chars/token; ASCII/Latin text ~4 chars/token.
-     */
-    private estimateTokens(text: string): number {
-        if (!text) { return 0; }
-        let cjk = 0;
-        let other = 0;
-        for (let i = 0; i < text.length; i++) {
-            const code = text.charCodeAt(i);
-            // CJK Unified Ideographs, Hiragana, Katakana, Hangul Syllables, plus common CJK punctuation/symbols.
-            if (
-                (code >= 0x3000 && code <= 0x303f) ||
-                (code >= 0x3040 && code <= 0x309f) ||
-                (code >= 0x30a0 && code <= 0x30ff) ||
-                (code >= 0x3400 && code <= 0x4dbf) ||
-                (code >= 0x4e00 && code <= 0x9fff) ||
-                (code >= 0xac00 && code <= 0xd7af) ||
-                (code >= 0xf900 && code <= 0xfaff) ||
-                (code >= 0xff00 && code <= 0xffef)
-            ) {
-                cjk++;
-            } else {
-                other++;
-            }
-        }
-        return cjk / 1.5 + other / 4;
-    }
 
     /**
      * Resolve a candidate path relative to repo root and ensure it stays inside.
