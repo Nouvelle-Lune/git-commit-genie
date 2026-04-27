@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { L10N_KEYS as I18N } from '../i18n/keys';
+import { safeRun } from '../utils/safeRun';
 
 export type StageEventType =
   | 'summarizeStart'
@@ -8,12 +9,29 @@ export type StageEventType =
   | 'validateFix'
   | 'strictFix'
   | 'enforceLanguage'
+  | 'ragPreparationSkipped'
+  | 'ragRetrieved'
+  | 'ragRetrievalSkipped'
   | 'done'
   | 'cancelled';
 
+export interface StageEventData {
+  current?: number;
+  total?: number;
+  file?: string;
+  summary?: string;
+  breaking?: boolean;
+  draft?: unknown;
+  validMessage?: string;
+  message?: string;
+  finalMessage?: string;
+  error?: string;
+  [extra: string]: unknown;
+}
+
 export interface StageEvent {
   type: StageEventType;
-  data?: any;
+  data?: StageEventData;
 }
 
 class ProgressSession {
@@ -36,7 +54,7 @@ class ProgressSession {
         this.progress = progress;
         // Not cancellable for now; keep token hook available for future use
         token.onCancellationRequested(() => {
-          try { this.onCancel?.(); } catch { /* ignore */ }
+          safeRun('StageNotifications.onCancel', () => this.onCancel?.());
         });
         await this.waitPromise;
       }
@@ -68,15 +86,16 @@ export class StageNotificationManager {
   }
 
   begin(onCancel?: () => void): void {
-    // Respect configuration toggle (default true)
-    try {
-      const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
-      this.enabled = cfg.get<boolean>('ui.stageNotifications.enabled', true);
-    } catch { this.enabled = true; }
+    // Respect configuration toggle (default true). The configuration read
+    // can fail when the extension host is shutting down; treat that as
+    // "enabled" so notifications still surface during the shutdown window.
+    this.enabled = safeRun('StageNotifications.readConfig', () =>
+      vscode.workspace.getConfiguration('gitCommitGenie').get<boolean>('ui.stageNotifications.enabled', true)
+    ) ?? true;
 
     if (!this.enabled) { return; }
-    // End any previous session quietly
-    try { this.active?.complete(); } catch { /* ignore */ }
+    // End any previous session before starting a new one.
+    this.active?.complete();
     const session = new ProgressSession(onCancel);
     this.active = session;
     session.start();
@@ -120,7 +139,7 @@ export class StageNotificationManager {
 
   end(): void {
     if (!this.enabled) { return; }
-    try { this.active?.complete(); } catch { /* ignore */ }
+    this.active?.complete();
     this.active = undefined;
   }
 }

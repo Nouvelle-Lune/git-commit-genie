@@ -203,7 +203,7 @@ export async function generateCommitMessageChain(
 	chat: ChatFn,
 	options?: {
 		maxParallel?: number;
-		onStage?: (event: { type: string; data?: any }) => void;
+		onStage?: (event: import('../../ui/StageNotificationManager').StageEvent) => void;
 		retrieveRagExamples?: (context: {
 			changeSetSummary: ChangeSetSummary;
 			retrievalFeatures: RetrievalFeatures;

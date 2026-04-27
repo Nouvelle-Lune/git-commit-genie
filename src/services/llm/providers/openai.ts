@@ -209,7 +209,7 @@ export class OpenAIService extends BaseLLMService {
         };
 
         // Start bottom-right stage notifications
-        safeRun('OpenAI.stageNotifications.begin', () => stageNotifications.begin());
+        stageNotifications.begin();
         let out;
         try {
             out = await generateCommitMessageChain(
@@ -238,14 +238,14 @@ export class OpenAIService extends BaseLLMService {
                         });
                     },
                     onStage: (event) => {
-                        safeRun('OpenAI.stageNotifications.update', () => stageNotifications.update({ type: event.type as any, data: event.data }));
+                        stageNotifications.update({ type: event.type, data: event.data });
                         const payload = { stage: event.type, data: event.data ?? {} };
                         safeRun('OpenAI.logCommitStage', () => logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath));
                     }
                 }
             );
         } finally {
-            safeRun('OpenAI.stageNotifications.end', () => stageNotifications.end());
+            stageNotifications.end();
         }
 
         if (usages.length) {
