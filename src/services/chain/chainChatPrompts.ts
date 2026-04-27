@@ -115,7 +115,7 @@ export function buildClassifyAndDraftMessages(
         '• **Terminology**: Apply consistent technical language appropriate to the codebase',
         '• **Change Impact**: Describe changes clearly, considering their scope and significance',
         '• **Repository Context**: If repo_analysis is available in input, use it as background context to understand the project better, but base decisions primarily on the actual file changes',
-        '  - repo_analysis structure: { summary: string (project overview), projectType: string (e.g., "Desktop Application"), technologies: string[] (tech stack array), insights: string[] (architectural patterns), importantFiles: string[] (key project files) }',
+        '  - repo_analysis structure: { summary: string (project overview), projectType: string (e.g., "Desktop Application"), technologies: string[] (tech stack array), insights: string[] (architectural patterns) }',
         '  - Use this context to inform terminology, scope selection, and change significance assessment',
         '</context>',
         '',

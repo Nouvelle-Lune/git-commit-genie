@@ -23,16 +23,10 @@ export interface RepositoryAnalysis {
     projectType: string;
     /** Main technologies used */
     technologies: string[];
-    /** Key directories found */
-    keyDirectories: string[];
-    /** Important files found */
-    importantFiles: string[];
     /** README content summary */
     readmeContent?: string;
     /** insights of repo */
     insights?: string[];
-    /** Package/configuration files content */
-    configFiles: { [filename: string]: string };
 }
 
 /**

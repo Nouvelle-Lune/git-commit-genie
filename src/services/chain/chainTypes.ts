@@ -17,7 +17,6 @@ export interface RepositoryAnalysis {
     projectType?: string;
     technologies?: string[];
     insights?: string[];
-    importantFiles?: string[];
 }
 
 export interface ChainInputs {

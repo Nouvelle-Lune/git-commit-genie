@@ -168,11 +168,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     insights: llmResp.insights,
                     projectType: llmResp.projectType,
                     technologies: llmResp.technologies,
-                    // In tool-driven mode, we do not force a scan. Keep these optional
-                    keyDirectories: [],
-                    importantFiles: [],
-                    readmeContent: undefined,
-                    configFiles: {}
+                    readmeContent: undefined
                 };
 
                 await this.saveAnalysis(repositoryPath, analysis);
@@ -270,11 +266,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     insights: llmResp.insights,
                     projectType: llmResp.projectType,
                     technologies: llmResp.technologies,
-                    // Keep previously saved structural hints if any
-                    keyDirectories: existing.keyDirectories || [],
-                    importantFiles: existing.importantFiles || [],
-                    readmeContent: existing.readmeContent,
-                    configFiles: existing.configFiles || {}
+                    readmeContent: existing.readmeContent
                 };
 
                 if (this.currentCancelSource?.token.isCancellationRequested) {
@@ -404,8 +396,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 summary: analysis.summary || '',
                 projectType: analysis.projectType || '',
                 technologies: Array.isArray(analysis.technologies) ? analysis.technologies : [],
-                insights: Array.isArray(analysis.insights) ? analysis.insights : [],
-                importantFiles: Array.isArray(analysis.importantFiles) ? analysis.importantFiles : []
+                insights: Array.isArray(analysis.insights) ? analysis.insights : []
             };
             return JSON.stringify(payload, null, 2);
         } catch (error) {
