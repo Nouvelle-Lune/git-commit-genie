@@ -35,7 +35,22 @@ type PendingGeneratedCommit = {
     fileSummaries: FileSummary[];
     changeSetSummary: ChangeSetSummary;
     retrievalFeatures: RetrievalFeatures;
+    paths: string[];
+    recordedAt: number;
 };
+
+const PENDING_GENERATED_TTL_MS = 30 * 60 * 1000;
+
+function normalizePathSet(paths: string[]): string[] {
+    return Array.from(new Set(paths.map(p => p.trim()).filter(Boolean))).sort();
+}
+
+function pathSetsEqual(left: string[], right: string[]): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+    return left.join('\0') === right.join('\0');
+}
 
 // Map a git --name-status short code (e.g. 'A', 'M', 'D', 'R100', 'C75', 'T', 'U')
 // to the project's DiffStatus literal. DiffStatus only models a subset; codes outside
@@ -263,6 +278,8 @@ export class RagHistoricalIndexService {
             fileSummaries: metadata.fileSummaries || [],
             changeSetSummary: metadata.changeSetSummary,
             retrievalFeatures: metadata.retrievalFeatures,
+            paths: normalizePathSet(diffs.map(diff => diff.fileName)),
+            recordedAt: Date.now(),
         });
         logger.info(`[Genie][RAG] Cached pending generated commit context for ${repo.rootUri.fsPath}.`);
     }
@@ -291,10 +308,15 @@ export class RagHistoricalIndexService {
     }
 
     private async prepareHistoricalCommitDocument(repo: Repository, commit: Commit): Promise<PreparedCommitRagDocument | null> {
-        const pending = this.pendingGenerated.get(repo.rootUri.fsPath);
-        if (pending && pending.commitMessage === commit.message.trim()) {
-            this.pendingGenerated.delete(repo.rootUri.fsPath);
-            logger.info(`[Genie][RAG] Using cached generated RAG context for committed HEAD ${commit.hash} in ${repo.rootUri.fsPath}.`);
+        const repoPath = repo.rootUri.fsPath;
+        this.evictExpiredPending(repoPath);
+        const pending = this.pendingGenerated.get(repoPath);
+        const trimmedMessage = commit.message.trim();
+
+        // Strongest match: exact commit message identity. Always honored.
+        if (pending && pending.commitMessage === trimmedMessage) {
+            this.pendingGenerated.delete(repoPath);
+            logger.info(`[Genie][RAG] Using cached generated RAG context (message match) for committed HEAD ${commit.hash} in ${repoPath}.`);
             return this.buildPendingDocument(commit, pending);
         }
 
@@ -302,9 +324,28 @@ export class RagHistoricalIndexService {
         const files = await this.loadCommitFiles(repo, commit.hash);
         this.importedCommitCounter += 1;
         if (this.importedCommitCounter % 100 === 0) {
-            logger.info(`[Genie][RAG] Imported ${this.importedCommitCounter} commits so far for ${repo.rootUri.fsPath}; last git show took ${Date.now() - startedAt}ms.`);
+            logger.info(`[Genie][RAG] Imported ${this.importedCommitCounter} commits so far for ${repoPath}; last git show took ${Date.now() - startedAt}ms.`);
         }
+
+        // Fallback match: same file-path set within TTL — survives user edits to the message.
+        if (pending && files) {
+            const commitPaths = normalizePathSet(files.map(file => file.path));
+            const withinTtl = Date.now() - pending.recordedAt < PENDING_GENERATED_TTL_MS;
+            if (withinTtl && pathSetsEqual(commitPaths, pending.paths)) {
+                this.pendingGenerated.delete(repoPath);
+                logger.info(`[Genie][RAG] Using cached generated RAG context (paths match) for committed HEAD ${commit.hash} in ${repoPath}.`);
+                return this.buildPendingDocument(commit, pending);
+            }
+        }
+
         return this.buildHistoricalDocumentFromMessage(commit, files);
+    }
+
+    private evictExpiredPending(repoPath: string): void {
+        const pending = this.pendingGenerated.get(repoPath);
+        if (pending && Date.now() - pending.recordedAt >= PENDING_GENERATED_TTL_MS) {
+            this.pendingGenerated.delete(repoPath);
+        }
     }
 
     private async loadCommitFiles(repo: Repository, hash: string): Promise<CommitFileEntry[] | null> {
