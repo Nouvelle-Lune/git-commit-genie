@@ -153,6 +153,12 @@
           "maximum": 2,
           "markdownDescription": "%config.llm.temperature.desc%"
         },
+        "gitCommitGenie.local.baseUrl": {
+          "order": 11,
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%config.local.baseUrl.desc%"
+        },
         "gitCommitGenie.repositoryAnalysis.enabled": {
           "order": 6,
           "type": "boolean",

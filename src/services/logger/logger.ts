@@ -367,7 +367,7 @@ export class Logger {
                     outputTokens = usage.output_tokens || 0;
                     cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
                     cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
-                } else if (providerLower === 'deepseek' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter') {
+                } else if (providerLower === 'deepseek' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter' || providerLower === 'local') {
                     inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
                     outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
                     cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
@@ -555,7 +555,7 @@ export class Logger {
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
-            if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter') {
+            if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter' || providerLower === 'local') {
                 inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
                 outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
                 cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
@@ -679,6 +679,9 @@ export class Logger {
      * Normalize pricing model names for provider-specific aliases.
      */
     private normalizePricingModelForProvider(providerLower: string, modelName: string): string {
+        if (providerLower === 'local') {
+            return 'local';
+        }
         if (providerLower !== 'openrouter') {
             return modelName;
         }
@@ -740,7 +743,7 @@ export class Logger {
                     inputTokens = usage.prompt_tokens || 0;
                     outputTokens = usage.completion_tokens || 0;
                     cachedTokens = usage.cached_content_tokens || 0;
-                } else if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter') {
+                } else if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter' || providerLower === 'local') {
                     inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
                     outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
                     cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;

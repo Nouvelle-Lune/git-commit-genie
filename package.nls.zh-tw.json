@@ -28,6 +28,7 @@
   "config.chain.maxParallel.desc": "鏈式提示的並行 LLM 呼叫最大數量。請謹慎增大以避免觸發速率限制。",
   "config.llm.maxRetries.desc": "API 請求失敗最大重試次數",
   "config.llm.temperature.desc": "Temperature（0-2），預設為 1。部分服務商/模型組合僅接受 1；修改此值可能導致 400 錯誤（invalid temperature）或輸出穩定性下降。",
+  "config.local.baseUrl.desc": "本地部署模型的 OpenAI 相容 Base URL。必須使用 OpenAI chat/completions 的基址格式並以 /v1 結尾（例如 http://127.0.0.1:11434/v1）。",
   "config.commitLanguage.desc": "產生的提交資訊目標語言。",
   "config.commitLanguage.auto": "自動（跟隨 VS Code 顯示語言）",
   "config.commitLanguage.en": "英文",

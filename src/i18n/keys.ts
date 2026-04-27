@@ -36,7 +36,13 @@ export const L10N_KEYS = {
     qwenRegionIntl: 'International',
     qwenRegionIntlDesc: 'For international API keys',
     qwenRegionChina: 'China',
-    qwenRegionChinaDesc: 'For mainland China API keys'
+    qwenRegionChinaDesc: 'For mainland China API keys',
+    localBaseUrlTitle: 'Set Local OpenAI Base URL',
+    localBaseUrlPrompt: 'OpenAI-compatible base URL (ending with /v1)',
+    localBaseUrlPlaceholder: 'http://127.0.0.1:11434/v1',
+    localBaseUrlInvalid: 'Invalid URL format.',
+    localBaseUrlMustBeHttp: 'URL must start with http:// or https://.',
+    localBaseUrlMustEndWithV1: 'URL must end with /v1.'
   },
   chain: {
     toggled: 'Chain prompting {0}.',

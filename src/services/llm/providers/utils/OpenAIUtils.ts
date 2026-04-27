@@ -4,7 +4,7 @@ import { zodTextFormat } from './openAiZodPatch';
 import { BaseProviderUtils } from './baseProviderUtils';
 import { logger } from '../../../logger';
 import { ProviderError } from '../errors/providerError';
-import { isOpenAIChatProvider, isOpenAIResponsesProvider } from '../config/providerConfig';
+import { isOpenAIChatProvider, isOpenAIResponsesProvider } from '../config/ProviderConfig';
 
 import { ChatMessage, RequestType } from "../../llmTypes";
 
@@ -117,13 +117,13 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                             const usage = (response as any).usage;
                             if (logId) {
                                 logger.logApiRequestWithResult(
-                                logId,
-                                options.provider,
-                                options.model,
-                                parsedResult,
-                                usage,
-                                isFinal,
-                                options.repoPath
+                                    logId,
+                                    options.provider,
+                                    options.model,
+                                    parsedResult,
+                                    usage,
+                                    isFinal,
+                                    options.repoPath
                                 );
                             }
 
@@ -162,13 +162,13 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                     // Log the result content for visibility in webview
                     if (logId) {
                         logger.logApiRequestWithResult(
-                        logId,
-                        options.provider,
-                        options.model,
-                        parsedResponse ?? textOut ?? '',
-                        usage,
-                        false,
-                        options.repoPath
+                            logId,
+                            options.provider,
+                            options.model,
+                            parsedResponse ?? textOut ?? '',
+                            usage,
+                            false,
+                            options.repoPath
                         );
                     }
 
@@ -194,13 +194,13 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                         const isFinal = parsedResponse.action === 'final';
                         if (logId) {
                             logger.logApiRequestWithResult(
-                            logId,
-                            options.provider,
-                            options.model,
-                            parsedResponse,
-                            usage,
-                            isFinal,
-                            options.repoPath
+                                logId,
+                                options.provider,
+                                options.model,
+                                parsedResponse,
+                                usage,
+                                isFinal,
+                                options.repoPath
                             );
                         }
                     }

@@ -2,7 +2,7 @@
  * Types for StatusBarManager
  */
 
-import { PROVIDER_CONFIGS, ProviderKey } from '../services/llm/providers/config/providerConfig';
+import { PROVIDER_CONFIGS, ProviderKey } from '../services/llm/providers/config/ProviderConfig';
 
 /**
  * Provider configuration state

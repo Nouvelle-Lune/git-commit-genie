@@ -26,6 +26,7 @@
   "config.chain.maxParallel.desc": "Maximum parallel LLM calls used by chain prompting across all providers. Increase carefully to avoid provider rate limits.",
   "config.llm.maxRetries.desc": "Max retry attempts for API request failures.",
   "config.llm.temperature.desc": "Temperature (0–2). Default 1. Some provider/model combinations only accept 1; changing this value may cause 400 errors (invalid temperature) or less stable outputs.",
+  "config.local.baseUrl.desc": "Base URL for local OpenAI-compatible deployments. Must use OpenAI chat/completions base format and end with /v1 (for example, http://127.0.0.1:11434/v1).",
   "config.repositoryAnalysis.enabled.desc": "Enable repository analysis to provide better context for commit message generation.",
   "config.rag.enabled.desc": "Enable RAG to keep commit message generation style consistent (requires a sufficient number of historical commit messages in the repository to build a local style index).",
   "config.rag.embedding.baseUrl.desc": "Base URL for the embeddings API used by RAG. Must be compatible with the OpenAI SDK format.",

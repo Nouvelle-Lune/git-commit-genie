@@ -8,13 +8,14 @@ import { QwenService } from '../services/llm/providers/qwen';
 import { GLMService } from '../services/llm/providers/glm';
 import { KimiService } from '../services/llm/providers/kimi';
 import { OpenRouterService } from '../services/llm/providers/openrouter';
+import { LocalService } from '../services/llm/providers/local';
 import { TemplateService } from '../template/templateService';
 import { RepositoryAnalysisService } from '../services/analysis';
 import { LLMService } from '../services/llm/llmTypes';
 import { RepoService } from "../services/repo/repo";
 import { CostTrackingService } from "../services/cost/costTrackingService";
 import { logger } from '../services/logger';
-import { getProviderModelStateKey, getProviderFromSecretKey, QWEN_REGIONS } from '../services/llm/providers/config/providerConfig';
+import { getProviderModelStateKey, getProviderFromSecretKey, QWEN_REGIONS } from '../services/llm/providers/config/ProviderConfig';
 import { RagRuntimeService } from '../services/rag/ragRuntimeService';
 import { RagHistoricalIndexService } from '../services/rag/ragHistoricalIndexService';
 import { RagRetrievalService } from '../services/rag/ragRetrievalService';
@@ -31,6 +32,7 @@ export class ServiceRegistry {
     private glmService!: GLMService;
     private kimiService!: KimiService;
     private openrouterService!: OpenRouterService;
+    private localService!: LocalService;
     private llmServices: Map<string, LLMService>;
     private currentLLMService!: LLMService;
     private repoService!: RepoService;
@@ -76,6 +78,7 @@ export class ServiceRegistry {
             this.glmService = new GLMService(this.context, this.templateService, this.analysisService);
             this.kimiService = new KimiService(this.context, this.templateService, this.analysisService);
             this.openrouterService = new OpenRouterService(this.context, this.templateService, this.analysisService);
+            this.localService = new LocalService(this.context, this.templateService, this.analysisService);
             // Setup LLM services map
             this.llmServices.set('openai', this.openAIService);
             this.llmServices.set('deepseek', this.deepseekService);
@@ -85,6 +88,7 @@ export class ServiceRegistry {
             this.llmServices.set('glm', this.glmService);
             this.llmServices.set('kimi', this.kimiService);
             this.llmServices.set('openrouter', this.openrouterService);
+            this.llmServices.set('local', this.localService);
 
             // Migrate stale model selections (e.g., removed/unsupported models after extension updates)
             await this.migrateUnsupportedModelSelections();
@@ -216,7 +220,8 @@ export class ServiceRegistry {
             qwen: ['qwen3.5-plus', 'qwen3.5-flash', 'qwen-plus-latest', 'qwen-plus', 'qwen3-max-preview', 'qwen3-max'],
             glm: ['glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.5', 'glm-4.7-flashx', 'glm-4.5-air', 'glm-4.7-flash'],
             kimi: ['kimi-k2.5', 'kimi-k2-thinking', 'kimi-k2'],
-            openrouter: ['openai/gpt-5.4-mini', 'openai/gpt-5.4', 'openai/gpt-5-mini', 'anthropic/claude-sonnet-4', 'deepseek/deepseek-chat']
+            openrouter: ['openai/gpt-5.4-mini', 'openai/gpt-5.4', 'openai/gpt-5-mini', 'anthropic/claude-sonnet-4', 'deepseek/deepseek-chat'],
+            local: []
         };
 
         const preferred = preferredByProvider[provider.toLowerCase()] || [];

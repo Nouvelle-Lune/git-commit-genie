@@ -30,6 +30,9 @@ export interface TieredPricing {
 export type ModelPricing = FlatPricing | TieredPricing;
 
 export const PRICING_TABLE: Record<string, ModelPricing> = {
+    // Local OpenAI-compatible deployments (no pricing by default)
+    'local': { input: 0, output: 0, cached: 0 },
+
     // OpenAI (USD)
     'gpt-5.4': { input: 2.5, output: 15.0, cached: 0.25 },
     'gpt-5.4-mini': { input: 0.75, output: 4.5, cached: 0.075 },

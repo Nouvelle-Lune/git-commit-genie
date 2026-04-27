@@ -4,7 +4,7 @@ import { logger } from '../services/logger';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { Repository } from "../services/git/git";
 import { DiffData } from '../services/git/gitTypes';
-import { getProviderSecretKey, getProviderLabel } from '../services/llm/providers/config/providerConfig';
+import { getProviderSecretKey, getProviderLabel } from '../services/llm/providers/config/ProviderConfig';
 
 /**
  * This class handles the registration of commands related to generating commit messages.
