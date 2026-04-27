@@ -220,7 +220,7 @@ export class AnthropicService extends BaseLLMService {
         };
 
         // Start bottom-right stage notifications
-        safeRun('Anthropic.stageNotifications.begin', () => stageNotifications.begin());
+        stageNotifications.begin();
         let out;
         try {
             out = await generateCommitMessageChain(
@@ -249,14 +249,14 @@ export class AnthropicService extends BaseLLMService {
                         });
                     },
                     onStage: (event) => {
-                        safeRun('Anthropic.stageNotifications.update', () => stageNotifications.update({ type: event.type as any, data: event.data }));
+                        stageNotifications.update({ type: event.type, data: event.data });
                         const payload = { stage: event.type, data: event.data ?? {} };
                         safeRun('Anthropic.logCommitStage', () => logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath));
                     }
                 }
             );
         } finally {
-            safeRun('Anthropic.stageNotifications.end', () => stageNotifications.end());
+            stageNotifications.end();
         }
 
         if (usages.length) {
