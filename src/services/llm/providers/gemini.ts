@@ -273,59 +273,44 @@ export class GeminiService extends BaseLLMService {
     ): Promise<LLMResponse | LLMError> {
         const retries = config.maxRetries ?? 2;
         const totalAttempts = Math.max(1, retries + 1);
-        let lastError: any;
-        let messages: ChatMessage[] = [
+        const messages: ChatMessage[] = [
             { role: 'system', content: rules.baseRule },
             { role: 'user', content: jsonMessage }
         ];
 
-        for (let attempt = 0; attempt < totalAttempts; attempt++) {
-            const result = await this.utils.callChatCompletion(
-                this.client!,
-                messages,
-                {
+        try {
+            const data = await this.runValidatedChatCall({
+                reqType: 'commitMessage',
+                totalAttempts,
+                initialMessages: messages,
+                repoPath,
+                validationSchema: commitMessageSchema,
+                callOnce: (msgs) => this.utils.callChatCompletion(this.client!, msgs, {
                     model: config.model,
                     provider: 'Gemini',
                     responseSchema: GeminiCommitMessageSchema,
                     token: options?.token,
                     trackUsage: true,
-                    repoPath
-                }
-            );
-
-            if (result.usage) {
-                logger.usageSummary(repoPath, 'Gemini', [result.usage], config.model, 'default');
-            } else {
-                logger.usageSummary(repoPath, 'Gemini', [], config.model, 'default');
-            }
-
-            const safe = commitMessageSchema.safeParse(result.parsedResponse);
-            if (safe.success) {
-                // Emit a final "done" stage in webview logs for default mode
-                safeRun('Gemini.logCommitStageDone', () => logger.logToolCall(
-                    'commitStage',
-                    JSON.stringify({ stage: 'done', data: { finalMessage: safe.data.commitMessage } }),
-                    'Commit generation stage',
-                    repoPath
-                ));
-                return { content: safe.data.commitMessage };
-            }
-
-            lastError = safe.error;
-            if (attempt < totalAttempts - 1) {
-                this.logSchemaValidationRetry('commitMessage', attempt, totalAttempts);
-                messages = this.buildSchemaValidationRetryMessages(
-                    messages,
-                    result,
-                    safe.error,
-                    commitMessageSchema,
-                    'commitMessage'
-                );
-                continue;
-            }
+                    repoPath,
+                }),
+                onUsage: (usage) => {
+                    if (usage) {
+                        logger.usageSummary(repoPath, 'Gemini', [usage], config.model, 'default');
+                    } else {
+                        logger.usageSummary(repoPath, 'Gemini', [], config.model, 'default');
+                    }
+                },
+            });
+            safeRun('Gemini.logCommitStageDone', () => logger.logToolCall(
+                'commitStage',
+                JSON.stringify({ stage: 'done', data: { finalMessage: data.commitMessage } }),
+                'Commit generation stage',
+                repoPath,
+            ));
+            return { content: data.commitMessage };
+        } catch {
+            return { message: 'Failed to validate structured commit message from Gemini.', statusCode: 500 };
         }
-
-        return { message: 'Failed to validate structured commit message from Gemini.', statusCode: 500 };
     }
 
 }
