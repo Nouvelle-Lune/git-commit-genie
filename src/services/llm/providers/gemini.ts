@@ -9,6 +9,7 @@ import { generateCommitMessageChain } from '../../chain/chainThinking';
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { GeminiUtils } from './utils/GeminiUtils';
+import { safeRun } from '../../../utils/safeRun';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import {
     GeminiCommitMessageSchema,
@@ -138,7 +139,7 @@ export class GeminiService extends BaseLLMService {
             }
 
             // Divider in webview: commit generation start
-            try { logger.logGenerationStart(repoPath, config.useChain ? 'thinking' : 'default'); } catch { /* ignore */ }
+            safeRun('Gemini.logGenerationStart', () => logger.logGenerationStart(repoPath, config.useChain ? 'thinking' : 'default'));
 
             const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
 
@@ -244,7 +245,7 @@ export class GeminiService extends BaseLLMService {
 
                     if (attempt < totalAttempts - 1) {
                         this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
-                        try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
+                        safeRun('Gemini.logSchemaValidationRetry', () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath));
                         messages = this.buildSchemaValidationRetryMessages(
                             messages,
                             result,
@@ -254,7 +255,7 @@ export class GeminiService extends BaseLLMService {
                         );
                         continue;
                     }
-                    try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
+                    safeRun('Gemini.logSchemaValidationFinal', () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath));
 
                     throw new Error(`Gemini structured result failed local validation for ${reqType} after ${totalAttempts} attempts`);
                 }
@@ -265,7 +266,7 @@ export class GeminiService extends BaseLLMService {
         };
 
         // Start bottom-right stage notifications
-        try { stageNotifications.begin(); } catch { /* ignore */ }
+        safeRun('Gemini.stageNotifications.begin', () => stageNotifications.begin());
         let out;
         try {
             out = await generateCommitMessageChain(
@@ -294,16 +295,14 @@ export class GeminiService extends BaseLLMService {
                         });
                     },
                     onStage: (event) => {
-                        try {
-                            stageNotifications.update({ type: event.type as any, data: event.data });
-                            const payload = { stage: event.type, data: event.data ?? {} };
-                            try { logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath); } catch { /* ignore */ }
-                        } catch { /* ignore */ }
+                        safeRun('Gemini.stageNotifications.update', () => stageNotifications.update({ type: event.type as any, data: event.data }));
+                        const payload = { stage: event.type, data: event.data ?? {} };
+                        safeRun('Gemini.logCommitStage', () => logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath));
                     }
                 }
             );
         } finally {
-            try { stageNotifications.end(); } catch { /* ignore */ }
+            safeRun('Gemini.stageNotifications.end', () => stageNotifications.end());
         }
 
         if (usages.length) {
@@ -362,14 +361,12 @@ export class GeminiService extends BaseLLMService {
             const safe = commitMessageSchema.safeParse(result.parsedResponse);
             if (safe.success) {
                 // Emit a final "done" stage in webview logs for default mode
-                try {
-                    logger.logToolCall(
-                        'commitStage',
-                        JSON.stringify({ stage: 'done', data: { finalMessage: safe.data.commitMessage } }),
-                        'Commit generation stage',
-                        repoPath
-                    );
-                } catch { /* ignore */ }
+                safeRun('Gemini.logCommitStageDone', () => logger.logToolCall(
+                    'commitStage',
+                    JSON.stringify({ stage: 'done', data: { finalMessage: safe.data.commitMessage } }),
+                    'Commit generation stage',
+                    repoPath
+                ));
                 return { content: safe.data.commitMessage };
             }
 

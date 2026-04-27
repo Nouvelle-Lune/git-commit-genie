@@ -9,6 +9,7 @@ import { logger } from '../../logger';
 import { OpenAICompatibleUtils } from './utils/index';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
+import { safeRun } from '../../../utils/safeRun';
 import {
     fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
     commitMessageSchema, ragPreparationResponseSchema, ragRerankResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
@@ -201,7 +202,7 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
                 return this.createModelNotSelectedError();
             }
 
-            try { logger.logGenerationStart(repoPath, config.useChain ? 'thinking' : 'default'); } catch { /* ignore */ }
+            safeRun(`${this.providerOptions.providerName}.logGenerationStart`, () => logger.logGenerationStart(repoPath, config.useChain ? 'thinking' : 'default'));
 
             const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
 
@@ -291,7 +292,7 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
                     }
                     if (attempt < totalAttempts - 1) {
                         this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
-                        try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
+                        safeRun(`${providerName}.logSchemaValidationRetry`, () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath));
                         messages = this.buildSchemaValidationRetryMessages(
                             messages,
                             result,
@@ -301,7 +302,7 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
                         );
                         continue;
                     }
-                    try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
+                    safeRun(`${providerName}.logSchemaValidationFinal`, () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath));
                     throw new Error(`${providerName} structured result failed local validation for ${reqType} after ${totalAttempts} attempts`);
                 }
 
@@ -309,7 +310,7 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
             }
         };
 
-        try { stageNotifications.begin(); } catch { /* ignore */ }
+        safeRun(`${providerName}.stageNotifications.begin`, () => stageNotifications.begin());
         let out;
         try {
             out = await generateCommitMessageChain(
@@ -338,16 +339,14 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
                         });
                     },
                     onStage: (event) => {
-                        try {
-                            stageNotifications.update({ type: event.type as any, data: event.data });
-                            const payload = { stage: event.type, data: event.data ?? {} };
-                            try { logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath); } catch { /* ignore */ }
-                        } catch { /* ignore */ }
+                        safeRun(`${providerName}.stageNotifications.update`, () => stageNotifications.update({ type: event.type as any, data: event.data }));
+                        const payload = { stage: event.type, data: event.data ?? {} };
+                        safeRun(`${providerName}.logCommitStage`, () => logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath));
                     }
                 }
             );
         } finally {
-            try { stageNotifications.end(); } catch { /* ignore */ }
+            safeRun(`${providerName}.stageNotifications.end`, () => stageNotifications.end());
         }
 
         if (usages.length) {
@@ -410,20 +409,18 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
 
             const safe = commitMessageSchema.safeParse(result.parsedResponse);
             if (safe.success) {
-                try {
-                    logger.logToolCall(
-                        'commitStage',
-                        JSON.stringify({ stage: 'done', data: { finalMessage: safe.data.commitMessage } }),
-                        'Commit generation stage',
-                        repoPath
-                    );
-                } catch { /* ignore */ }
+                safeRun(`${providerName}.logCommitStageDone`, () => logger.logToolCall(
+                    'commitStage',
+                    JSON.stringify({ stage: 'done', data: { finalMessage: safe.data.commitMessage } }),
+                    'Commit generation stage',
+                    repoPath
+                ));
                 return { content: safe.data.commitMessage };
             }
             lastError = safe.error;
             if (attempt < totalAttempts - 1) {
                 this.logSchemaValidationRetry('commitMessage', attempt, totalAttempts);
-                try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'commitMessage', attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
+                safeRun(`${providerName}.logSchemaValidationRetry.commit`, () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'commitMessage', attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath));
                 messages = this.buildSchemaValidationRetryMessages(
                     messages,
                     result,
@@ -433,7 +430,7 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
                 );
                 continue;
             }
-            try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'commitMessage', finalFailure: true, error: String(lastError) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
+            safeRun(`${providerName}.logSchemaValidationFinal.commit`, () => logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'commitMessage', finalFailure: true, error: String(lastError) }), 'Schema validation failed', repoPath));
         }
 
         return { message: `Failed to validate structured commit message from ${providerName}.`, statusCode: 500 };

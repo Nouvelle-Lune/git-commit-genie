@@ -12,6 +12,7 @@ import {
 import { normalizeLanguageCode, extractNarrativeTextForLanguageCheck, isLikelyTargetLanguage } from "./langDetector";
 import { isRagPreparationEnabled, prepareRagContext } from "./ragPreparation";
 import { logger } from "../logger";
+import { safeRun } from "../../utils/safeRun";
 
 
 async function summarizeSingleFile(diff: DiffData, chat: ChatFn): Promise<FileSummary> {
@@ -216,7 +217,7 @@ export async function generateCommitMessageChain(
 	const results: FileSummary[] = [];
 
 	// Notify: summarizing has started
-	try { options?.onStage?.({ type: 'summarizeStart' }); } catch { /* ignore */ }
+	safeRun('Chain.onStage.summarizeStart', () => options?.onStage?.({ type: 'summarizeStart' }));
 
 	async function worker() {
 		while (queue.length) {
@@ -225,12 +226,10 @@ export async function generateCommitMessageChain(
 			const summary = await summarizeSingleFile(item, chat);
 			results.push(summary);
 			// progress update + last summary text for visibility
-			try {
-				options?.onStage?.({
-					type: 'summarizeProgress',
-					data: { current: results.length, total: diffs.length, file: summary.file, summary: summary.summary, breaking: !!summary.breaking }
-				});
-			} catch { /* ignore */ }
+			safeRun('Chain.onStage.summarizeProgress', () => options?.onStage?.({
+				type: 'summarizeProgress',
+				data: { current: results.length, total: diffs.length, file: summary.file, summary: summary.summary, breaking: !!summary.breaking }
+			}));
 		}
 	}
 
@@ -251,68 +250,60 @@ export async function generateCommitMessageChain(
 		} catch (error) {
 			const errorMessage = String((error as any)?.message || error || 'Unknown error');
 			logger.warn('[Genie][Chain] RAG preparation failed; continuing without RAG context.', error);
-			try {
-				options?.onStage?.({
-					type: 'ragPreparationSkipped',
-					data: { error: errorMessage }
-				});
-			} catch { /* ignore */ }
+			safeRun('Chain.onStage.ragPreparationSkipped', () => options?.onStage?.({
+				type: 'ragPreparationSkipped',
+				data: { error: errorMessage }
+			}));
 		}
 	}
 
 	if (changeSetSummary && retrievalFeatures && options?.retrieveRagExamples) {
 		try {
 			ragStyleReferences = await options.retrieveRagExamples({ changeSetSummary, retrievalFeatures });
-			try {
-				options?.onStage?.({
-					type: 'ragRetrieved',
-					data: {
-						count: ragStyleReferences.length,
-						messages: ragStyleReferences.map(reference => reference.message),
-					}
-				});
-			} catch { /* ignore */ }
+			safeRun('Chain.onStage.ragRetrieved', () => options?.onStage?.({
+				type: 'ragRetrieved',
+				data: {
+					count: ragStyleReferences.length,
+					messages: ragStyleReferences.map(reference => reference.message),
+				}
+			}));
 		} catch (error) {
 			const errorMessage = String((error as any)?.message || error || 'Unknown error');
 			logger.warn('[Genie][Chain] RAG retrieval failed; continuing without style references.', error);
-			try {
-				options?.onStage?.({
-					type: 'ragRetrievalSkipped',
-					data: { error: errorMessage }
-				});
-			} catch { /* ignore */ }
+			safeRun('Chain.onStage.ragRetrievalSkipped', () => options?.onStage?.({
+				type: 'ragRetrievalSkipped',
+				data: { error: errorMessage }
+			}));
 		}
 	}
 
 	const { draft, notes: classificationNotes } = await classifyAndDraft(results, { ...inputs, ragStyleReferences }, chat);
 
-	try {
-		options?.onStage?.({ type: 'classifyDraft', data: { draft } });
-	} catch { /* ignore */ }
+	safeRun('Chain.onStage.classifyDraft', () => options?.onStage?.({ type: 'classifyDraft', data: { draft } }));
 
 	const { validMessage, notes: validationNotes } = await validateAndFix(draft, inputs.validationChecklist ?? '', chat, inputs.userTemplate);
-	try { options?.onStage?.({ type: 'validateFix', data: { validMessage } }); } catch { /* ignore */ }
+	safeRun('Chain.onStage.validateFix', () => options?.onStage?.({ type: 'validateFix', data: { validMessage } }));
 
 	// Local strict check; if still not conforming, ask LLM for a minimal strict fix
 	let finalMessage = validMessage;
 	const check = localStrictCheck(finalMessage);
 	if (!check.ok) {
 		finalMessage = await enforceStrictWithLLM(finalMessage, check.problems, chat, inputs.userTemplate);
-		try { options?.onStage?.({ type: 'strictFix', data: { message: finalMessage } }); } catch { /* ignore */ }
+		safeRun('Chain.onStage.strictFix', () => options?.onStage?.({ type: 'strictFix', data: { message: finalMessage } }));
 	}
 
 	// Enforce target language strictly while preserving tokens/structure
-	try {
-		if ((inputs.targetLanguage || '').trim()) {
+	if ((inputs.targetLanguage || '').trim()) {
+		try {
 			const out = await enforceTargetLanguageForCommit(finalMessage, inputs.targetLanguage, chat, inputs.userTemplate);
 			finalMessage = out;
-			try { options?.onStage?.({ type: 'enforceLanguage', data: { message: finalMessage } }); } catch { /* ignore */ }
+			safeRun('Chain.onStage.enforceLanguage', () => options?.onStage?.({ type: 'enforceLanguage', data: { message: finalMessage } }));
+		} catch (error) {
+			logger.warn('[Genie][Chain] Target language enforcement failed; keeping previous message.', error);
 		}
-	} catch (error) {
-		// ignore
 	}
 
-	try { options?.onStage?.({ type: 'done', data: { finalMessage } }); } catch { /* ignore */ }
+	safeRun('Chain.onStage.done', () => options?.onStage?.({ type: 'done', data: { finalMessage } }));
 
 	return {
 		commitMessage: finalMessage,
