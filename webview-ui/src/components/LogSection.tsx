@@ -176,28 +176,25 @@ export const LogSection: React.FC = () => {
 
     const renderLogIcon = (log: LogEntry) => {
         if (isSchemaValidationLog(log)) {
-            return <GenieWarningIcon size={14} />;
+            return <GenieWarningIcon size={13} />;
         }
         switch (log.type) {
             case LogType.FileRead:
-                return <GenieReadIcon size={14} />;
+                return <GenieReadIcon size={13} />;
             case LogType.ApiRequest:
-                return <GenieCloudIcon size={14} />;
+                return <GenieCloudIcon size={13} />;
             case LogType.ToolCall:
-                return isCommitStageDone(log) ? <GenieCheckIcon size={14} /> : <GenieToolIcon size={14} />;
+                return isCommitStageDone(log) ? <GenieCheckIcon size={13} /> : <GenieToolIcon size={13} />;
             case LogType.AnalysisStart:
-                // restore play button for started
                 return <i className="codicon codicon-debug-start"></i>;
             case LogType.GenerationStart:
-                // restore play button for started
                 return <i className="codicon codicon-debug-start"></i>;
             case LogType.FinalResult:
-                // Use "think" icon for final result to match desired style
-                return <GenieReasonIcon size={14} />;
+                return <GenieReasonIcon size={13} />;
             case LogType.Reason:
-                return <GenieReasonIcon size={14} />;
+                return <GenieReasonIcon size={13} />;
             default:
-                return <GenieToolIcon size={14} />;
+                return <GenieToolIcon size={13} />;
         }
     };
 
@@ -342,15 +339,20 @@ export const LogSection: React.FC = () => {
 
     return (
         <div className="log-section">
-            <div className="log-header-bar">
-                <div className="log-title">{state.i18n.logs}</div>
-                <button className="log-clear-btn" onClick={handleClearLogs} title={state.i18n.clearLogs}>
+            <div className="section-header">
+                <h3 className="section-title">{state.i18n.logs}</h3>
+                <button className="icon-btn" onClick={handleClearLogs} title={state.i18n.clearLogs}>
                     <i className="codicon codicon-trash"></i>
                 </button>
             </div>
-            <div className="log-box">
+            <div className="panel-box log-panel">
                 {state.logs.length === 0 ? (
-                    <div className="log-empty">{state.i18n.noLogsYet}</div>
+                    <div className="log-empty">
+                        <div className="log-empty-icon">
+                            <i className="codicon codicon-output"></i>
+                        </div>
+                        <div className="log-empty-text">{state.i18n.noLogsYet}</div>
+                    </div>
                 ) : (
                     <>
                         <div className={`log-list ${autoScroll ? 'auto-scroll' : ''}`} ref={logListRef} onScroll={handleScroll}>
@@ -410,7 +412,7 @@ export const LogSection: React.FC = () => {
                                                             <span className="log-file-icon" title="Open file"><GenieReadIcon size={12} /></span>
                                                         )}
                                                         {(log.content || log.fileContent) && log.type !== LogType.Reason && (
-                                                            <span className={`codicon codicon-chevron-${expandedLog === log.id ? 'down' : 'right'} log-expand-icon`}></span>
+                                                            <span className={`codicon codicon-chevron-right log-expand-icon${expandedLog === log.id ? ' expanded' : ''}`}></span>
                                                         )}
                                                     </div>
                                                 </div>
