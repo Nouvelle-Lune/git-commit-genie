@@ -1,11 +1,18 @@
-import { DiffData } from '../git/gitTypes';
+import { DiffData, DiffStatus } from '../git/gitTypes';
 import { RepoService } from '../repo/repo';
 import { Commit, Repository } from '../git/git';
 import { ChangeSetSummary, FileSummary, RetrievalFeatures } from '../chain/chainTypes';
 import { RagRuntimeService } from './ragRuntimeService';
 import { logger } from '../logger';
 import * as vscode from 'vscode';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
+
+const execFileAsync = promisify(execFile);
+const GIT_SHOW_MAX_BUFFER = 32 * 1024 * 1024;
+
+type CommitFileEntry = { path: string; status: string };
 
 type PreparedCommitRagDocument = {
     commit_hash: string;
@@ -14,11 +21,12 @@ type PreparedCommitRagDocument = {
     subject: string;
     body: string;
     message: string;
-    files: Array<{ path: string; status: string }>;
+    files: Array<{ path: string; status: DiffStatus }>;
     file_summaries: FileSummary[];
     change_set_summary: ChangeSetSummary;
     retrieval_features: RetrievalFeatures;
     document_text: string;
+    embedding_text: string;
 };
 
 type PendingGeneratedCommit = {
@@ -28,6 +36,17 @@ type PendingGeneratedCommit = {
     changeSetSummary: ChangeSetSummary;
     retrievalFeatures: RetrievalFeatures;
 };
+
+// Map a git --name-status short code (e.g. 'A', 'M', 'D', 'R100', 'C75', 'T', 'U')
+// to the project's DiffStatus literal. DiffStatus only models a subset; codes outside
+// that subset (C/T/U/X) collapse to 'modified', matching parseCommitNameStatus in diff.ts.
+function mapGitStatus(raw: string): DiffStatus {
+    const token = (raw || '').toUpperCase();
+    if (token.startsWith('A')) { return 'added'; }
+    if (token.startsWith('D')) { return 'deleted'; }
+    if (token.startsWith('R')) { return 'renamed'; }
+    return 'modified';
+}
 
 export class RagHistoricalIndexService {
     private static readonly COMMIT_PAGE_SIZE = 128;
@@ -40,8 +59,11 @@ export class RagHistoricalIndexService {
         private readonly ragRuntimeService: RagRuntimeService,
     ) { }
 
+    private importedCommitCounter = 0;
+
     public async ensureRepositoryIndexed(repo: Repository, reason: string): Promise<void> {
         const repoPath = repo.rootUri.fsPath;
+        this.importedCommitCounter = 0;
         if (this.inFlight.has(repoPath)) {
             logger.info(`[Genie][RAG] Historical import already in progress for ${repoPath}; skipping duplicate trigger (${reason})`);
             return;
@@ -276,18 +298,72 @@ export class RagHistoricalIndexService {
             return this.buildPendingDocument(commit, pending);
         }
 
-        return this.buildHistoricalDocumentFromMessage(commit);
+        const startedAt = Date.now();
+        const files = await this.loadCommitFiles(repo, commit.hash);
+        this.importedCommitCounter += 1;
+        if (this.importedCommitCounter % 100 === 0) {
+            logger.info(`[Genie][RAG] Imported ${this.importedCommitCounter} commits so far for ${repo.rootUri.fsPath}; last git show took ${Date.now() - startedAt}ms.`);
+        }
+        return this.buildHistoricalDocumentFromMessage(commit, files);
+    }
+
+    private async loadCommitFiles(repo: Repository, hash: string): Promise<CommitFileEntry[] | null> {
+        // Use NUL-separated output to safely handle paths with whitespace/newlines.
+        try {
+            const { stdout } = await execFileAsync(
+                'git',
+                ['show', '--name-status', '-z', '--format=', hash],
+                { cwd: repo.rootUri.fsPath, maxBuffer: GIT_SHOW_MAX_BUFFER }
+            );
+            return this.parseNameStatusZ(stdout);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            logger.warn(`[Genie][RAG] git show failed for commit ${hash} in ${repo.rootUri.fsPath}: ${message}. Falling back to message-only feature extraction.`);
+            return null;
+        }
+    }
+
+    private parseNameStatusZ(stdout: string): CommitFileEntry[] {
+        // git show --name-status -z emits records as: STATUS\0PATH\0 (or for renames/copies: Rxxx\0OLD\0NEW\0)
+        // The leading --format= keeps the message empty, so the buffer starts with the first status token.
+        const tokens = stdout.split('\0').filter(token => token.length > 0);
+        const files: CommitFileEntry[] = [];
+        let i = 0;
+        while (i < tokens.length) {
+            const status = tokens[i];
+            // Status tokens are short (1-4 chars) like A/M/D/R100/C75/T. Anything longer is likely a path leak.
+            if (!/^[A-Z][0-9]{0,3}$/.test(status)) {
+                i += 1;
+                continue;
+            }
+            const isRenameOrCopy = status.startsWith('R') || status.startsWith('C');
+            if (isRenameOrCopy) {
+                const newPath = tokens[i + 2];
+                if (newPath) {
+                    files.push({ path: newPath, status });
+                }
+                i += 3;
+            } else {
+                const filePath = tokens[i + 1];
+                if (filePath) {
+                    files.push({ path: filePath, status });
+                }
+                i += 2;
+            }
+        }
+        return files;
     }
 
     private buildPendingDocument(commit: Commit, pending: PendingGeneratedCommit): PreparedCommitRagDocument {
         const message = commit.message.trim();
         const [subject, ...bodyLines] = message.split('\n');
         const body = bodyLines.join('\n').trim();
+        const subjectText = (subject || message).trim();
         return {
             commit_hash: commit.hash,
             parent_hashes: [...(commit.parents || [])],
             committed_at: (commit.commitDate || commit.authorDate || new Date()).toISOString(),
-            subject: (subject || message).trim(),
+            subject: subjectText,
             body,
             message,
             files: pending.diffs.map(diff => ({ path: diff.fileName, status: diff.status })),
@@ -295,54 +371,193 @@ export class RagHistoricalIndexService {
             change_set_summary: pending.changeSetSummary,
             retrieval_features: pending.retrievalFeatures,
             document_text: this.buildDocumentText(message, pending.changeSetSummary, pending.retrievalFeatures),
+            embedding_text: this.buildEmbeddingText(subjectText, pending.changeSetSummary.text, body),
         };
     }
 
-    private buildHistoricalDocumentFromMessage(commit: Commit): PreparedCommitRagDocument {
+    private buildHistoricalDocumentFromMessage(commit: Commit, files: CommitFileEntry[] | null): PreparedCommitRagDocument {
         const message = commit.message.trim();
         const [subject, ...bodyLines] = message.split('\n');
         const body = bodyLines.join('\n').trim();
         const parsed = this.parseCommitMessage(message);
+        const fileFeatures = this.deriveFileFeatures(files || []);
+
         const changeSetSummary: ChangeSetSummary = {
             text: [parsed.summary, body].filter(Boolean).join('\n\n').trim() || subject.trim(),
             dominantType: parsed.type,
             dominantScope: parsed.scope ?? null,
-            areas: parsed.scope ? [parsed.scope] : [],
-            fileKinds: [],
+            areas: this.dedupeJoin(fileFeatures.areas, parsed.scope ? [parsed.scope] : []),
+            fileKinds: fileFeatures.fileKinds,
             changeActions: parsed.type ? [parsed.type] : [],
             entities: parsed.entities,
         };
         const retrievalFeatures: RetrievalFeatures = {
             predictedType: parsed.type,
             predictedScope: parsed.scope ?? null,
-            areas: parsed.scope ? [parsed.scope] : [],
-            fileKinds: [],
+            areas: this.dedupeJoin(fileFeatures.areas, parsed.scope ? [parsed.scope] : []),
+            fileKinds: fileFeatures.fileKinds,
             changeActions: parsed.type ? [parsed.type] : [],
             entities: parsed.entities,
-            touchedPaths: [],
-            fileExtensions: [],
-            statusMix: [],
-            fileCount: 0,
-            hasDocs: false,
-            hasTests: false,
-            hasConfig: false,
-            hasRenames: false,
-            isCrossLayer: false,
+            touchedPaths: fileFeatures.touchedPaths,
+            fileExtensions: fileFeatures.fileExtensions,
+            statusMix: fileFeatures.statusMix,
+            fileCount: fileFeatures.fileCount,
+            hasDocs: fileFeatures.hasDocs,
+            hasTests: fileFeatures.hasTests,
+            hasConfig: fileFeatures.hasConfig,
+            hasRenames: fileFeatures.hasRenames,
+            isCrossLayer: fileFeatures.isCrossLayer,
             breakingLike: parsed.breaking,
         };
 
+        const subjectText = (subject || message).trim();
         return {
             commit_hash: commit.hash,
             parent_hashes: [...(commit.parents || [])],
             committed_at: (commit.commitDate || commit.authorDate || new Date()).toISOString(),
-            subject: (subject || message).trim(),
+            subject: subjectText,
             body,
             message,
-            files: [],
+            files: (files || []).map(file => ({ path: file.path, status: this.mapGitStatus(file.status) })),
             file_summaries: [],
             change_set_summary: changeSetSummary,
             retrieval_features: retrievalFeatures,
             document_text: this.buildDocumentText(message, changeSetSummary, retrievalFeatures),
+            embedding_text: this.buildEmbeddingText(subjectText, changeSetSummary.text, body),
+        };
+    }
+
+    private buildEmbeddingText(subject: string, summary: string, body: string): string {
+        // Embedding input keeps only natural-language signal so the vector
+        // is not dominated by structured tags (Type/Scope/Areas/...).
+        const parts: string[] = [];
+        const seen = new Set<string>();
+        for (const part of [subject, summary, body]) {
+            const trimmed = (part || '').trim();
+            if (!trimmed || seen.has(trimmed)) {
+                continue;
+            }
+            seen.add(trimmed);
+            parts.push(trimmed);
+        }
+        return parts.join('\n\n');
+    }
+
+    private dedupeJoin(...lists: string[][]): string[] {
+        const seen = new Set<string>();
+        const out: string[] = [];
+        for (const list of lists) {
+            for (const item of list) {
+                const value = (item || '').trim();
+                if (!value || seen.has(value)) {
+                    continue;
+                }
+                seen.add(value);
+                out.push(value);
+            }
+        }
+        return out;
+    }
+
+    private mapGitStatus(raw: string): DiffStatus {
+        return mapGitStatus(raw);
+    }
+
+    private deriveFileFeatures(files: CommitFileEntry[]): {
+        touchedPaths: string[];
+        fileExtensions: string[];
+        fileKinds: string[];
+        fileCount: number;
+        statusMix: DiffStatus[];
+        hasRenames: boolean;
+        hasDocs: boolean;
+        hasTests: boolean;
+        hasConfig: boolean;
+        isCrossLayer: boolean;
+        areas: string[];
+    } {
+        if (!files.length) {
+            return {
+                touchedPaths: [], fileExtensions: [], fileKinds: [], fileCount: 0,
+                statusMix: [], hasRenames: false, hasDocs: false, hasTests: false,
+                hasConfig: false, isCrossLayer: false, areas: [],
+            };
+        }
+
+        const touchedPaths: string[] = [];
+        const extensions = new Set<string>();
+        const fileKinds = new Set<string>();
+        const statusSet = new Set<DiffStatus>();
+        const areaSet = new Set<string>();
+        let hasRenames = false;
+        let hasDocs = false;
+        let hasTests = false;
+        let hasConfig = false;
+        let hasFrontend = false;
+        let hasNonFrontend = false;
+
+        const docsPathRe = /(^|\/)(docs?|documentation|README|CHANGELOG)/i;
+        const docsExtRe = /\.(md|mdx|rst)$/i;
+        const testsPathRe = /(^|\/)(tests?|__tests__|spec)\b/i;
+        const testsFileRe = /\.(test|spec)\./i;
+        const configFileRe = /(^|\/)(package\.json|tsconfig[^/]*\.json|[^/]+\.ya?ml|[^/]+\.toml|Dockerfile|\.eslintrc[^/]*|\.prettierrc[^/]*|vite\.config\.[^/]+|webpack\.config\.[^/]+|tailwind\.config\.[^/]+|\.gitignore|\.env[^/]*)$/i;
+        const frontendRe = /(^|\/)(webview-ui|src\/ui|components|pages)\//;
+        const nonFrontendRe = /(^|\/)(src\/services|src\/commands|src\/core|src\/utils)\//;
+
+        for (const file of files) {
+            const filePath = file.path;
+            touchedPaths.push(filePath);
+            const mappedStatus = mapGitStatus(file.status);
+            statusSet.add(mappedStatus);
+            if (mappedStatus === 'renamed') {
+                hasRenames = true;
+            }
+
+            const lastSlash = filePath.lastIndexOf('/');
+            const baseName = lastSlash >= 0 ? filePath.slice(lastSlash + 1) : filePath;
+            const dotIdx = baseName.lastIndexOf('.');
+            if (dotIdx > 0 && dotIdx < baseName.length - 1) {
+                const ext = baseName.slice(dotIdx + 1).toLowerCase();
+                if (ext) {
+                    extensions.add(ext);
+                    fileKinds.add(ext);
+                }
+            }
+
+            const isDocs = docsPathRe.test(filePath) || docsExtRe.test(filePath);
+            const isTests = testsPathRe.test(filePath) || testsFileRe.test(filePath);
+            const isConfig = configFileRe.test(filePath);
+            if (isDocs) { hasDocs = true; fileKinds.add('docs'); }
+            if (isTests) { hasTests = true; fileKinds.add('test'); }
+            if (isConfig) { hasConfig = true; fileKinds.add('config'); }
+
+            if (frontendRe.test(filePath)) { hasFrontend = true; }
+            if (nonFrontendRe.test(filePath)) { hasNonFrontend = true; }
+
+            const segments = filePath.split('/').filter(Boolean);
+            const dirs = segments.slice(0, -1);
+            if (dirs.length >= 2) {
+                areaSet.add(`${dirs[0]}/${dirs[1]}`);
+            } else if (dirs.length === 1) {
+                areaSet.add(dirs[0]);
+            } else if (segments.length === 1) {
+                areaSet.add(segments[0]);
+            }
+        }
+
+        const areas = Array.from(areaSet).slice(0, 8);
+        return {
+            touchedPaths,
+            fileExtensions: Array.from(extensions),
+            fileKinds: Array.from(fileKinds),
+            fileCount: files.length,
+            statusMix: Array.from(statusSet),
+            hasRenames,
+            hasDocs,
+            hasTests,
+            hasConfig,
+            isCrossLayer: hasFrontend && hasNonFrontend,
+            areas,
         };
     }
 

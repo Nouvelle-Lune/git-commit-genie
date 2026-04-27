@@ -34,8 +34,21 @@ type IndexedCommitRow = {
     changeSetSummary: Partial<ChangeSetSummary>;
     retrievalFeatures: Partial<RetrievalFeatures>;
     documentText: string;
+    embeddingText: string;
     searchText: string;
     embedding?: number[];
+};
+
+type Bm25CorpusStats = {
+    documentFrequencies: Map<string, number>;
+    avgDocLength: number;
+    documentTokens: string[][];
+};
+
+type IndexCacheEntry = {
+    mtimeMs: number;
+    rows: IndexedCommitRow[];
+    bm25: Bm25CorpusStats;
 };
 
 type RecallCandidate = IndexedCommitRow & {
@@ -54,6 +67,10 @@ type RagRerankResponse = {
 };
 
 export class RagRetrievalService {
+    // Per-repo in-memory cache keyed by storage directory. Reused across
+    // retrieval calls and invalidated by ndjson mtime change.
+    private readonly indexCache = new Map<string, IndexCacheEntry>();
+
     constructor(private readonly context: vscode.ExtensionContext) { }
 
     public async retrieveStyleReferences(params: {
@@ -65,14 +82,15 @@ export class RagRetrievalService {
     }): Promise<RagStyleReference[]> {
         const { repo, changeSetSummary, retrievalFeatures, chat } = params;
         const maxResults = Math.max(1, params.maxResults ?? DEFAULT_RERANK_TOP_K);
-        const rows = await this.loadIndexedRows(repo);
+        const loaded = await this.loadIndexedRows(repo);
 
-        if (!rows.length) {
+        if (!loaded || !loaded.rows.length) {
             logger.info(`[Genie][RAG] Retrieval skipped for ${repo.rootUri.fsPath}; no indexed rows found.`);
             return [];
         }
 
-        const hybrid = await this.hybridRecall(rows, changeSetSummary.text || '');
+        const { rows, bm25 } = loaded;
+        const hybrid = await this.hybridRecall(rows, bm25, changeSetSummary.text || '');
         const typeScope = this.typeScopeRecall(rows, retrievalFeatures);
         const merged = this.mergeCandidates(hybrid, typeScope)
             .sort((left, right) => {
@@ -100,20 +118,21 @@ export class RagRetrievalService {
         return merged.slice(0, maxResults).map(candidate => this.toStyleReference(candidate, this.buildFallbackStyleReason(candidate)));
     }
 
-    private async hybridRecall(rows: IndexedCommitRow[], queryText: string): Promise<RecallCandidate[]> {
+    private async hybridRecall(rows: IndexedCommitRow[], bm25: Bm25CorpusStats, queryText: string): Promise<RecallCandidate[]> {
         const cleanQuery = (queryText || '').trim();
         if (!cleanQuery) {
             return [];
         }
 
-        const denseScores = await this.computeDenseScores(rows, cleanQuery);
-        const bm25Scores = this.computeBm25Scores(rows, cleanQuery);
-        const denseAvailable = denseScores.some(score => score > 0);
+        const { scores: denseScores, available: denseAvailable } = await this.computeDenseScores(rows, cleanQuery);
+        const bm25Scores = this.computeBm25Scores(bm25, cleanQuery);
         const denseNormalized = this.normalizeScores(denseScores);
         const bm25Normalized = this.normalizeScores(bm25Scores);
 
         const weighted = rows.map((row, index) => {
-            const hybridScore = denseAvailable
+            // Per-row decision: rows without an embedding fall back to BM25-only,
+            // so legacy rows are not systematically suppressed by dense weighting.
+            const hybridScore = denseAvailable[index]
                 ? (denseNormalized[index] * HYBRID_DENSE_WEIGHT) + (bm25Normalized[index] * HYBRID_BM25_WEIGHT)
                 : bm25Normalized[index];
 
@@ -296,14 +315,17 @@ export class RagRetrievalService {
         return normalized || null;
     }
 
-    private async computeDenseScores(rows: IndexedCommitRow[], queryText: string): Promise<number[]> {
+    private async computeDenseScores(rows: IndexedCommitRow[], queryText: string): Promise<{ scores: number[]; available: boolean[] }> {
+        const emptyAvailable = new Array(rows.length).fill(false);
+        const emptyScores = new Array(rows.length).fill(0);
+
         if (!rows.some(row => Array.isArray(row.embedding) && row.embedding.length)) {
-            return new Array(rows.length).fill(0);
+            return { scores: emptyScores, available: emptyAvailable };
         }
 
         const config = await this.readEmbeddingConfig();
         if (!config.apiKey || !config.baseUrl || !config.model) {
-            return new Array(rows.length).fill(0);
+            return { scores: emptyScores, available: emptyAvailable };
         }
 
         const client = new OpenAI({
@@ -322,33 +344,34 @@ export class RagRetrievalService {
         const response = await client.embeddings.create(request as any);
         const queryVector = this.normalizeVector(response.data[0]?.embedding?.map(value => Number(value)) || []);
         if (!queryVector.length) {
-            return new Array(rows.length).fill(0);
+            return { scores: emptyScores, available: emptyAvailable };
         }
 
-        return rows.map((row) => {
-            if (!row.embedding?.length || row.embedding.length !== queryVector.length) {
-                return 0;
+        const scores: number[] = new Array(rows.length).fill(0);
+        const available: boolean[] = new Array(rows.length).fill(false);
+        for (let index = 0; index < rows.length; index += 1) {
+            const row = rows[index];
+            const hasEmbedding = Array.isArray(row.embedding)
+                && row.embedding.length > 0
+                && row.embedding.length === queryVector.length;
+            if (!hasEmbedding) {
+                continue;
             }
-            return Math.max(0, this.dotProduct(queryVector, row.embedding));
-        });
+            available[index] = true;
+            scores[index] = Math.max(0, this.dotProduct(queryVector, row.embedding!));
+        }
+        return { scores, available };
     }
 
-    private computeBm25Scores(rows: IndexedCommitRow[], queryText: string): number[] {
+    private computeBm25Scores(bm25: Bm25CorpusStats, queryText: string): number[] {
+        const documents = bm25.documentTokens;
         const queryTerms = this.tokenize(queryText);
-        if (!queryTerms.length || !rows.length) {
-            return new Array(rows.length).fill(0);
+        if (!queryTerms.length || !documents.length) {
+            return new Array(documents.length).fill(0);
         }
 
-        const documents = rows.map(row => this.tokenize(row.searchText));
-        const avgDocLength = documents.reduce((sum, tokens) => sum + tokens.length, 0) / Math.max(documents.length, 1);
-        const documentFrequencies = new Map<string, number>();
-
-        for (const tokens of documents) {
-            for (const term of new Set(tokens)) {
-                documentFrequencies.set(term, (documentFrequencies.get(term) || 0) + 1);
-            }
-        }
-
+        const documentFrequencies = bm25.documentFrequencies;
+        const avgDocLength = bm25.avgDocLength;
         const totalDocuments = documents.length;
         const k1 = 1.2;
         const b = 0.75;
@@ -392,11 +415,89 @@ export class RagRetrievalService {
     }
 
     private tokenize(text: string): string[] {
-        return String(text || '')
-            .toLowerCase()
-            .split(/[^a-z0-9_.-]+/)
-            .map(token => token.trim())
-            .filter(token => token.length >= 2);
+        // CJK ranges kept in sync with estimateTokens() in src/services/analysis/tools/modelContext.ts.
+        // isCjkBoundary mirrors that full set so any CJK code point flushes the ASCII buffer.
+        // isCjkWordChar is the narrower subset of actual ideographic/syllabic characters that
+        // contribute as BM25 tokens; CJK Symbols/Punctuation (U+3000-U+303F) and Fullwidth Forms
+        // (U+FF00-U+FFEF) are excluded because they are mostly punctuation/full-width symbols
+        // and should act as separators rather than tokens.
+        const lowered = String(text || '').toLowerCase();
+        if (!lowered) {
+            return [];
+        }
+
+        const isCjkBoundary = (code: number): boolean => (
+            (code >= 0x3000 && code <= 0x303f) ||
+            (code >= 0x3040 && code <= 0x309f) ||
+            (code >= 0x30a0 && code <= 0x30ff) ||
+            (code >= 0x3400 && code <= 0x4dbf) ||
+            (code >= 0x4e00 && code <= 0x9fff) ||
+            (code >= 0xac00 && code <= 0xd7af) ||
+            (code >= 0xf900 && code <= 0xfaff) ||
+            (code >= 0xff00 && code <= 0xffef)
+        );
+        const isCjkWordChar = (code: number): boolean => (
+            (code >= 0x3040 && code <= 0x309f) ||
+            (code >= 0x30a0 && code <= 0x30ff) ||
+            (code >= 0x3400 && code <= 0x4dbf) ||
+            (code >= 0x4e00 && code <= 0x9fff) ||
+            (code >= 0xac00 && code <= 0xd7af) ||
+            (code >= 0xf900 && code <= 0xfaff)
+        );
+        const isAsciiWord = (code: number): boolean => (
+            (code >= 0x30 && code <= 0x39) ||
+            (code >= 0x61 && code <= 0x7a) ||
+            code === 0x5f || code === 0x2e || code === 0x2d || code === 0x2f
+        );
+        const stripTrim = (token: string): string => token.replace(/^[._\-/]+|[._\-/]+$/g, '');
+
+        const tokens: string[] = [];
+        let asciiBuf = '';
+        let cjkBuf = '';
+
+        const flushAscii = () => {
+            const trimmed = stripTrim(asciiBuf);
+            if (trimmed.length >= 2) {
+                tokens.push(trimmed);
+            }
+            asciiBuf = '';
+        };
+        const flushCjk = () => {
+            if (cjkBuf.length === 0) {
+                return;
+            }
+            // Emit each char and adjacent 2-grams.
+            for (let i = 0; i < cjkBuf.length; i++) {
+                tokens.push(cjkBuf[i]);
+                if (i + 1 < cjkBuf.length) {
+                    tokens.push(cjkBuf.slice(i, i + 2));
+                }
+            }
+            cjkBuf = '';
+        };
+
+        for (let i = 0; i < lowered.length; i++) {
+            const ch = lowered[i];
+            const code = ch.charCodeAt(0);
+            if (isCjkWordChar(code)) {
+                flushAscii();
+                cjkBuf += ch;
+            } else if (isCjkBoundary(code)) {
+                // CJK punctuation / fullwidth symbols act as separators.
+                flushAscii();
+                flushCjk();
+            } else if (isAsciiWord(code)) {
+                flushCjk();
+                asciiBuf += ch;
+            } else {
+                flushAscii();
+                flushCjk();
+            }
+        }
+        flushAscii();
+        flushCjk();
+
+        return tokens.filter(token => token.length > 0);
     }
 
     private dotProduct(left: number[], right: number[]): number {
@@ -467,6 +568,8 @@ export class RagRetrievalService {
         const changeSetSummary = this.safeParseJson<Partial<ChangeSetSummary>>(row.change_set_summary_json);
         const retrievalFeatures = this.safeParseJson<Partial<RetrievalFeatures>>(row.retrieval_features_json);
         const documentText = String(row.document_text || '').trim();
+        // Backward compat: older ndjson rows have no embedding_text; fall back to document_text.
+        const embeddingText = String(row.embedding_text || '').trim() || documentText;
         const searchText = [
             message,
             changeSetSummary?.text || '',
@@ -485,6 +588,7 @@ export class RagRetrievalService {
             changeSetSummary: changeSetSummary || {},
             retrievalFeatures: retrievalFeatures || {},
             documentText,
+            embeddingText,
             searchText: searchText || documentText || message,
             embedding: Array.isArray(row.embedding)
                 ? this.normalizeVector(row.embedding.map(value => Number(value)).filter(value => Number.isFinite(value)))
