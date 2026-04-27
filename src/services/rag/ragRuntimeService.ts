@@ -86,6 +86,8 @@ type RagState = {
 
 type EmbeddedDocument = Record<string, unknown> & {
     commit_hash: string;
+    document_text?: string;
+    embedding_text?: string;
     embedding?: number[];
 };
 
@@ -614,7 +616,9 @@ export class RagRuntimeService {
             }
             const request: Record<string, unknown> = {
                 model: config.model,
-                input: batch.map(doc => String(doc.document_text || '')),
+                // Embedding input is the natural-language portion only; fall back to
+                // document_text for legacy callers that did not supply embedding_text.
+                input: batch.map(doc => String(doc.embedding_text || doc.document_text || '')),
             };
             if (config.dimensions > 0) {
                 request.dimensions = config.dimensions;
@@ -668,6 +672,7 @@ export class RagRuntimeService {
             change_set_summary_json: JSON.stringify(document.change_set_summary || {}),
             retrieval_features_json: JSON.stringify(document.retrieval_features || {}),
             document_text: String(document.document_text || ''),
+            embedding_text: String(document.embedding_text || ''),
             indexed_at: new Date().toISOString(),
         };
         if (embedding) {
