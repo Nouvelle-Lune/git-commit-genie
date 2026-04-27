@@ -2,6 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import OpenAI from 'openai';
+import { createHash } from 'crypto';
 import { RepoService } from '../repo/repo';
 import { logger } from '../logger';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
@@ -10,7 +11,7 @@ import { Repository } from '../git/git';
 const RAG_EMBEDDING_API_KEY_SECRET = 'gitCommitGenie.secret.ragEmbeddingApiKey';
 const RAG_STATE_FILE = 'state.json';
 const RAG_DOCUMENTS_FILE = 'documents.ndjson';
-const STORAGE_VERSION = 3;
+const STORAGE_VERSION = 4;
 const TS_RAG_PIPELINE_VERSION = 1;
 
 type RagEmbeddingConfig = {
@@ -76,12 +77,19 @@ type RagState = {
     storageVersion: number;
     fingerprintHash: string;
     fingerprintPayload: Record<string, unknown>;
-    knownCommitHashes: string[];
     commitCount: number;
     vectorCount: number;
     historyImportComplete?: boolean;
     indexedAt?: string;
     embeddingDimensions?: number | null;
+};
+
+type RepoIndexMemo = {
+    knownHashes: Set<string>;
+    commitCount: number;
+    vectorCount: number;
+    embeddingDimensions: number | null;
+    mtimeMs: number;
 };
 
 type EmbeddedDocument = Record<string, unknown> & {
@@ -104,6 +112,9 @@ export class RagRuntimeService {
     private disposed = false;
     private backgroundEnsureCallback: ((reason: string) => Promise<void>) | null = null;
     private readonly repositoryStatuses = new Map<string, RagRepositoryStatus>();
+    // Per-repo memo keyed by storage directory. Avoids re-reading the entire
+    // ndjson on every upsert; rebuilt when the file mtime advances unexpectedly.
+    private readonly repoMemos = new Map<string, RepoIndexMemo>();
     private readonly _onDidRepositoryStatusChange = new vscode.EventEmitter<{ repoPath: string; status: RagRepositoryStatus }>();
     public readonly onDidRepositoryStatusChange = this._onDidRepositoryStatusChange.event;
 
@@ -243,12 +254,12 @@ export class RagRuntimeService {
         if (!storageDir) {
             return false;
         }
-        const stats = await this.readDocumentStats(storageDir);
-        if (stats.commitCount > 0 || stats.vectorCount > 0) {
+        const memo = await this.getOrLoadMemo(storageDir);
+        if (memo.commitCount > 0 || memo.vectorCount > 0) {
             return true;
         }
         const state = await this.readState(storageDir);
-        return !!state && (state.commitCount > 0 || state.vectorCount > 0 || state.knownCommitHashes.length > 0);
+        return !!state && (state.commitCount > 0 || state.vectorCount > 0);
     }
 
     public getRepositoryStatus(repoPath: string): RagRepositoryStatus | null {
@@ -306,15 +317,15 @@ export class RagRuntimeService {
 
         const fingerprint = this.buildFingerprint(cfg);
         const state = await this.readState(storageDir);
-        const storedStats = await this.readDocumentStats(storageDir);
+        const memo = await this.getOrLoadMemo(storageDir);
         let rebuildRequired = !state || state.fingerprintHash !== fingerprint.hash;
-        if (!rebuildRequired && state && this.isConfigured(cfg) && storedStats.commitCount > 0) {
-            const vectorCountBehind = storedStats.vectorCount < storedStats.commitCount;
+        if (!rebuildRequired && state && this.isConfigured(cfg) && memo.commitCount > 0) {
+            const vectorCountBehind = memo.vectorCount < memo.commitCount;
             if (vectorCountBehind && this.shouldAutoRepairEmbeddings(reason)) {
                 rebuildRequired = true;
                 logger.info(
                     `[Genie][RAG] Forcing rebuild for ${repo.rootUri.fsPath} because historical embeddings are incomplete: ` +
-                    `commitCount=${storedStats.commitCount}, vectorCount=${storedStats.vectorCount}`
+                    `commitCount=${memo.commitCount}, vectorCount=${memo.vectorCount}`
                 );
             } else if (vectorCountBehind) {
                 logger.info(
@@ -326,18 +337,19 @@ export class RagRuntimeService {
         if (rebuildRequired) {
             logger.info(`[Genie][RAG] Rebuilding local RAG store for ${repo.rootUri.fsPath}. fingerprintChanged=${!state || state.fingerprintHash !== fingerprint.hash}`);
             await this.resetStorage(storageDir);
+            this.repoMemos.delete(storageDir);
         }
 
+        const effectiveMemo = rebuildRequired ? null : memo;
         const nextState: RagState = {
             storageVersion: STORAGE_VERSION,
             fingerprintHash: fingerprint.hash,
             fingerprintPayload: fingerprint.payload,
-            knownCommitHashes: rebuildRequired ? [] : storedStats.commitHashes,
-            commitCount: rebuildRequired ? 0 : storedStats.commitCount,
-            vectorCount: rebuildRequired ? 0 : storedStats.vectorCount,
+            commitCount: effectiveMemo ? effectiveMemo.commitCount : 0,
+            vectorCount: effectiveMemo ? effectiveMemo.vectorCount : 0,
             historyImportComplete: rebuildRequired ? false : (state?.historyImportComplete === true),
             indexedAt: new Date().toISOString(),
-            embeddingDimensions: rebuildRequired ? null : (storedStats.embeddingDimensions ?? state?.embeddingDimensions ?? null),
+            embeddingDimensions: effectiveMemo ? (effectiveMemo.embeddingDimensions ?? state?.embeddingDimensions ?? null) : null,
         };
         await this.writeState(storageDir, nextState);
 
@@ -381,14 +393,14 @@ export class RagRuntimeService {
 
     public async getKnownCommitHashes(repo: Repository): Promise<Set<string>> {
         const storageDir = await this.requireStorageDir(repo);
-        const stats = await this.readDocumentStats(storageDir);
+        const memo = await this.getOrLoadMemo(storageDir);
         const response: KnownCommitsResponse = {
             ok: true,
             repo_path: repo.rootUri.fsPath,
-            commit_hashes: stats.commitHashes,
+            commit_hashes: Array.from(memo.knownHashes),
         };
         logger.info(`[Genie][RAG] Loaded ${response.commit_hashes.length} known commit hashes for ${repo.rootUri.fsPath}`);
-        return new Set(response.commit_hashes);
+        return new Set(memo.knownHashes);
     }
 
     public async upsertPreparedDocuments(repo: Repository, documents: unknown[], options?: UpsertPreparedDocumentsOptions): Promise<UpsertDocumentsResponse> {
@@ -399,56 +411,70 @@ export class RagRuntimeService {
             throw new Error('RAG state is missing. Call ensureRepositoryIndexed first.');
         }
 
-        const existingRows = await this.readDocumentRows(storageDir);
-        const knownHashes = new Set(existingRows.map(row => row.commit_hash));
-        const existingVectorCount = existingRows.filter(row => Array.isArray(row.embedding) && row.embedding.length > 0).length;
+        const memo = await this.getOrLoadMemo(storageDir);
         const incomingDocs = (Array.isArray(documents) ? documents : []) as Record<string, unknown>[];
         const newDocs = incomingDocs.filter(doc => {
             const hash = String(doc.commit_hash || '').trim();
-            return !!hash && !knownHashes.has(hash);
+            return !!hash && !memo.knownHashes.has(hash);
         });
 
-        logger.info(`[Genie][RAG] Upsert request for ${repo.rootUri.fsPath}: incoming=${incomingDocs.length}, new=${newDocs.length}, known=${knownHashes.size}, embeddingConfigured=${this.isConfigured(cfg)}`);
+        logger.info(`[Genie][RAG] Upsert request for ${repo.rootUri.fsPath}: incoming=${incomingDocs.length}, new=${newDocs.length}, known=${memo.knownHashes.size}, embeddingConfigured=${this.isConfigured(cfg)}`);
 
         if (!newDocs.length) {
             if (!options?.skipStatusUpdates) {
-                this.updateRepositoryStatus(repo.rootUri.fsPath, 'ready', this.getReadyStatusText(existingRows.length, existingVectorCount));
+                this.updateRepositoryStatus(repo.rootUri.fsPath, 'ready', this.getReadyStatusText(memo.commitCount, memo.vectorCount));
             }
             return {
                 ok: true,
                 repo_path: repo.rootUri.fsPath,
                 stored_count: 0,
                 vector_count_added: 0,
-                commit_count: existingRows.length,
-                vector_count: existingVectorCount,
+                commit_count: memo.commitCount,
+                vector_count: memo.vectorCount,
             };
         }
 
         if (!options?.skipStatusUpdates) {
-            this.updateRepositoryStatus(repo.rootUri.fsPath, 'ready', this.getReadyStatusText(existingRows.length, existingVectorCount));
+            this.updateRepositoryStatus(repo.rootUri.fsPath, 'ready', this.getReadyStatusText(memo.commitCount, memo.vectorCount));
         }
         this.throwIfCancelled(options?.isCancellationRequested);
         const embeddings = this.isConfigured(cfg)
             ? await this.embedDocuments(repo.rootUri.fsPath, cfg, newDocs, options?.isCancellationRequested, options?.skipStatusUpdates)
             : new Map<string, number[]>();
-        const rowsWithEmbeddings: EmbeddedDocument[] = newDocs.map((doc) => this.toStoredRow(doc, embeddings.get(String(doc.commit_hash))));
-        const rows = rowsWithEmbeddings;
+        const rows: EmbeddedDocument[] = newDocs.map((doc) => this.toStoredRow(doc, embeddings.get(String(doc.commit_hash))));
 
         this.throwIfCancelled(options?.isCancellationRequested);
-        await this.appendRows(storageDir, rows);
+        const newMtimeMs = await this.appendRows(storageDir, rows);
 
-        const nextRows = existingRows.concat(rows);
+        // Incrementally update memo so the next upsert does not rescan the file.
+        let addedVectors = 0;
+        let firstNewVectorDim: number | null = null;
+        for (const row of rows) {
+            memo.knownHashes.add(row.commit_hash);
+            if (Array.isArray(row.embedding) && row.embedding.length > 0) {
+                addedVectors += 1;
+                if (firstNewVectorDim === null) {
+                    firstNewVectorDim = row.embedding.length;
+                }
+            }
+        }
+        memo.commitCount += rows.length;
+        memo.vectorCount += addedVectors;
+        if (memo.embeddingDimensions === null && firstNewVectorDim !== null) {
+            memo.embeddingDimensions = firstNewVectorDim;
+        }
+        memo.mtimeMs = newMtimeMs;
+
         const nextState: RagState = {
             ...state,
-            knownCommitHashes: nextRows.map(row => row.commit_hash),
-            commitCount: nextRows.length,
-            vectorCount: nextRows.filter(row => Array.isArray(row.embedding) && row.embedding.length > 0).length,
+            commitCount: memo.commitCount,
+            vectorCount: memo.vectorCount,
             indexedAt: new Date().toISOString(),
-            embeddingDimensions: nextRows.find(row => Array.isArray(row.embedding) && row.embedding.length > 0)?.embedding?.length ?? state.embeddingDimensions ?? null,
+            embeddingDimensions: memo.embeddingDimensions ?? state.embeddingDimensions ?? null,
         };
         await this.writeState(storageDir, nextState);
 
-        logger.info(`[Genie][RAG] Upsert completed for ${repo.rootUri.fsPath}: stored=${rows.length}, vectorsAdded=${rows.filter(row => Array.isArray(row.embedding)).length}, commitCount=${nextState.commitCount}, vectorCount=${nextState.vectorCount}`);
+        logger.info(`[Genie][RAG] Upsert completed for ${repo.rootUri.fsPath}: stored=${rows.length}, vectorsAdded=${addedVectors}, commitCount=${nextState.commitCount}, vectorCount=${nextState.vectorCount}`);
         if (!options?.skipStatusUpdates) {
             this.updateRepositoryStatus(
                 repo.rootUri.fsPath,
@@ -461,7 +487,7 @@ export class RagRuntimeService {
             ok: true,
             repo_path: repo.rootUri.fsPath,
             stored_count: rows.length,
-            vector_count_added: rows.filter(row => Array.isArray(row.embedding)).length,
+            vector_count_added: addedVectors,
             commit_count: nextState.commitCount,
             vector_count: nextState.vectorCount,
         };
@@ -507,23 +533,17 @@ export class RagRuntimeService {
             ts_rag_pipeline_version: TS_RAG_PIPELINE_VERSION,
             backend: 'local-js-index',
             embedding: {
+                // baseUrl is excluded; embedding output depends only on model + dimensions,
+                // so switching mirrors of the same provider should not invalidate the index.
                 enabled: embeddingEnabled,
                 provider_family: embeddingEnabled ? 'openai-compatible' : null,
-                base_url: embeddingEnabled ? config.baseUrl : null,
                 model: embeddingEnabled ? config.model : null,
                 dimensions: embeddingEnabled && config.dimensions > 0 ? config.dimensions : null,
             },
         };
         const encoded = JSON.stringify(payload);
-        let hash = 0;
-        for (let i = 0; i < encoded.length; i++) {
-            hash = ((hash << 5) - hash) + encoded.charCodeAt(i);
-            hash |= 0;
-        }
-        return {
-            hash: `f${Math.abs(hash)}`,
-            payload,
-        };
+        const hash = createHash('sha256').update(encoded).digest('hex').slice(0, 16);
+        return { hash, payload };
     }
 
     private async readState(storageDir: string): Promise<RagState | null> {
@@ -544,6 +564,7 @@ export class RagRuntimeService {
     private async resetStorage(storageDir: string): Promise<void> {
         await fs.rm(path.join(storageDir, RAG_DOCUMENTS_FILE), { force: true });
         await fs.rm(path.join(storageDir, 'lancedb'), { recursive: true, force: true });
+        this.repoMemos.delete(storageDir);
     }
 
     private shouldAutoRepairEmbeddings(reason: string): boolean {
@@ -565,30 +586,65 @@ export class RagRuntimeService {
         }
     }
 
-    private async readDocumentStats(storageDir: string): Promise<{
-        commitCount: number;
-        vectorCount: number;
-        commitHashes: string[];
-        embeddingDimensions: number | null;
-    }> {
+    private async getOrLoadMemo(storageDir: string): Promise<RepoIndexMemo> {
+        const file = path.join(storageDir, RAG_DOCUMENTS_FILE);
+        let mtimeMs = 0;
+        try {
+            const stat = await fs.stat(file);
+            mtimeMs = stat.mtimeMs;
+        } catch {
+            // File does not exist yet; treat as empty memo with mtimeMs=0.
+            const empty: RepoIndexMemo = {
+                knownHashes: new Set(),
+                commitCount: 0,
+                vectorCount: 0,
+                embeddingDimensions: null,
+                mtimeMs: 0,
+            };
+            this.repoMemos.set(storageDir, empty);
+            return empty;
+        }
+
+        const cached = this.repoMemos.get(storageDir);
+        if (cached && cached.mtimeMs === mtimeMs) {
+            return cached;
+        }
+
         const rows = await this.readDocumentRows(storageDir);
-        const vectorRows = rows.filter(row => Array.isArray(row.embedding) && row.embedding.length > 0);
-        return {
+        const knownHashes = new Set<string>();
+        let vectorCount = 0;
+        let firstVectorDim: number | null = null;
+        for (const row of rows) {
+            knownHashes.add(row.commit_hash);
+            if (Array.isArray(row.embedding) && row.embedding.length > 0) {
+                vectorCount += 1;
+                if (firstVectorDim === null) {
+                    firstVectorDim = row.embedding.length;
+                }
+            }
+        }
+        const memo: RepoIndexMemo = {
+            knownHashes,
             commitCount: rows.length,
-            vectorCount: vectorRows.length,
-            commitHashes: rows.map(row => row.commit_hash),
-            embeddingDimensions: vectorRows[0]?.embedding?.length ?? null,
+            vectorCount,
+            embeddingDimensions: firstVectorDim,
+            mtimeMs,
         };
+        this.repoMemos.set(storageDir, memo);
+        return memo;
     }
 
-    private async appendRows(storageDir: string, rows: EmbeddedDocument[]): Promise<void> {
-        if (!rows.length) {
-            return;
-        }
+    private async appendRows(storageDir: string, rows: EmbeddedDocument[]): Promise<number> {
         const file = path.join(storageDir, RAG_DOCUMENTS_FILE);
+        if (!rows.length) {
+            const stat = await fs.stat(file).catch(() => null);
+            return stat?.mtimeMs ?? 0;
+        }
         const payload = rows.map(row => JSON.stringify(row)).join('\n') + '\n';
         await fs.appendFile(file, payload, 'utf8');
+        const stat = await fs.stat(file);
         logger.info(`[Genie][RAG] Appended ${rows.length} rows to local RAG document store '${RAG_DOCUMENTS_FILE}'.`);
+        return stat.mtimeMs;
     }
 
     private async embedDocuments(

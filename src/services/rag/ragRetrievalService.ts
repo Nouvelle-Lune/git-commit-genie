@@ -519,28 +519,37 @@ export class RagRetrievalService {
         return vector.map(value => value / magnitude);
     }
 
-    private async loadIndexedRows(repo: Repository): Promise<IndexedCommitRow[]> {
+    private async loadIndexedRows(repo: Repository): Promise<{ rows: IndexedCommitRow[]; bm25: Bm25CorpusStats } | null> {
         const repoPath = repo.rootUri.fsPath;
         const gitDir = await this.resolveGitDir(repoPath);
         if (!gitDir) {
-            return [];
+            return null;
         }
 
         const storageDir = path.join(gitDir, 'git-commit-genie', 'rag');
         const state = await this.readState(storageDir);
         if (!state?.commitCount) {
-            return [];
+            this.indexCache.delete(storageDir);
+            return null;
         }
 
         const file = path.join(storageDir, RAG_DOCUMENTS_FILE);
+        let mtimeMs: number;
         try {
-            await fs.access(file);
+            const stat = await fs.stat(file);
+            mtimeMs = stat.mtimeMs;
         } catch {
-            return [];
+            this.indexCache.delete(storageDir);
+            return null;
+        }
+
+        const cached = this.indexCache.get(storageDir);
+        if (cached && cached.mtimeMs === mtimeMs) {
+            return { rows: cached.rows, bm25: cached.bm25 };
         }
 
         const raw = await fs.readFile(file, 'utf8');
-        const rows = raw
+        const parsed = raw
             .split('\n')
             .map(line => line.trim())
             .filter(Boolean)
@@ -553,9 +562,27 @@ export class RagRetrievalService {
             })
             .filter((row): row is Record<string, unknown> => !!row);
 
-        return rows
+        const rows = parsed
             .map((row: Record<string, unknown>) => this.toIndexedRow(row))
             .filter((row: IndexedCommitRow | null): row is IndexedCommitRow => !!row);
+
+        const bm25 = this.buildBm25Corpus(rows);
+        this.indexCache.set(storageDir, { mtimeMs, rows, bm25 });
+        return { rows, bm25 };
+    }
+
+    private buildBm25Corpus(rows: IndexedCommitRow[]): Bm25CorpusStats {
+        const documentTokens = rows.map(row => this.tokenize(row.searchText));
+        const documentFrequencies = new Map<string, number>();
+        let totalLength = 0;
+        for (const tokens of documentTokens) {
+            totalLength += tokens.length;
+            for (const term of new Set(tokens)) {
+                documentFrequencies.set(term, (documentFrequencies.get(term) || 0) + 1);
+            }
+        }
+        const avgDocLength = totalLength / Math.max(documentTokens.length, 1);
+        return { documentTokens, documentFrequencies, avgDocLength };
     }
 
     private toIndexedRow(row: Record<string, unknown>): IndexedCommitRow | null {
