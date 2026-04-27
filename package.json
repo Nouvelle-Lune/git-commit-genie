@@ -237,6 +237,27 @@
           "minimum": -1,
           "markdownDescription": "%config.repositoryAnalysis.MaxCount.desc%"
         },
+        "gitCommitGenie.repositoryAnalysis.toolResult.maxContentChars": {
+          "order": 20,
+          "type": "number",
+          "default": 40000,
+          "minimum": 1000,
+          "markdownDescription": "%config.repositoryAnalysis.toolResult.maxContentChars.desc%"
+        },
+        "gitCommitGenie.repositoryAnalysis.toolResult.maxListLines": {
+          "order": 21,
+          "type": "number",
+          "default": 3000,
+          "minimum": 10,
+          "markdownDescription": "%config.repositoryAnalysis.toolResult.maxListLines.desc%"
+        },
+        "gitCommitGenie.repositoryAnalysis.toolResult.maxSnippetChars": {
+          "order": 22,
+          "type": "number",
+          "default": 8000,
+          "minimum": 100,
+          "markdownDescription": "%config.repositoryAnalysis.toolResult.maxSnippetChars.desc%"
+        },
         "gitCommitGenie.repositoryAnalysis.model": {
           "order": 10,
           "type": "string",
