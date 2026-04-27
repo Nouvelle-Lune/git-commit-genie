@@ -30,6 +30,7 @@ import { searchFiles } from './tools/searchTools';
 import { readFileContent } from './tools/fileTools';
 import { compressContext } from './tools/compressionTools';
 import { compactToolResultForConversation } from './tools/formattingTools';
+import { shouldExclude } from './tools/utils';
 import { DirectoryEntry, SearchFilesResult, ToolResult } from './tools/toolTypes';
 import { getMaxContextByFunction } from './tools/modelContext';
 
@@ -43,6 +44,7 @@ import { getMaxContextByFunction } from './tools/modelContext';
 export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private static readonly ANALYSIS_MD_FILE_NAME = 'repository-analysis.md';
     private static readonly ANALYSIS_STATE_KEY_PREFIX = 'gitCommitGenie.analysis.';
+    private static readonly DEFAULT_EXCLUDE_PATTERNS = ['node_modules', '__pycache__', 'dist', 'build', 'out', 'coverage', '.DS_Store', '.*'];
 
     private llmService: LLMService | null = null;
     private resolveLLMService?: (provider: string) => (LLMService | undefined);
@@ -963,7 +965,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      */
     private normalizeExcludePatterns(user: string[] = []): string[] {
         const list = Array.isArray(user) ? user : [];
-        return Array.from(new Set(list.filter(v => typeof v === 'string' && v.trim().length > 0)));
+        const merged = [...RepositoryAnalysisService.DEFAULT_EXCLUDE_PATTERNS, ...list];
+        return Array.from(new Set(merged.filter(v => typeof v === 'string' && v.trim().length > 0)));
     }
 
     /**
@@ -1002,6 +1005,12 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 }
                 case 'readFileContent': {
                     const filePath = this.resolveSafePath(repoPath, String(args.filePath || ''));
+                    const relativePath = path.relative(repoPath, filePath);
+                    if (shouldExclude(relativePath, excludePatterns)) {
+                        const errMsg = `Excluded path: '${relativePath}' matches user or default exclude patterns`;
+                        logger.info(`[Genie][RepoAnalysis] Blocked read of excluded path: ${relativePath}`);
+                        return { success: false, error: errMsg };
+                    }
                     const startLine = typeof args.startLine === 'number' ? args.startLine : 1;
                     const maxLines = typeof args.maxLines === 'number' ? args.maxLines : 1000;
                     const encoding = typeof args.encoding === 'string' ? args.encoding : 'utf-8';
