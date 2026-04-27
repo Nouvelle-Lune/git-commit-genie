@@ -632,11 +632,11 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             : undefined;
 
 
-        // Limit total thinking/acting steps to prevent runaway loops
-        let maxSteps = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('repositoryAnalysis.MaxCount', 99999);
-        if (maxSteps === -1) {
-            maxSteps = 99999;
-        }
+        // Limit total thinking/acting steps to prevent runaway loops.
+        // Non-positive values (the legacy -1 sentinel and 0) mean "no upper bound";
+        // when unbounded, the step === maxSteps reset branch below never fires.
+        const configuredMaxSteps = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('repositoryAnalysis.MaxCount', -1);
+        const maxSteps = configuredMaxSteps <= 0 ? Number.POSITIVE_INFINITY : configuredMaxSteps;
         const maxContextTokens = getMaxContextByFunction('repoAnalysis', model);
         // Compress earlier to avoid runaway growth
         const contextThreshold = maxContextTokens * 0.65;
