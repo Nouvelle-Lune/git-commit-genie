@@ -20,8 +20,8 @@ export const OPENROUTER_MODEL_ALIAS_MAP: Readonly<Record<string, string>> = Obje
     'openai/gpt-5-nano': 'gpt-5-nano',
 
     // DeepSeek family
-    'deepseek/deepseek-chat': 'deepseek-chat',
-    'deepseek/deepseek-r1': 'deepseek-reasoner',
+    'deepseek/deepseek-v4-flash': 'deepseek-v4-flash',
+    'deepseek/deepseek-v4-pro': 'deepseek-v4-pro',
 
     // Anthropic family
     'anthropic/claude-3.5-haiku': 'claude-3-5-haiku-20241022',

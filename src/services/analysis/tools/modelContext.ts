@@ -22,8 +22,8 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'gpt-5-nano': 400_000,
 
   // DeepSeek
-  'deepseek-chat': 128_000,
-  'deepseek-reasoner': 128_000,
+  'deepseek-v4-flash': 1_000_000,
+  'deepseek-v4-pro': 1_000_000,
 
   // Anthropic
   'claude-3-5-haiku-20241022': 200_000,
@@ -79,8 +79,8 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'openai/gpt-5.2': 400_000,
   'openai/gpt-5-mini': 400_000,
   'openai/gpt-5-nano': 400_000,
-  'deepseek/deepseek-chat': 128_000,
-  'deepseek/deepseek-r1': 128_000,
+  'deepseek/deepseek-v4-flash': 1_000_000,
+  'deepseek/deepseek-v4-pro': 1_000_000,
   'anthropic/claude-3.5-haiku': 200_000,
   'anthropic/claude-3.5-sonnet': 200_000,
   'anthropic/claude-3.7-sonnet': 200_000,

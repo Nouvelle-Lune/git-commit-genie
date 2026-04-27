@@ -79,8 +79,12 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     // lite variants removed
 
     // DeepSeek (USD)
-    'deepseek-chat': { input: 0.274, output: 0.411, cached: 0.027 },
-    'deepseek-reasoner': { input: 0.274, output: 0.411, cached: 0.027 },
+    // Converted from official CNY pricing using the same fixed rate as GLM
+    // (1 CNY = 0.145 USD). DeepSeek-V4-Pro uses the original (non-discounted)
+    // rate; the limited-time 2.5-折 promotion is intentionally ignored so that
+    // cost estimates remain stable after the promotion ends.
+    'deepseek-v4-flash': { input: 0.145, output: 0.29, cached: 0.0029 },   // CNY: 1 / 2 / 0.02
+    'deepseek-v4-pro': { input: 1.74, output: 3.48, cached: 0.0145 },      // CNY: 12 / 24 / 0.1
 
     // GLM (USD)
     // Converted from RMB pricing snapshot shared by user on 2026-04-02.
