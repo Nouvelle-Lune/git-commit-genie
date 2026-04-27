@@ -44,7 +44,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private static readonly ANALYSIS_MD_FILE_NAME = 'repository-analysis.md';
     private static readonly ANALYSIS_STATE_KEY_PREFIX = 'gitCommitGenie.analysis.';
 
-    private llmService: LLMService | null;
+    private llmService: LLMService | null = null;
     private resolveLLMService?: (provider: string) => (LLMService | undefined);
 
     private repoService: RepoService;
@@ -65,9 +65,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private readonly _onAnalysisChanged = new vscode.EventEmitter<string>();
     public readonly onAnalysisChanged = this._onAnalysisChanged.event;
 
-    constructor(context: vscode.ExtensionContext, llmService: LLMService | null, repoService: RepoService) {
+    constructor(context: vscode.ExtensionContext, repoService: RepoService) {
         this.context = context;
-        this.llmService = llmService;
         this.repoService = repoService;
     }
 
