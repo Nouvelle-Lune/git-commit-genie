@@ -76,14 +76,14 @@ export class OpenAIService extends BaseLLMService {
     /**
      * Get the OpenAI client instance
      */
-    protected getClient(): OpenAI | null {
+    public getClient(): OpenAI | null {
         return this.openai;
     }
 
     /**
      * Get the OpenAI utils instance
      */
-    protected getUtils(): OpenAICompatibleUtils {
+    public getUtils(): OpenAICompatibleUtils {
         return this.utils;
     }
 

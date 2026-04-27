@@ -87,4 +87,11 @@ export interface LLMService {
     clearApiKey(): Promise<void>;
 
     generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError>;
+
+    // Provider-specific raw client (e.g., OpenAI, Anthropic, GoogleGenAI). Typed as unknown
+    // because each provider's SDK exposes a different shape; callers must narrow.
+    getClient(): unknown | null;
+
+    // Provider-specific utils with chat-completion helpers. Typed as unknown for the same reason.
+    getUtils(): unknown;
 }

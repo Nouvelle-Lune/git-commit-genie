@@ -35,6 +35,16 @@ import { DirectoryEntry, SearchFilesResult, ToolResult } from './tools/toolTypes
 import { getMaxContextByFunction } from './tools/modelContext';
 
 /**
+ * Structural shape of provider utils used by the repo analysis flow.
+ * Each provider's full utils class is wider; this captures the contract this
+ * module relies on so we can drop `as any` casts at the call sites.
+ */
+interface RepoAnalysisProviderUtils {
+    callChatCompletion(client: unknown, messages: ChatMessage[], options: Record<string, unknown>): Promise<any>;
+    getMaxRetries?(): number;
+}
+
+/**
  * Tool-driven repository analysis service
  * 
  * This module provides an LLM-driven repository analysis flow
@@ -801,8 +811,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
             const model = this.getActiveModelForProvider(provider) || '';
 
-            const client = (service as any).getClient();
-            const utils = (service as any).getUtils();
+            const client = service.getClient();
+            const utils = service.getUtils() as RepoAnalysisProviderUtils;
 
             if (!client) {
                 throw Object.assign(new Error(`${provider} client is not initialized`), { statusCode: 401 });
@@ -1022,8 +1032,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         }
 
                         const model = this.getActiveModelForProvider(provider) || '';
-                        const client = (service as any).getClient();
-                        const utils = (service as any).getUtils();
+                        const client = service.getClient();
+                        const utils = service.getUtils() as RepoAnalysisProviderUtils;
 
                         if (!client) {
                             throw new Error(`${provider} client is not initialized`);
@@ -1046,8 +1056,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         return result;
                     };
 
-                    const maxRetries = typeof (this.pickRepoAnalysisService().service as any)?.getUtils?.()?.getMaxRetries === 'function'
-                        ? (this.pickRepoAnalysisService().service as any).getUtils().getMaxRetries()
+                    const utilsForRetries = this.pickRepoAnalysisService().service?.getUtils() as RepoAnalysisProviderUtils | undefined;
+                    const maxRetries = typeof utilsForRetries?.getMaxRetries === 'function'
+                        ? utilsForRetries.getMaxRetries()
                         : 2;
                     const compressionResult = await compressContext(content, chatFn, { targetTokens, preserveStructure, language, maxRetries });
 

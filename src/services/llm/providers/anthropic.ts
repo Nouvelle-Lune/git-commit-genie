@@ -94,14 +94,14 @@ export class AnthropicService extends BaseLLMService {
     /**
      * Get the Anthropic client instance
      */
-    protected getClient(): Anthropic | null {
+    public getClient(): Anthropic | null {
         return this.client;
     }
 
     /**
      * Get the Anthropic utils instance
      */
-    protected getUtils(): AnthropicUtils {
+    public getUtils(): AnthropicUtils {
         return this.utils;
     }
 
