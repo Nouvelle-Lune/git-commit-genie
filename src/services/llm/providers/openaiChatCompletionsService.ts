@@ -11,7 +11,16 @@ import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
+import { ProviderRules } from './utils/baseProviderUtils';
 import { commitMessageSchema } from './schemas/common';
+
+interface OpenAIChatRuntimeConfig {
+    model: string;
+    useChain: boolean;
+    chainMaxParallel: number;
+    maxRetries: number;
+    temperature: number;
+}
 
 interface OpenAIChatProviderOptions {
     providerName: string;
@@ -175,7 +184,7 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
         return this.context.globalState.get<string>(this.providerOptions.modelStateKey, '');
     }
 
-    protected getProviderConfig() {
+    protected getProviderConfig(): OpenAIChatRuntimeConfig {
         const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
         return {
             useChain: cfg.get<boolean>('chain.enabled', true),
@@ -219,8 +228,8 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
     private async generateThinking(
         diffs: DiffData[],
         jsonMessage: string,
-        config: any,
-        rules: any,
+        config: OpenAIChatRuntimeConfig,
+        rules: ProviderRules,
         repoPath: string,
         options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
@@ -321,8 +330,8 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
      */
     private async generateDefault(
         jsonMessage: string,
-        config: any,
-        rules: any,
+        config: OpenAIChatRuntimeConfig,
+        rules: ProviderRules,
         repoPath: string,
         options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
