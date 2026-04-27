@@ -108,16 +108,6 @@ export class OpenAIService extends BaseLLMService {
         return this.utils.getProviderConfig('gitCommitGenie', 'openaiModel');
     }
 
-    private getPreferredFallbackModel(supported: string[]): string {
-        const preferred = ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-5', 'gpt-5.2', 'gpt-5-nano'];
-        for (const model of preferred) {
-            if (supported.includes(model)) {
-                return model;
-            }
-        }
-        return supported[0] || '';
-    }
-
     private async ensureSupportedModel(model: string): Promise<string> {
         const selected = (model || '').trim();
         if (!selected) {
@@ -129,7 +119,9 @@ export class OpenAIService extends BaseLLMService {
             return selected;
         }
 
-        const fallback = this.getPreferredFallbackModel(supported);
+        // listSupportedModels is already ordered by preference; the first
+        // entry is the default fallback.
+        const fallback = supported[0];
         if (!fallback) {
             return selected;
         }
