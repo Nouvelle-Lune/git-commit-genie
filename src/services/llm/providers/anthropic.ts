@@ -11,6 +11,7 @@ import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { AnthropicUtils } from './utils/AnthropicUtils';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
+import { ProviderRuntimeConfig, ProviderRules } from './utils/baseProviderUtils';
 import { ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from '../baseLLMService';
 import {
@@ -160,8 +161,8 @@ export class AnthropicService extends BaseLLMService {
     private async generateThinking(
         diffs: DiffData[],
         jsonMessage: string,
-        config: any,
-        rules: any,
+        config: ProviderRuntimeConfig,
+        rules: ProviderRules,
         repoPath: string,
         options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
@@ -278,8 +279,8 @@ export class AnthropicService extends BaseLLMService {
      */
     private async generateDefault(
         jsonMessage: string,
-        config: any,
-        rules: any,
+        config: ProviderRuntimeConfig,
+        rules: ProviderRules,
         repoPath: string,
         options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {

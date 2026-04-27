@@ -11,6 +11,7 @@ import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { GeminiUtils } from './utils/GeminiUtils';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
+import { ProviderRuntimeConfig, ProviderRules } from './utils/baseProviderUtils';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import {
     GeminiCommitMessageSchema,
@@ -31,7 +32,7 @@ const SECRET_GEMINI_API_KEY = 'gitCommitGenie.secret.geminiApiKey';
  * Google Gemini service implementation using @google/genai
  */
 export class GeminiService extends BaseLLMService {
-    private client: any | null = null;
+    private client: GoogleGenAI | null = null;
     protected context: vscode.ExtensionContext;
     private utils: GeminiUtils;
 
@@ -150,8 +151,8 @@ export class GeminiService extends BaseLLMService {
     private async generateThinking(
         diffs: DiffData[],
         jsonMessage: string,
-        config: any,
-        rules: any,
+        config: ProviderRuntimeConfig,
+        rules: ProviderRules,
         repoPath: string,
         options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
@@ -265,8 +266,8 @@ export class GeminiService extends BaseLLMService {
      */
     private async generateDefault(
         jsonMessage: string,
-        config: any,
-        rules: any,
+        config: ProviderRuntimeConfig,
+        rules: ProviderRules,
         repoPath: string,
         options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {

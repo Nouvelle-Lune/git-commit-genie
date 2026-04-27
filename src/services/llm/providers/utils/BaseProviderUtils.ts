@@ -5,6 +5,26 @@ import { L10N_KEYS as I18N } from '../../../../i18n/keys';
 import { ProviderError } from '../errors/providerError';
 
 /**
+ * Runtime configuration resolved from VS Code settings + per-provider model state.
+ * Returned by {@link BaseProviderUtils.getProviderConfig}.
+ */
+export interface ProviderRuntimeConfig {
+    model: string;
+    useChain: boolean;
+    chainMaxParallel: number;
+    maxRetries: number;
+}
+
+/**
+ * Prompt rules read from packaged resources, returned by
+ * {@link BaseProviderUtils.getRules}.
+ */
+export interface ProviderRules {
+    baseRule: string;
+    checklistText: string;
+}
+
+/**
  * Common utility functions for LLM providers
  */
 export abstract class BaseProviderUtils {
@@ -47,12 +67,7 @@ export abstract class BaseProviderUtils {
      * @param modelStateKey The global state key for the model (e.g., 'openaiModel')
      * @returns Configuration object with model, useChain, chainMaxParallel, maxRetries
      */
-    public getProviderConfig(providerKey: string, modelStateKey: string): {
-        model: string;
-        useChain: boolean;
-        chainMaxParallel: number;
-        maxRetries: number;
-    } {
+    public getProviderConfig(providerKey: string, modelStateKey: string): ProviderRuntimeConfig {
         const commonConfig = this.getCommonConfig();
         return {
             ...commonConfig,
@@ -177,7 +192,7 @@ export abstract class BaseProviderUtils {
     /**
      * Get rules file content
      */
-    public getRules() {
+    public getRules(): ProviderRules {
         const rulesPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'baseRules.md'));
         const checklistPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'validationChecklist.md'));
 
