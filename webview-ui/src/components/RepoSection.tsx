@@ -46,6 +46,13 @@ export const RepoSection: React.FC = () => {
         });
     };
 
+    const handleRepairEmbeddings = (repoPath: string) => {
+        vscodeApi.postMessage({
+            type: 'repairRagEmbeddings',
+            repoPath
+        });
+    };
+
     const getStatusBadge = (status: 'missing' | 'analyzing' | 'idle') => {
         switch (status) {
             case 'analyzing':
@@ -147,6 +154,16 @@ export const RepoSection: React.FC = () => {
                             </div>
                             <div className="repo-actions">
                                 <span className="repo-cost">${repo.cost.toFixed(4)}</span>
+                                {repo.ragStatus?.repairNeeded ? (
+                                    <button
+                                        className="icon-btn"
+                                        onClick={() => handleRepairEmbeddings(repo.path)}
+                                        aria-label={state.i18n.repairRagEmbeddings}
+                                        title={state.i18n.repairRagEmbeddings}
+                                    >
+                                        <i className="codicon codicon-tools"></i>
+                                    </button>
+                                ) : null}
                                 {repo.analysisStatus === 'analyzing' ? (
                                     <button
                                         className="icon-btn repo-cancel-btn"

@@ -12,6 +12,7 @@
   "command.clearRagEmbeddingApiKey": "Git Commit Genie: 清除 RAG Embedding API Key",
   "command.startRagIndexing": "Git Commit Genie: 开始 RAG 索引",
   "command.cancelRagIndexing": "Git Commit Genie: 停止 RAG 索引",
+  "command.repairRagEmbeddings": "Git Commit Genie: 修复 RAG 缺失向量",
   "command.toggleChain": "Git Commit Genie: 启用/关闭链式思考模式",
   "command.selectTemplate": "Git Commit Genie: 选择/新建模板",
   "command.viewRepositoryAnalysis": "Git Commit Genie: 查看仓库分析",

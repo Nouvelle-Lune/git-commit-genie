@@ -107,6 +107,9 @@ export const L10N_KEYS = {
     statusEmbeddingBatch: 'Embedding {0}/{1}',
     statusReady: 'Index complete · {0} commits',
     statusReadyWithVectors: 'Index complete · {0} commits indexed',
+    statusEmbeddingRepairNeeded: 'Some commits are missing embeddings; manual reindex is recommended to improve retrieval quality',
+    embeddingRepairCompleted: 'Repaired {0} embeddings.',
+    embeddingRepairFailed: 'Failed to repair embeddings: {0}',
     statusScanningHistory: 'Scanning history',
     statusImportingPage: 'Importing page {0}',
     statusImportFailedShort: 'Import failed',
@@ -228,7 +231,8 @@ export const L10N_KEYS = {
     viewAnalysis: 'View analysis',
     analysisStatusMissing: 'Analysis missing',
     analysisStatusAnalyzing: 'Analyzing...',
-    analysisStatusIdle: 'Up to date'
+    analysisStatusIdle: 'Up to date',
+    repairRagEmbeddings: 'Repair missing RAG embeddings'
   }
 } as const;
 

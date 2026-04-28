@@ -12,6 +12,7 @@
   "command.clearRagEmbeddingApiKey": "Git Commit Genie: Clear RAG Embedding API Key",
   "command.startRagIndexing": "Git Commit Genie: Start RAG Indexing",
   "command.cancelRagIndexing": "Git Commit Genie: Stop RAG Indexing",
+  "command.repairRagEmbeddings": "Git Commit Genie: Repair RAG Embeddings",
   "command.toggleChain": "Git Commit Genie: Enable/Disable thinking mode",
   "command.selectTemplate": "Git Commit Genie: Select/Create Template",
   "command.viewRepositoryAnalysis": "Git Commit Genie: View Repository Analysis",

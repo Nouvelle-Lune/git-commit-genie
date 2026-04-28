@@ -108,6 +108,9 @@
   "Indexing {0}/{1} · {2} left": "Indexing {0}/{1} · {2} left",
   "Index complete · {0} commits": "Index complete · {0} commits",
   "Index complete · {0} commits indexed": "Index complete · {0} commits indexed",
+  "Some commits are missing embeddings; manual reindex is recommended to improve retrieval quality": "Some commits are missing embeddings; manual reindex is recommended to improve retrieval quality",
+  "Repaired {0} embeddings.": "Repaired {0} embeddings.",
+  "Failed to repair embeddings: {0}": "Failed to repair embeddings: {0}",
   "Import failed": "Import failed",
   "Failed to create template directory": "Failed to create template directory",
   "Repository analysis request limit reached, reset request count and continue task?": "Repository analysis request limit reached, reset request count and continue task?",
@@ -122,5 +125,6 @@
   "View analysis": "View analysis",
   "Analysis missing": "Analysis missing",
   "Analyzing...": "Analyzing...",
-  "Up to date": "Up to date"
+  "Up to date": "Up to date",
+  "Repair missing RAG embeddings": "Repair missing RAG embeddings"
 }

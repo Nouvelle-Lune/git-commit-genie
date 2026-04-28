@@ -237,6 +237,45 @@ export class RagHistoricalIndexService {
         }
     }
 
+    public async repairRepositoryEmbeddings(repo: Repository): Promise<void> {
+        const repoPath = repo.rootUri.fsPath;
+        const repoLabel = this.repoService.getRepositoryLabel(repo) || repoPath;
+        if (this.inFlight.has(repoPath)) {
+            // Mirror the indexing-in-progress behavior so repair cannot race with import.
+            void vscode.window.showInformationMessage(vscode.l10n.t(I18N.rag.indexingAlreadyRunning, repoLabel));
+            return;
+        }
+        this.inFlight.set(repoPath, { cancelled: false });
+        try {
+            const result = await vscode.window.withProgress({
+                location: vscode.ProgressLocation.Notification,
+                title: vscode.l10n.t(I18N.rag.statusEmbedding),
+                cancellable: true,
+            }, async (_progress, token) => {
+                token.onCancellationRequested(() => this.cancelRepositoryIndexing(repoPath));
+                return await this.ragRuntimeService.repairMissingEmbeddings(repo, {
+                    isCancellationRequested: () => this.isCancellationRequested(repoPath),
+                });
+            });
+            void vscode.window.showInformationMessage(vscode.l10n.t(I18N.rag.embeddingRepairCompleted, String(result.repaired)));
+            logger.info(
+                `[Genie][RAG] Repair embeddings command finished for ${repoPath}: repaired=${result.repaired}, remaining=${result.remaining}.`
+            );
+        } catch (error) {
+            if (this.isCancellationError(error)) {
+                logger.info(`[Genie][RAG] Repair embeddings cancelled for ${repoPath}.`);
+                this.ragRuntimeService.updateRepositoryStatus(repoPath, 'idle', vscode.l10n.t(I18N.rag.statusIndexingCancelled));
+                return;
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            logger.warn(`[Genie][RAG] Repair embeddings failed for ${repoPath}`, error as any);
+            void vscode.window.showErrorMessage(vscode.l10n.t(I18N.rag.embeddingRepairFailed, message));
+            throw error;
+        } finally {
+            this.inFlight.delete(repoPath);
+        }
+    }
+
     public cancelRepositoryIndexing(repoPath?: string): void {
         if (!repoPath) {
             for (const state of this.inFlight.values()) {

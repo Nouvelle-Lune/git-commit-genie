@@ -35,7 +35,8 @@ const initialState: AppState = {
         analysisStatusMissing: 'Analysis missing',
         analysisStatusAnalyzing: 'Analyzing...',
         analysisStatusIdle: 'Up to date',
-        openSettings: 'Open Settings'
+        openSettings: 'Open Settings',
+        repairRagEmbeddings: 'Repair missing RAG embeddings'
     },
     logs: [],
     analysisRunning: false

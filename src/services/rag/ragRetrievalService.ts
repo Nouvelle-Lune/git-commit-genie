@@ -1,12 +1,16 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { execFile } from 'child_process';
 import * as vscode from 'vscode';
 import OpenAI from 'openai';
 import { Repository } from '../git/git';
+import { RepoService } from '../repo/repo';
 import { buildRagRerankMessages } from '../chain/chainChatPrompts';
 import { ChangeSetSummary, RagStyleReference, RetrievalFeatures } from '../chain/chainTypes';
 import { logger } from '../logger';
+
+// Recency boost half-life. 90 days matches typical commit-style relevance decay.
+const RECENCY_HALF_LIFE_DAYS = 90;
+const MILLIS_PER_DAY = 86_400_000;
 
 const RAG_EMBEDDING_API_KEY_SECRET = 'gitCommitGenie.secret.ragEmbeddingApiKey';
 const RAG_STATE_FILE = 'state.json';
@@ -56,12 +60,13 @@ type RecallCandidate = IndexedCommitRow & {
     denseScore: number;
     bm25Score: number;
     featureScore: number;
+    recencyBoost: number;
     matchedBy: Set<'hybrid' | 'typeScope'>;
 };
 
 type RagRerankResponse = {
     selected?: Array<{
-        commitHash?: string;
+        id?: string;
         reason?: string;
     }>;
 };
@@ -71,7 +76,10 @@ export class RagRetrievalService {
     // retrieval calls and invalidated by ndjson mtime change.
     private readonly indexCache = new Map<string, IndexCacheEntry>();
 
-    constructor(private readonly context: vscode.ExtensionContext) { }
+    constructor(
+        private readonly context: vscode.ExtensionContext,
+        private readonly repoService: RepoService,
+    ) { }
 
     public async retrieveStyleReferences(params: {
         repo: Repository;
@@ -92,10 +100,17 @@ export class RagRetrievalService {
         const { rows, bm25 } = loaded;
         const hybrid = await this.hybridRecall(rows, bm25, changeSetSummary.text || '');
         const typeScope = this.typeScopeRecall(rows, retrievalFeatures);
-        const merged = this.mergeCandidates(hybrid, typeScope)
+        const mergedCandidates = this.mergeCandidates(hybrid, typeScope);
+        // Apply recency boost before final sort so newer commits get a small
+        // ranking lift (and older ones a small penalty), capped at +/-30%.
+        const now = Date.now();
+        for (const candidate of mergedCandidates) {
+            candidate.recencyBoost = this.computeRecencyBoost(candidate.committedAt, now);
+        }
+        const merged = mergedCandidates
             .sort((left, right) => {
-                const leftPrimary = Math.max(left.featureScore, left.hybridScore);
-                const rightPrimary = Math.max(right.featureScore, right.hybridScore);
+                const leftPrimary = Math.max(left.featureScore, left.hybridScore) * (0.7 + 0.3 * left.recencyBoost);
+                const rightPrimary = Math.max(right.featureScore, right.hybridScore) * (0.7 + 0.3 * right.recencyBoost);
                 return rightPrimary - leftPrimary;
             })
             .slice(0, RERANK_CANDIDATE_LIMIT);
@@ -142,6 +157,7 @@ export class RagRetrievalService {
                 denseScore: denseScores[index] ?? 0,
                 bm25Score: bm25Scores[index] ?? 0,
                 featureScore: 0,
+                recencyBoost: 0,
                 matchedBy: new Set<'hybrid' | 'typeScope'>(hybridScore > 0 ? ['hybrid'] : []),
             };
         });
@@ -174,6 +190,7 @@ export class RagRetrievalService {
                     denseScore: 0,
                     bm25Score: 0,
                     featureScore,
+                    recencyBoost: 0,
                     matchedBy: new Set<'hybrid' | 'typeScope'>(featureScore > 0 ? ['typeScope'] : []),
                 };
             })
@@ -214,15 +231,22 @@ export class RagRetrievalService {
         candidates: RecallCandidate[],
         maxResults: number
     ): Promise<RagStyleReference[]> {
-        const promptCandidates = candidates.map(candidate => ({
-            commitHash: candidate.commitHash,
-            message: candidate.message,
-            matchedBy: Array.from(candidate.matchedBy),
-            type: candidate.retrievalFeatures.predictedType || candidate.changeSetSummary.dominantType || null,
-            scope: candidate.retrievalFeatures.predictedScope || candidate.changeSetSummary.dominantScope || null,
-            hybridScore: Number(candidate.hybridScore.toFixed(4)),
-            featureScore: Number(candidate.featureScore.toFixed(4)),
-        }));
+        // Use compact c1..cN ids in the rerank prompt to save tokens versus
+        // sending 40-char commit hashes; map back to real hashes after parsing.
+        const idToHash = new Map<string, string>();
+        const promptCandidates = candidates.map((candidate, index) => {
+            const id = `c${index + 1}`;
+            idToHash.set(id, candidate.commitHash);
+            return {
+                id,
+                message: candidate.message,
+                matchedBy: Array.from(candidate.matchedBy),
+                type: candidate.retrievalFeatures.predictedType || candidate.changeSetSummary.dominantType || null,
+                scope: candidate.retrievalFeatures.predictedScope || candidate.changeSetSummary.dominantScope || null,
+                hybridScore: Number(candidate.hybridScore.toFixed(4)),
+                featureScore: Number(candidate.featureScore.toFixed(4)),
+            };
+        });
 
         const messages = buildRagRerankMessages(changeSetSummary, retrievalFeatures, promptCandidates, maxResults);
         const parsed = await chat(messages, { requestType: 'ragRerank' }) as RagRerankResponse;
@@ -232,7 +256,8 @@ export class RagRetrievalService {
         const seen = new Set<string>();
 
         for (const item of selected) {
-            const commitHash = String(item?.commitHash || '').trim();
+            const id = String(item?.id || '').trim();
+            const commitHash = idToHash.get(id);
             if (!commitHash || seen.has(commitHash)) {
                 continue;
             }
@@ -248,6 +273,17 @@ export class RagRetrievalService {
         }
 
         return out;
+    }
+
+    private computeRecencyBoost(committedAt: string, nowMs: number): number {
+        const parsed = Date.parse(committedAt || '');
+        if (!Number.isFinite(parsed)) {
+            // Neutral boost when timestamp is missing/malformed so it does not
+            // skew ordering relative to entries with valid timestamps.
+            return 0.5;
+        }
+        const ageDays = Math.max(0, (nowMs - parsed) / MILLIS_PER_DAY);
+        return Math.exp(-ageDays / RECENCY_HALF_LIFE_DAYS);
     }
 
     private toStyleReference(candidate: RecallCandidate, styleReason: string): RagStyleReference {
@@ -520,8 +556,7 @@ export class RagRetrievalService {
     }
 
     private async loadIndexedRows(repo: Repository): Promise<{ rows: IndexedCommitRow[]; bm25: Bm25CorpusStats } | null> {
-        const repoPath = repo.rootUri.fsPath;
-        const gitDir = await this.resolveGitDir(repoPath);
+        const gitDir = await this.repoService.getRepositoryGitDir(repo);
         if (!gitDir) {
             return null;
         }
@@ -549,22 +584,44 @@ export class RagRetrievalService {
         }
 
         const raw = await fs.readFile(file, 'utf8');
-        const parsed = raw
-            .split('\n')
-            .map(line => line.trim())
-            .filter(Boolean)
-            .map(line => {
-                try {
-                    return JSON.parse(line) as Record<string, unknown>;
-                } catch {
-                    return null;
-                }
-            })
-            .filter((row): row is Record<string, unknown> => !!row);
+        // Surface ndjson corruption: log per-line warnings so commitCount drift
+        // becomes visible instead of being silently dropped.
+        const parsed: Record<string, unknown>[] = [];
+        const lines = raw.split('\n');
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+            const trimmed = lines[lineIndex].trim();
+            if (!trimmed) {
+                continue;
+            }
+            let row: Record<string, unknown>;
+            try {
+                row = JSON.parse(trimmed) as Record<string, unknown>;
+            } catch (error) {
+                const preview = trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
+                logger.warn(
+                    `[Genie][RAG] Skipping unparseable ndjson row at ${file}:${lineIndex + 1}; ` +
+                    `preview="${preview}"; error=${(error as Error)?.message || error}`
+                );
+                continue;
+            }
+            parsed.push(row);
+        }
 
-        const rows = parsed
-            .map((row: Record<string, unknown>) => this.toIndexedRow(row))
-            .filter((row: IndexedCommitRow | null): row is IndexedCommitRow => !!row);
+        const rows: IndexedCommitRow[] = [];
+        for (let i = 0; i < parsed.length; i += 1) {
+            const row = parsed[i];
+            const indexed = this.toIndexedRow(row);
+            if (!indexed) {
+                const hash = String(row.commit_hash || '').trim();
+                const message = String(row.message || '').trim();
+                logger.warn(
+                    `[Genie][RAG] Skipping ndjson row missing required fields at ${file} (entry #${i + 1}): ` +
+                    `commit_hash=${hash ? 'present' : 'missing'}, message=${message ? 'present' : 'missing'}`
+                );
+                continue;
+            }
+            rows.push(indexed);
+        }
 
         const bm25 = this.buildBm25Corpus(rows);
         this.indexCache.set(storageDir, { mtimeMs, rows, bm25 });
@@ -641,18 +698,6 @@ export class RagRetrievalService {
         } catch {
             return null;
         }
-    }
-
-    private async resolveGitDir(repoPath: string): Promise<string | null> {
-        return await new Promise<string | null>((resolve) => {
-            execFile('git', ['rev-parse', '--absolute-git-dir'], { cwd: repoPath, maxBuffer: 8 * 1024 * 1024 }, (error, stdout) => {
-                if (error) {
-                    resolve(null);
-                    return;
-                }
-                resolve(String(stdout || '').trim() || null);
-            });
-        });
     }
 
     private async readEmbeddingConfig(): Promise<RagEmbeddingConfig> {

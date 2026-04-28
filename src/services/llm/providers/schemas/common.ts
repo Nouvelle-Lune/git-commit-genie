@@ -68,7 +68,7 @@ export const ragPreparationResponseSchema = z.object({
 
 export const ragRerankResponseSchema = z.object({
   selected: z.array(z.object({
-    commitHash: z.string().min(1),
+    id: z.string().min(1),
     reason: z.string().min(1),
   })).default([]),
   notes: z.string().nullable().default(null),

@@ -203,6 +203,16 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 } else if (data.type === 'cancelAnalysis') {
                     // Cancel repository analysis
                     vscode.commands.executeCommand('git-commit-genie.cancelRepositoryAnalysis');
+                } else if (data.type === 'repairRagEmbeddings') {
+                    // Repair missing RAG embeddings for a specific repo. Resolve the repo by path
+                    // and forward an arg shape consistent with other repo-targeted commands.
+                    const repo = this._serviceRegistry
+                        .getRepoService()
+                        .getRepositories()
+                        .find(r => r.rootUri.fsPath === data.repoPath);
+                    if (repo) {
+                        vscode.commands.executeCommand('git-commit-genie.repairRagEmbeddings', { rootUri: repo.rootUri });
+                    }
                 }
             })
         );
@@ -348,7 +358,9 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                         return undefined;
                     }
                     const status = ragRuntimeService.getRepositoryStatus(repoPath);
-                    return status ? { kind: status.kind, text: status.text, detail: status.detail } : undefined;
+                    return status
+                        ? { kind: status.kind, text: status.text, detail: status.detail, repairNeeded: status.repairNeeded === true || undefined }
+                        : undefined;
                 })()
             });
         }
@@ -367,7 +379,8 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 analysisStatusMissing: vscode.l10n.t(I18N.dashboard.analysisStatusMissing),
                 analysisStatusAnalyzing: vscode.l10n.t(I18N.dashboard.analysisStatusAnalyzing),
                 analysisStatusIdle: vscode.l10n.t(I18N.dashboard.analysisStatusIdle),
-                openSettings: vscode.l10n.t(I18N.actions.openSettings)
+                openSettings: vscode.l10n.t(I18N.actions.openSettings),
+                repairRagEmbeddings: vscode.l10n.t(I18N.dashboard.repairRagEmbeddings)
             }
         };
     }

@@ -160,6 +160,21 @@ export class CommandManager {
         );
 
         this.context.subscriptions.push(
+            vscode.commands.registerCommand('git-commit-genie.repairRagEmbeddings', async (arg?: any) => {
+                const repo = await this.resolveRagTargetRepository(arg, false);
+                if (!repo) {
+                    return;
+                }
+                const ragRuntime = this.serviceRegistry.getRagRuntimeService();
+                if (!await ragRuntime.isEmbeddingConfigured()) {
+                    vscode.window.showErrorMessage(vscode.l10n.t(I18N.rag.backendNotConfigured));
+                    return;
+                }
+                await this.serviceRegistry.getRagHistoricalIndexService().repairRepositoryEmbeddings(repo);
+            })
+        );
+
+        this.context.subscriptions.push(
             vscode.commands.registerCommand('git-commit-genie.cancelRagIndexing', async (arg?: any) => {
                 const repo = await this.resolveRagTargetRepository(arg, true);
                 if (!repo) {
