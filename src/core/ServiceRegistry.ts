@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { DiffService } from '../services/git/diff';
 import { OpenAIService } from '../services/llm/providers/openai';
 import { DeepSeekService } from '../services/llm/providers/deepseek';
-import { AnthropicService } from '../services/llm/providers/anthropic';
+import { AnthropicService, ANTHROPIC_DATED_TO_UNDATED_MAP } from '../services/llm/providers/anthropic';
 import { GeminiService } from '../services/llm/providers/gemini';
 import { QwenService } from '../services/llm/providers/qwen';
 import { GLMService } from '../services/llm/providers/glm';
@@ -179,7 +179,7 @@ export class ServiceRegistry {
         const preferredByProvider: Record<string, string[]> = {
             openai: ['gpt-5.4-mini', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-5', 'gpt-5.2', 'gpt-5-nano'],
             deepseek: ['deepseek-chat', 'deepseek-reasoner'],
-            anthropic: ['claude-sonnet-4-20250514'],
+            anthropic: ['claude-sonnet-4'],
             gemini: ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-pro', 'gemini-3-pro-preview'],
             qwen: ['qwen3.5-plus', 'qwen3.5-flash', 'qwen-plus-latest', 'qwen-plus', 'qwen3-max-preview', 'qwen3-max'],
             glm: ['glm-5-turbo', 'glm-5', 'glm-4.7', 'glm-4.5', 'glm-4.7-flashx', 'glm-4.5-air', 'glm-4.7-flash'],
@@ -202,9 +202,16 @@ export class ServiceRegistry {
 
         for (const [provider, service] of this.llmServices.entries()) {
             const modelKey = getProviderModelStateKey(provider);
-            const selected = (this.context.globalState.get<string>(modelKey, '') || '').trim();
+            let selected = (this.context.globalState.get<string>(modelKey, '') || '').trim();
             if (!selected) {
                 continue;
+            }
+
+            // Normalize dated Anthropic model names to undated aliases
+            const normalized = ANTHROPIC_DATED_TO_UNDATED_MAP[selected];
+            if (normalized) {
+                await this.context.globalState.update(modelKey, normalized);
+                selected = normalized;
             }
 
             const supported = service.listSupportedModels();
@@ -225,7 +232,15 @@ export class ServiceRegistry {
         // Also migrate repository analysis model override if it points to an unsupported model.
         try {
             const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-            const selected = (cfg.get<string>('model', 'general') || 'general').trim();
+            let selected = (cfg.get<string>('model', 'general') || 'general').trim();
+
+            // Normalize dated Anthropic model names to undated aliases
+            const repoAnalysisNormalized = ANTHROPIC_DATED_TO_UNDATED_MAP[selected];
+            if (repoAnalysisNormalized) {
+                await cfg.update('model', repoAnalysisNormalized, vscode.ConfigurationTarget.Global);
+                selected = repoAnalysisNormalized;
+            }
+
             if (selected && selected !== 'general') {
                 let supportedByAny = false;
                 for (const service of this.llmServices.values()) {

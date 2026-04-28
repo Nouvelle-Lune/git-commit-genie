@@ -24,15 +24,15 @@ export const OPENROUTER_MODEL_ALIAS_MAP: Readonly<Record<string, string>> = Obje
     'deepseek/deepseek-r1': 'deepseek-reasoner',
 
     // Anthropic family
-    'anthropic/claude-3.5-haiku': 'claude-3-5-haiku-20241022',
-    'anthropic/claude-3.5-sonnet': 'claude-3-5-sonnet-20241022',
-    'anthropic/claude-3.7-sonnet': 'claude-3-7-sonnet-20250219',
-    'anthropic/claude-sonnet-4': 'claude-sonnet-4-20250514',
-    'anthropic/claude-opus-4': 'claude-opus-4-20250514',
-    'anthropic/claude-opus-4.1': 'claude-opus-4-1-20250805',
-    'anthropic/claude-haiku-4.5': 'claude-haiku-4-5-20251001',
-    'anthropic/claude-sonnet-4.5': 'claude-sonnet-4-5-20250929',
-    'anthropic/claude-opus-4.5': 'claude-opus-4-5-20251101',
+    'anthropic/claude-3.5-haiku': 'claude-3-5-haiku',
+    'anthropic/claude-3.5-sonnet': 'claude-3-5-sonnet',
+    'anthropic/claude-3.7-sonnet': 'claude-3-7-sonnet',
+    'anthropic/claude-sonnet-4': 'claude-sonnet-4',
+    'anthropic/claude-opus-4': 'claude-opus-4',
+    'anthropic/claude-opus-4.1': 'claude-opus-4-1',
+    'anthropic/claude-haiku-4.5': 'claude-haiku-4-5',
+    'anthropic/claude-sonnet-4.5': 'claude-sonnet-4-5',
+    'anthropic/claude-opus-4.5': 'claude-opus-4-5',
 
     // Gemini family
     'google/gemini-2.5-flash': 'gemini-2.5-flash',
