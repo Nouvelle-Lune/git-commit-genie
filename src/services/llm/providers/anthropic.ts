@@ -29,6 +29,23 @@ import { commitMessageSchema } from './schemas/common';
 const SECRET_ANTHROPIC_API_KEY = 'gitCommitGenie.secret.anthropicApiKey';
 
 /**
+ * Map dated Anthropic model snapshot IDs to undated aliases.
+ * Undated aliases auto-route to the latest snapshot of that model.
+ */
+export const ANTHROPIC_DATED_TO_UNDATED_MAP: Readonly<Record<string, string>> = Object.freeze({
+    'claude-haiku-4-5-20251001': 'claude-haiku-4-5',
+    'claude-sonnet-4-5-20250929': 'claude-sonnet-4-5',
+    'claude-opus-4-5-20251101': 'claude-opus-4-5',
+    'claude-3-5-haiku-20241022': 'claude-3-5-haiku',
+    'claude-sonnet-4-20250514': 'claude-sonnet-4',
+    'claude-3-7-sonnet-20250219': 'claude-3-7-sonnet',
+    'claude-3-5-sonnet-20241022': 'claude-3-5-sonnet',
+    'claude-3-5-sonnet-20240620': 'claude-3-5-sonnet',
+    'claude-opus-4-1-20250805': 'claude-opus-4-1',
+    'claude-opus-4-20250514': 'claude-opus-4',
+});
+
+/**
  * Anthropic Claude service implementation
  */
 export class AnthropicService extends BaseLLMService {
@@ -66,17 +83,16 @@ export class AnthropicService extends BaseLLMService {
 
     public listSupportedModels(): string[] {
         return [
-            'claude-haiku-4-5-20251001',
-            'claude-sonnet-4-5-20250929',
-            'claude-opus-4-5-20251101',
+            'claude-haiku-4-5',
+            'claude-sonnet-4-5',
+            'claude-opus-4-5',
 
-            'claude-3-5-haiku-20241022',
-            'claude-sonnet-4-20250514',
-            'claude-3-7-sonnet-20250219',
-            'claude-3-5-sonnet-20241022',
-            'claude-3-5-sonnet-20240620',
-            'claude-opus-4-1-20250805',
-            'claude-opus-4-20250514'
+            'claude-3-5-haiku',
+            'claude-sonnet-4',
+            'claude-3-7-sonnet',
+            'claude-3-5-sonnet',
+            'claude-opus-4-1',
+            'claude-opus-4'
 
         ];
     }
@@ -116,7 +132,13 @@ export class AnthropicService extends BaseLLMService {
      * Get the current model configuration
      */
     protected getCurrentModel(): string {
-        return this.context.globalState.get<string>('gitCommitGenie.anthropicModel', '');
+        const stored = this.context.globalState.get<string>('gitCommitGenie.anthropicModel', '') || '';
+        const normalized = ANTHROPIC_DATED_TO_UNDATED_MAP[stored];
+        if (normalized) {
+            this.context.globalState.update('gitCommitGenie.anthropicModel', normalized);
+            return normalized;
+        }
+        return stored;
     }
 
     /**

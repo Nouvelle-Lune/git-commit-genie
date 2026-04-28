@@ -55,17 +55,16 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     'gpt-5-nano': { input: 0.05, output: 0.4, cached: 0.005 },
 
     // Anthropic Claude (USD)
-    'claude-opus-4-1-20250805': { input: 15.0, output: 75.0, cached: 1.5 },
-    'claude-opus-4-20250514': { input: 15.0, output: 75.0, cached: 1.5 },
-    'claude-sonnet-4-20250514': { input: 3.0, output: 15.0, cached: 0.3 },
-    'claude-3-7-sonnet-20250219': { input: 3.0, output: 15.0, cached: 0.3 },
-    'claude-3-5-sonnet-20241022': { input: 3.0, output: 15.0, cached: 0.3 },
-    'claude-3-5-sonnet-20240620': { input: 3.0, output: 15.0, cached: 0.3 },
-    'claude-3-5-haiku-20241022': { input: 0.8, output: 4.0, cached: 0.08 },
+    'claude-opus-4-1': { input: 15.0, output: 75.0, cached: 1.5 },
+    'claude-opus-4': { input: 15.0, output: 75.0, cached: 1.5 },
+    'claude-sonnet-4': { input: 3.0, output: 15.0, cached: 0.3 },
+    'claude-3-7-sonnet': { input: 3.0, output: 15.0, cached: 0.3 },
+    'claude-3-5-sonnet': { input: 3.0, output: 15.0, cached: 0.3 },
+    'claude-3-5-haiku': { input: 0.8, output: 4.0, cached: 0.08 },
 
-    'claude-haiku-4-5-20251001': { input: 1.0, output: 5.0, cached: 0.10 },
-    'claude-sonnet-4-5-20250929': { input: 3.0, output: 15.0, cached: 0.3 },
-    'claude-opus-4-5-20251101': { input: 5.0, output: 25.0, cached: 0.5 },
+    'claude-haiku-4-5': { input: 1.0, output: 5.0, cached: 0.10 },
+    'claude-sonnet-4-5': { input: 3.0, output: 15.0, cached: 0.3 },
+    'claude-opus-4-5': { input: 5.0, output: 25.0, cached: 0.5 },
 
     // Google Gemini (USD)
     'gemini-2.5-pro': {
