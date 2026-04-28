@@ -25,7 +25,7 @@ type RagEmbeddingConfig = {
     model: string;
     dimensions: number;
     batchSize: number;
-    apiKey?: string;
+    apiKey: string;
 };
 
 type HealthResponse = {
@@ -146,7 +146,6 @@ export class RagRuntimeService {
                     e.affectsConfiguration('gitCommitGenie.rag.enabled') ||
                     e.affectsConfiguration('gitCommitGenie.rag.embedding.baseUrl') ||
                     e.affectsConfiguration('gitCommitGenie.rag.embedding.model') ||
-                    e.affectsConfiguration('gitCommitGenie.rag.embedding.apiKey') ||
                     e.affectsConfiguration('gitCommitGenie.rag.embedding.dimensions') ||
                     e.affectsConfiguration('gitCommitGenie.rag.embedding.batchSize')
                 ) {
@@ -657,8 +656,7 @@ export class RagRuntimeService {
 
     private async readConfig(): Promise<RagEmbeddingConfig> {
         const ragConfig = vscode.workspace.getConfiguration('gitCommitGenie.rag');
-        const configApiKey = (ragConfig.get<string>('embedding.apiKey', '') || '').trim();
-        const secretApiKey = await this.context.secrets.get(RAG_EMBEDDING_API_KEY_SECRET);
+        const secretApiKey = (await this.context.secrets.get(RAG_EMBEDDING_API_KEY_SECRET))?.trim() || '';
 
         return {
             enabled: ragConfig.get<boolean>('enabled', false),
@@ -666,7 +664,7 @@ export class RagRuntimeService {
             model: (ragConfig.get<string>('embedding.model', '') || '').trim(),
             dimensions: ragConfig.get<number>('embedding.dimensions', 0) || 0,
             batchSize: ragConfig.get<number>('embedding.batchSize', 10) || 10,
-            apiKey: configApiKey || secretApiKey?.trim()
+            apiKey: secretApiKey
         };
     }
 

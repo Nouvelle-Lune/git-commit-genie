@@ -3,7 +3,7 @@
   "displayName": "%displayName%",
   "publisher": "Lune-99",
   "description": "%description%",
-  "version": "3.1.4",
+  "version": "3.2.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.103.0"
@@ -209,11 +209,11 @@
           "default": "",
           "markdownDescription": "%config.rag.embedding.model.desc%"
         },
-        "gitCommitGenie.rag.embedding.apiKey": {
+        "gitCommitGenie.rag.embedding.configureApiKey": {
           "order": 17,
-          "type": "string",
-          "default": "",
-          "markdownDescription": "%config.rag.embedding.apiKey.desc%"
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%config.rag.embedding.configureApiKey.desc%"
         },
         "gitCommitGenie.rag.embedding.dimensions": {
           "order": 18,
@@ -528,6 +528,13 @@
         "enablement": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true && gitCommitGenie.ragIndexing == true"
       },
       {
+        "command": "git-commit-genie.repairRagEmbeddings",
+        "title": "%command.repairRagEmbeddings%",
+        "category": "%category.title%",
+        "icon": "$(wrench)",
+        "enablement": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true && gitCommitGenie.ragIndexing != true"
+      },
+      {
         "command": "git-commit-genie.toggleChainMode",
         "title": "%command.toggleChain%",
         "category": "%category.title%",
@@ -612,6 +619,10 @@
         {
           "command": "git-commit-genie.cancelRagIndexing",
           "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true && gitCommitGenie.ragIndexing == true"
+        },
+        {
+          "command": "git-commit-genie.repairRagEmbeddings",
+          "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true && gitCommitGenie.ragIndexing != true"
         },
         {
           "command": "git-commit-genie.cancelRepositoryAnalysis",
