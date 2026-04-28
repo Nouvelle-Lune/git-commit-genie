@@ -24,11 +24,9 @@ export const OPENROUTER_MODEL_ALIAS_MAP: Readonly<Record<string, string>> = Obje
     'deepseek/deepseek-v4-pro': 'deepseek-v4-pro',
 
     // Anthropic family
-    'anthropic/claude-3.5-haiku': 'claude-3-5-haiku',
-    'anthropic/claude-3.5-sonnet': 'claude-3-5-sonnet',
-    'anthropic/claude-3.7-sonnet': 'claude-3-7-sonnet',
-    'anthropic/claude-sonnet-4': 'claude-sonnet-4',
-    'anthropic/claude-opus-4': 'claude-opus-4',
+    'anthropic/claude-opus-4.7': 'claude-opus-4-7',
+    'anthropic/claude-sonnet-4.6': 'claude-sonnet-4-6',
+    'anthropic/claude-opus-4.6': 'claude-opus-4-6',
     'anthropic/claude-opus-4.1': 'claude-opus-4-1',
     'anthropic/claude-haiku-4.5': 'claude-haiku-4-5',
     'anthropic/claude-sonnet-4.5': 'claude-sonnet-4-5',

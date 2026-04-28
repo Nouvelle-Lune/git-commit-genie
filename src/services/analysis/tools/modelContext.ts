@@ -26,15 +26,13 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'deepseek-v4-pro': 1_000_000,
 
   // Anthropic
-  'claude-3-5-haiku': 200_000,
-  'claude-3-5-sonnet': 200_000,
-  'claude-3-7-sonnet': 200_000,
-  'claude-sonnet-4': 200_000,
-  'claude-opus-4-1': 200_000,
-  'claude-opus-4': 200_000,
-  'claude-haiku-4-5': 200_000,
-  'claude-sonnet-4-5': 200_000,
+  'claude-opus-4-7': 1_000_000,
+  'claude-sonnet-4-6': 1_000_000,
+  'claude-opus-4-6': 1_000_000,
   'claude-opus-4-5': 200_000,
+  'claude-sonnet-4-5': 200_000,
+  'claude-haiku-4-5': 200_000,
+  'claude-opus-4-1': 200_000,
 
 
 
@@ -80,11 +78,9 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'openai/gpt-5-nano': 400_000,
   'deepseek/deepseek-v4-flash': 1_000_000,
   'deepseek/deepseek-v4-pro': 1_000_000,
-  'anthropic/claude-3.5-haiku': 200_000,
-  'anthropic/claude-3.5-sonnet': 200_000,
-  'anthropic/claude-3.7-sonnet': 200_000,
-  'anthropic/claude-sonnet-4': 200_000,
-  'anthropic/claude-opus-4': 200_000,
+  'anthropic/claude-opus-4.7': 1_000_000,
+  'anthropic/claude-sonnet-4.6': 1_000_000,
+  'anthropic/claude-opus-4.6': 1_000_000,
   'anthropic/claude-opus-4.1': 200_000,
   'anthropic/claude-haiku-4.5': 200_000,
   'anthropic/claude-sonnet-4.5': 200_000,
