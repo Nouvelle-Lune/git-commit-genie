@@ -36,13 +36,7 @@ export const ANTHROPIC_DATED_TO_UNDATED_MAP: Readonly<Record<string, string>> = 
     'claude-haiku-4-5-20251001': 'claude-haiku-4-5',
     'claude-sonnet-4-5-20250929': 'claude-sonnet-4-5',
     'claude-opus-4-5-20251101': 'claude-opus-4-5',
-    'claude-3-5-haiku-20241022': 'claude-3-5-haiku',
-    'claude-sonnet-4-20250514': 'claude-sonnet-4',
-    'claude-3-7-sonnet-20250219': 'claude-3-7-sonnet',
-    'claude-3-5-sonnet-20241022': 'claude-3-5-sonnet',
-    'claude-3-5-sonnet-20240620': 'claude-3-5-sonnet',
     'claude-opus-4-1-20250805': 'claude-opus-4-1',
-    'claude-opus-4-20250514': 'claude-opus-4',
 });
 
 /**
@@ -83,17 +77,13 @@ export class AnthropicService extends BaseLLMService {
 
     public listSupportedModels(): string[] {
         return [
+            'claude-opus-4-7',
+            'claude-sonnet-4-6',
+            'claude-opus-4-6',
             'claude-haiku-4-5',
             'claude-sonnet-4-5',
             'claude-opus-4-5',
-
-            'claude-3-5-haiku',
-            'claude-sonnet-4',
-            'claude-3-7-sonnet',
-            'claude-3-5-sonnet',
             'claude-opus-4-1',
-            'claude-opus-4'
-
         ];
     }
 
