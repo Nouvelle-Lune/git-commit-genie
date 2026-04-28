@@ -13,6 +13,7 @@ import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
 import { ProviderRuntimeConfig, ProviderRules } from './utils/baseProviderUtils';
 import { commitMessageSchema } from './schemas/common';
+import { ProviderError } from './errors/providerError';
 
 const SECRET_OPENAI_API_KEY = 'gitCommitGenie.secret.openaiApiKey';
 
@@ -312,7 +313,14 @@ export class OpenAIService extends BaseLLMService {
                 repoPath,
             ));
             return { content: data.commitMessage };
-        } catch {
+        } catch (error: any) {
+            // Preserve cancellation signals instead of silently converting to 500
+            if (error instanceof ProviderError) {
+                return { message: error.message, statusCode: error.statusCode };
+            }
+            if (error?.name === 'AbortError' || error?.message === 'Cancelled' || error?.message?.includes('aborted')) {
+                return { message: error?.message || 'Operation cancelled', statusCode: 499 };
+            }
             return { message: 'Failed to validate structured commit message from OpenAI.', statusCode: 500 };
         }
     }
