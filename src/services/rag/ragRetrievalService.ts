@@ -26,7 +26,7 @@ type RagEmbeddingConfig = {
     baseUrl: string;
     model: string;
     dimensions: number;
-    apiKey?: string;
+    apiKey: string;
 };
 
 type IndexedCommitRow = {
@@ -702,14 +702,13 @@ export class RagRetrievalService {
 
     private async readEmbeddingConfig(): Promise<RagEmbeddingConfig> {
         const ragConfig = vscode.workspace.getConfiguration('gitCommitGenie.rag');
-        const configApiKey = (ragConfig.get<string>('embedding.apiKey', '') || '').trim();
-        const secretApiKey = await this.context.secrets.get(RAG_EMBEDDING_API_KEY_SECRET);
+        const secretApiKey = (await this.context.secrets.get(RAG_EMBEDDING_API_KEY_SECRET))?.trim() || '';
 
         return {
             baseUrl: (ragConfig.get<string>('embedding.baseUrl', '') || '').trim(),
             model: (ragConfig.get<string>('embedding.model', '') || '').trim(),
             dimensions: ragConfig.get<number>('embedding.dimensions', 0) || 0,
-            apiKey: configApiKey || secretApiKey?.trim(),
+            apiKey: secretApiKey,
         };
     }
 }
