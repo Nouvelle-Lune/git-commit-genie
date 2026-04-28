@@ -328,7 +328,7 @@ export function buildRagRerankMessages(
     changeSetSummary: ChangeSetSummary,
     retrievalFeatures: RetrievalFeatures,
     candidates: Array<{
-        commitHash: string;
+        id: string;
         message: string;
         matchedBy: string[];
         type?: string | null;
@@ -368,13 +368,14 @@ export function buildRagRerankMessages(
             '- Avoid near-duplicate examples.',
             '- Reject candidates that are topically unrelated even if token overlap is high.',
             '- The selected examples will later be used for style reference only, so focus your reason on style and scope fit.',
+            '- Return ONLY the candidate "id" values (e.g., "c1", "c7"); do not echo full commit hashes or messages.',
             '</instructions>',
             '',
             '<schema>',
             '{',
             '  "selected": [',
             '    {',
-            '      "commitHash": string,',
+            '      "id": string,',
             '      "reason": string',
             '    }',
             '  ],',

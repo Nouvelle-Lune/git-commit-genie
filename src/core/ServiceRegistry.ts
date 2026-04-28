@@ -59,7 +59,7 @@ export class ServiceRegistry {
                 this.repoService,
                 this.ragRuntimeService,
             );
-            this.ragRetrievalService = new RagRetrievalService(this.context);
+            this.ragRetrievalService = new RagRetrievalService(this.context, this.repoService);
             this.ragRuntimeService.setBackgroundEnsureCallback((reason: string) =>
                 this.ragHistoricalIndexService.ensureAllRepositoriesIndexed(reason)
             );

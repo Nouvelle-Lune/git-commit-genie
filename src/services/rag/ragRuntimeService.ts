@@ -7,6 +7,11 @@ import { RepoService } from '../repo/repo';
 import { logger } from '../logger';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
 import { Repository } from '../git/git';
+import { estimateTokens } from '../analysis/tools/modelContext';
+
+// Embedding inputs are soft-truncated above this token count. Keeps individual
+// requests below typical 8k embedding context limits.
+const EMBEDDING_INPUT_TOKEN_LIMIT = 8000;
 
 const RAG_EMBEDDING_API_KEY_SECRET = 'gitCommitGenie.secret.ragEmbeddingApiKey';
 const RAG_STATE_FILE = 'state.json';
@@ -82,6 +87,15 @@ type RagState = {
     historyImportComplete?: boolean;
     indexedAt?: string;
     embeddingDimensions?: number | null;
+    embeddingRepairNeeded?: boolean;
+};
+
+export type RepairMissingEmbeddingsResult = {
+    ok: true;
+    repaired: number;
+    remaining: number;
+    commitCount: number;
+    vectorCount: number;
 };
 
 type RepoIndexMemo = {
@@ -105,6 +119,7 @@ export type RagRepositoryStatus = {
     kind: RagRepositoryStatusKind;
     text: string;
     detail?: string;
+    repairNeeded?: boolean;
     updatedAt: string;
 };
 
@@ -266,15 +281,23 @@ export class RagRuntimeService {
         return this.repositoryStatuses.get(repoPath) || null;
     }
 
-    public updateRepositoryStatus(repoPath: string, kind: RagRepositoryStatusKind, text: string, detail?: string): void {
+    public updateRepositoryStatus(repoPath: string, kind: RagRepositoryStatusKind, text: string, detail?: string, repairNeeded?: boolean): void {
         const previous = this.repositoryStatuses.get(repoPath);
-        if (previous && previous.kind === kind && previous.text === text && previous.detail === detail) {
+        const normalizedRepair = repairNeeded === true ? true : undefined;
+        if (
+            previous
+            && previous.kind === kind
+            && previous.text === text
+            && previous.detail === detail
+            && (previous.repairNeeded === true ? true : undefined) === normalizedRepair
+        ) {
             return;
         }
         const status: RagRepositoryStatus = {
             kind,
             text,
             detail,
+            repairNeeded: normalizedRepair,
             updatedAt: new Date().toISOString(),
         };
         this.repositoryStatuses.set(repoPath, status);
@@ -318,21 +341,20 @@ export class RagRuntimeService {
         const fingerprint = this.buildFingerprint(cfg);
         const state = await this.readState(storageDir);
         const memo = await this.getOrLoadMemo(storageDir);
-        let rebuildRequired = !state || state.fingerprintHash !== fingerprint.hash;
-        if (!rebuildRequired && state && this.isConfigured(cfg) && memo.commitCount > 0) {
-            const vectorCountBehind = memo.vectorCount < memo.commitCount;
-            if (vectorCountBehind && this.shouldAutoRepairEmbeddings(reason)) {
-                rebuildRequired = true;
-                logger.info(
-                    `[Genie][RAG] Forcing rebuild for ${repo.rootUri.fsPath} because historical embeddings are incomplete: ` +
-                    `commitCount=${memo.commitCount}, vectorCount=${memo.vectorCount}`
-                );
-            } else if (vectorCountBehind) {
-                logger.info(
-                    `[Genie][RAG] Detected incomplete historical embeddings for ${repo.rootUri.fsPath} but deferring rebuild ` +
-                    `for passive trigger (${reason}). User-initiated reindex is required to backfill dense vectors.`
-                );
-            }
+        const rebuildRequired = !state || state.fingerprintHash !== fingerprint.hash;
+        // Detect missing dense vectors without dropping the existing text index.
+        // Surface the condition via state.embeddingRepairNeeded so the user can
+        // trigger a manual reindex; never silently rebuild on passive triggers.
+        const embeddingRepairNeeded = !rebuildRequired
+            && this.isConfigured(cfg)
+            && memo.commitCount > 0
+            && memo.vectorCount < memo.commitCount;
+        if (embeddingRepairNeeded) {
+            logger.warn(
+                `[Genie][RAG] Detected incomplete historical embeddings for ${repo.rootUri.fsPath} (${reason}). ` +
+                `commitCount=${memo.commitCount}, vectorCount=${memo.vectorCount}. ` +
+                `Surfacing repair signal; manual reindex is required to backfill dense vectors.`
+            );
         }
         if (rebuildRequired) {
             logger.info(`[Genie][RAG] Rebuilding local RAG store for ${repo.rootUri.fsPath}. fingerprintChanged=${!state || state.fingerprintHash !== fingerprint.hash}`);
@@ -350,16 +372,19 @@ export class RagRuntimeService {
             historyImportComplete: rebuildRequired ? false : (state?.historyImportComplete === true),
             indexedAt: new Date().toISOString(),
             embeddingDimensions: effectiveMemo ? (effectiveMemo.embeddingDimensions ?? state?.embeddingDimensions ?? null) : null,
+            embeddingRepairNeeded,
         };
         await this.writeState(storageDir, nextState);
 
-        logger.info(`[Genie][RAG] Local RAG file store ready for ${repo.rootUri.fsPath} (${reason}); rebuildRequired=${rebuildRequired}, commitCount=${nextState.commitCount}, vectorCount=${nextState.vectorCount}`);
+        logger.info(`[Genie][RAG] Local RAG file store ready for ${repo.rootUri.fsPath} (${reason}); rebuildRequired=${rebuildRequired}, commitCount=${nextState.commitCount}, vectorCount=${nextState.vectorCount}, embeddingRepairNeeded=${embeddingRepairNeeded}`);
         this.updateRepositoryStatus(
             repo.rootUri.fsPath,
             'idle',
             rebuildRequired
                 ? vscode.l10n.t(I18N.rag.statusStoreRebuilt)
-                : vscode.l10n.t(I18N.rag.statusStoreReady, String(nextState.commitCount))
+                : vscode.l10n.t(I18N.rag.statusStoreReady, String(nextState.commitCount)),
+            embeddingRepairNeeded ? vscode.l10n.t(I18N.rag.statusEmbeddingRepairNeeded) : undefined,
+            embeddingRepairNeeded || undefined
         );
         return {
             ok: true,
@@ -389,6 +414,143 @@ export class RagRuntimeService {
             historyImportComplete: complete,
             indexedAt: new Date().toISOString(),
         });
+    }
+
+    public async repairMissingEmbeddings(
+        repo: Repository,
+        options?: { isCancellationRequested?: () => boolean; }
+    ): Promise<RepairMissingEmbeddingsResult> {
+        const cfg = await this.readConfig();
+        if (!this.isConfigured(cfg)) {
+            // Surface to the caller so the UI can prompt the user to set the embedding API key.
+            throw new Error(vscode.l10n.t(I18N.rag.backendNotConfigured));
+        }
+        const storageDir = await this.requireStorageDir(repo);
+        const repoPath = repo.rootUri.fsPath;
+
+        const rows = await this.readDocumentRows(storageDir);
+        const targets = rows.filter(row => !Array.isArray(row.embedding) || row.embedding.length === 0);
+        const initialState = await this.readState(storageDir);
+
+        if (!targets.length) {
+            // Nothing to repair: clear the repair flag if it was set.
+            if (initialState && initialState.embeddingRepairNeeded) {
+                await this.writeState(storageDir, {
+                    ...initialState,
+                    embeddingRepairNeeded: false,
+                    indexedAt: new Date().toISOString(),
+                });
+            }
+            const memo = await this.getOrLoadMemo(storageDir);
+            this.updateRepositoryStatus(repoPath, 'ready', this.getReadyStatusText(memo.commitCount, memo.vectorCount));
+            logger.info(`[Genie][RAG] Repair embeddings: nothing to repair for ${repoPath}.`);
+            return {
+                ok: true,
+                repaired: 0,
+                remaining: 0,
+                commitCount: memo.commitCount,
+                vectorCount: memo.vectorCount,
+            };
+        }
+
+        logger.info(`[Genie][RAG] Repair embeddings starting for ${repoPath}: targets=${targets.length}, totalRows=${rows.length}.`);
+        this.throwIfCancelled(options?.isCancellationRequested);
+        this.updateRepositoryStatus(repoPath, 'embedding', vscode.l10n.t(I18N.rag.statusEmbedding));
+
+        const embeddings = await this.embedDocuments(
+            repoPath,
+            cfg,
+            targets as Record<string, unknown>[],
+            options?.isCancellationRequested,
+            true
+        );
+        this.throwIfCancelled(options?.isCancellationRequested);
+
+        // Apply embeddings in-place; only rows that received a vector are touched.
+        let repaired = 0;
+        let firstNewVectorDim: number | null = null;
+        for (const row of rows) {
+            if (Array.isArray(row.embedding) && row.embedding.length > 0) {
+                continue;
+            }
+            const vector = embeddings.get(row.commit_hash);
+            if (!vector || !vector.length) {
+                continue;
+            }
+            row.embedding = vector;
+            repaired += 1;
+            if (firstNewVectorDim === null) {
+                firstNewVectorDim = vector.length;
+            }
+        }
+
+        // Atomically rewrite ndjson via tmp + rename so a crash cannot leave a half-written file.
+        const file = path.join(storageDir, RAG_DOCUMENTS_FILE);
+        const tmpFile = `${file}.tmp`;
+        const payload = rows.map(row => JSON.stringify(row)).join('\n') + (rows.length ? '\n' : '');
+        await fs.writeFile(tmpFile, payload, 'utf8');
+        await fs.rename(tmpFile, file);
+        const stat = await fs.stat(file);
+
+        // Recompute memo from the rewritten file content rather than trusting the prior state.
+        let vectorCount = 0;
+        const knownHashes = new Set<string>();
+        let memoFirstDim: number | null = null;
+        for (const row of rows) {
+            knownHashes.add(row.commit_hash);
+            if (Array.isArray(row.embedding) && row.embedding.length > 0) {
+                vectorCount += 1;
+                if (memoFirstDim === null) {
+                    memoFirstDim = row.embedding.length;
+                }
+            }
+        }
+        const updatedMemo: RepoIndexMemo = {
+            knownHashes,
+            commitCount: rows.length,
+            vectorCount,
+            embeddingDimensions: memoFirstDim,
+            mtimeMs: stat.mtimeMs,
+        };
+        this.repoMemos.set(storageDir, updatedMemo);
+
+        const baseState: RagState = initialState ?? {
+            storageVersion: STORAGE_VERSION,
+            fingerprintHash: this.buildFingerprint(cfg).hash,
+            fingerprintPayload: this.buildFingerprint(cfg).payload,
+            commitCount: rows.length,
+            vectorCount,
+        };
+        const nextState: RagState = {
+            ...baseState,
+            commitCount: rows.length,
+            vectorCount,
+            embeddingDimensions: memoFirstDim ?? baseState.embeddingDimensions ?? null,
+            embeddingRepairNeeded: vectorCount < rows.length,
+            indexedAt: new Date().toISOString(),
+        };
+        await this.writeState(storageDir, nextState);
+
+        const remaining = Math.max(0, rows.length - vectorCount);
+        this.updateRepositoryStatus(
+            repoPath,
+            'ready',
+            this.getReadyStatusText(rows.length, vectorCount),
+            remaining > 0 ? vscode.l10n.t(I18N.rag.statusEmbeddingRepairNeeded) : undefined,
+            remaining > 0 || undefined
+        );
+        logger.info(
+            `[Genie][RAG] Repair embeddings finished for ${repoPath}: targets=${targets.length}, repaired=${repaired}, ` +
+            `commitCount=${rows.length}, vectorCount=${vectorCount}, remaining=${remaining}.`
+        );
+
+        return {
+            ok: true,
+            repaired,
+            remaining,
+            commitCount: rows.length,
+            vectorCount,
+        };
     }
 
     public async getKnownCommitHashes(repo: Repository): Promise<Set<string>> {
@@ -562,28 +724,99 @@ export class RagRuntimeService {
     }
 
     private async resetStorage(storageDir: string): Promise<void> {
-        await fs.rm(path.join(storageDir, RAG_DOCUMENTS_FILE), { force: true });
+        // Lightweight safety net: rename the existing ndjson into a single timestamped
+        // backup before destruction. To restore manually, rename the .bak.<ts> file
+        // back to documents.ndjson.
+        const documentsPath = path.join(storageDir, RAG_DOCUMENTS_FILE);
+        let backupPath: string | null = null;
+        const stat = await fs.stat(documentsPath).catch(() => null);
+        if (stat && stat.isFile() && stat.size > 0) {
+            backupPath = path.join(storageDir, `${RAG_DOCUMENTS_FILE}.bak.${Date.now()}`);
+            await fs.rename(documentsPath, backupPath);
+        } else if (stat) {
+            // Empty or non-file entry: drop without creating an empty backup.
+            await fs.rm(documentsPath, { force: true });
+        }
+
+        // Keep at most one backup; prune older ones by mtime.
+        const droppedCount = await this.pruneOldBackups(storageDir);
+
+        // lancedb residue is always stale once the ndjson is rotated.
         await fs.rm(path.join(storageDir, 'lancedb'), { recursive: true, force: true });
         this.repoMemos.delete(storageDir);
+
+        if (backupPath) {
+            logger.info(
+                `[Genie][RAG] Reset storage at ${storageDir}: backed up '${RAG_DOCUMENTS_FILE}' to '${backupPath}'; ` +
+                `dropped ${droppedCount} older backup file(s).`
+            );
+        } else if (droppedCount > 0) {
+            logger.info(`[Genie][RAG] Reset storage at ${storageDir}: dropped ${droppedCount} older backup file(s); no current ndjson to back up.`);
+        }
     }
 
-    private shouldAutoRepairEmbeddings(reason: string): boolean {
-        return reason === 'command-start' || reason === 'settings-refresh';
+    private async pruneOldBackups(storageDir: string): Promise<number> {
+        const entries = await fs.readdir(storageDir);
+        const prefix = `${RAG_DOCUMENTS_FILE}.bak.`;
+        const candidates: { name: string; mtimeMs: number; }[] = [];
+        for (const name of entries) {
+            if (!name.startsWith(prefix)) {
+                continue;
+            }
+            const stat = await fs.stat(path.join(storageDir, name));
+            candidates.push({ name, mtimeMs: stat.mtimeMs });
+        }
+        if (candidates.length <= 1) {
+            return 0;
+        }
+        candidates.sort((a, b) => b.mtimeMs - a.mtimeMs);
+        const toRemove = candidates.slice(1);
+        for (const item of toRemove) {
+            await fs.rm(path.join(storageDir, item.name), { force: true });
+        }
+        return toRemove.length;
     }
 
     private async readDocumentRows(storageDir: string): Promise<EmbeddedDocument[]> {
         const file = path.join(storageDir, RAG_DOCUMENTS_FILE);
+        let raw: string;
         try {
-            const raw = await fs.readFile(file, 'utf8');
-            return raw
-                .split('\n')
-                .map(line => line.trim())
-                .filter(Boolean)
-                .map((line) => JSON.parse(line) as EmbeddedDocument)
-                .filter((row) => !!row && typeof row.commit_hash === 'string' && row.commit_hash.trim().length > 0);
+            raw = await fs.readFile(file, 'utf8');
         } catch {
             return [];
         }
+
+        // Surface ndjson corruption explicitly: log per-line warnings instead of
+        // silently dropping data so commitCount/vectorCount drift becomes visible.
+        const out: EmbeddedDocument[] = [];
+        const lines = raw.split('\n');
+        for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+            const trimmed = lines[lineIndex].trim();
+            if (!trimmed) {
+                continue;
+            }
+            let parsed: EmbeddedDocument;
+            try {
+                parsed = JSON.parse(trimmed) as EmbeddedDocument;
+            } catch (error) {
+                const preview = trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
+                logger.warn(
+                    `[Genie][RAG] Skipping unparseable ndjson row at ${file}:${lineIndex + 1}; ` +
+                    `preview="${preview}"; error=${(error as Error)?.message || error}`
+                );
+                continue;
+            }
+            const hash = typeof parsed?.commit_hash === 'string' ? parsed.commit_hash.trim() : '';
+            if (!hash) {
+                const preview = trimmed.length > 80 ? `${trimmed.slice(0, 80)}…` : trimmed;
+                logger.warn(
+                    `[Genie][RAG] Skipping ndjson row missing commit_hash at ${file}:${lineIndex + 1}; preview="${preview}"`
+                );
+                continue;
+            }
+            out.push(parsed);
+        }
+        return out;
     }
 
     private async getOrLoadMemo(storageDir: string): Promise<RepoIndexMemo> {
@@ -640,11 +873,63 @@ export class RagRuntimeService {
             const stat = await fs.stat(file).catch(() => null);
             return stat?.mtimeMs ?? 0;
         }
+        // Guard against partial trailing rows from a previous crash. If the
+        // existing file does not end with '\n', truncate back to the last
+        // complete newline so the new payload starts on a clean boundary.
+        await this.ensureNdjsonHasCleanTail(file);
         const payload = rows.map(row => JSON.stringify(row)).join('\n') + '\n';
         await fs.appendFile(file, payload, 'utf8');
         const stat = await fs.stat(file);
         logger.info(`[Genie][RAG] Appended ${rows.length} rows to local RAG document store '${RAG_DOCUMENTS_FILE}'.`);
         return stat.mtimeMs;
+    }
+
+    private async ensureNdjsonHasCleanTail(file: string): Promise<void> {
+        let stat;
+        try {
+            stat = await fs.stat(file);
+        } catch {
+            return;
+        }
+        if (!stat.isFile() || stat.size === 0) {
+            return;
+        }
+        const handle = await fs.open(file, 'r+');
+        try {
+            const lastByte = Buffer.alloc(1);
+            await handle.read(lastByte, 0, 1, stat.size - 1);
+            if (lastByte[0] === 0x0a) {
+                return;
+            }
+            // Scan backwards to find the last newline so we can drop only the
+            // partial trailing record. Buffer in chunks to keep memory bounded.
+            const chunkSize = 64 * 1024;
+            let position = stat.size;
+            let lastNewlineOffset = -1;
+            const buf = Buffer.alloc(chunkSize);
+            while (position > 0 && lastNewlineOffset < 0) {
+                const readLength = Math.min(chunkSize, position);
+                position -= readLength;
+                await handle.read(buf, 0, readLength, position);
+                for (let i = readLength - 1; i >= 0; i -= 1) {
+                    if (buf[i] === 0x0a) {
+                        lastNewlineOffset = position + i;
+                        break;
+                    }
+                }
+            }
+            const truncatedBytes = lastNewlineOffset < 0
+                ? stat.size
+                : stat.size - (lastNewlineOffset + 1);
+            const newSize = lastNewlineOffset < 0 ? 0 : lastNewlineOffset + 1;
+            await handle.truncate(newSize);
+            logger.warn(
+                `[Genie][RAG] Detected unterminated trailing ndjson row in '${file}'. ` +
+                `Truncated ${truncatedBytes} bytes back to last newline (size ${stat.size} -> ${newSize}).`
+            );
+        } finally {
+            await handle.close();
+        }
     }
 
     private async embedDocuments(
@@ -670,18 +955,32 @@ export class RagRuntimeService {
             if (!skipStatusUpdates) {
                 this.updateRepositoryStatus(repoPath, 'embedding', vscode.l10n.t(I18N.rag.statusEmbedding));
             }
-            const request: Record<string, unknown> = {
-                model: config.model,
-                // Embedding input is the natural-language portion only; fall back to
-                // document_text for legacy callers that did not supply embedding_text.
-                input: batch.map(doc => String(doc.embedding_text || doc.document_text || '')),
-            };
-            if (config.dimensions > 0) {
-                request.dimensions = config.dimensions;
-            }
+            await this.embedBatchWithSplitFallback(client, config, batch, batchNumber, out, isCancellationRequested);
+            logger.info(`[Genie][RAG] Embedded batch ${batchNumber}/${totalBatches} (${batch.length} documents).`);
+        }
+        return out;
+    }
+
+    private async embedBatchWithSplitFallback(
+        client: OpenAI,
+        config: RagEmbeddingConfig,
+        batch: Record<string, unknown>[],
+        batchNumber: number,
+        out: Map<string, number[]>,
+        isCancellationRequested?: () => boolean,
+    ): Promise<void> {
+        this.throwIfCancelled(isCancellationRequested);
+        const inputs = batch.map(doc => this.prepareEmbeddingInput(doc));
+        const request: Record<string, unknown> = {
+            model: config.model,
+            input: inputs,
+        };
+        if (config.dimensions > 0) {
+            request.dimensions = config.dimensions;
+        }
+        try {
             const response = await client.embeddings.create(request as any);
             this.throwIfCancelled(isCancellationRequested);
-            logger.info(`[Genie][RAG] Embedded batch ${batchNumber}/${totalBatches} (${batch.length} documents).`);
             response.data.forEach((item, index) => {
                 const hash = String(batch[index]?.commit_hash || '');
                 if (!hash || !Array.isArray(item.embedding)) {
@@ -690,8 +989,44 @@ export class RagRuntimeService {
                 const vector = this.normalizeVector(item.embedding.map(value => Number(value)));
                 out.set(hash, vector);
             });
+        } catch (error) {
+            logger.warn(
+                `[Genie][RAG] Embedding batch ${batchNumber} failed (size=${batch.length}, model=${config.model}): ` +
+                `${(error as Error)?.message || error}`
+            );
+            if (batch.length <= 1) {
+                throw error;
+            }
+            // Single-level recursion: split in half and retry each half once.
+            const mid = Math.floor(batch.length / 2);
+            const left = batch.slice(0, mid);
+            const right = batch.slice(mid);
+            await this.embedBatchWithSplitFallback(client, config, left, batchNumber, out, isCancellationRequested);
+            await this.embedBatchWithSplitFallback(client, config, right, batchNumber, out, isCancellationRequested);
         }
-        return out;
+    }
+
+    private prepareEmbeddingInput(document: Record<string, unknown>): string {
+        // Embedding input is the natural-language portion only; fall back to
+        // document_text for legacy callers that did not supply embedding_text.
+        const raw = String(document.embedding_text || document.document_text || '');
+        if (!raw) {
+            return raw;
+        }
+        const tokens = estimateTokens(raw);
+        if (tokens <= EMBEDDING_INPUT_TOKEN_LIMIT) {
+            return raw;
+        }
+        // estimateTokens() yields ~ASCII/4 + CJK/1.5; project that ratio onto the
+        // character budget so the truncated input stays under the token cap.
+        const charBudget = Math.max(1, Math.floor(raw.length * (EMBEDDING_INPUT_TOKEN_LIMIT / tokens)));
+        const truncated = raw.slice(0, charBudget);
+        const hashPreview = String(document.commit_hash || '').slice(0, 8);
+        logger.info(
+            `[Genie][RAG] Truncated embedding input for commit ${hashPreview}: ` +
+            `originalLength=${raw.length}, truncatedLength=${truncated.length}, estimatedTokens=${Math.round(tokens)}`
+        );
+        return truncated;
     }
 
     private throwIfCancelled(isCancellationRequested?: () => boolean): void {

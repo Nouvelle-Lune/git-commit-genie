@@ -189,10 +189,10 @@ export const RagRerankJSONSchema = {
       items: {
         type: 'object',
         properties: {
-          commitHash: { type: 'string', minLength: 1 },
+          id: { type: 'string', minLength: 1 },
           reason: { type: 'string', minLength: 1 }
         },
-        required: ['commitHash', 'reason']
+        required: ['id', 'reason']
       }
     },
     notes: { type: ['string', 'null'] }

@@ -108,6 +108,9 @@
   "Indexing {0}/{1} · {2} left": "索引中 {0}/{1} · 剩余 {2}",
   "Index complete · {0} commits": "索引已完成 · {0} 条 commit",
   "Index complete · {0} commits indexed": "索引已完成 · 已索引 {0} 条 commit",
+  "Some commits are missing embeddings; manual reindex is recommended to improve retrieval quality": "部分提交缺少向量，建议手动重建索引以提升检索质量",
+  "Repaired {0} embeddings.": "已修复 {0} 条向量。",
+  "Failed to repair embeddings: {0}": "修复向量失败：{0}",
   "Import failed": "导入失败",
   "Only one repository available": "只有一个仓库可用",
   "Current active repository": "当前活动仓库",
@@ -124,5 +127,6 @@
   "View analysis": "查看分析",
   "Analysis missing": "未分析",
   "Analyzing...": "分析中...",
-  "Up to date": "已就绪"
+  "Up to date": "已就绪",
+  "Repair missing RAG embeddings": "修复 RAG 缺失向量"
 }
