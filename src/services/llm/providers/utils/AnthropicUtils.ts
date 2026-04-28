@@ -50,6 +50,7 @@ export class AnthropicUtils extends BaseProviderUtils {
                     messages,
                     temperature: options.temperature ?? this.getTemperature(),
                     max_tokens: options.maxTokens ?? 2048,
+                    cache_control: { type: "ephemeral" },
                 };
 
                 // Handle system messages for Anthropic format
