@@ -14,6 +14,7 @@ import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestType
 import { ProviderRuntimeConfig, ProviderRules } from './utils/baseProviderUtils';
 import { ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from '../baseLLMService';
+import { ProviderError } from './errors/providerError';
 import {
     AnthropicCommitMessageTool,
     AnthropicFileSummaryTool,
@@ -334,7 +335,14 @@ export class AnthropicService extends BaseLLMService {
                 repoPath,
             ));
             return { content: data.commitMessage };
-        } catch {
+        } catch (error: any) {
+            // Preserve cancellation signals instead of silently converting to 500
+            if (error instanceof ProviderError) {
+                return { message: error.message, statusCode: error.statusCode };
+            }
+            if (error?.name === 'AbortError' || error?.message === 'Cancelled' || error?.message?.includes('aborted')) {
+                return { message: error?.message || 'Operation cancelled', statusCode: 499 };
+            }
             return { message: 'Failed to validate structured commit message from Anthropic.', statusCode: 500 };
         }
     }
