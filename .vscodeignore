@@ -1,0 +1,67 @@
+.vscode/**
+.vscode-test/**
+src/**
+out/**
+webview-ui/**
+node_modules/**
+!node_modules/@vscode/codicons/dist/**
+.gitignore
+.yarnrc
+vsc-extension-quickstart.md
+**/tsconfig.json
+**/eslint.config.mjs
+**/*.map
+**/*.ts
+**/.vscode-test.*
+
+webpack.config.js
+.bmad-core/**
+.clinerules/**
+.gemini/**
+.github/**
+.kilocode/**
+.idea/**
+.kilocodemodes
+.vsixmanifest
+.DS_Store
+
+.env
+.env.*
+
+.claude/**
+.venv/**
+__pycache__/**
+.python-version
+uv.lock
+*.log
+coverage/
+
+CHANGELOG.md
+docs_/**
+
+DEVELOPMENT.md
+TODO.md
+
+# Scripts directory
+scripts/**
+
+# Explicitly include media directory for README images
+!media/**
+
+# Ignore Git Commit Genie templates
+.gitgenie/**
+
+draft.json
+
+.mydocs/**
+# Exclude RAG testing module (internal use only, not for end users)
+# This module is used to evaluate RAG effectiveness during development
+src/services/testing/**
+src/commands/RagTestCommands.ts
+
+# Exclude all test artifacts
+test/**
+tests/**
+src/test/**
+**/*.test.*
+**/*.spec.*
