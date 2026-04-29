@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import OpenAI from 'openai';
 import { zodTextFormat } from './openAiZodPatch';
-import { BaseProviderUtils } from './baseProviderUtils';
+import { BaseProviderUtils } from './BaseProviderUtils';
 import { logger } from '../../../logger';
 import { ProviderError } from '../errors/providerError';
 import { isOpenAIChatProvider, isOpenAIResponsesProvider } from '../config/ProviderConfig';

@@ -36,7 +36,14 @@ export const L10N_KEYS = {
     qwenRegionIntl: 'International',
     qwenRegionIntlDesc: 'For international API keys',
     qwenRegionChina: 'China',
-    qwenRegionChinaDesc: 'For mainland China API keys'
+    qwenRegionChinaDesc: 'For mainland China API keys',
+    localBaseUrlTitle: 'Configure Local Provider Base URL',
+    localBaseUrlPrompt: 'Enter the base URL for your local LLM provider',
+    localBaseUrlPlaceholder: 'http://localhost:1234/v1',
+    localBaseUrlSaved: 'Local provider base URL saved.',
+    localBaseUrlMustBeHttp: 'URL must start with http:// or https://',
+    localBaseUrlMustEndWithV1: 'URL path must end with /v1',
+    localBaseUrlInvalid: 'Invalid URL format'
   },
   chain: {
     toggled: 'Chain prompting {0}.',
@@ -186,6 +193,36 @@ export const L10N_KEYS = {
     analysisStatusAnalyzing: 'Analyzing...',
     analysisStatusIdle: 'Up to date',
     repairRagEmbeddings: 'Repair RAG Embeddings'
+  },
+  rag: {
+    enterEmbeddingKeyTitle: 'Configure RAG Embedding API Key',
+    enterEmbeddingKeyPrompt: 'Enter your embedding API key',
+    embeddingKeySaved: 'RAG embedding API key saved.',
+    embeddingKeyCleared: 'RAG embedding API key cleared.',
+    backendNotConfigured: 'RAG embedding backend is not configured. Please configure the API key and model first.',
+    indexingAlreadyRunning: 'RAG indexing is already running for "{0}".',
+    indexingStarted: 'RAG indexing started for "{0}".',
+    statusImporting: 'Importing commits…',
+    statusIndexingCancelled: 'Indexing cancelled',
+    indexingCancelled: 'RAG indexing cancelled for "{0}".',
+    indexingCompleted: 'RAG indexing completed for "{0}".',
+    statusImportFailed: 'RAG import failed: {0}',
+    statusImportFailedShort: 'Import failed',
+    indexingFailed: 'RAG indexing failed for "{0}": {1}',
+    indexingNothingToCancel: 'No active RAG indexing to cancel.',
+    indexingCancelRequested: 'Cancel requested for "{0}". Indexing will stop after the current batch.',
+    embeddingRepairCompleted: 'RAG embedding repair completed: {0} embedding(s) repaired.',
+    embeddingRepairFailed: 'RAG embedding repair failed: {0}',
+    statusDisabled: 'RAG disabled',
+    statusEmbedding: 'Generating embeddings…',
+    statusEmbeddingRepairNeeded: 'Embedding repair needed',
+    statusPreparingStore: 'Preparing store…',
+    statusStoreReady: 'Store ready ({0} commits)',
+    statusStoreRebuilt: 'Store rebuilt',
+    statusReady: '{0} commits indexed',
+    statusReadyWithVectors: '{0} commits, {1} vectors indexed',
+    statusIndexingProgress: 'Indexing commits ({0}/{1})…',
+    statusIndexingProgressDetail: 'Indexing commits ({0}/{1}), {2} remaining'
   }
 } as const;
 

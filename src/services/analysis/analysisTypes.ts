@@ -27,6 +27,12 @@ export interface RepositoryAnalysis {
     readmeContent?: string;
     /** insights of repo */
     insights?: string[];
+    /** Key directories found during scan */
+    keyDirectories?: string[];
+    /** Important files found during scan */
+    importantFiles?: { path: string; content?: string }[];
+    /** Configuration files content */
+    configFiles?: { [filename: string]: string };
 }
 
 /**

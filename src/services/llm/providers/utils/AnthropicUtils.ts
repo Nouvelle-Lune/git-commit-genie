@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import Anthropic from '@anthropic-ai/sdk';
-import { BaseProviderUtils } from './baseProviderUtils';
+import { BaseProviderUtils } from './BaseProviderUtils';
 import { logger } from '../../../logger';
 import { ToolUseBlock } from '@anthropic-ai/sdk/resources';
 import { ProviderError } from '../errors/providerError';

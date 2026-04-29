@@ -11,7 +11,7 @@ import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { AnthropicUtils } from './utils/AnthropicUtils';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
-import { ProviderRuntimeConfig, ProviderRules } from './utils/baseProviderUtils';
+import { ProviderRuntimeConfig, ProviderRules } from './utils/BaseProviderUtils';
 import { ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from '../baseLLMService';
 import { ProviderError } from './errors/providerError';
