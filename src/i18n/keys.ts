@@ -184,7 +184,8 @@ export const L10N_KEYS = {
     viewAnalysis: 'View analysis',
     analysisStatusMissing: 'Analysis missing',
     analysisStatusAnalyzing: 'Analyzing...',
-    analysisStatusIdle: 'Up to date'
+    analysisStatusIdle: 'Up to date',
+    repairRagEmbeddings: 'Repair RAG Embeddings'
   }
 } as const;
 
