@@ -1,10 +1,24 @@
 # Changelog
 
-## [Unreleased]
-- feat: Added full provider support for `GLM`, `Kimi`, and `OpenRouter` across model management, status bar integration, commit generation, and repository analysis model selection.
+## [3.2.0]
+- feat: Added comprehensive RAG embedding and indexing system with embedding repair, BM25 caching, and commit file loading for enhanced commit message generation.
+- feat: Added support for new Anthropic models — `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` — and removed retired/deprecated model variants.
+- feat: Switched to `DeepSeek-V4 Flash` and `DeepSeek-V4 Pro` models.
+- fix: Prompt caching now uses the top-level `cache_control` field for Anthropic requests.
+- feat: Added full provider support for `GLM`, `Kimi`, and `OpenRouter` across model management, status bar integration, commit generation, and repository analysis model selection, with curated model sets.
+- feat: Added OpenRouter model mapping registry for request-model to canonical-pricing alias normalization, integrated into usage logging and cost tracking.
+- feat: Added local provider support with configurable base URL for connecting to self-hosted LLM endpoints.
+- feat: Repository analysis now skips likely-binary files, supports configurable default exclude patterns, and exposes tool-result truncation thresholds.
+- refactor: Introduced CJK-aware token estimation and text splitting for more accurate token counting in mixed-language content.
 - refactor: Introduced a shared OpenAI-compatible chat-completions provider base and migrated `DeepSeek`/`Qwen` onto the unified implementation path.
-- feat: Added OpenRouter model mapping registry for request-model to canonical-pricing alias normalization, and integrated this mapping into usage logging/cost tracking.
-- feat: Added static curated model sets for GLM 4.7 (`glm-4.7`, `glm-4.7-flashx`, `glm-4.7-flash`) and Kimi K2 (`kimi-k2.5`, `kimi-k2`, `kimi-k2-thinking`).
+- refactor: Unified provider config types (replaced `any`), extracted shared retry loop and `safeRun` error handling, centralised CNY→USD pricing conversion.
+- refactor: Simplified repository analysis control flow, removed deprecated analysis modules and placeholder LLM service dependencies.
+- refactor: Webview UI updated with CSS design tokens and icon component extraction.
+- fix: Resolved `cancelCurrentAnalysis` race condition with per-repository cancel sources and fixed `EventManager` repository listener leak.
+- fix: Preserved `ProviderError.statusCode` when retries are exhausted in Gemini and Anthropic providers.
+- fix: Preserved cancellation signals instead of silently converting to HTTP 500 errors.
+- fix: Added 68 missing i18n translation keys for `zh-cn` and `zh-tw` locales.
+- fix: Fixed `toggleThinking` typo and added missing `repairRagEmbeddings` dashboard i18n key.
 
 ## [3.0.4]
 - feat: Added support for new OpenAI frontier models:
