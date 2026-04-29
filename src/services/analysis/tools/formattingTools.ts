@@ -5,15 +5,27 @@
 
 import { ToolResult } from './toolTypes';
 
+/** Optional caller-supplied truncation thresholds. */
+export interface CompactToolResultLimits {
+	/** Maximum characters of file content kept per readFileContent payload. */
+	maxContentChars?: number;
+	/** Maximum entries kept per directory listing or search result. */
+	maxListLines?: number;
+	/** Maximum characters of each content-search snippet. */
+	maxSnippetChars?: number;
+}
+
 /** Create compact JSON and text representations of a tool result. */
 export function compactToolResultForConversation(
 	repoPath: string,
 	toolName: string,
-	result: ToolResult<any>
+	result: ToolResult<any>,
+	limits?: CompactToolResultLimits
 ): { compactJson: any; compactText: string } {
-	const MAX_LIST_LINES = 3000;
-	const MAX_SNIPPET_CHARS = 8000;
-	const MAX_CONTENT_CHARS = 40000; // for readFileContent payloads
+	// Defaults are duplicated in package.json contributes.configuration; bump both together.
+	const MAX_LIST_LINES = limits?.maxListLines ?? 3000;
+	const MAX_SNIPPET_CHARS = limits?.maxSnippetChars ?? 8000;
+	const MAX_CONTENT_CHARS = limits?.maxContentChars ?? 40000; // for readFileContent payloads
 
 	try {
 		if (!result || (result as any).success === false) {

@@ -3,7 +3,7 @@
   "displayName": "%displayName%",
   "publisher": "Lune-99",
   "description": "%description%",
-  "version": "3.1.4",
+  "version": "3.2.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.103.0"
@@ -123,7 +123,7 @@
           ]
         },
         "gitCommitGenie.chain.enabled": {
-          "order": 2,
+          "order": 3,
           "type": "boolean",
           "default": true,
           "markdownDescription": "%config.chain.enabled.desc%",
@@ -132,35 +132,41 @@
           ]
         },
         "gitCommitGenie.chain.maxParallel": {
-          "order": 3,
+          "order": 4,
           "type": "number",
           "default": 2,
           "minimum": 1,
           "markdownDescription": "%config.chain.maxParallel.desc%"
         },
         "gitCommitGenie.llm.maxRetries": {
-          "order": 4,
+          "order": 5,
           "type": "number",
           "default": 2,
           "minimum": 1,
           "markdownDescription": "%config.llm.maxRetries.desc%"
         },
         "gitCommitGenie.llm.temperature": {
-          "order": 5,
+          "order": 6,
           "type": "number",
           "default": 1,
           "minimum": 0,
           "maximum": 2,
           "markdownDescription": "%config.llm.temperature.desc%"
         },
+        "gitCommitGenie.local.baseUrl": {
+          "order": 7,
+          "type": "string",
+          "default": "",
+          "markdownDescription": "%config.local.baseUrl.desc%"
+        },
         "gitCommitGenie.repositoryAnalysis.enabled": {
-          "order": 6,
+          "order": 11,
           "type": "boolean",
           "default": true,
           "markdownDescription": "%config.repositoryAnalysis.enabled.desc%"
         },
         "gitCommitGenie.repositoryAnalysis.excludePatterns": {
-          "order": 7,
+          "order": 13,
           "type": "array",
           "items": {
             "type": "string"
@@ -169,7 +175,7 @@
           "markdownDescription": "%config.repositoryAnalysis.excludePatterns.desc%"
         },
         "gitCommitGenie.repositoryAnalysis.updateThreshold": {
-          "order": 8,
+          "order": 14,
           "type": "number",
           "default": 10,
           "minimum": 1,
@@ -177,13 +183,13 @@
           "markdownDescription": "%config.repositoryAnalysis.updateThreshold.desc%"
         },
         "gitCommitGenie.ui.stageNotifications.enabled": {
-          "order": 12,
+          "order": 10,
           "type": "boolean",
           "default": true,
           "markdownDescription": "%config.ui.stageNotifications.enabled.desc%"
         },
         "gitCommitGenie.rag.enabled": {
-          "order": 14,
+          "order": 19,
           "type": "boolean",
           "default": false,
           "tags": [
@@ -191,15 +197,75 @@
           ],
           "markdownDescription": "%config.rag.enabled.desc%"
         },
+        "gitCommitGenie.rag.embedding.baseUrl": {
+          "order": 20,
+          "type": "string",
+          "default": "",
+          "tags": [
+            "experimental"
+          ],
+          "markdownDescription": "%config.rag.embedding.baseUrl.desc%"
+        },
+        "gitCommitGenie.rag.embedding.model": {
+          "order": 21,
+          "type": "string",
+          "default": "",
+          "tags": [
+            "experimental"
+          ],
+          "markdownDescription": "%config.rag.embedding.model.desc%"
+        },
+        "gitCommitGenie.rag.embedding.dimensions": {
+          "order": 22,
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "tags": [
+            "experimental"
+          ],
+          "markdownDescription": "%config.rag.embedding.dimensions.desc%"
+        },
+        "gitCommitGenie.rag.embedding.batchSize": {
+          "order": 23,
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "maximum": 512,
+          "tags": [
+            "experimental"
+          ],
+          "markdownDescription": "%config.rag.embedding.batchSize.desc%"
+        },
         "gitCommitGenie.repositoryAnalysis.MaxCount": {
-          "order": 9,
+          "order": 15,
           "type": "number",
           "default": -1,
           "minimum": -1,
           "markdownDescription": "%config.repositoryAnalysis.MaxCount.desc%"
         },
+        "gitCommitGenie.repositoryAnalysis.toolResult.maxContentChars": {
+          "order": 16,
+          "type": "number",
+          "default": 40000,
+          "minimum": 1000,
+          "markdownDescription": "%config.repositoryAnalysis.toolResult.maxContentChars.desc%"
+        },
+        "gitCommitGenie.repositoryAnalysis.toolResult.maxListLines": {
+          "order": 17,
+          "type": "number",
+          "default": 3000,
+          "minimum": 10,
+          "markdownDescription": "%config.repositoryAnalysis.toolResult.maxListLines.desc%"
+        },
+        "gitCommitGenie.repositoryAnalysis.toolResult.maxSnippetChars": {
+          "order": 18,
+          "type": "number",
+          "default": 8000,
+          "minimum": 100,
+          "markdownDescription": "%config.repositoryAnalysis.toolResult.maxSnippetChars.desc%"
+        },
         "gitCommitGenie.repositoryAnalysis.model": {
-          "order": 10,
+          "order": 12,
           "type": "string",
           "default": "general",
           "enum": [
@@ -211,18 +277,15 @@
             "gpt-5.2",
             "gpt-5-mini",
             "gpt-5-nano",
-            "deepseek-chat",
-            "deepseek-reasoner",
-            "claude-3-5-haiku-20241022",
-            "claude-sonnet-4-20250514",
-            "claude-3-7-sonnet-20250219",
-            "claude-3-5-sonnet-20241022",
-            "claude-3-5-sonnet-20240620",
-            "claude-opus-4-1-20250805",
-            "claude-opus-4-20250514",
-            "claude-haiku-4-5-20251001",
-            "claude-sonnet-4-5-20250929",
-            "claude-opus-4-5-20251101",
+            "deepseek-v4-flash",
+            "deepseek-v4-pro",
+            "claude-opus-4-7",
+            "claude-opus-4-6",
+            "claude-sonnet-4-6",
+            "claude-opus-4-1",
+            "claude-haiku-4-5",
+            "claude-sonnet-4-5",
+            "claude-opus-4-5",
             "gemini-2.5-flash",
             "gemini-2.5-flash-preview-09-2025",
             "gemini-3-flash-preview",
@@ -245,13 +308,11 @@
             "openai/gpt-5.2",
             "openai/gpt-5-mini",
             "openai/gpt-5-nano",
-            "deepseek/deepseek-chat",
-            "deepseek/deepseek-r1",
-            "anthropic/claude-3.5-haiku",
-            "anthropic/claude-3.5-sonnet",
-            "anthropic/claude-3.7-sonnet",
-            "anthropic/claude-sonnet-4",
-            "anthropic/claude-opus-4",
+            "deepseek/deepseek-v4-flash",
+            "deepseek/deepseek-v4-pro",
+            "anthropic/claude-opus-4.7",
+            "anthropic/claude-opus-4.6",
+            "anthropic/claude-sonnet-4.6",
             "anthropic/claude-opus-4.1",
             "anthropic/claude-haiku-4.5",
             "anthropic/claude-sonnet-4.5",
@@ -296,9 +357,6 @@
             "Anthropic",
             "Anthropic",
             "Anthropic",
-            "Anthropic",
-            "Anthropic",
-            "Anthropic",
             "Gemini",
             "Gemini",
             "Gemini",
@@ -314,8 +372,6 @@
             "Kimi",
             "Kimi",
             "Kimi",
-            "OpenRouter",
-            "OpenRouter",
             "OpenRouter",
             "OpenRouter",
             "OpenRouter",
@@ -357,7 +413,7 @@
           "markdownDescription": "%config.repositoryAnalysis.model.desc%"
         },
         "gitCommitGenie.commitLanguage": {
-          "order": 0,
+          "order": 2,
           "type": "string",
           "default": "auto",
           "enum": [
@@ -391,7 +447,7 @@
           "markdownDescription": "%config.commitLanguage.desc%"
         },
         "gitCommitGenie.typingAnimationSpeed": {
-          "order": 11,
+          "order": 8,
           "type": "number",
           "default": 15,
           "minimum": -1,
@@ -399,7 +455,7 @@
           "markdownDescription": "%config.typingAnimationSpeed.desc%"
         },
         "gitCommitGenie.showUsageCost": {
-          "order": 13,
+          "order": 9,
           "type": "boolean",
           "default": true,
           "markdownDescription": "%config.showUsageCost.desc%"
@@ -440,6 +496,32 @@
         "title": "%command.manageModels%",
         "category": "%category.title%",
         "icon": "$(gear)"
+      },
+      {
+        "command": "git-commit-genie.configureRagEmbeddingApiKey",
+        "title": "%command.configureRagEmbeddingApiKey%",
+        "category": "%category.title%",
+        "icon": "$(key)"
+      },
+      {
+        "command": "git-commit-genie.clearRagEmbeddingApiKey",
+        "title": "%command.clearRagEmbeddingApiKey%",
+        "category": "%category.title%",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "git-commit-genie.startRagIndexing",
+        "title": "%command.startRagIndexing%",
+        "category": "%category.title%",
+        "icon": "$(play)",
+        "enablement": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true"
+      },
+      {
+        "command": "git-commit-genie.cancelRagIndexing",
+        "title": "%command.cancelRagIndexing%",
+        "category": "%category.title%",
+        "icon": "$(debug-stop)",
+        "enablement": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true && gitCommitGenie.ragIndexing == true"
       },
       {
         "command": "git-commit-genie.toggleChainMode",
@@ -518,6 +600,14 @@
         {
           "command": "git-commit-genie.clearRepositoryAnalysisCache",
           "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
+        },
+        {
+          "command": "git-commit-genie.startRagIndexing",
+          "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true"
+        },
+        {
+          "command": "git-commit-genie.cancelRagIndexing",
+          "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true && gitCommitGenie.ragIndexing == true"
         },
         {
           "command": "git-commit-genie.cancelRepositoryAnalysis",

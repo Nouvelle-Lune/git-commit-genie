@@ -48,6 +48,14 @@ export class ConfigurationManager {
         }
     }
 
+    isRagEnabled(): boolean {
+        try {
+            return vscode.workspace.getConfiguration('gitCommitGenie.rag').get<boolean>('enabled', false);
+        } catch {
+            return false;
+        }
+    }
+
     private getLogLevel(logLevel: string): LogLevel {
         switch (logLevel.toLowerCase()) {
             case 'debug': return LogLevel.Debug;
@@ -59,12 +67,14 @@ export class ConfigurationManager {
 
     private async updateContextKeys(): Promise<void> {
         await vscode.commands.executeCommand('setContext', 'gitCommitGenie.repositoryAnalysisEnabled', this.isRepoAnalysisEnabled());
+        await vscode.commands.executeCommand('setContext', 'gitCommitGenie.ragEnabled', this.isRagEnabled());
     }
 
     private async onConfigurationChanged(e: vscode.ConfigurationChangeEvent): Promise<void> {
         const chainChanged = e.affectsConfiguration('gitCommitGenie.useChainPrompts') ||
             e.affectsConfiguration('gitCommitGenie.chain.enabled');
         const repoAnalysisChanged = e.affectsConfiguration('gitCommitGenie.repositoryAnalysis.enabled');
+        const ragChanged = e.affectsConfiguration('gitCommitGenie.rag.enabled');
         const logLevelChanged = e.affectsConfiguration('gitCommitGenie.logLevel');
 
         if (logLevelChanged) {
@@ -77,12 +87,12 @@ export class ConfigurationManager {
             } catch { }
         }
 
-        if (repoAnalysisChanged) {
+        if (repoAnalysisChanged || ragChanged) {
             await this.updateContextKeys();
         }
 
         // Notify other components about config changes
-        if (chainChanged || repoAnalysisChanged) {
+        if (chainChanged || repoAnalysisChanged || ragChanged) {
             vscode.commands.executeCommand('git-commit-genie.updateStatusBar');
         }
     }

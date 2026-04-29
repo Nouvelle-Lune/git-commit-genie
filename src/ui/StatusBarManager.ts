@@ -7,7 +7,7 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
 import { GitExtension } from '../services/git/git';
 import { RepoService } from '../services/repo/repo';
 import { CostTrackingService } from '../services/cost/costTrackingService';
-import { getAllProviderKeys, getProviderSecretKey } from '../services/llm/providers/config/providerConfig';
+import { getAllProviderKeys, getProviderSecretKey } from '../services/llm/providers/config/ProviderConfig';
 import {
     ProviderState,
     AnalysisState,
@@ -373,10 +373,14 @@ export class StatusBarManager {
     }
 
     private getModelLabel(): string {
-        const { hasApiKey, model } = this.providerState;
+        const { provider, hasApiKey, model } = this.providerState;
 
         if (!hasApiKey || !model.trim()) {
             return vscode.l10n.t(I18N.statusBar.selectModel);
+        }
+
+        if (provider.toLowerCase() === 'local') {
+            return this.getProviderLabel(provider);
         }
 
         return this.shortenModelName(model.trim());
@@ -414,6 +418,9 @@ export class StatusBarManager {
         const providerLabel = this.getProviderLabel(provider);
 
         if (hasApiKey && model.trim()) {
+            if (provider.toLowerCase() === 'local') {
+                return `Git Commit Genie: ${providerLabel}`;
+            }
             return vscode.l10n.t(I18N.statusBar.tooltipConfigured, providerLabel, model);
         }
 
@@ -427,6 +434,9 @@ export class StatusBarManager {
         }
 
         const providerLabel = this.getProviderLabel(provider);
+        if (provider.toLowerCase() === 'local') {
+            return vscode.l10n.t(I18N.statusBar.analysisModel, providerLabel, '').replace(/\s*\/\s*$/, '');
+        }
         const modelLabel = this.shortenModelName(model);
 
         return vscode.l10n.t(I18N.statusBar.analysisModel, providerLabel, modelLabel || '');

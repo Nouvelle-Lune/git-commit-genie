@@ -110,7 +110,7 @@ export const L10N_KEYS = {
     cancelAnalysis: '$(stop-circle) Cancel Analysis',
     refreshAnalysis: '$(refresh) Refresh Analysis',
     openMarkdown: '$(go-to-file) Open repository-analysis.md',
-    toggleThingking: '$(thinking) Enable / Disable thinking mode',
+    toggleThinking: '$(thinking) Enable / Disable thinking mode',
   },
   repoAnalysis: {
     running: 'Repository analysis in progress…',
@@ -184,7 +184,8 @@ export const L10N_KEYS = {
     viewAnalysis: 'View analysis',
     analysisStatusMissing: 'Analysis missing',
     analysisStatusAnalyzing: 'Analyzing...',
-    analysisStatusIdle: 'Up to date'
+    analysisStatusIdle: 'Up to date',
+    repairRagEmbeddings: 'Repair RAG Embeddings'
   }
 } as const;
 

@@ -181,6 +181,25 @@ export const RagPreparationJSONSchema = {
   required: ['changeSetSummary', 'retrievalFeatures']
 } as const;
 
+export const RagRerankJSONSchema = {
+  type: 'object',
+  properties: {
+    selected: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          id: { type: 'string', minLength: 1 },
+          reason: { type: 'string', minLength: 1 }
+        },
+        required: ['id', 'reason']
+      }
+    },
+    notes: { type: ['string', 'null'] }
+  },
+  required: ['selected']
+} as const;
+
 export const AnthropicFileSummaryTool = {
   name: 'file_summary',
   description: 'Return a structured summary for a single file diff.',
@@ -203,4 +222,10 @@ export const AnthropicRagPreparationTool = {
   name: 'rag_preparation',
   description: 'Return structured changeSetSummary and retrievalFeatures for future RAG retrieval.',
   input_schema: RagPreparationJSONSchema
+} as const;
+
+export const AnthropicRagRerankTool = {
+  name: 'rag_rerank',
+  description: 'Rerank retrieved historical commit messages and return the best style-reference candidates.',
+  input_schema: RagRerankJSONSchema
 } as const;

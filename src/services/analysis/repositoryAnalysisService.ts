@@ -49,7 +49,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
     private repoService: RepoService;
     private context: vscode.ExtensionContext;
-    private currentCancelSource?: vscode.CancellationTokenSource;
+    private activeCancelSources: Map<string, vscode.CancellationTokenSource> = new Map();
     private apiKeyWaiters: Map<string, vscode.Disposable> = new Map();
     // In-flight guards to prevent duplicate work per repository
     private initInflight: Map<string, Promise<RepoAnalysisRunResult>> = new Map();
@@ -127,11 +127,11 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
         const task = (async (): Promise<RepoAnalysisRunResult> => {
             const cfg = this.getConfig();
-            this.currentCancelSource = new vscode.CancellationTokenSource();
-
             if (!cfg.enabled) {
                 return 'skipped';
             }
+            const cancelSource = new vscode.CancellationTokenSource();
+            this.activeCancelSources.set(repositoryPath, cancelSource);
 
             try {
                 const existing = await this.getAnalysis(repositoryPath);
@@ -152,7 +152,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 });
                 if (!llmResp) { return 'skipped'; }
 
-                if (this.currentCancelSource?.token.isCancellationRequested) {
+                if (cancelSource.token.isCancellationRequested) {
                     logger.warn('[Genie][RepoAnalysis] Initialization cancelled after LLM response; aborting save.');
                     return 'skipped';
                 }
@@ -181,6 +181,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 return 'success';
             } catch (error: any) {
                 return this.handleAnalysisError(error, 'Initialization');
+            } finally {
+                this.activeCancelSources.delete(repositoryPath);
             }
         })();
 
@@ -235,7 +237,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         const task = (async (): Promise<RepoAnalysisRunResult> => {
             const cfg = this.getConfig();
             if (!cfg.enabled) { return 'skipped'; }
-            this.currentCancelSource = new vscode.CancellationTokenSource();
+            const cancelSource = new vscode.CancellationTokenSource();
+            this.activeCancelSources.set(repositoryPath, cancelSource);
 
             try {
                 const existing = await this.getAnalysis(repositoryPath);
@@ -276,7 +279,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     configFiles: existing.configFiles || {}
                 };
 
-                if (this.currentCancelSource?.token.isCancellationRequested) {
+                if (cancelSource.token.isCancellationRequested) {
                     logger.warn('[Genie][RepoAnalysis] Update cancelled after LLM response; aborting save.');
                     return 'skipped';
                 }
@@ -287,6 +290,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 return 'success';
             } catch (error: any) {
                 return this.handleAnalysisError(error, 'Update');
+            } finally {
+                this.activeCancelSources.delete(repositoryPath);
             }
         })();
 
@@ -419,7 +424,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * Triggers cancellation token to abort LLM calls and other async operations
      */
     public cancelCurrentAnalysis(): void {
-        try { this.currentCancelSource?.cancel(); } catch { /* ignore */ }
+        for (const source of this.activeCancelSources.values()) {
+            try { source.cancel(); } catch { /* ignore */ }
+        }
     }
 
 
@@ -834,7 +841,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 let callOptions: any = {
                     model,
                     provider,
-                    token: this.currentCancelSource?.token,
+                    token: this.activeCancelSources.get(repoPath)?.token,
                     trackUsage: true,
                     isFirstRequest: isFirstRequest && attempt === 0 // Only mark first attempt of first call as first request
                 };
@@ -1033,7 +1040,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         const callOpts: any = {
                             model,
                             provider,
-                            token: this.currentCancelSource?.token,
+                            token: this.activeCancelSources.get(repoPath)?.token,
                             trackUsage: true,
                             requestType: 'compression'
                         };

@@ -1,19 +1,119 @@
-body {
-    padding: 0;
-    color: var(--vscode-foreground);
-    font-size: var(--vscode-font-size);
-    font-family: var(--vscode-font-family);
-    margin: 0;
-    overflow: hidden;
-    height: 100vh;
+/* ── Design Tokens ── */
+:root {
+  /* Spacing scale (4px base, compact for VS Code panel) */
+  --space-1: 3px;
+  --space-2: 5px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+
+  /* Border radius */
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-pill: 999px;
+
+  /* Animation timing */
+  --transition-fast: 100ms;
+  --transition-normal: 150ms;
+  --transition-slow: 220ms;
+
+  /* Semantic badge colors (used with color-mix for backgrounds) */
+  --semantic-info: #0ea5e9;
+  --semantic-process: #d97706;
+  --semantic-generate: #8b5cf6;
+  --semantic-success: #16a34a;
+  --semantic-error: #ef4444;
 }
 
+/* ── Base ── */
+body {
+  padding: 0;
+  margin: 0;
+  color: var(--vscode-foreground);
+  font-size: var(--vscode-font-size);
+  font-family: var(--vscode-font-family);
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* ── Layout ── */
 .container {
-    max-width: 100%;
-    padding: 4px 8px;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    box-sizing: border-box;
+  max-width: 100%;
+  padding: var(--space-3) var(--space-3);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  gap: var(--space-1);
+}
+
+/* ── Shared section header ── */
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 var(--space-2);
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--vscode-descriptionForeground);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex: 1;
+}
+
+/* ── Shared icon button ── */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  color: var(--vscode-icon-foreground);
+  transition: background-color var(--transition-fast);
+  flex-shrink: 0;
+}
+
+.icon-btn:hover {
+  background-color: var(--vscode-toolbar-hoverBackground);
+}
+
+.icon-btn:active {
+  background-color: var(--vscode-toolbar-activeBackground);
+}
+
+.icon-btn:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.icon-btn i.codicon {
+  font-size: 12px;
+  pointer-events: none;
+}
+
+/* ── Shared panel box ── */
+.panel-box {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: var(--radius-md);
+  padding: 5px;
+  margin: 0 var(--space-2) var(--space-1) var(--space-2);
+  box-sizing: border-box;
 }

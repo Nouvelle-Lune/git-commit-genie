@@ -9,6 +9,9 @@ import { generateCommitMessageChain } from '../../chain/chainThinking';
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { GeminiUtils } from './utils/GeminiUtils';
+import { safeRun } from '../../../utils/safeRun';
+import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
+import { ProviderRuntimeConfig, ProviderRules } from './utils/baseProviderUtils';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import {
     GeminiCommitMessageSchema,
@@ -16,20 +19,12 @@ import {
     GeminiClassifyAndDraftSchema,
     GeminiValidateAndFixSchema,
     GeminiRagPreparationSchema,
+    GeminiRagRerankSchema,
     GeminiRepoAnalysisSchema,
     GeminiRepoAnalysisActionSchema
 } from './schemas/geminiSchemas';
 
-import {
-    // Shared Zod schemas used to check structured output
-    commitMessageSchema,
-    fileSummarySchema,
-    classifyAndDraftResponseSchema,
-    validateAndFixResponseSchema,
-    ragPreparationResponseSchema,
-    repoAnalysisResponseSchema,
-    repoAnalysisActionSchema
-} from "./schemas/common";
+import { commitMessageSchema } from './schemas/common';
 
 const SECRET_GEMINI_API_KEY = 'gitCommitGenie.secret.geminiApiKey';
 
@@ -37,7 +32,7 @@ const SECRET_GEMINI_API_KEY = 'gitCommitGenie.secret.geminiApiKey';
  * Google Gemini service implementation using @google/genai
  */
 export class GeminiService extends BaseLLMService {
-    private client: any | null = null;
+    private client: GoogleGenAI | null = null;
     protected context: vscode.ExtensionContext;
     private utils: GeminiUtils;
 
@@ -89,14 +84,14 @@ export class GeminiService extends BaseLLMService {
     /**
      * Get the Gemini client instance
      */
-    protected getClient(): GoogleGenAI | null {
+    public getClient(): GoogleGenAI | null {
         return this.client;
     }
 
     /**
      * Get the Gemini utils instance
      */
-    protected getUtils(): GeminiUtils {
+    public getUtils(): GeminiUtils {
         return this.utils;
     }
 
@@ -136,7 +131,7 @@ export class GeminiService extends BaseLLMService {
             }
 
             // Divider in webview: commit generation start
-            try { logger.logGenerationStart(repoPath, config.useChain ? 'thinking' : 'default'); } catch { /* ignore */ }
+            safeRun('Gemini.logGenerationStart', () => logger.logGenerationStart(repoPath, config.useChain ? 'thinking' : 'default'));
 
             const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
 
@@ -156,8 +151,8 @@ export class GeminiService extends BaseLLMService {
     private async generateThinking(
         diffs: DiffData[],
         jsonMessage: string,
-        config: any,
-        rules: any,
+        config: ProviderRuntimeConfig,
+        rules: ProviderRules,
         repoPath: string,
         options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
@@ -165,102 +160,54 @@ export class GeminiService extends BaseLLMService {
         const usages: Array<any> = [];
         let callCount = 0;
 
+        // Map request type to Gemini's response schema (provider-specific).
+        const responseSchemaMap: Record<string, any> = {
+            summary: GeminiFileSummarySchema,
+            draft: GeminiClassifyAndDraftSchema,
+            fix: GeminiValidateAndFixSchema,
+            ragPreparation: GeminiRagPreparationSchema,
+            ragRerank: GeminiRagRerankSchema,
+            commitMessage: GeminiCommitMessageSchema,
+            strictFix: GeminiCommitMessageSchema,
+            enforceLanguage: GeminiCommitMessageSchema,
+            repoAnalysis: GeminiRepoAnalysisSchema,
+            repoAnalysisAction: GeminiRepoAnalysisActionSchema,
+        };
+
         const chat: ChatFn = async (messages, chainOptions) => {
             const reqType = chainOptions?.requestType;
-            const labelFor = (t?: string) => {
-                switch (t) {
-                    case 'summary': return 'summarize';
-                    case 'draft': return 'draft';
-                    case 'fix': return 'validate-fix';
-                    case 'ragPreparation': return 'rag-prep';
-                    case 'strictFix': return 'strict-fix';
-                    case 'enforceLanguage': return 'lang-fix';
-                    case 'commitMessage': return 'build-commit-msg';
-                    case 'repoAnalysis': return 'repo-analysis';
-                    case 'repoAnalysisAction': return 'repo-analysis-action';
-                    default: return 'thinking';
-                }
-            };
-            // Map request type to schema
-            const schemaMap: Record<string, any> = {
-                summary: GeminiFileSummarySchema,
-                draft: GeminiClassifyAndDraftSchema,
-                fix: GeminiValidateAndFixSchema,
-                ragPreparation: GeminiRagPreparationSchema,
-                commitMessage: GeminiCommitMessageSchema,
-                strictFix: GeminiCommitMessageSchema,
-                enforceLanguage: GeminiCommitMessageSchema,
-                repoAnalysis: GeminiRepoAnalysisSchema,
-                repoAnalysisAction: GeminiRepoAnalysisActionSchema,
-            };
-
-            const schemaMapValidation: Record<string, any> = {
-                summary: fileSummarySchema,
-                draft: classifyAndDraftResponseSchema,
-                fix: validateAndFixResponseSchema,
-                ragPreparation: ragPreparationResponseSchema,
-                commitMessage: commitMessageSchema,
-                strictFix: commitMessageSchema,
-                enforceLanguage: commitMessageSchema,
-                repoAnalysis: repoAnalysisResponseSchema,
-                repoAnalysisAction: repoAnalysisActionSchema,
-            };
-
-            const schema = reqType ? schemaMap[reqType] : undefined;
             const retries = config.maxRetries ?? 2;
             const totalAttempts = Math.max(1, retries + 1);
+            const responseSchema = reqType ? responseSchemaMap[reqType] : undefined;
 
-            for (let attempt = 0; attempt < totalAttempts; attempt++) {
-                const result = await this.utils.callChatCompletion(this.client!, messages, {
+            return await this.runValidatedChatCall({
+                reqType,
+                totalAttempts,
+                initialMessages: messages,
+                repoPath,
+                validationSchema: getValidationSchemaFor(reqType),
+                callOnce: (msgs) => this.utils.callChatCompletion(this.client!, msgs, {
                     model: config.model,
                     provider: 'Gemini',
-                    responseSchema: schema,
+                    responseSchema,
                     token: options?.token,
                     trackUsage: true,
-                    repoPath
-                });
-
-                callCount += 1;
-                if (result.usage) {
-                    usages.push(result.usage);
-                    logger.usage(repoPath, 'Gemini', result.usage, config.model, labelFor(reqType), callCount);
-                } else {
-                    logger.usage(repoPath, 'Gemini', undefined, config.model, labelFor(reqType), callCount);
-                }
-
-                // Validate structured output if schema is defined
-                const validationSchema = reqType ? schemaMapValidation[reqType] : undefined;
-
-                if (validationSchema) {
-                    const safe = validationSchema.safeParse(result.parsedResponse);
-                    if (safe.success) {
-                        return safe.data;
+                    repoPath,
+                }),
+                onUsage: (usage) => {
+                    callCount += 1;
+                    if (usage) {
+                        usages.push(usage);
+                        logger.usage(repoPath, 'Gemini', usage, config.model, getRequestTypeLabel(reqType), callCount);
+                    } else {
+                        logger.usage(repoPath, 'Gemini', undefined, config.model, getRequestTypeLabel(reqType), callCount);
                     }
-
-                    if (attempt < totalAttempts - 1) {
-                        this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
-                        try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
-                        messages = this.buildSchemaValidationRetryMessages(
-                            messages,
-                            result,
-                            safe.error,
-                            validationSchema,
-                            reqType
-                        );
-                        continue;
-                    }
-                    try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
-
-                    throw new Error(`Gemini structured result failed local validation for ${reqType} after ${totalAttempts} attempts`);
-                }
-
-                // Fallback: return raw data
-                return result.parsedResponse;
-            }
+                },
+            });
         };
 
         // Start bottom-right stage notifications
-        try { stageNotifications.begin(); } catch { /* ignore */ }
+        stageNotifications.begin();
         let out;
         try {
             out = await generateCommitMessageChain(
@@ -271,29 +218,47 @@ export class GeminiService extends BaseLLMService {
                     targetLanguage: parsedInput?.['target-language'],
                     validationChecklist: rules.checklistText,
                     repositoryPath: repoPath,
+                    targetRepo: options?.targetRepo,
                     repositoryAnalysis: parsedInput?.['repository-analysis']
                 },
                 chat,
                 {
                     maxParallel: config.chainMaxParallel,
+                    retrieveRagExamples: async (context) => {
+                        if (!options?.ragRetrievalService || !options?.targetRepo) {
+                            return [];
+                        }
+                        return await options.ragRetrievalService.retrieveStyleReferences({
+                            repo: options.targetRepo,
+                            changeSetSummary: context.changeSetSummary,
+                            retrievalFeatures: context.retrievalFeatures,
+                            chat,
+                        });
+                    },
                     onStage: (event) => {
-                        try {
-                            stageNotifications.update({ type: event.type as any, data: event.data });
-                            const payload = { stage: event.type, data: event.data ?? {} };
-                            try { logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath); } catch { /* ignore */ }
-                        } catch { /* ignore */ }
+                        stageNotifications.update({ type: event.type, data: event.data });
+                        const payload = { stage: event.type, data: event.data ?? {} };
+                        safeRun('Gemini.logCommitStage', () => logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath));
                     }
                 }
             );
         } finally {
-            try { stageNotifications.end(); } catch { /* ignore */ }
+            stageNotifications.end();
         }
 
         if (usages.length) {
             logger.usageSummary(repoPath, 'Gemini', usages, config.model, 'thinking', undefined, false);
         }
 
-        return { content: out.commitMessage };
+        return {
+            content: out.commitMessage,
+            ragMetadata: {
+                fileSummaries: out.fileSummaries,
+                changeSetSummary: out.changeSetSummary,
+                retrievalFeatures: out.retrievalFeatures,
+                ragStyleReferences: out.ragStyleReferences,
+            }
+        };
     }
 
     /**
@@ -301,68 +266,51 @@ export class GeminiService extends BaseLLMService {
      */
     private async generateDefault(
         jsonMessage: string,
-        config: any,
-        rules: any,
+        config: ProviderRuntimeConfig,
+        rules: ProviderRules,
         repoPath: string,
         options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
         const retries = config.maxRetries ?? 2;
         const totalAttempts = Math.max(1, retries + 1);
-        let lastError: any;
-        let messages: ChatMessage[] = [
+        const messages: ChatMessage[] = [
             { role: 'system', content: rules.baseRule },
             { role: 'user', content: jsonMessage }
         ];
 
-        for (let attempt = 0; attempt < totalAttempts; attempt++) {
-            const result = await this.utils.callChatCompletion(
-                this.client!,
-                messages,
-                {
+        try {
+            const data = await this.runValidatedChatCall({
+                reqType: 'commitMessage',
+                totalAttempts,
+                initialMessages: messages,
+                repoPath,
+                validationSchema: commitMessageSchema,
+                callOnce: (msgs) => this.utils.callChatCompletion(this.client!, msgs, {
                     model: config.model,
                     provider: 'Gemini',
                     responseSchema: GeminiCommitMessageSchema,
                     token: options?.token,
                     trackUsage: true,
-                    repoPath
-                }
-            );
-
-            if (result.usage) {
-                logger.usageSummary(repoPath, 'Gemini', [result.usage], config.model, 'default');
-            } else {
-                logger.usageSummary(repoPath, 'Gemini', [], config.model, 'default');
-            }
-
-            const safe = commitMessageSchema.safeParse(result.parsedResponse);
-            if (safe.success) {
-                // Emit a final "done" stage in webview logs for default mode
-                try {
-                    logger.logToolCall(
-                        'commitStage',
-                        JSON.stringify({ stage: 'done', data: { finalMessage: safe.data.commitMessage } }),
-                        'Commit generation stage',
-                        repoPath
-                    );
-                } catch { /* ignore */ }
-                return { content: safe.data.commitMessage };
-            }
-
-            lastError = safe.error;
-            if (attempt < totalAttempts - 1) {
-                this.logSchemaValidationRetry('commitMessage', attempt, totalAttempts);
-                messages = this.buildSchemaValidationRetryMessages(
-                    messages,
-                    result,
-                    safe.error,
-                    commitMessageSchema,
-                    'commitMessage'
-                );
-                continue;
-            }
+                    repoPath,
+                }),
+                onUsage: (usage) => {
+                    if (usage) {
+                        logger.usageSummary(repoPath, 'Gemini', [usage], config.model, 'default');
+                    } else {
+                        logger.usageSummary(repoPath, 'Gemini', [], config.model, 'default');
+                    }
+                },
+            });
+            safeRun('Gemini.logCommitStageDone', () => logger.logToolCall(
+                'commitStage',
+                JSON.stringify({ stage: 'done', data: { finalMessage: data.commitMessage } }),
+                'Commit generation stage',
+                repoPath,
+            ));
+            return { content: data.commitMessage };
+        } catch {
+            return { message: 'Failed to validate structured commit message from Gemini.', statusCode: 500 };
         }
-
-        return { message: 'Failed to validate structured commit message from Gemini.', statusCode: 500 };
     }
 
 }

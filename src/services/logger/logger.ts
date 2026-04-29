@@ -367,16 +367,20 @@ export class Logger {
                     outputTokens = usage.output_tokens || 0;
                     cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
                     cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
-                } else if (providerLower === 'deepseek' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter') {
+                } else if (providerLower === 'deepseek' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter' || providerLower === 'local') {
                     inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
                     outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
                     cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
                     const pricingModel = this.normalizePricingModelForProvider(providerLower, model);
                     cost = this.calculateCost(pricingModel, inputTokens, outputTokens, cachedTokens);
                 } else if (providerLower === 'anthropic') {
-                    inputTokens = usage.input_tokens || 0;
+                    const rawInput = usage.input_tokens || 0;
                     outputTokens = usage.output_tokens || 0;
-                    cachedTokens = usage.cache_read_input_tokens || 0;
+                    const cacheReadTokens = usage.cache_read_input_tokens || 0;
+                    const cacheCreationTokens = usage.cache_creation_input_tokens || 0;
+                    // Anthropic input_tokens excludes cache tokens — include them for correct pricing
+                    inputTokens = rawInput + cacheReadTokens + cacheCreationTokens;
+                    cachedTokens = cacheReadTokens;
                     cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
                 } else if (providerLower === 'gemini') {
                     inputTokens = usage.prompt_tokens || 0;
@@ -540,11 +544,15 @@ export class Logger {
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens);
             }
             if (providerLower === 'anthropic') {
-                inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
-                outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
-                cachedTokens = usage.cached_tokens ?? usage.input_tokens_details?.cached_tokens ?? 0;
-                totalTokens = usage.total_tokens ?? (inputTokens + outputTokens);
-                cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
+                const rawInput = usage.input_tokens || 0;
+                outputTokens = usage.output_tokens || 0;
+                const cacheReadTokens = usage.cache_read_input_tokens || 0;
+                const cacheCreationTokens = usage.cache_creation_input_tokens || 0;
+                cachedTokens = cacheReadTokens;
+                // Anthropic input_tokens excludes cache tokens — compute true total
+                inputTokens = rawInput + cacheReadTokens + cacheCreationTokens;
+                totalTokens = inputTokens + outputTokens;
+                cachePercentage = inputTokens > 0 ? (cacheReadTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
             if (providerLower === 'gemini') {
@@ -555,7 +563,7 @@ export class Logger {
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
-            if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter') {
+            if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter' || providerLower === 'local') {
                 inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
                 outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
                 cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
@@ -679,6 +687,9 @@ export class Logger {
      * Normalize pricing model names for provider-specific aliases.
      */
     private normalizePricingModelForProvider(providerLower: string, modelName: string): string {
+        if (providerLower === 'local') {
+            return 'local';
+        }
         if (providerLower !== 'openrouter') {
             return modelName;
         }
@@ -733,14 +744,17 @@ export class Logger {
                     outputTokens = usage.output_tokens || 0;
                     cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
                 } else if (providerLower === 'anthropic') {
-                    inputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0;
-                    outputTokens = usage.output_tokens ?? usage.completion_tokens ?? 0;
-                    cachedTokens = usage.cached_tokens ?? usage.input_tokens_details?.cached_tokens ?? 0;
+                    const rawInput = usage.input_tokens || 0;
+                    outputTokens = usage.output_tokens || 0;
+                    const cacheReadTokens = usage.cache_read_input_tokens || 0;
+                    const cacheCreationTokens = usage.cache_creation_input_tokens || 0;
+                    inputTokens = rawInput + cacheReadTokens + cacheCreationTokens;
+                    cachedTokens = cacheReadTokens;
                 } else if (providerLower === 'gemini') {
                     inputTokens = usage.prompt_tokens || 0;
                     outputTokens = usage.completion_tokens || 0;
                     cachedTokens = usage.cached_content_tokens || 0;
-                } else if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter') {
+                } else if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter' || providerLower === 'local') {
                     inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
                     outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
                     cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;

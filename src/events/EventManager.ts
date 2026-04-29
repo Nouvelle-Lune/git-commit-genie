@@ -8,6 +8,7 @@ import { logger } from '../services/logger';
 
 export class EventManager {
     private lastHeadByRepo = new Map<string, string | undefined>();
+    private repoDisposables = new Map<string, vscode.Disposable>();
     private initializationAttempted = false;
 
     constructor(
@@ -23,7 +24,11 @@ export class EventManager {
     }
 
     async dispose(): Promise<void> {
-        // Cleanup if needed
+        for (const d of this.repoDisposables.values()) {
+            d.dispose();
+        }
+        this.repoDisposables.clear();
+        this.lastHeadByRepo.clear();
     }
 
     private async setupFileWatchers(): Promise<void> {
@@ -115,18 +120,23 @@ export class EventManager {
             const api = gitExtension.getAPI(1);
 
             const attachRepoListeners = (repo: Repository) => {
-                // Seed last known HEAD
                 const repoPath = repo.rootUri?.fsPath;
-                if (repoPath) {
-                    this.lastHeadByRepo.set(repoPath, repo.state.HEAD?.commit);
+                if (!repoPath) {
+                    return;
                 }
+
+                // Dispose previous listener if repo was previously opened
+                const existing = this.repoDisposables.get(repoPath);
+                if (existing) {
+                    existing.dispose();
+                }
+
+                // Seed last known HEAD
+                this.lastHeadByRepo.set(repoPath, repo.state.HEAD?.commit);
 
                 // Any repository state change (detect HEAD commit changes from all sources)
                 const d = repo.state.onDidChange(() => {
                     try {
-                        if (!repoPath) {
-                            return;
-                        }
                         const prev = this.lastHeadByRepo.get(repoPath);
                         const next = repo.state.HEAD?.commit;
                         if (next && next !== prev) {
@@ -137,7 +147,7 @@ export class EventManager {
                         // noop
                     }
                 });
-                this.context.subscriptions.push(d);
+                this.repoDisposables.set(repoPath, d);
             };
 
             // Attach to existing and future repositories
@@ -148,10 +158,22 @@ export class EventManager {
             // Listen for new repositories being opened/detected
             const onDidOpenRepo = api.onDidOpenRepository((repo: Repository) => {
                 attachRepoListeners(repo);
-                // Try to initialize analysis when a new repository is detected
                 this.initializeRepositoryAnalysis();
             });
             this.context.subscriptions.push(onDidOpenRepo);
+
+            const onDidCloseRepo = api.onDidCloseRepository((repo: Repository) => {
+                const repoPath = repo.rootUri?.fsPath;
+                if (repoPath) {
+                    this.lastHeadByRepo.delete(repoPath);
+                    const disposable = this.repoDisposables.get(repoPath);
+                    if (disposable) {
+                        disposable.dispose();
+                        this.repoDisposables.delete(repoPath);
+                    }
+                }
+            });
+            this.context.subscriptions.push(onDidCloseRepo);
         } catch {
             // ignore errors
         }

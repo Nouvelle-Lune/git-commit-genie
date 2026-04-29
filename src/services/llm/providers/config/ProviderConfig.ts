@@ -13,7 +13,8 @@ export type ProviderKey =
     | 'qwen'
     | 'glm'
     | 'kimi'
-    | 'openrouter';
+    | 'openrouter'
+    | 'local';
 
 export interface ProviderMetadata {
     /** Provider key (internal identifier) */
@@ -124,6 +125,13 @@ export const PROVIDER_CONFIGS: Record<ProviderKey, ProviderMetadata> = {
         modelStateKey: 'gitCommitGenie.openrouterModel',
         apiStyle: 'openai-chat',
         baseUrl: 'https://openrouter.ai/api/v1'
+    },
+    local: {
+        key: 'local',
+        label: 'Local',
+        secretKey: 'gitCommitGenie.secret.localApiKey',
+        modelStateKey: 'gitCommitGenie.localModel',
+        apiStyle: 'openai-chat'
     }
 };
 

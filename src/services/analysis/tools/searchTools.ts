@@ -238,6 +238,11 @@ async function searchFile(
     // Content search
     if (searchType === 'content') {
         try {
+            // Sniff the first 8KB before loading the file as UTF-8: binaries (images, archives,
+            // compiled artifacts) waste context and produce mojibake noise on regex matches.
+            if (await isLikelyBinary(filePath)) {
+                return null;
+            }
             const content = await fs.promises.readFile(filePath, 'utf-8');
             const lines = content.split('\n');
             const matches: ContentMatch[] = [];
@@ -286,4 +291,26 @@ async function searchFile(
     }
 
     return null;
+}
+
+/**
+ * Sniff up to the first 8KB of a file and report whether it looks binary.
+ * A NULL byte anywhere in that prefix is a strong indicator (text formats
+ * never contain 0x00), and we treat such files as binary for content search.
+ */
+export async function isLikelyBinary(filePath: string): Promise<boolean> {
+    const SNIFF_BYTES = 8192;
+    const handle = await fs.promises.open(filePath, 'r');
+    try {
+        const buffer = Buffer.alloc(SNIFF_BYTES);
+        const { bytesRead } = await handle.read(buffer, 0, SNIFF_BYTES, 0);
+        for (let i = 0; i < bytesRead; i++) {
+            if (buffer[i] === 0x00) {
+                return true;
+            }
+        }
+        return false;
+    } finally {
+        await handle.close();
+    }
 }

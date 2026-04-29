@@ -161,6 +161,23 @@ export const GeminiRagPreparationSchema = {
     propertyOrdering: ['changeSetSummary', 'retrievalFeatures']
 };
 
+export const GeminiRagRerankSchema = {
+    type: Type.OBJECT,
+    properties: {
+        selected: createArrayType({
+            type: Type.OBJECT,
+            properties: {
+                id: createStringType('Candidate short id (e.g., c1, c7) from the prompt'),
+                reason: createStringType('Why this commit is a good style reference for the current change'),
+            },
+            required: ['id', 'reason']
+        }, 'Selected historical commit messages'),
+        notes: createStringType('Optional notes about the reranking result')
+    },
+    required: ['selected'],
+    propertyOrdering: ['selected', 'notes']
+};
+
 /**
  * Schema for repository analysis response
  */
