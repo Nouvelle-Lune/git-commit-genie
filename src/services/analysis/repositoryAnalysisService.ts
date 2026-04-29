@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { RepoService } from '../repo/repo';
 import { logger } from '../logger';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
-import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../llm/providers/config/ProviderConfig';
+import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../llm/providers/config/providerConfig';
 import { AnthropicRepoAnalysisActionTool, AnthropicCompressionTool } from '../llm/providers/schemas/anthropicSchemas';
 import { GeminiRepoAnalysisFunctionDeclarations } from '../llm/providers/schemas/geminiFunctions';
 import { repoAnalysisActionSchema, compressionResponseSchema } from '../llm/providers/schemas/common';
@@ -30,19 +30,8 @@ import { searchFiles } from './tools/searchTools';
 import { readFileContent } from './tools/fileTools';
 import { compressContext } from './tools/compressionTools';
 import { compactToolResultForConversation } from './tools/formattingTools';
-import { shouldExclude } from './tools/utils';
 import { DirectoryEntry, SearchFilesResult, ToolResult } from './tools/toolTypes';
-import { getMaxContextByFunction, estimateTokens } from './tools/modelContext';
-
-/**
- * Structural shape of provider utils used by the repo analysis flow.
- * Each provider's full utils class is wider; this captures the contract this
- * module relies on so we can drop `as any` casts at the call sites.
- */
-interface RepoAnalysisProviderUtils {
-    callChatCompletion(client: unknown, messages: ChatMessage[], options: Record<string, unknown>): Promise<any>;
-    getMaxRetries?(): number;
-}
+import { getMaxContextByFunction } from './tools/modelContext';
 
 /**
  * Tool-driven repository analysis service
@@ -54,14 +43,13 @@ interface RepoAnalysisProviderUtils {
 export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private static readonly ANALYSIS_MD_FILE_NAME = 'repository-analysis.md';
     private static readonly ANALYSIS_STATE_KEY_PREFIX = 'gitCommitGenie.analysis.';
-    private static readonly DEFAULT_EXCLUDE_PATTERNS = ['node_modules', '__pycache__', 'dist', 'build', 'out', 'coverage', '.DS_Store', '.*'];
 
-    private llmService: LLMService | null = null;
+    private llmService: LLMService | null;
     private resolveLLMService?: (provider: string) => (LLMService | undefined);
 
     private repoService: RepoService;
     private context: vscode.ExtensionContext;
-    private currentCancelSource?: vscode.CancellationTokenSource;
+    private activeCancelSources: Map<string, vscode.CancellationTokenSource> = new Map();
     private apiKeyWaiters: Map<string, vscode.Disposable> = new Map();
     // In-flight guards to prevent duplicate work per repository
     private initInflight: Map<string, Promise<RepoAnalysisRunResult>> = new Map();
@@ -77,8 +65,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private readonly _onAnalysisChanged = new vscode.EventEmitter<string>();
     public readonly onAnalysisChanged = this._onAnalysisChanged.event;
 
-    constructor(context: vscode.ExtensionContext, repoService: RepoService) {
+    constructor(context: vscode.ExtensionContext, llmService: LLMService | null, repoService: RepoService) {
         this.context = context;
+        this.llmService = llmService;
         this.repoService = repoService;
     }
 
@@ -138,11 +127,11 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
         const task = (async (): Promise<RepoAnalysisRunResult> => {
             const cfg = this.getConfig();
-            this.currentCancelSource = new vscode.CancellationTokenSource();
-
             if (!cfg.enabled) {
                 return 'skipped';
             }
+            const cancelSource = new vscode.CancellationTokenSource();
+            this.activeCancelSources.set(repositoryPath, cancelSource);
 
             try {
                 const existing = await this.getAnalysis(repositoryPath);
@@ -163,7 +152,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 });
                 if (!llmResp) { return 'skipped'; }
 
-                if (this.currentCancelSource?.token.isCancellationRequested) {
+                if (cancelSource.token.isCancellationRequested) {
                     logger.warn('[Genie][RepoAnalysis] Initialization cancelled after LLM response; aborting save.');
                     return 'skipped';
                 }
@@ -178,7 +167,11 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     insights: llmResp.insights,
                     projectType: llmResp.projectType,
                     technologies: llmResp.technologies,
-                    readmeContent: undefined
+                    // In tool-driven mode, we do not force a scan. Keep these optional
+                    keyDirectories: [],
+                    importantFiles: [],
+                    readmeContent: undefined,
+                    configFiles: {}
                 };
 
                 await this.saveAnalysis(repositoryPath, analysis);
@@ -188,6 +181,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 return 'success';
             } catch (error: any) {
                 return this.handleAnalysisError(error, 'Initialization');
+            } finally {
+                this.activeCancelSources.delete(repositoryPath);
             }
         })();
 
@@ -242,7 +237,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         const task = (async (): Promise<RepoAnalysisRunResult> => {
             const cfg = this.getConfig();
             if (!cfg.enabled) { return 'skipped'; }
-            this.currentCancelSource = new vscode.CancellationTokenSource();
+            const cancelSource = new vscode.CancellationTokenSource();
+            this.activeCancelSources.set(repositoryPath, cancelSource);
 
             try {
                 const existing = await this.getAnalysis(repositoryPath);
@@ -276,10 +272,14 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     insights: llmResp.insights,
                     projectType: llmResp.projectType,
                     technologies: llmResp.technologies,
-                    readmeContent: existing.readmeContent
+                    // Keep previously saved structural hints if any
+                    keyDirectories: existing.keyDirectories || [],
+                    importantFiles: existing.importantFiles || [],
+                    readmeContent: existing.readmeContent,
+                    configFiles: existing.configFiles || {}
                 };
 
-                if (this.currentCancelSource?.token.isCancellationRequested) {
+                if (cancelSource.token.isCancellationRequested) {
                     logger.warn('[Genie][RepoAnalysis] Update cancelled after LLM response; aborting save.');
                     return 'skipped';
                 }
@@ -290,6 +290,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 return 'success';
             } catch (error: any) {
                 return this.handleAnalysisError(error, 'Update');
+            } finally {
+                this.activeCancelSources.delete(repositoryPath);
             }
         })();
 
@@ -406,7 +408,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 summary: analysis.summary || '',
                 projectType: analysis.projectType || '',
                 technologies: Array.isArray(analysis.technologies) ? analysis.technologies : [],
-                insights: Array.isArray(analysis.insights) ? analysis.insights : []
+                insights: Array.isArray(analysis.insights) ? analysis.insights : [],
+                importantFiles: Array.isArray(analysis.importantFiles) ? analysis.importantFiles : []
             };
             return JSON.stringify(payload, null, 2);
         } catch (error) {
@@ -421,7 +424,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * Triggers cancellation token to abort LLM calls and other async operations
      */
     public cancelCurrentAnalysis(): void {
-        try { this.currentCancelSource?.cancel(); } catch { /* ignore */ }
+        for (const source of this.activeCancelSources.values()) {
+            try { source.cancel(); } catch { /* ignore */ }
+        }
     }
 
 
@@ -632,11 +637,11 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             : undefined;
 
 
-        // Limit total thinking/acting steps to prevent runaway loops.
-        // Non-positive values (the legacy -1 sentinel and 0) mean "no upper bound";
-        // when unbounded, the step === maxSteps reset branch below never fires.
-        const configuredMaxSteps = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('repositoryAnalysis.MaxCount', -1);
-        const maxSteps = configuredMaxSteps <= 0 ? Number.POSITIVE_INFINITY : configuredMaxSteps;
+        // Limit total thinking/acting steps to prevent runaway loops
+        let maxSteps = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('repositoryAnalysis.MaxCount', 99999);
+        if (maxSteps === -1) {
+            maxSteps = 99999;
+        }
         const maxContextTokens = getMaxContextByFunction('repoAnalysis', model);
         // Compress earlier to avoid runaway growth
         const contextThreshold = maxContextTokens * 0.65;
@@ -654,7 +659,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             }
 
             // Check context size and force compression if needed
-            const estimatedTokens = msgs.reduce((sum, m) => sum + estimateTokens(m.content), 0);
+            const totalContextLength = msgs.map(m => m.content.length).reduce((a, b) => a + b, 0);
+            const estimatedTokens = totalContextLength / 4; // Rough estimate: 1 token ≈ 4 chars
 
             if (estimatedTokens > contextThreshold) {
                 logger.warn(`[Genie][RepoAnalysis] Context at ${Math.round((estimatedTokens / maxContextTokens) * 100)}% (${Math.round(estimatedTokens)}/${maxContextTokens} tokens), forcing compression...`);
@@ -693,8 +699,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         }
                         newMsgs.push({ role: 'user', content: `Here is the compressed Exploration History for last conversation, Continue exploring: \n\n${compressResult.data.compressed}` });
                         msgs = newMsgs;
-                        const newTokens = msgs.reduce((sum, m) => sum + estimateTokens(m.content), 0);
-                        logger.info(`[Genie][RepoAnalysis] Compression successful: ${Math.round(estimatedTokens)} → ${Math.round(newTokens)} tokens (${(compressResult.data.compressionRatio * 100).toFixed(1)}% reduction)`);
+                        const newSize = msgs.map(m => m.content.length).reduce((a, b) => a + b, 0);
+                        logger.info(`[Genie][RepoAnalysis] Compression successful: ${Math.round(totalContextLength / 4)} → ${Math.round(newSize / 4)} tokens (${(compressResult.data.compressionRatio * 100).toFixed(1)}% reduction)`);
                     } else {
                         logger.warn(`[Genie][RepoAnalysis] Compression failed: ${compressResult.error || 'Unknown error'}`);
                     }
@@ -769,12 +775,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 this.logToolOutcome(toolName, toolResult);
 
                 // Build compact representations to minimize token usage
-                const compactCfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis.toolResult');
-                const { compactJson, compactText } = compactToolResultForConversation(repoPath, toolName, toolResult, {
-                    maxContentChars: compactCfg.get<number>('maxContentChars'),
-                    maxListLines: compactCfg.get<number>('maxListLines'),
-                    maxSnippetChars: compactCfg.get<number>('maxSnippetChars')
-                });
+                const { compactJson, compactText } = compactToolResultForConversation(repoPath, toolName, toolResult);
 
                 // For OpenAI function calling, queue function_call_output with compact JSON
                 if (provider.toLowerCase() === 'openai' && (result as any).functionCallId) {
@@ -815,8 +816,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
             const model = this.getActiveModelForProvider(provider) || '';
 
-            const client = service.getClient();
-            const utils = service.getUtils() as RepoAnalysisProviderUtils;
+            const client = (service as any).getClient();
+            const utils = (service as any).getUtils();
 
             if (!client) {
                 throw Object.assign(new Error(`${provider} client is not initialized`), { statusCode: 401 });
@@ -840,7 +841,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 let callOptions: any = {
                     model,
                     provider,
-                    token: this.currentCancelSource?.token,
+                    token: this.activeCancelSources.get(repoPath)?.token,
                     trackUsage: true,
                     isFirstRequest: isFirstRequest && attempt === 0 // Only mark first attempt of first call as first request
                 };
@@ -970,8 +971,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      */
     private normalizeExcludePatterns(user: string[] = []): string[] {
         const list = Array.isArray(user) ? user : [];
-        const merged = [...RepositoryAnalysisService.DEFAULT_EXCLUDE_PATTERNS, ...list];
-        return Array.from(new Set(merged.filter(v => typeof v === 'string' && v.trim().length > 0)));
+        return Array.from(new Set(list.filter(v => typeof v === 'string' && v.trim().length > 0)));
     }
 
     /**
@@ -1010,12 +1010,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 }
                 case 'readFileContent': {
                     const filePath = this.resolveSafePath(repoPath, String(args.filePath || ''));
-                    const relativePath = path.relative(repoPath, filePath);
-                    if (shouldExclude(relativePath, excludePatterns)) {
-                        const errMsg = `Excluded path: '${relativePath}' matches user or default exclude patterns`;
-                        logger.info(`[Genie][RepoAnalysis] Blocked read of excluded path: ${relativePath}`);
-                        return { success: false, error: errMsg };
-                    }
                     const startLine = typeof args.startLine === 'number' ? args.startLine : 1;
                     const maxLines = typeof args.maxLines === 'number' ? args.maxLines : 1000;
                     const encoding = typeof args.encoding === 'string' ? args.encoding : 'utf-8';
@@ -1036,8 +1030,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         }
 
                         const model = this.getActiveModelForProvider(provider) || '';
-                        const client = service.getClient();
-                        const utils = service.getUtils() as RepoAnalysisProviderUtils;
+                        const client = (service as any).getClient();
+                        const utils = (service as any).getUtils();
 
                         if (!client) {
                             throw new Error(`${provider} client is not initialized`);
@@ -1046,7 +1040,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         const callOpts: any = {
                             model,
                             provider,
-                            token: this.currentCancelSource?.token,
+                            token: this.activeCancelSources.get(repoPath)?.token,
                             trackUsage: true,
                             requestType: 'compression'
                         };
@@ -1060,9 +1054,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         return result;
                     };
 
-                    const utilsForRetries = this.pickRepoAnalysisService().service?.getUtils() as RepoAnalysisProviderUtils | undefined;
-                    const maxRetries = typeof utilsForRetries?.getMaxRetries === 'function'
-                        ? utilsForRetries.getMaxRetries()
+                    const maxRetries = typeof (this.pickRepoAnalysisService().service as any)?.getUtils?.()?.getMaxRetries === 'function'
+                        ? (this.pickRepoAnalysisService().service as any).getUtils().getMaxRetries()
                         : 2;
                     const compressionResult = await compressContext(content, chatFn, { targetTokens, preserveStructure, language, maxRetries });
 
@@ -1140,23 +1133,28 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * @returns Object containing the provider name and service instance
      */
     private pickRepoAnalysisService(): { provider: string, service: LLMService | null } {
-        const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-        const selectedModel = (cfg.get<string>('model', 'general') || 'general').trim();
-        const defaultProvider = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
-
-        if (!selectedModel || selectedModel === 'general') {
-            return { provider: defaultProvider, service: this.llmService };
-        }
-
-        for (const p of getAllProviderKeys()) {
-            const svc = this.resolveLLMService?.(p);
-            if (svc && svc.listSupportedModels().includes(selectedModel)) {
-                return { provider: p, service: svc };
+        try {
+            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
+            const selectedModel = (cfg.get<string>('model', 'general') || 'general').trim();
+            if (!selectedModel || selectedModel === 'general') {
+                const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
+                return { provider: p, service: this.llmService };
             }
+            const candidates = getAllProviderKeys();
+            for (const p of candidates) {
+                const svc = this.resolveLLMService?.(p);
+                try {
+                    if (svc && svc.listSupportedModels().includes(selectedModel)) {
+                        return { provider: p, service: svc };
+                    }
+                } catch { /* ignore */ }
+            }
+            const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
+            return { provider: p, service: this.llmService };
+        } catch {
+            const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
+            return { provider: p, service: this.llmService };
         }
-
-        // Selected model is not registered with any provider; fall back to the user's default provider.
-        return { provider: defaultProvider, service: this.llmService };
     }
 
     /**
