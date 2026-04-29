@@ -8,6 +8,7 @@ import { logger } from '../services/logger';
 
 export class EventManager {
     private lastHeadByRepo = new Map<string, string | undefined>();
+    private repoDisposables = new Map<string, vscode.Disposable>();
     private initializationAttempted = false;
 
     constructor(
@@ -20,11 +21,14 @@ export class EventManager {
         await this.setupFileWatchers();
         await this.setupGitWatchers();
         await this.initializeRepositoryAnalysis();
-        await this.initializeRagIndexes();
     }
 
     async dispose(): Promise<void> {
-        // Cleanup if needed
+        for (const d of this.repoDisposables.values()) {
+            d.dispose();
+        }
+        this.repoDisposables.clear();
+        this.lastHeadByRepo.clear();
     }
 
     private async setupFileWatchers(): Promise<void> {
@@ -116,30 +120,34 @@ export class EventManager {
             const api = gitExtension.getAPI(1);
 
             const attachRepoListeners = (repo: Repository) => {
-                // Seed last known HEAD
                 const repoPath = repo.rootUri?.fsPath;
-                if (repoPath) {
-                    this.lastHeadByRepo.set(repoPath, repo.state.HEAD?.commit);
+                if (!repoPath) {
+                    return;
                 }
+
+                // Dispose previous listener if repo was previously opened
+                const existing = this.repoDisposables.get(repoPath);
+                if (existing) {
+                    existing.dispose();
+                }
+
+                // Seed last known HEAD
+                this.lastHeadByRepo.set(repoPath, repo.state.HEAD?.commit);
 
                 // Any repository state change (detect HEAD commit changes from all sources)
                 const d = repo.state.onDidChange(() => {
                     try {
-                        if (!repoPath) {
-                            return;
-                        }
                         const prev = this.lastHeadByRepo.get(repoPath);
                         const next = repo.state.HEAD?.commit;
                         if (next && next !== prev) {
                             this.lastHeadByRepo.set(repoPath, next);
                             this.runAnalysisCheck(repo, 'HEADChanged');
-                            void this.ensureRagIndex(repo, 'HEADChanged');
                         }
                     } catch {
                         // noop
                     }
                 });
-                this.context.subscriptions.push(d);
+                this.repoDisposables.set(repoPath, d);
             };
 
             // Attach to existing and future repositories
@@ -150,11 +158,22 @@ export class EventManager {
             // Listen for new repositories being opened/detected
             const onDidOpenRepo = api.onDidOpenRepository((repo: Repository) => {
                 attachRepoListeners(repo);
-                // Try to initialize analysis when a new repository is detected
                 this.initializeRepositoryAnalysis();
-                void this.ensureRagIndex(repo, 'repositoryOpened');
             });
             this.context.subscriptions.push(onDidOpenRepo);
+
+            const onDidCloseRepo = api.onDidCloseRepository((repo: Repository) => {
+                const repoPath = repo.rootUri?.fsPath;
+                if (repoPath) {
+                    this.lastHeadByRepo.delete(repoPath);
+                    const disposable = this.repoDisposables.get(repoPath);
+                    if (disposable) {
+                        disposable.dispose();
+                        this.repoDisposables.delete(repoPath);
+                    }
+                }
+            });
+            this.context.subscriptions.push(onDidCloseRepo);
         } catch {
             // ignore errors
         }
@@ -262,30 +281,6 @@ export class EventManager {
             this.initializationAttempted = true;
         } catch (error) {
             logger.error('Error during repository analysis initialization:', error);
-        }
-    }
-
-    private async initializeRagIndexes(): Promise<void> {
-        try {
-            const enabled = vscode.workspace.getConfiguration('gitCommitGenie.rag').get<boolean>('enabled', false);
-            if (!enabled) {
-                return;
-            }
-            await this.serviceRegistry.getRagHistoricalIndexService().ensureAllRepositoriesIndexed('startup');
-        } catch (error) {
-            logger.warn('[Genie][RAG] Failed to initialize background indexes', error as any);
-        }
-    }
-
-    private async ensureRagIndex(repo: Repository, reason: string): Promise<void> {
-        try {
-            const enabled = vscode.workspace.getConfiguration('gitCommitGenie.rag').get<boolean>('enabled', false);
-            if (!enabled) {
-                return;
-            }
-            await this.serviceRegistry.getRagHistoricalIndexService().ensureRepositoryIndexed(repo, reason);
-        } catch (error) {
-            logger.warn(`[Genie][RAG] Failed to ensure background index (${reason})`, error as any);
         }
     }
 
