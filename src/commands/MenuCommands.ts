@@ -23,7 +23,7 @@ export class MenuCommands {
         const items: Array<vscode.QuickPickItem & { action: string }> = [];
 
         items.push({
-            label: vscode.l10n.t(I18N.genieMenu.toggleThingking),
+            label: vscode.l10n.t(I18N.genieMenu.toggleThinking),
             action: 'toggle'
         });
 
