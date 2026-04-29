@@ -36,13 +36,7 @@ export const L10N_KEYS = {
     qwenRegionIntl: 'International',
     qwenRegionIntlDesc: 'For international API keys',
     qwenRegionChina: 'China',
-    qwenRegionChinaDesc: 'For mainland China API keys',
-    localBaseUrlTitle: 'Set Local OpenAI Base URL',
-    localBaseUrlPrompt: 'OpenAI-compatible base URL (ending with /v1)',
-    localBaseUrlPlaceholder: 'http://127.0.0.1:11434/v1',
-    localBaseUrlInvalid: 'Invalid URL format.',
-    localBaseUrlMustBeHttp: 'URL must start with http:// or https://.',
-    localBaseUrlMustEndWithV1: 'URL must end with /v1.'
+    qwenRegionChinaDesc: 'For mainland China API keys'
   },
   chain: {
     toggled: 'Chain prompting {0}.',
@@ -73,47 +67,6 @@ export const L10N_KEYS = {
     manageModels: 'Manage Models',
     replaceKey: 'Replace Key',
     enterKey: 'Enter Key'
-  },
-  rag: {
-    enterEmbeddingKeyTitle: 'Enter RAG Embedding API Key',
-    enterEmbeddingKeyPrompt: 'RAG Embedding API Key',
-    embeddingKeySaved: 'RAG embedding API key saved.',
-    embeddingKeyCleared: 'RAG embedding API key cleared.',
-    indexingStarted: 'Started RAG indexing for "{0}".',
-    indexingCompleted: 'RAG indexing completed for "{0}".',
-    indexingFailed: 'RAG indexing failed for "{0}": {1}',
-    indexingCancelled: 'RAG indexing cancelled for "{0}".',
-    indexingAlreadyRunning: 'RAG indexing is already running for "{0}".',
-    indexingNothingToCancel: 'No RAG indexing task is running.',
-    indexingCancelRequested: 'Requested cancellation for RAG indexing in "{0}".',
-    statusIndexingCancelled: 'Indexing cancelled',
-    embeddingKeyMissing: 'RAG embedding API key is not configured.',
-    backendStarting: 'Preparing local RAG store…',
-    backendReady: 'Local RAG store is ready.',
-    backendStopped: 'Local RAG store stopped.',
-    backendNotConfigured: 'RAG embedding is not fully configured. Set base URL, model, and API key first.',
-    backendStartFailed: 'Failed to initialize local RAG store: {0}',
-    configValidated: 'RAG embedding configuration validated: {0}',
-    configValidationFailed: 'RAG embedding validation failed: {0}',
-    statusDisabled: 'RAG off',
-    statusPreparingStore: 'Preparing store',
-    statusStoreRebuilt: 'Store rebuilt',
-    statusStoreReady: 'Store ready · {0} commits',
-    statusImporting: 'Importing history',
-    statusIndexingProgress: 'Indexing {0}/{1}',
-    statusIndexingProgressDetail: 'Indexing {0}/{1} · {2} left',
-    statusImportingCommits: 'Importing {0} commit{1}',
-    statusEmbedding: 'Embedding vectors',
-    statusEmbeddingBatch: 'Embedding {0}/{1}',
-    statusReady: 'Index complete · {0} commits',
-    statusReadyWithVectors: 'Index complete · {0} commits indexed',
-    statusEmbeddingRepairNeeded: 'Some commits are missing embeddings; manual reindex is recommended to improve retrieval quality',
-    embeddingRepairCompleted: 'Repaired {0} embeddings.',
-    embeddingRepairFailed: 'Failed to repair embeddings: {0}',
-    statusScanningHistory: 'Scanning history',
-    statusImportingPage: 'Importing page {0}',
-    statusImportFailedShort: 'Import failed',
-    statusImportFailed: 'Import failed · {0}'
   },
   errors: {
     invalidApiKey: '{0} API key appears invalid or revoked.'
@@ -157,7 +110,7 @@ export const L10N_KEYS = {
     cancelAnalysis: '$(stop-circle) Cancel Analysis',
     refreshAnalysis: '$(refresh) Refresh Analysis',
     openMarkdown: '$(go-to-file) Open repository-analysis.md',
-    toggleThingking: '$(thinking) Enable / Disable thinking mode',
+    toggleThinking: '$(thinking) Enable / Disable thinking mode',
   },
   repoAnalysis: {
     running: 'Repository analysis in progress…',
@@ -231,8 +184,7 @@ export const L10N_KEYS = {
     viewAnalysis: 'View analysis',
     analysisStatusMissing: 'Analysis missing',
     analysisStatusAnalyzing: 'Analyzing...',
-    analysisStatusIdle: 'Up to date',
-    repairRagEmbeddings: 'Repair missing RAG embeddings'
+    analysisStatusIdle: 'Up to date'
   }
 } as const;
 
