@@ -239,6 +239,11 @@ export class RagRuntimeService {
         };
     }
 
+    public async isRagEnabled(): Promise<boolean> {
+        const cfg = await readEmbeddingConfig(this.context);
+        return cfg.enabled;
+    }
+
     public async isEmbeddingConfigured(): Promise<boolean> {
         const cfg = await readEmbeddingConfig(this.context);
         return this.isConfigured(cfg);

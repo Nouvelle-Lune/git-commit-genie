@@ -97,6 +97,10 @@ function createMockRepo(repoPath: string): {
     return { repo, headChangeEvent };
 }
 
+async function flushPromises(): Promise<void> {
+    await new Promise(resolve => setImmediate(resolve));
+}
+
 // ============================================================================
 // EventManager — constructor & dispose
 // ============================================================================
@@ -788,6 +792,200 @@ describe('EventManager', () => {
             // EventManager.dispose() only cleans repoDisposables and lastHeadByRepo,
             // not context.subscriptions (those are owned by VS Code extension lifecycle)
             assert.strictEqual(mockContext.subscriptions.length, subCountBefore);
+        });
+    });
+
+    describe('passive RAG indexing on HEAD change', () => {
+        let em: EventManager;
+        let sandbox: sinon.SinonSandbox;
+        let openRepoEvent: ReturnType<typeof createMockEvent<Repository>>;
+        let closeRepoEvent: ReturnType<typeof createMockEvent<Repository>>;
+        let isRagEnabledStub: sinon.SinonStub;
+        let isEmbeddingConfiguredStub: sinon.SinonStub;
+        let hasExistingRepositoryIndexStub: sinon.SinonStub;
+        let ensureRepositoryIndexedStub: sinon.SinonStub;
+        let runAnalysisCheckStub: sinon.SinonStub;
+
+        beforeEach(() => {
+            sandbox = sinon.createSandbox();
+            const mockContext = createMockContext();
+
+            openRepoEvent = createMockEvent<Repository>();
+            closeRepoEvent = createMockEvent<Repository>();
+
+            const mockApi = {
+                repositories: [] as Repository[],
+                onDidOpenRepository: openRepoEvent.event,
+                onDidCloseRepository: closeRepoEvent.event,
+            };
+
+            const mockGitExtension = {
+                enabled: true,
+                onDidChangeEnablement: createMockEvent<boolean>().event,
+                getAPI: () => mockApi,
+            };
+
+            sandbox.stub(vscode.extensions, 'getExtension').callsFake((id: string) => {
+                if (id === 'vscode.git') {
+                    return { exports: mockGitExtension, id, extensionPath: '', extensionUri: vscode.Uri.file('/fake'), isActive: true, packageJSON: {}, extensionKind: vscode.ExtensionKind.Workspace, activate: () => Promise.resolve(mockGitExtension) } as unknown as vscode.Extension<any>;
+                }
+                return undefined;
+            });
+
+            const mockWatcher = {
+                onDidCreate: () => { },
+                onDidChange: () => { },
+                onDidDelete: () => { },
+                dispose: () => { },
+                ignoreCreateEvents: false,
+                ignoreChangeEvents: false,
+                ignoreDeleteEvents: false,
+            };
+            sandbox.stub(vscode.workspace, 'createFileSystemWatcher').returns(mockWatcher as unknown as vscode.FileSystemWatcher);
+
+            sandbox.stub(vscode.workspace, 'getConfiguration').returns({
+                get: (_section: string, defaultValue: any) => defaultValue,
+                has: () => false,
+                inspect: () => undefined,
+                update: () => Promise.resolve(),
+            } as unknown as vscode.WorkspaceConfiguration);
+
+            isRagEnabledStub = sandbox.stub().resolves(true);
+            isEmbeddingConfiguredStub = sandbox.stub().resolves(true);
+            hasExistingRepositoryIndexStub = sandbox.stub().resolves(true);
+            ensureRepositoryIndexedStub = sandbox.stub().resolves();
+
+            const mockServiceRegistry = {
+                getAnalysisService: () => ({
+                    getAnalysis: () => Promise.resolve(undefined),
+                    initializeRepository: () => Promise.resolve(),
+                    updateAnalysis: () => Promise.resolve(),
+                    shouldUpdateAnalysis: () => Promise.resolve(false),
+                    syncAnalysisFromMarkdown: () => Promise.resolve(),
+                    clearAnalysis: () => Promise.resolve(),
+                }),
+                getRagRuntimeService: () => ({
+                    isRagEnabled: isRagEnabledStub,
+                    isEmbeddingConfigured: isEmbeddingConfiguredStub,
+                    hasExistingRepositoryIndex: hasExistingRepositoryIndexStub,
+                }),
+                getRagHistoricalIndexService: () => ({
+                    ensureRepositoryIndexed: ensureRepositoryIndexedStub,
+                }),
+            } as unknown as ServiceRegistry;
+
+            const mockStatusBarManager = {
+                updateStatusBar: () => { },
+                setRepoAnalysisRunning: () => { },
+            } as unknown as StatusBarManager;
+
+            em = new EventManager(mockContext, mockServiceRegistry, mockStatusBarManager);
+            runAnalysisCheckStub = sandbox.stub(em as any, 'runAnalysisCheck').resolves();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (em as any).setupGitChangeListeners();
+        });
+
+        afterEach(() => {
+            sandbox.restore();
+        });
+
+        it('should index on HEAD change when RAG is enabled, configured, and index exists', async () => {
+            const { repo, headChangeEvent } = createMockRepo('/fake/repo-rag-ready');
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (repo.state.HEAD as any) = { commit: 'commit-a' };
+            openRepoEvent.fire(repo);
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (repo.state.HEAD as any) = { commit: 'commit-b' };
+            headChangeEvent.fire();
+            await flushPromises();
+
+            assert.strictEqual(runAnalysisCheckStub.calledOnceWithExactly(repo, 'HEADChanged'), true);
+            assert.strictEqual(isRagEnabledStub.calledOnce, true);
+            assert.strictEqual(isEmbeddingConfiguredStub.calledOnce, true);
+            assert.strictEqual(hasExistingRepositoryIndexStub.calledOnceWithExactly(repo), true);
+            assert.strictEqual(ensureRepositoryIndexedStub.calledOnceWithExactly(repo, 'HEADChanged'), true);
+        });
+
+        it('should not trigger indexing when repository is only opened with an existing HEAD', async () => {
+            const { repo } = createMockRepo('/fake/repo-rag-open-only');
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (repo.state.HEAD as any) = { commit: 'commit-a' };
+
+            openRepoEvent.fire(repo);
+            await flushPromises();
+
+            assert.strictEqual(runAnalysisCheckStub.called, false);
+            assert.strictEqual(isRagEnabledStub.called, false);
+            assert.strictEqual(ensureRepositoryIndexedStub.called, false);
+        });
+
+        it('should not trigger indexing when HEAD is unchanged', async () => {
+            const { repo, headChangeEvent } = createMockRepo('/fake/repo-rag-same-head');
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (repo.state.HEAD as any) = { commit: 'same-head' };
+            openRepoEvent.fire(repo);
+
+            headChangeEvent.fire();
+            await flushPromises();
+
+            assert.strictEqual(runAnalysisCheckStub.called, false);
+            assert.strictEqual(isRagEnabledStub.called, false);
+            assert.strictEqual(ensureRepositoryIndexedStub.called, false);
+        });
+
+        it('should not trigger indexing when RAG is disabled', async () => {
+            isRagEnabledStub.resolves(false);
+            const { repo, headChangeEvent } = createMockRepo('/fake/repo-rag-disabled');
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (repo.state.HEAD as any) = { commit: 'commit-a' };
+            openRepoEvent.fire(repo);
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (repo.state.HEAD as any) = { commit: 'commit-b' };
+            headChangeEvent.fire();
+            await flushPromises();
+
+            assert.strictEqual(isRagEnabledStub.calledOnce, true);
+            assert.strictEqual(isEmbeddingConfiguredStub.called, false);
+            assert.strictEqual(hasExistingRepositoryIndexStub.called, false);
+            assert.strictEqual(ensureRepositoryIndexedStub.called, false);
+        });
+
+        it('should not trigger indexing when embedding is not configured', async () => {
+            isEmbeddingConfiguredStub.resolves(false);
+            const { repo, headChangeEvent } = createMockRepo('/fake/repo-rag-no-embedding');
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (repo.state.HEAD as any) = { commit: 'commit-a' };
+            openRepoEvent.fire(repo);
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (repo.state.HEAD as any) = { commit: 'commit-b' };
+            headChangeEvent.fire();
+            await flushPromises();
+
+            assert.strictEqual(isRagEnabledStub.calledOnce, true);
+            assert.strictEqual(isEmbeddingConfiguredStub.calledOnce, true);
+            assert.strictEqual(hasExistingRepositoryIndexStub.called, false);
+            assert.strictEqual(ensureRepositoryIndexedStub.called, false);
+        });
+
+        it('should skip passive indexing when repository index does not exist', async () => {
+            hasExistingRepositoryIndexStub.resolves(false);
+            const { repo, headChangeEvent } = createMockRepo('/fake/repo-rag-no-index');
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (repo.state.HEAD as any) = { commit: 'commit-a' };
+            openRepoEvent.fire(repo);
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (repo.state.HEAD as any) = { commit: 'commit-b' };
+            headChangeEvent.fire();
+            await flushPromises();
+
+            assert.strictEqual(isRagEnabledStub.calledOnce, true);
+            assert.strictEqual(isEmbeddingConfiguredStub.calledOnce, true);
+            assert.strictEqual(hasExistingRepositoryIndexStub.calledOnceWithExactly(repo), true);
+            assert.strictEqual(ensureRepositoryIndexedStub.called, false);
         });
     });
 });

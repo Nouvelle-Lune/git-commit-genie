@@ -141,7 +141,8 @@ export class EventManager {
                         const next = repo.state.HEAD?.commit;
                         if (next && next !== prev) {
                             this.lastHeadByRepo.set(repoPath, next);
-                            this.runAnalysisCheck(repo, 'HEADChanged');
+                            void this.runAnalysisCheck(repo, 'HEADChanged');
+                            void this.runPassiveRagIndexingOnHeadChange(repo);
                         }
                     } catch {
                         // noop
@@ -200,6 +201,33 @@ export class EventManager {
             }
         } catch (err) {
             logger.error('Error handling Git change:', err);
+        }
+    }
+
+    private async runPassiveRagIndexingOnHeadChange(repo: Repository): Promise<void> {
+        const repoPath = repo.rootUri?.fsPath;
+        if (!repoPath) {
+            return;
+        }
+
+        try {
+            const ragRuntimeService = this.serviceRegistry.getRagRuntimeService();
+            if (!await ragRuntimeService.isRagEnabled()) {
+                logger.info(`[Genie][RAG] Skipping passive HEAD change indexing for ${repoPath}: RAG is disabled.`);
+                return;
+            }
+            if (!await ragRuntimeService.isEmbeddingConfigured()) {
+                logger.info(`[Genie][RAG] Skipping passive HEAD change indexing for ${repoPath}: embedding is not configured.`);
+                return;
+            }
+            if (!await ragRuntimeService.hasExistingRepositoryIndex(repo)) {
+                logger.info(`[Genie][RAG] Skipping passive HEAD change indexing for ${repoPath}: repository index does not exist.`);
+                return;
+            }
+
+            await this.serviceRegistry.getRagHistoricalIndexService().ensureRepositoryIndexed(repo, 'HEADChanged');
+        } catch (error) {
+            logger.error('Error handling passive RAG HEAD change:', error);
         }
     }
 
