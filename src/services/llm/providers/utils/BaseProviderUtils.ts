@@ -5,26 +5,6 @@ import { L10N_KEYS as I18N } from '../../../../i18n/keys';
 import { ProviderError } from '../errors/providerError';
 
 /**
- * Runtime configuration resolved from VS Code settings + per-provider model state.
- * Returned by {@link BaseProviderUtils.getProviderConfig}.
- */
-export interface ProviderRuntimeConfig {
-    model: string;
-    useChain: boolean;
-    chainMaxParallel: number;
-    maxRetries: number;
-}
-
-/**
- * Prompt rules read from packaged resources, returned by
- * {@link BaseProviderUtils.getRules}.
- */
-export interface ProviderRules {
-    baseRule: string;
-    checklistText: string;
-}
-
-/**
  * Common utility functions for LLM providers
  */
 export abstract class BaseProviderUtils {
@@ -67,7 +47,12 @@ export abstract class BaseProviderUtils {
      * @param modelStateKey The global state key for the model (e.g., 'openaiModel')
      * @returns Configuration object with model, useChain, chainMaxParallel, maxRetries
      */
-    public getProviderConfig(providerKey: string, modelStateKey: string): ProviderRuntimeConfig {
+    public getProviderConfig(providerKey: string, modelStateKey: string): {
+        model: string;
+        useChain: boolean;
+        chainMaxParallel: number;
+        maxRetries: number;
+    } {
         const commonConfig = this.getCommonConfig();
         return {
             ...commonConfig,
@@ -147,23 +132,11 @@ export abstract class BaseProviderUtils {
      * Get common configuration values
      */
     public getCommonConfig() {
-        const cfg = vscode.workspace.getConfiguration();
+        const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
         return {
-            useChain: ((): boolean => {
-                const v = cfg.get<boolean>('gitCommitGenie.chain.enabled');
-                if (typeof v === 'boolean') { return v; }
-                return cfg.get<boolean>('gitCommitGenie.useChainPrompts', false);
-            })(),
-            chainMaxParallel: Math.max(1, ((): number => {
-                const v = cfg.get<number>('gitCommitGenie.chain.maxParallel');
-                if (typeof v === 'number' && !isNaN(v)) { return v; }
-                return cfg.get<number>('gitCommitGenie.chainMaxParallel', 4);
-            })()),
-            maxRetries: Math.max(1, ((): number => {
-                const v = cfg.get<number>('gitCommitGenie.llm.maxRetries');
-                if (typeof v === 'number' && !isNaN(v)) { return v; }
-                return 2;
-            })())
+            useChain: cfg.get<boolean>('chain.enabled', true),
+            chainMaxParallel: cfg.get<number>('chain.maxParallel', 2),
+            maxRetries: cfg.get<number>('llm.maxRetries', 2)
         };
     }
 
@@ -171,28 +144,22 @@ export abstract class BaseProviderUtils {
      * Read global max retries for provider calls
      */
     public getMaxRetries(): number {
-        const cfg = vscode.workspace.getConfiguration();
-        const v = cfg.get<number>('gitCommitGenie.llm.maxRetries');
-        if (typeof v === 'number' && !isNaN(v) && v >= 1) { return v; }
-        return 2;
+        const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
+        return cfg.get<number>('llm.maxRetries', 2);
     }
 
     /**
      * Read global temperature for provider calls
      */
     public getTemperature(): number {
-        const cfg = vscode.workspace.getConfiguration();
-        const v = cfg.get<number>('gitCommitGenie.llm.temperature');
-        if (typeof v === 'number' && !isNaN(v)) {
-            return v;
-        }
-        return 1;
+        const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
+        return cfg.get<number>('llm.temperature', 1);
     }
 
     /**
      * Get rules file content
      */
-    public getRules(): ProviderRules {
+    public getRules() {
         const rulesPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'baseRules.md'));
         const checklistPath = this.context.asAbsolutePath(path.join('resources', 'agentRules', 'validationChecklist.md'));
 
