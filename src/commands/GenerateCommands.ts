@@ -3,7 +3,8 @@ import { ServiceRegistry } from '../core/ServiceRegistry';
 import { logger } from '../services/logger';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { Repository } from "../services/git/git";
-import { getProviderSecretKey, getProviderLabel } from '../services/llm/providers/config/providerConfig';
+import { DiffData } from '../services/git/gitTypes';
+import { getProviderSecretKey, getProviderLabel } from '../services/llm/providers/config/ProviderConfig';
 
 /**
  * This class handles the registration of commands related to generating commit messages.
@@ -105,10 +106,15 @@ export class GenerateCommands {
                 }
 
                 const llmService = this.serviceRegistry.getCurrentLLMService();
-                const result = await llmService.generateCommitMessage(diffs, { token: cts.token, targetRepo });
+                const result = await llmService.generateCommitMessage(diffs, {
+                    token: cts.token,
+                    targetRepo,
+                    ragRetrievalService: this.serviceRegistry.getRagRetrievalService(),
+                });
 
                 if ('content' in result) {
                     await this.fillCommitMessage(result.content, targetRepo);
+                    await this.maybeCachePendingRagDocument(targetRepo, diffs, result);
                 } else {
                     await this.handleError(result);
                 }
@@ -165,6 +171,24 @@ export class GenerateCommands {
             }, typingSpeed);
         }
 
+    }
+
+    private async maybeCachePendingRagDocument(repo: Repository, diffs: DiffData[], result: any): Promise<void> {
+        try {
+            const ragEnabled = vscode.workspace.getConfiguration('gitCommitGenie.rag').get<boolean>('enabled', false);
+            if (!ragEnabled || !result?.ragMetadata?.changeSetSummary || !result?.ragMetadata?.retrievalFeatures) {
+                return;
+            }
+
+            await this.serviceRegistry.getRagHistoricalIndexService().recordPendingGeneratedCommit(
+                repo,
+                result.content,
+                diffs,
+                result.ragMetadata
+            );
+        } catch (error) {
+            logger.warn('[Genie][RAG] Failed to cache pending generated commit context', error as any);
+        }
     }
 
     private async handleError(result: any): Promise<void> {

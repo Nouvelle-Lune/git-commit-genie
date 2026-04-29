@@ -1,0 +1,81 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+out
+
+# VSCode
+.vscode-test/
+.vscode-test.*
+*.vsix
+.vscode/**
+# Mac
+.DS_Store
+
+# BMAD methods
+.bmad-core/
+.clinerules/
+.gemini/
+.github/
+.kilocode/
+.kilocodemodes
+docs_/
+
+
+# tests
+tests/
+test/
+src/test/
+**/*.test.*
+**/*.spec.*
+**/__tests__/
+
+TODO.md
+# Ignore Git Commit Genie templates
+.gitgenie/**
+
+DEVELOPMENT.md
+
+draft.ts
+draft.json
+
+webpack.config.js
+
+# Scripts
+scripts/*
+!scripts/build_repo_analysis_sft.py
+!scripts/build_github_eval_corpus.py
+
+.mydocs/**
+
+# Environment files
+.env
+.env.*
+
+# Python virtual environment
+.venv/
+
+# Claude Code local config
+.claude/
+
+# Local config files
+*.local.*
+
+# IDE
+.idea/
+
+# Logs
+*.log
+
+# Coverage reports
+coverage/
+
+# TypeScript build info
+*.tsbuildinfo
+
+# python cache
+__pycache__/
+
+.eval/
+./sft/

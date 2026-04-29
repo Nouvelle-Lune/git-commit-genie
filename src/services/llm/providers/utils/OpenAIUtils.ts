@@ -4,11 +4,11 @@ import { zodTextFormat } from './openAiZodPatch';
 import { BaseProviderUtils } from './baseProviderUtils';
 import { logger } from '../../../logger';
 import { ProviderError } from '../errors/providerError';
-import { isOpenAIChatProvider, isOpenAIResponsesProvider } from '../config/providerConfig';
+import { isOpenAIChatProvider, isOpenAIResponsesProvider } from '../config/ProviderConfig';
 
 import { ChatMessage, RequestType } from "../../llmTypes";
 
-import { commitMessageSchema, fileSummarySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, ragPreparationResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema, compressionResponseSchema } from "../schemas/common";
+import { commitMessageSchema, fileSummarySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, ragPreparationResponseSchema, ragRerankResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema, compressionResponseSchema } from "../schemas/common";
 import { OpenAIRepoAnalysisFunctions } from "../schemas/openaiFunctions";
 
 
@@ -51,6 +51,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             toolOutputs?: Array<{ call_id: string; output: string }>; // For OpenAI Responses function_call_output
             isFirstRequest?: boolean; // Track if this is the first request in analysis
             repoPath?: string;
+            suppressApiLogs?: boolean;
         }
     ): Promise<{ parsedResponse?: any; usage?: any; parsedAssistantResponse?: any; responseId?: string; functionCallId?: string }> {
         if (!client) {
@@ -75,7 +76,9 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 const requestOptions = this.buildRequestOptions(options, messages, { forceTemperatureOne });
 
                 // Log API request (pending state)
-                logId = logger.logApiRequest(options.repoPath);
+                if (!options.suppressApiLogs) {
+                    logId = logger.logApiRequest(options.repoPath);
+                }
 
                 if (isOpenAIResponsesProvider(options.provider)) {
                     // Use Responses API with function calling for OpenAI
@@ -112,15 +115,17 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                             // Update log with function call result
                             const isFinal = name === 'finalize';
                             const usage = (response as any).usage;
-                            logger.logApiRequestWithResult(
-                                logId,
-                                options.provider,
-                                options.model,
-                                parsedResult,
-                                usage,
-                                isFinal,
-                                options.repoPath
-                            );
+                            if (logId) {
+                                logger.logApiRequestWithResult(
+                                    logId,
+                                    options.provider,
+                                    options.model,
+                                    parsedResult,
+                                    usage,
+                                    isFinal,
+                                    options.repoPath
+                                );
+                            }
 
                             if (name === 'finalize') {
                                 return { parsedResponse: { action: 'final', final: args }, usage: (response as any).usage, responseId: (response as any)?.id, functionCallId: String(fnCall.call_id || fnCall.id || '') };
@@ -155,15 +160,17 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                         parsedResponse = { text: textOut };
                     }
                     // Log the result content for visibility in webview
-                    logger.logApiRequestWithResult(
-                        logId,
-                        options.provider,
-                        options.model,
-                        parsedResponse ?? textOut ?? '',
-                        usage,
-                        false,
-                        options.repoPath
-                    );
+                    if (logId) {
+                        logger.logApiRequestWithResult(
+                            logId,
+                            options.provider,
+                            options.model,
+                            parsedResponse ?? textOut ?? '',
+                            usage,
+                            false,
+                            options.repoPath
+                        );
+                    }
 
                     return { parsedResponse, usage, responseId: (response as any)?.id };
                 }
@@ -185,15 +192,17 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                     // Update log with function call result
                     if (parsedResponse) {
                         const isFinal = parsedResponse.action === 'final';
-                        logger.logApiRequestWithResult(
-                            logId,
-                            options.provider,
-                            options.model,
-                            parsedResponse,
-                            usage,
-                            isFinal,
-                            options.repoPath
-                        );
+                        if (logId) {
+                            logger.logApiRequestWithResult(
+                                logId,
+                                options.provider,
+                                options.model,
+                                parsedResponse,
+                                usage,
+                                isFinal,
+                                options.repoPath
+                            );
+                        }
                     }
 
                     const parsedAssistantResponse = response.choices[0]?.message;
@@ -319,6 +328,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 ['draft', { schema: classifyAndDraftResponseSchema, name: 'classifyAndDraftResponse' }],
                 ['fix', { schema: validateAndFixResponseSchema, name: 'validateAndFixResponse' }],
                 ['ragPreparation', { schema: ragPreparationResponseSchema, name: 'ragPreparationResponse' }],
+                ['ragRerank', { schema: ragRerankResponseSchema, name: 'ragRerankResponse' }],
                 ['repoAnalysis', { schema: repoAnalysisResponseSchema, name: 'repoAnalysisResponse' }],
                 ['repoAnalysisAction', { schema: repoAnalysisActionSchema, name: 'repoAnalysisAction' }],
                 ['compression', { schema: compressionResponseSchema, name: 'compression' }],

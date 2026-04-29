@@ -132,23 +132,11 @@ export abstract class BaseProviderUtils {
      * Get common configuration values
      */
     public getCommonConfig() {
-        const cfg = vscode.workspace.getConfiguration();
+        const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
         return {
-            useChain: ((): boolean => {
-                const v = cfg.get<boolean>('gitCommitGenie.chain.enabled');
-                if (typeof v === 'boolean') { return v; }
-                return cfg.get<boolean>('gitCommitGenie.useChainPrompts', false);
-            })(),
-            chainMaxParallel: Math.max(1, ((): number => {
-                const v = cfg.get<number>('gitCommitGenie.chain.maxParallel');
-                if (typeof v === 'number' && !isNaN(v)) { return v; }
-                return cfg.get<number>('gitCommitGenie.chainMaxParallel', 4);
-            })()),
-            maxRetries: Math.max(1, ((): number => {
-                const v = cfg.get<number>('gitCommitGenie.llm.maxRetries');
-                if (typeof v === 'number' && !isNaN(v)) { return v; }
-                return 2;
-            })())
+            useChain: cfg.get<boolean>('chain.enabled', true),
+            chainMaxParallel: cfg.get<number>('chain.maxParallel', 2),
+            maxRetries: cfg.get<number>('llm.maxRetries', 2)
         };
     }
 
@@ -156,22 +144,16 @@ export abstract class BaseProviderUtils {
      * Read global max retries for provider calls
      */
     public getMaxRetries(): number {
-        const cfg = vscode.workspace.getConfiguration();
-        const v = cfg.get<number>('gitCommitGenie.llm.maxRetries');
-        if (typeof v === 'number' && !isNaN(v) && v >= 1) { return v; }
-        return 2;
+        const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
+        return cfg.get<number>('llm.maxRetries', 2);
     }
 
     /**
      * Read global temperature for provider calls
      */
     public getTemperature(): number {
-        const cfg = vscode.workspace.getConfiguration();
-        const v = cfg.get<number>('gitCommitGenie.llm.temperature');
-        if (typeof v === 'number' && !isNaN(v)) {
-            return v;
-        }
-        return 1;
+        const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
+        return cfg.get<number>('llm.temperature', 1);
     }
 
     /**

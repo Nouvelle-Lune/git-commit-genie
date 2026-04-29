@@ -10,7 +10,7 @@ import {
     getProviderLabel,
     getAllProviderKeys,
     QWEN_REGIONS
-} from '../services/llm/providers/config/providerConfig';
+} from '../services/llm/providers/config/ProviderConfig';
 
 export class ModelCommands {
     constructor(
@@ -90,14 +90,25 @@ export class ModelCommands {
             await this.context.globalState.update('gitCommitGenie.qwenRegion', qwenRegion);
         }
 
+        if (providerPick.value === 'local') {
+            const localCfg = vscode.workspace.getConfiguration('gitCommitGenie');
+            const currentBaseUrl = (localCfg.get<string>('local.baseUrl', 'http://127.0.0.1:11434/v1') || '').trim();
+            const enteredBaseUrl = await this.promptForLocalBaseUrl(currentBaseUrl || 'http://127.0.0.1:11434/v1');
+            if (!enteredBaseUrl) {
+                return;
+            }
+            await localCfg.update('local.baseUrl', enteredBaseUrl, vscode.ConfigurationTarget.Global);
+        }
+
         const secretName = this.getSecretName(providerPick.value, qwenRegion);
         const modelStateKey = this.getModelStateKey(providerPick.value);
+        const isLocalProvider = providerPick.value === 'local';
 
         let existingKey = await this.context.secrets.get(secretName);
         let apiKeyToUse: string | undefined = existingKey || undefined;
         let keyWasCleared = false;
 
-        if (existingKey) {
+        if (existingKey && !isLocalProvider) {
             apiKeyToUse = await this.handleExistingApiKey(existingKey, providerPick.label, secretName);
             if (!apiKeyToUse) {
                 return;
@@ -113,12 +124,17 @@ export class ModelCommands {
         }
 
         if (!apiKeyToUse) {
-            // First time input
-            const entered = await this.promptForApiKey(providerPick.label);
-            if (!entered) {
-                return;
+            if (isLocalProvider) {
+                // Local OpenAI-compatible endpoints often do not require a real key.
+                apiKeyToUse = 'local';
+            } else {
+                // First time input
+                const entered = await this.promptForApiKey(providerPick.label);
+                if (!entered) {
+                    return;
+                }
+                apiKeyToUse = entered;
             }
-            apiKeyToUse = entered;
         }
 
         let models: string[] = [];
@@ -133,17 +149,13 @@ export class ModelCommands {
                 const service = this.serviceRegistry.getLLMService(providerPick.value);
                 if (!service) { return; }
 
-                if (sameKey) {
-                    // Avoid token-wasting pings when API key is unchanged
-                    models = service.listSupportedModels();
+                // Always fetch remote models so provider-side model updates are reflected immediately.
+                // Pass region for Qwen provider only.
+                if (providerPick.value === 'qwen' && qwenRegion) {
+                    // TypeScript knows QwenService accepts region parameter
+                    models = await (service as any).validateApiKeyAndListModels(apiKeyToUse!, qwenRegion);
                 } else {
-                    // Pass region for Qwen provider only
-                    if (providerPick.value === 'qwen' && qwenRegion) {
-                        // TypeScript knows QwenService accepts region parameter
-                        models = await (service as any).validateApiKeyAndListModels(apiKeyToUse!, qwenRegion);
-                    } else {
-                        models = await service.validateApiKeyAndListModels(apiKeyToUse!);
-                    }
+                    models = await service.validateApiKeyAndListModels(apiKeyToUse!);
                 }
             });
         } catch (err: any) {
@@ -239,6 +251,36 @@ export class ModelCommands {
         });
     }
 
+    private async promptForLocalBaseUrl(defaultValue: string): Promise<string | undefined> {
+        const value = await vscode.window.showInputBox({
+            title: vscode.l10n.t(I18N.manageModels.localBaseUrlTitle),
+            prompt: vscode.l10n.t(I18N.manageModels.localBaseUrlPrompt),
+            placeHolder: vscode.l10n.t(I18N.manageModels.localBaseUrlPlaceholder),
+            value: defaultValue,
+            ignoreFocusOut: true,
+            validateInput: (input) => {
+                const candidate = (input || '').trim();
+                if (!candidate) {
+                    return vscode.l10n.t(I18N.manageModels.localBaseUrlPrompt);
+                }
+                try {
+                    const parsed = new URL(candidate);
+                    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+                        return vscode.l10n.t(I18N.manageModels.localBaseUrlMustBeHttp);
+                    }
+                    if (!parsed.pathname.endsWith('/v1')) {
+                        return vscode.l10n.t(I18N.manageModels.localBaseUrlMustEndWithV1);
+                    }
+                    return undefined;
+                } catch {
+                    return vscode.l10n.t(I18N.manageModels.localBaseUrlInvalid);
+                }
+            }
+        });
+
+        return value?.trim();
+    }
+
     private async selectModel(models: string[], providerPick: any, modelStateKey: string): Promise<any> {
         const currentModel = this.context.globalState.get<string>(modelStateKey, '');
         const activeProvider = this.serviceRegistry.getProvider().toLowerCase();
@@ -263,13 +305,16 @@ export class ModelCommands {
 
     private async updateProviderAndModel(providerPick: any, modelPick: any, modelStateKey: string, apiKey: string, existingKey: string | undefined): Promise<void> {
         await this.context.globalState.update('gitCommitGenie.provider', providerPick.value);
+        const service = this.serviceRegistry.getLLMService(providerPick.value);
 
         // Only store the key if it actually changed (avoid unnecessary SecretStorage writes)
         if (!existingKey || apiKey !== existingKey) {
-            const service = this.serviceRegistry.getLLMService(providerPick.value);
             if (service) {
                 await service.setApiKey(apiKey);
             }
+        } else if (providerPick.value === 'local') {
+            // Local provider base URL can change without API key changes.
+            await service?.refreshFromSettings();
         }
 
         // Update current LLM service

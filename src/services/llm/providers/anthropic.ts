@@ -9,23 +9,36 @@ import { DiffData } from '../../git/gitTypes';
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { AnthropicUtils } from './utils/AnthropicUtils';
+import { safeRun } from '../../../utils/safeRun';
+import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
+import { ProviderRuntimeConfig, ProviderRules } from './utils/baseProviderUtils';
 import { ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from '../baseLLMService';
+import { ProviderError } from './errors/providerError';
 import {
     AnthropicCommitMessageTool,
     AnthropicFileSummaryTool,
     AnthropicClassifyAndDraftTool,
     AnthropicValidateAndFixTool,
     AnthropicRagPreparationTool,
+    AnthropicRagRerankTool,
     AnthropicRepoAnalysisTool,
     AnthropicRepoAnalysisActionTool
 } from './schemas/anthropicSchemas';
-import {
-    fileSummarySchema, classifyAndDraftResponseSchema, validateAndFixResponseSchema,
-    commitMessageSchema, ragPreparationResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema
-} from './schemas/common';
+import { commitMessageSchema } from './schemas/common';
 
 const SECRET_ANTHROPIC_API_KEY = 'gitCommitGenie.secret.anthropicApiKey';
+
+/**
+ * Map dated Anthropic model snapshot IDs to undated aliases.
+ * Undated aliases auto-route to the latest snapshot of that model.
+ */
+export const ANTHROPIC_DATED_TO_UNDATED_MAP: Readonly<Record<string, string>> = Object.freeze({
+    'claude-haiku-4-5-20251001': 'claude-haiku-4-5',
+    'claude-sonnet-4-5-20250929': 'claude-sonnet-4-5',
+    'claude-opus-4-5-20251101': 'claude-opus-4-5',
+    'claude-opus-4-1-20250805': 'claude-opus-4-1',
+});
 
 /**
  * Anthropic Claude service implementation
@@ -65,18 +78,13 @@ export class AnthropicService extends BaseLLMService {
 
     public listSupportedModels(): string[] {
         return [
-            'claude-haiku-4-5-20251001',
-            'claude-sonnet-4-5-20250929',
-            'claude-opus-4-5-20251101',
-
-            'claude-3-5-haiku-20241022',
-            'claude-sonnet-4-20250514',
-            'claude-3-7-sonnet-20250219',
-            'claude-3-5-sonnet-20241022',
-            'claude-3-5-sonnet-20240620',
-            'claude-opus-4-1-20250805',
-            'claude-opus-4-20250514'
-
+            'claude-opus-4-7',
+            'claude-sonnet-4-6',
+            'claude-opus-4-6',
+            'claude-haiku-4-5',
+            'claude-sonnet-4-5',
+            'claude-opus-4-5',
+            'claude-opus-4-1',
         ];
     }
 
@@ -93,14 +101,14 @@ export class AnthropicService extends BaseLLMService {
     /**
      * Get the Anthropic client instance
      */
-    protected getClient(): Anthropic | null {
+    public getClient(): Anthropic | null {
         return this.client;
     }
 
     /**
      * Get the Anthropic utils instance
      */
-    protected getUtils(): AnthropicUtils {
+    public getUtils(): AnthropicUtils {
         return this.utils;
     }
 
@@ -115,7 +123,13 @@ export class AnthropicService extends BaseLLMService {
      * Get the current model configuration
      */
     protected getCurrentModel(): string {
-        return this.context.globalState.get<string>('gitCommitGenie.anthropicModel', '');
+        const stored = this.context.globalState.get<string>('gitCommitGenie.anthropicModel', '') || '';
+        const normalized = ANTHROPIC_DATED_TO_UNDATED_MAP[stored];
+        if (normalized) {
+            this.context.globalState.update('gitCommitGenie.anthropicModel', normalized);
+            return normalized;
+        }
+        return stored;
     }
 
     /**
@@ -140,7 +154,7 @@ export class AnthropicService extends BaseLLMService {
             }
 
             // Divider in webview: commit generation start
-            try { logger.logGenerationStart(repoPath, config.useChain ? 'thinking' : 'default'); } catch { /* ignore */ }
+            safeRun('Anthropic.logGenerationStart', () => logger.logGenerationStart(repoPath, config.useChain ? 'thinking' : 'default'));
 
             const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
 
@@ -160,8 +174,8 @@ export class AnthropicService extends BaseLLMService {
     private async generateThinking(
         diffs: DiffData[],
         jsonMessage: string,
-        config: any,
-        rules: any,
+        config: ProviderRuntimeConfig,
+        rules: ProviderRules,
         repoPath: string,
         options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
@@ -169,88 +183,57 @@ export class AnthropicService extends BaseLLMService {
         const usages: Array<any> = [];
         let callCount = 0;
 
+        // Map request type to provider-specific tool definition. The
+        // validation schema is shared across providers and resolved via
+        // getValidationSchemaFor.
+        const toolMap: Record<string, any> = {
+            summary: AnthropicFileSummaryTool,
+            draft: AnthropicClassifyAndDraftTool,
+            fix: AnthropicValidateAndFixTool,
+            ragPreparation: AnthropicRagPreparationTool,
+            ragRerank: AnthropicRagRerankTool,
+            commitMessage: AnthropicCommitMessageTool,
+            strictFix: AnthropicCommitMessageTool,
+            enforceLanguage: AnthropicCommitMessageTool,
+            repoAnalysis: AnthropicRepoAnalysisTool,
+            repoAnalysisAction: AnthropicRepoAnalysisActionTool,
+        };
+
         const chat: ChatFn = async (messages, chainOptions) => {
             const reqType = chainOptions?.requestType;
-            const labelFor = (t?: string) => {
-                switch (t) {
-                    case 'summary': return 'summarize';
-                    case 'draft': return 'draft';
-                    case 'fix': return 'validate-fix';
-                    case 'ragPreparation': return 'rag-prep';
-                    case 'strictFix': return 'strict-fix';
-                    case 'enforceLanguage': return 'lang-fix';
-                    case 'commitMessage': return 'build-commit-msg';
-                    case 'repoAnalysis': return 'repo-analysis';
-                    case 'repoAnalysisAction': return 'repo-analysis-action';
-                    default: return 'thinking';
-                }
-            };
-            // Map request type to tool and schema
-            const toolMap: Record<string, { tool: any, schema: any }> = {
-                summary: { tool: AnthropicFileSummaryTool, schema: fileSummarySchema },
-                draft: { tool: AnthropicClassifyAndDraftTool, schema: classifyAndDraftResponseSchema },
-                fix: { tool: AnthropicValidateAndFixTool, schema: validateAndFixResponseSchema },
-                ragPreparation: { tool: AnthropicRagPreparationTool, schema: ragPreparationResponseSchema },
-                commitMessage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
-                strictFix: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
-                enforceLanguage: { tool: AnthropicCommitMessageTool, schema: commitMessageSchema },
-                repoAnalysis: { tool: AnthropicRepoAnalysisTool, schema: repoAnalysisResponseSchema },
-                repoAnalysisAction: { tool: AnthropicRepoAnalysisActionTool, schema: repoAnalysisActionSchema },
-            };
-
-            const mapping = reqType ? toolMap[reqType] : undefined;
             const retries = config.maxRetries ?? 2;
             const totalAttempts = Math.max(1, retries + 1);
+            const tool = reqType ? toolMap[reqType] : undefined;
 
-            for (let attempt = 0; attempt < totalAttempts; attempt++) {
-                const result = await this.utils.callChatCompletion(this.client!, messages, {
+            return await this.runValidatedChatCall({
+                reqType,
+                totalAttempts,
+                initialMessages: messages,
+                repoPath,
+                validationSchema: getValidationSchemaFor(reqType),
+                callOnce: (msgs) => this.utils.callChatCompletion(this.client!, msgs, {
                     model: config.model,
                     provider: 'Anthropic',
                     token: options?.token,
                     trackUsage: true,
-                    tools: mapping ? [mapping.tool] : undefined,
-                    toolChoice: mapping ? { type: 'tool', name: mapping.tool.name } : undefined,
-                    repoPath
-                });
-
-                callCount += 1;
-                if (result.usage) {
-                    usages.push(result.usage);
-                    logger.usage(repoPath, 'Anthropic', result.usage, config.model, labelFor(reqType), callCount);
-                } else {
-                    logger.usage(repoPath, 'Anthropic', undefined, config.model, labelFor(reqType), callCount);
-                }
-
-                if (mapping) {
-                    const safe = mapping.schema.safeParse(result.parsedResponse);
-                    if (safe.success) {
-                        return safe.data;
+                    tools: tool ? [tool] : undefined,
+                    toolChoice: tool ? { type: 'tool', name: tool.name } : undefined,
+                    repoPath,
+                }),
+                onUsage: (usage) => {
+                    callCount += 1;
+                    if (usage) {
+                        usages.push(usage);
+                        logger.usage(repoPath, 'Anthropic', usage, config.model, getRequestTypeLabel(reqType), callCount);
+                    } else {
+                        logger.usage(repoPath, 'Anthropic', undefined, config.model, getRequestTypeLabel(reqType), callCount);
                     }
-
-                    if (attempt < totalAttempts - 1) {
-                        this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
-                        try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
-                        messages = this.buildSchemaValidationRetryMessages(
-                            messages,
-                            result,
-                            safe.error,
-                            mapping.schema,
-                            reqType
-                        );
-                        continue;
-                    }
-                    try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
-
-                    throw new Error(`Anthropic tool result failed local validation for ${reqType} after ${totalAttempts} attempts`);
-                }
-
-                // Fallback: return raw content text (should not happen in our chain)
-                return result.parsedResponse;
-            }
+                },
+            });
         };
 
         // Start bottom-right stage notifications
-        try { stageNotifications.begin(); } catch { /* ignore */ }
+        stageNotifications.begin();
         let out;
         try {
             out = await generateCommitMessageChain(
@@ -261,29 +244,47 @@ export class AnthropicService extends BaseLLMService {
                     targetLanguage: parsedInput?.['target-language'],
                     validationChecklist: rules.checklistText,
                     repositoryPath: repoPath,
+                    targetRepo: options?.targetRepo,
                     repositoryAnalysis: parsedInput?.['repository-analysis']
                 },
                 chat,
                 {
                     maxParallel: config.chainMaxParallel,
+                    retrieveRagExamples: async (context) => {
+                        if (!options?.ragRetrievalService || !options?.targetRepo) {
+                            return [];
+                        }
+                        return await options.ragRetrievalService.retrieveStyleReferences({
+                            repo: options.targetRepo,
+                            changeSetSummary: context.changeSetSummary,
+                            retrievalFeatures: context.retrievalFeatures,
+                            chat,
+                        });
+                    },
                     onStage: (event) => {
-                        try {
-                            stageNotifications.update({ type: event.type as any, data: event.data });
-                            const payload = { stage: event.type, data: event.data ?? {} };
-                            try { logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath); } catch { /* ignore */ }
-                        } catch { /* ignore */ }
+                        stageNotifications.update({ type: event.type, data: event.data });
+                        const payload = { stage: event.type, data: event.data ?? {} };
+                        safeRun('Anthropic.logCommitStage', () => logger.logToolCall('commitStage', JSON.stringify(payload), 'Commit generation stage', repoPath));
                     }
                 }
             );
         } finally {
-            try { stageNotifications.end(); } catch { /* ignore */ }
+            stageNotifications.end();
         }
 
         if (usages.length) {
             logger.usageSummary(repoPath, 'Anthropic', usages, config.model, 'thinking', undefined, false);
         }
 
-        return { content: out.commitMessage };
+        return {
+            content: out.commitMessage,
+            ragMetadata: {
+                fileSummaries: out.fileSummaries,
+                changeSetSummary: out.changeSetSummary,
+                retrievalFeatures: out.retrievalFeatures,
+                ragStyleReferences: out.ragStyleReferences,
+            }
+        };
     }
 
     /**
@@ -291,69 +292,58 @@ export class AnthropicService extends BaseLLMService {
      */
     private async generateDefault(
         jsonMessage: string,
-        config: any,
-        rules: any,
+        config: ProviderRuntimeConfig,
+        rules: ProviderRules,
         repoPath: string,
         options?: GenerateCommitMessageOptions
     ): Promise<LLMResponse | LLMError> {
         const retries = config.maxRetries ?? 2;
         const totalAttempts = Math.max(1, retries + 1);
-        let lastError: any;
-
-        let messages: ChatMessage[] = [
+        const messages: ChatMessage[] = [
             { role: 'system', content: rules.baseRule },
             { role: 'user', content: jsonMessage }
         ];
 
-        for (let attempt = 0; attempt < totalAttempts; attempt++) {
-            const result = await this.utils.callChatCompletion(
-                this.client!,
-                messages,
-                {
+        try {
+            const data = await this.runValidatedChatCall({
+                reqType: 'commitMessage',
+                totalAttempts,
+                initialMessages: messages,
+                repoPath,
+                validationSchema: commitMessageSchema,
+                callOnce: (msgs) => this.utils.callChatCompletion(this.client!, msgs, {
                     model: config.model,
                     provider: 'Anthropic',
                     token: options?.token,
                     trackUsage: true,
                     tools: [AnthropicCommitMessageTool],
                     toolChoice: { type: 'tool', name: AnthropicCommitMessageTool.name },
-                    repoPath
-                }
-            );
-
-            if (result.usage) {
-                logger.usageSummary(repoPath, 'Anthropic', [result.usage], config.model, 'default');
-            } else {
-                logger.usageSummary(repoPath, 'Anthropic', [], config.model, 'default');
+                    repoPath,
+                }),
+                onUsage: (usage) => {
+                    if (usage) {
+                        logger.usageSummary(repoPath, 'Anthropic', [usage], config.model, 'default');
+                    } else {
+                        logger.usageSummary(repoPath, 'Anthropic', [], config.model, 'default');
+                    }
+                },
+            });
+            safeRun('Anthropic.logCommitStageDone', () => logger.logToolCall(
+                'commitStage',
+                JSON.stringify({ stage: 'done', data: { finalMessage: data.commitMessage } }),
+                'Commit generation stage',
+                repoPath,
+            ));
+            return { content: data.commitMessage };
+        } catch (error: any) {
+            // Preserve cancellation signals instead of silently converting to 500
+            if (error instanceof ProviderError) {
+                return { message: error.message, statusCode: error.statusCode };
             }
-
-            const safe = commitMessageSchema.safeParse(result.parsedResponse);
-            if (safe.success) {
-                // Emit a final "done" stage in webview logs for default mode
-                try {
-                    logger.logToolCall(
-                        'commitStage',
-                        JSON.stringify({ stage: 'done', data: { finalMessage: safe.data.commitMessage } }),
-                        'Commit generation stage',
-                        repoPath
-                    );
-                } catch { /* ignore */ }
-                return { content: safe.data.commitMessage };
+            if (error?.name === 'AbortError' || error?.message === 'Cancelled' || error?.message?.includes('aborted')) {
+                return { message: error?.message || 'Operation cancelled', statusCode: 499 };
             }
-
-            lastError = safe.error;
-            if (attempt < totalAttempts - 1) {
-                this.logSchemaValidationRetry('commitMessage', attempt, totalAttempts);
-                messages = this.buildSchemaValidationRetryMessages(
-                    messages,
-                    result,
-                    safe.error,
-                    commitMessageSchema,
-                    'commitMessage'
-                );
-                continue;
-            }
+            return { message: 'Failed to validate structured commit message from Anthropic.', statusCode: 500 };
         }
-
-        return { message: 'Failed to validate structured commit message from Anthropic.', statusCode: 500 };
     }
 }

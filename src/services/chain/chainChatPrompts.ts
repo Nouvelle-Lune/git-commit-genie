@@ -1,6 +1,6 @@
 import { DiffData } from "../git/gitTypes";
 import { ChatMessage } from "../llm/llmTypes";
-import { ChainInputs, FileSummary } from "./chainTypes";
+import { ChainInputs, ChangeSetSummary, FileSummary, RetrievalFeatures } from "./chainTypes";
 
 // Centralized builders for chat prompt messages used in chainThinking
 
@@ -62,7 +62,7 @@ export function buildClassifyAndDraftMessages(
     summaries: FileSummary[],
     inputs: ChainInputs
 ): ChatMessage[] {
-    const { userTemplate, currentTime, targetLanguage, repositoryAnalysis } = inputs;
+    const { userTemplate, currentTime, targetLanguage, repositoryAnalysis, ragStyleReferences } = inputs;
 
     const system: ChatMessage = {
         role: 'system',
@@ -92,7 +92,14 @@ export function buildClassifyAndDraftMessages(
         now: currentTime ?? new Date().toISOString(),
         file_summaries: summaries,
         target_language: targetLanguage || '',
-        repo_analysis: repoAnalysisForPayload
+        repo_analysis: repoAnalysisForPayload,
+        rag_style_references: (ragStyleReferences || []).map(reference => ({
+            commit_message: reference.message,
+            type: reference.type || null,
+            scope: reference.scope ?? null,
+            matched_by: reference.matchedBy,
+            style_reason: reference.styleReason,
+        }))
     };
 
     const lines: string[] = [
@@ -108,7 +115,7 @@ export function buildClassifyAndDraftMessages(
         '• **Terminology**: Apply consistent technical language appropriate to the codebase',
         '• **Change Impact**: Describe changes clearly, considering their scope and significance',
         '• **Repository Context**: If repo_analysis is available in input, use it as background context to understand the project better, but base decisions primarily on the actual file changes',
-        '  - repo_analysis structure: { summary: string (project overview), projectType: string (e.g., "Desktop Application"), technologies: string[] (tech stack array), insights: string[] (architectural patterns), importantFiles: string[] (key project files) }',
+        '  - repo_analysis structure: { summary: string (project overview), projectType: string (e.g., "Desktop Application"), technologies: string[] (tech stack array), insights: string[] (architectural patterns) }',
         '  - Use this context to inform terminology, scope selection, and change significance assessment',
         '</context>',
         '',
@@ -162,6 +169,19 @@ export function buildClassifyAndDraftMessages(
 
     }
 
+    if (ragStyleReferences?.length) {
+        lines.push(
+            '',
+            '<rag_style_reference>',
+            'Historical commit messages below are STYLE REFERENCES ONLY.',
+            '- Use them only to infer writing habits such as type/scope granularity, header length, tone, and body structure.',
+            '- Do NOT copy, paraphrase, or reuse any concrete facts, entities, file names, feature names, bug names, or claims from these examples.',
+            '- Every factual statement in the new commit message must be grounded in the current file_summaries input, not in the historical examples.',
+            '- If a style example conflicts with the current changes, ignore it.',
+            '</rag_style_reference>'
+        );
+    }
+
     lines.push(
         '',
         '<analysis_workflow>',
@@ -196,6 +216,11 @@ export function buildClassifyAndDraftMessages(
         'Do NOT translate footer tokens like BREAKING CHANGE or Refs.',
         (targetLanguage && targetLanguage.trim() ? `Target language hint: ${targetLanguage}` : 'Target language hint: en'),
         '</language_requirement>',
+        '',
+        '<style_requirement>',
+        'If rag_style_references are present, use them only for style calibration.',
+        'That means you may mirror style patterns, but you must not borrow topic-specific content from them.',
+        '</style_requirement>',
         '',
         '<critical>',
         'Return strictly valid JSON.',
@@ -293,6 +318,81 @@ export function buildRagPreparationMessages(
             '<input>',
             JSON.stringify(payload, null, 2),
             '</input>'
+        ].join('\n')
+    };
+
+    return [system, user];
+}
+
+export function buildRagRerankMessages(
+    changeSetSummary: ChangeSetSummary,
+    retrievalFeatures: RetrievalFeatures,
+    candidates: Array<{
+        id: string;
+        message: string;
+        matchedBy: string[];
+        type?: string | null;
+        scope?: string | null;
+        hybridScore: number;
+        featureScore: number;
+    }>,
+    maxResults: number
+): ChatMessage[] {
+    const system: ChatMessage = {
+        role: 'system',
+        content: [
+            '<role>',
+            'You rerank historical commit messages for a style-aware RAG pipeline.',
+            '</role>',
+            '',
+            '<critical>',
+            'Return STRICT JSON only.',
+            'Select candidates that are genuinely similar in change scope or functional area and whose writing style is useful for drafting the new commit message.',
+            'Do not optimize for shared nouns alone.',
+            '</critical>'
+        ].join('\n')
+    };
+
+    const user: ChatMessage = {
+        role: 'user',
+        content: [
+            '<instructions>',
+            `Select up to ${maxResults} historical commit messages.`,
+            'Prioritize candidates that satisfy both of these goals:',
+            '1. The change scope, affected area, or functional intent is close to the current change.',
+            '2. The commit message style is useful as a writing reference for the new message.',
+            '',
+            'Selection rules:',
+            '- Prefer candidates whose type/scope framing matches the current change.',
+            '- Prefer candidates with clean, reusable commit-writing style.',
+            '- Avoid near-duplicate examples.',
+            '- Reject candidates that are topically unrelated even if token overlap is high.',
+            '- The selected examples will later be used for style reference only, so focus your reason on style and scope fit.',
+            '- Return ONLY the candidate "id" values (e.g., "c1", "c7"); do not echo full commit hashes or messages.',
+            '</instructions>',
+            '',
+            '<schema>',
+            '{',
+            '  "selected": [',
+            '    {',
+            '      "id": string,',
+            '      "reason": string',
+            '    }',
+            '  ],',
+            '  "notes": string|null',
+            '}',
+            '</schema>',
+            '',
+            '<current_change>',
+            JSON.stringify({
+                changeSetSummary,
+                retrievalFeatures,
+            }, null, 2),
+            '</current_change>',
+            '',
+            '<candidates>',
+            JSON.stringify(candidates, null, 2),
+            '</candidates>'
         ].join('\n')
     };
 

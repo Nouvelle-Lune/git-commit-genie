@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { BaseProviderUtils } from './baseProviderUtils';
 import { logger } from '../../../logger/index';
+import { ProviderError } from '../errors/providerError';
 
 import { Content, GoogleGenAI, GenerateContentConfig } from '@google/genai';
 import { ChatMessage, RequestType } from '../../llmTypes';
@@ -54,6 +55,7 @@ export class GeminiUtils extends BaseProviderUtils {
             functionDeclarations?: any[];
             isFirstRequest?: boolean;
             repoPath?: string;
+            suppressApiLogs?: boolean;
         }
     ): Promise<{ parsedResponse?: any; usage?: any }> {
 
@@ -108,7 +110,9 @@ export class GeminiUtils extends BaseProviderUtils {
                 config.abortSignal = controller.signal;
 
                 // Log API request (pending state)
-                logId = logger.logApiRequest(options.repoPath);
+                if (!options.suppressApiLogs) {
+                    logId = logger.logApiRequest(options.repoPath);
+                }
 
                 const response = await client.models.generateContent({
                     model: options.model,
@@ -149,7 +153,8 @@ export class GeminiUtils extends BaseProviderUtils {
 
                     // Update log with function call result
                     const isFinal = fnName === 'finalize';
-                    logger.logApiRequestWithResult(
+                    if (logId) {
+                        logger.logApiRequestWithResult(
                         logId,
                         options.provider,
                         options.model,
@@ -157,7 +162,8 @@ export class GeminiUtils extends BaseProviderUtils {
                         usage,
                         isFinal,
                         options.repoPath
-                    );
+                        );
+                    }
                 } else if (options.responseSchema) {
                     // Structured output path: extract and parse JSON from candidates
                     let jsonText = '';
@@ -182,7 +188,8 @@ export class GeminiUtils extends BaseProviderUtils {
                         parsedResponse = JSON.parse(jsonText);
                         // Update webview log: mark request as completed and attach cost
                         try {
-                            logger.logApiRequestWithResult(
+                            if (logId) {
+                                logger.logApiRequestWithResult(
                                 logId,
                                 options.provider,
                                 options.model,
@@ -190,7 +197,8 @@ export class GeminiUtils extends BaseProviderUtils {
                                 usage,
                                 false,
                                 options.repoPath
-                            );
+                                );
+                            }
                         } catch { /* ignore logging errors */ }
                     } catch {
                         // Retry on parse failure
@@ -261,7 +269,10 @@ export class GeminiUtils extends BaseProviderUtils {
             }
         }
 
-        throw lastErr || new Error(`${options.provider} chat failed after retries`);
+        throw ProviderError.wrap(
+            lastErr || new Error(`${options.provider} chat failed after retries`),
+            options.provider
+        );
     }
 
     /**

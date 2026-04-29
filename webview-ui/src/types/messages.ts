@@ -61,7 +61,12 @@ export interface CancelAnalysisMessage {
     type: 'cancelAnalysis';
 }
 
-export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage | RequestFlushLogsMessage | RefreshAnalysisMessage | OpenGenieMenuMessage | CancelAnalysisMessage;
+export interface RepairRagEmbeddingsMessage {
+    type: 'repairRagEmbeddings';
+    repoPath: string;
+}
+
+export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage | RequestFlushLogsMessage | RefreshAnalysisMessage | OpenGenieMenuMessage | CancelAnalysisMessage | RepairRagEmbeddingsMessage;
 
 // Data Types
 export interface RepositoryInfo {
@@ -70,6 +75,12 @@ export interface RepositoryInfo {
     cost: number;
     analysisStatus: 'missing' | 'analyzing' | 'idle';
     analysisPath?: string;
+    ragStatus?: {
+        kind: 'disabled' | 'idle' | 'preparing' | 'importing' | 'embedding' | 'ready' | 'error';
+        text: string;
+        detail?: string;
+        repairNeeded?: boolean;
+    };
 }
 
 export interface I18nTexts {
@@ -85,6 +96,7 @@ export interface I18nTexts {
     analysisStatusAnalyzing: string;
     analysisStatusIdle: string;
     openSettings: string;
+    repairRagEmbeddings: string;
 }
 
 // Log Types

@@ -1,14 +1,24 @@
 /**
  * LLM API Pricing Configuration
- * All prices are in USD per 1M tokens
- * 
+ * All prices are in USD per 1M tokens.
+ *
  * For flat pricing models, use: { input, output, cached }
  * For tiered pricing models, use: { tiers: [{ maxInputTokens, input, output, cached }] }
- * 
+ *
  * For Qwen Plus models with thinking mode support:
  * - Use model name with `:thinking` suffix (e.g., 'qwen-plus:intl:thinking')
  * - Thinking mode has higher output costs
+ *
+ * CNY-priced providers (GLM, Qwen China, DeepSeek, etc.) are converted to USD
+ * using a fixed exchange rate of 1 CNY = 0.145 USD. The rate is captured
+ * as `CNY_TO_USD` below and is intentionally fixed so that historical cost
+ * estimates do not shift when the FX rate moves.
  */
+
+/** Fixed conversion rate for CNY → USD pricing entries. */
+const CNY_TO_USD = 0.145;
+/** Helper for declaring CNY-denominated rates inline. */
+const cny = (amount: number): number => Number((amount * CNY_TO_USD).toFixed(4));
 
 export interface FlatPricing {
     input: number;
@@ -30,6 +40,9 @@ export interface TieredPricing {
 export type ModelPricing = FlatPricing | TieredPricing;
 
 export const PRICING_TABLE: Record<string, ModelPricing> = {
+    // Local OpenAI-compatible deployments (no pricing by default)
+    'local': { input: 0, output: 0, cached: 0 },
+
     // OpenAI (USD)
     'gpt-5.4': { input: 2.5, output: 15.0, cached: 0.25 },
     'gpt-5.4-mini': { input: 0.75, output: 4.5, cached: 0.075 },
@@ -42,17 +55,13 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     'gpt-5-nano': { input: 0.05, output: 0.4, cached: 0.005 },
 
     // Anthropic Claude (USD)
-    'claude-opus-4-1-20250805': { input: 15.0, output: 75.0, cached: 1.5 },
-    'claude-opus-4-20250514': { input: 15.0, output: 75.0, cached: 1.5 },
-    'claude-sonnet-4-20250514': { input: 3.0, output: 15.0, cached: 0.3 },
-    'claude-3-7-sonnet-20250219': { input: 3.0, output: 15.0, cached: 0.3 },
-    'claude-3-5-sonnet-20241022': { input: 3.0, output: 15.0, cached: 0.3 },
-    'claude-3-5-sonnet-20240620': { input: 3.0, output: 15.0, cached: 0.3 },
-    'claude-3-5-haiku-20241022': { input: 0.8, output: 4.0, cached: 0.08 },
-
-    'claude-haiku-4-5-20251001': { input: 1.0, output: 5.0, cached: 0.10 },
-    'claude-sonnet-4-5-20250929': { input: 3.0, output: 15.0, cached: 0.3 },
-    'claude-opus-4-5-20251101': { input: 5.0, output: 25.0, cached: 0.5 },
+    'claude-opus-4-7': { input: 5.0, output: 25.0, cached: 0.5 },
+    'claude-sonnet-4-6': { input: 3.0, output: 15.0, cached: 0.3 },
+    'claude-opus-4-6': { input: 5.0, output: 25.0, cached: 0.5 },
+    'claude-opus-4-5': { input: 5.0, output: 25.0, cached: 0.5 },
+    'claude-sonnet-4-5': { input: 3.0, output: 15.0, cached: 0.3 },
+    'claude-haiku-4-5': { input: 1.0, output: 5.0, cached: 0.10 },
+    'claude-opus-4-1': { input: 15.0, output: 75.0, cached: 1.5 },
 
     // Google Gemini (USD)
     'gemini-2.5-pro': {
@@ -75,9 +84,12 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
 
     // lite variants removed
 
-    // DeepSeek (USD)
-    'deepseek-chat': { input: 0.274, output: 0.411, cached: 0.027 },
-    'deepseek-reasoner': { input: 0.274, output: 0.411, cached: 0.027 },
+    // DeepSeek (CNY → USD via CNY_TO_USD).
+    // DeepSeek-V4-Pro uses the original (non-discounted) rate; the limited
+    // 2.5-折 promotion is intentionally ignored so cost estimates stay stable
+    // after the promotion ends.
+    'deepseek-v4-flash': { input: cny(1), output: cny(2), cached: cny(0.02) },
+    'deepseek-v4-pro': { input: cny(12), output: cny(24), cached: cny(0.1) },
 
     // GLM (USD)
     // Converted from RMB pricing snapshot shared by user on 2026-04-02.
