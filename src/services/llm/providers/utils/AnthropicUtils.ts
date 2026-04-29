@@ -175,7 +175,10 @@ export class AnthropicUtils extends BaseProviderUtils {
             }
         }
 
-        throw lastErr || new Error(`${options.provider} chat failed after retries`);
+        throw ProviderError.wrap(
+            lastErr || new Error(`${options.provider} chat failed after retries`),
+            options.provider
+        );
     }
 
     /**
