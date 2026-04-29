@@ -201,12 +201,18 @@
           "order": 20,
           "type": "string",
           "default": "",
+          "tags": [
+            "experimental"
+          ],
           "markdownDescription": "%config.rag.embedding.baseUrl.desc%"
         },
         "gitCommitGenie.rag.embedding.model": {
           "order": 21,
           "type": "string",
           "default": "",
+          "tags": [
+            "experimental"
+          ],
           "markdownDescription": "%config.rag.embedding.model.desc%"
         },
         "gitCommitGenie.rag.embedding.dimensions": {
@@ -214,6 +220,9 @@
           "type": "number",
           "default": 0,
           "minimum": 0,
+          "tags": [
+            "experimental"
+          ],
           "markdownDescription": "%config.rag.embedding.dimensions.desc%"
         },
         "gitCommitGenie.rag.embedding.batchSize": {
@@ -222,6 +231,9 @@
           "default": 10,
           "minimum": 1,
           "maximum": 512,
+          "tags": [
+            "experimental"
+          ],
           "markdownDescription": "%config.rag.embedding.batchSize.desc%"
         },
         "gitCommitGenie.repositoryAnalysis.MaxCount": {
