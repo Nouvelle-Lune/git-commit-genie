@@ -8,25 +8,14 @@ import { logger } from '../logger';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
 import { Repository } from '../git/git';
 import { estimateTokens } from '../analysis/tools/modelContext';
+import { RAG_DOCUMENTS_FILE, RAG_EMBEDDING_API_KEY_SECRET, RAG_STATE_FILE, RagEmbeddingConfig, normalizeVector, readEmbeddingConfig } from './ragShared';
 
 // Embedding inputs are soft-truncated above this token count. Keeps individual
 // requests below typical 8k embedding context limits.
 const EMBEDDING_INPUT_TOKEN_LIMIT = 8000;
 
-const RAG_EMBEDDING_API_KEY_SECRET = 'gitCommitGenie.secret.ragEmbeddingApiKey';
-const RAG_STATE_FILE = 'state.json';
-const RAG_DOCUMENTS_FILE = 'documents.ndjson';
 const STORAGE_VERSION = 4;
 const TS_RAG_PIPELINE_VERSION = 1;
-
-type RagEmbeddingConfig = {
-    enabled: boolean;
-    baseUrl: string;
-    model: string;
-    dimensions: number;
-    batchSize: number;
-    apiKey: string;
-};
 
 type HealthResponse = {
     ok: boolean;
@@ -190,7 +179,7 @@ export class RagRuntimeService {
             return;
         }
 
-        const cfg = await this.readConfig();
+        const cfg = await readEmbeddingConfig(this.context);
         if (!cfg.enabled) {
             for (const repo of this.repoService.getRepositories()) {
                 this.updateRepositoryStatus(repo.rootUri.fsPath, 'disabled', vscode.l10n.t(I18N.rag.statusDisabled));
@@ -218,7 +207,7 @@ export class RagRuntimeService {
     }
 
     public async validateEmbeddingConfiguration(): Promise<ValidateConfigResponse> {
-        const cfg = await this.readConfig();
+        const cfg = await readEmbeddingConfig(this.context);
         if (!this.isConfigured(cfg)) {
             throw new Error(vscode.l10n.t(I18N.rag.backendNotConfigured));
         }
@@ -251,7 +240,7 @@ export class RagRuntimeService {
     }
 
     public async isEmbeddingConfigured(): Promise<boolean> {
-        const cfg = await this.readConfig();
+        const cfg = await readEmbeddingConfig(this.context);
         return this.isConfigured(cfg);
     }
 
@@ -305,7 +294,7 @@ export class RagRuntimeService {
     }
 
     public async ensureAllRepositoriesIndexed(reason: string = 'manual'): Promise<void> {
-        const cfg = await this.readConfig();
+        const cfg = await readEmbeddingConfig(this.context);
         if (!cfg.enabled) {
             logger.info(`[Genie][RAG] Skipping ensureAllRepositoriesIndexed: rag.enabled=false (${reason})`);
             return;
@@ -320,7 +309,7 @@ export class RagRuntimeService {
     }
 
     public async ensureRepositoryIndexed(repo: Repository, reason: string = 'manual'): Promise<EnsureIndexResponse> {
-        const cfg = await this.readConfig();
+        const cfg = await readEmbeddingConfig(this.context);
         if (!cfg.enabled) {
             this.updateRepositoryStatus(repo.rootUri.fsPath, 'disabled', vscode.l10n.t(I18N.rag.statusDisabled));
             throw new Error('RAG is disabled.');
@@ -419,7 +408,7 @@ export class RagRuntimeService {
         repo: Repository,
         options?: { isCancellationRequested?: () => boolean; }
     ): Promise<RepairMissingEmbeddingsResult> {
-        const cfg = await this.readConfig();
+        const cfg = await readEmbeddingConfig(this.context);
         if (!this.isConfigured(cfg)) {
             // Surface to the caller so the UI can prompt the user to set the embedding API key.
             throw new Error(vscode.l10n.t(I18N.rag.backendNotConfigured));
@@ -566,7 +555,7 @@ export class RagRuntimeService {
 
     public async upsertPreparedDocuments(repo: Repository, documents: unknown[], options?: UpsertPreparedDocumentsOptions): Promise<UpsertDocumentsResponse> {
         const storageDir = await this.requireStorageDir(repo);
-        const cfg = await this.readConfig();
+        const cfg = await readEmbeddingConfig(this.context);
         const state = await this.readState(storageDir);
         if (!state) {
             throw new Error('RAG state is missing. Call ensureRepositoryIndexed first.');
@@ -651,20 +640,6 @@ export class RagRuntimeService {
             vector_count_added: addedVectors,
             commit_count: nextState.commitCount,
             vector_count: nextState.vectorCount,
-        };
-    }
-
-    private async readConfig(): Promise<RagEmbeddingConfig> {
-        const ragConfig = vscode.workspace.getConfiguration('gitCommitGenie.rag');
-        const secretApiKey = (await this.context.secrets.get(RAG_EMBEDDING_API_KEY_SECRET))?.trim() || '';
-
-        return {
-            enabled: ragConfig.get<boolean>('enabled', false),
-            baseUrl: (ragConfig.get<string>('embedding.baseUrl', '') || '').trim(),
-            model: (ragConfig.get<string>('embedding.model', '') || '').trim(),
-            dimensions: ragConfig.get<number>('embedding.dimensions', 0) || 0,
-            batchSize: ragConfig.get<number>('embedding.batchSize', 10) || 10,
-            apiKey: secretApiKey
         };
     }
 
@@ -984,7 +959,7 @@ export class RagRuntimeService {
                 if (!hash || !Array.isArray(item.embedding)) {
                     return;
                 }
-                const vector = this.normalizeVector(item.embedding.map(value => Number(value)));
+                const vector = normalizeVector(item.embedding.map(value => Number(value)));
                 out.set(hash, vector);
             });
         } catch (error) {
@@ -1031,14 +1006,6 @@ export class RagRuntimeService {
         if (isCancellationRequested?.()) {
             throw new Error('RAG_INDEXING_CANCELLED');
         }
-    }
-
-    private normalizeVector(vector: number[]): number[] {
-        const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + (value * value), 0));
-        if (!magnitude) {
-            return vector;
-        }
-        return vector.map(value => value / magnitude);
     }
 
     private getReadyStatusText(commitCount: number, vectorCount: number): string {

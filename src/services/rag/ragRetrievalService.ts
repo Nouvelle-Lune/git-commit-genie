@@ -7,27 +7,18 @@ import { RepoService } from '../repo/repo';
 import { buildRagRerankMessages } from '../chain/chainChatPrompts';
 import { ChangeSetSummary, RagStyleReference, RetrievalFeatures } from '../chain/chainTypes';
 import { logger } from '../logger';
+import { RAG_DOCUMENTS_FILE, RAG_STATE_FILE, RagEmbeddingConfig, normalizeVector, readEmbeddingConfig } from './ragShared';
 
 // Recency boost half-life. 90 days matches typical commit-style relevance decay.
 const RECENCY_HALF_LIFE_DAYS = 90;
 const MILLIS_PER_DAY = 86_400_000;
 
-const RAG_EMBEDDING_API_KEY_SECRET = 'gitCommitGenie.secret.ragEmbeddingApiKey';
-const RAG_STATE_FILE = 'state.json';
-const RAG_DOCUMENTS_FILE = 'documents.ndjson';
 const HYBRID_DENSE_WEIGHT = 0.72;
 const HYBRID_BM25_WEIGHT = 0.28;
 const HYBRID_RECALL_LIMIT = 18;
 const TYPE_SCOPE_RECALL_LIMIT = 12;
 const RERANK_CANDIDATE_LIMIT = 20;
 const DEFAULT_RERANK_TOP_K = 5;
-
-type RagEmbeddingConfig = {
-    baseUrl: string;
-    model: string;
-    dimensions: number;
-    apiKey: string;
-};
 
 type IndexedCommitRow = {
     commitHash: string;
@@ -359,7 +350,7 @@ export class RagRetrievalService {
             return { scores: emptyScores, available: emptyAvailable };
         }
 
-        const config = await this.readEmbeddingConfig();
+        const config = await readEmbeddingConfig(this.context);
         if (!config.apiKey || !config.baseUrl || !config.model) {
             return { scores: emptyScores, available: emptyAvailable };
         }
@@ -378,7 +369,7 @@ export class RagRetrievalService {
         }
 
         const response = await client.embeddings.create(request as any);
-        const queryVector = this.normalizeVector(response.data[0]?.embedding?.map(value => Number(value)) || []);
+        const queryVector = normalizeVector(response.data[0]?.embedding?.map(value => Number(value)) || []);
         if (!queryVector.length) {
             return { scores: emptyScores, available: emptyAvailable };
         }
@@ -544,17 +535,6 @@ export class RagRetrievalService {
         return sum;
     }
 
-    private normalizeVector(vector: number[]): number[] {
-        if (!vector.length) {
-            return [];
-        }
-        const magnitude = Math.sqrt(vector.reduce((sum, value) => sum + (value * value), 0));
-        if (!magnitude) {
-            return vector;
-        }
-        return vector.map(value => value / magnitude);
-    }
-
     private async loadIndexedRows(repo: Repository): Promise<{ rows: IndexedCommitRow[]; bm25: Bm25CorpusStats } | null> {
         const gitDir = await this.repoService.getRepositoryGitDir(repo);
         if (!gitDir) {
@@ -675,7 +655,7 @@ export class RagRetrievalService {
             embeddingText,
             searchText: searchText || documentText || message,
             embedding: Array.isArray(row.embedding)
-                ? this.normalizeVector(row.embedding.map(value => Number(value)).filter(value => Number.isFinite(value)))
+                ? normalizeVector(row.embedding.map(value => Number(value)).filter(value => Number.isFinite(value)))
                 : undefined,
         };
     }
@@ -700,15 +680,4 @@ export class RagRetrievalService {
         }
     }
 
-    private async readEmbeddingConfig(): Promise<RagEmbeddingConfig> {
-        const ragConfig = vscode.workspace.getConfiguration('gitCommitGenie.rag');
-        const secretApiKey = (await this.context.secrets.get(RAG_EMBEDDING_API_KEY_SECRET))?.trim() || '';
-
-        return {
-            baseUrl: (ragConfig.get<string>('embedding.baseUrl', '') || '').trim(),
-            model: (ragConfig.get<string>('embedding.model', '') || '').trim(),
-            dimensions: ragConfig.get<number>('embedding.dimensions', 0) || 0,
-            apiKey: secretApiKey,
-        };
-    }
 }
