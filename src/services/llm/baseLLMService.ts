@@ -261,7 +261,9 @@ export abstract class BaseLLMService implements LLMService {
                 const repositoryPath = this.getRepositoryPath(targetRepo);
                 if (repositoryPath) {
                     repositoryAnalysis = await this.analysisService.getAnalysisForPrompt(repositoryPath);
-                    repositoryAnalysis = JSON.parse(repositoryAnalysis);
+                    if (repositoryAnalysis) {
+                        repositoryAnalysis = JSON.parse(repositoryAnalysis);
+                    }
                 }
             } catch (error) {
                 console.error('Failed to get repository analysis:', error);
