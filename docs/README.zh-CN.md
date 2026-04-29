@@ -55,6 +55,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 多模型提供商             | 支持 OpenAI、DeepSeek、Anthropic、Gemini、Qwen、GLM、Kimi、OpenRouter 等。                                                                                        |
 | 仓库智能分析             | AI驱动的仓库分析智能Agent，自主使用智能工具探索代码库；自动理解项目结构、技术栈和架构，为更好的提交信息提供上下文洞察；支持手动刷新、实时更新和可编辑的分析报告。 |
+| RAG（检索增强生成）      | 构建本地历史提交信息索引，通过混合检索（稠密向量 + BM25 关键词）检索风格参考，使生成的提交信息与仓库风格保持一致。需要兼容 OpenAI 接口的 Embedding API。支持增量索引与后台向量修复。 |
 | Thinking 模式            | 多步：文件级摘要 → 结构化综合 → 校验修复，显著提升准确度与模板贴合度。                                                                                            |
 | 用户模板策略             | 内置模板选择和创建功能，支持工作区和用户数据目录，抽取策略影响段落顺序、必填 footers、词汇偏好等。                                                                |
 | Conventional Commit 校验 | 头行格式（type(scope)!: desc），长度 ≤ 72，无句号。                                                                                                               |
@@ -82,6 +83,11 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `gitCommitGenie.chain.maxParallel`                  | number  | 2       | 链式提示并行 LLM 调用最大数量。谨慎增大以避免触发速率限制。                                                                                          |
 | `gitCommitGenie.llm.maxRetries`                     | number  | 2       | API请求失败最大重试次数。                                                                                                                            |
 | `gitCommitGenie.llm.temperature`                    | number  | 1       | Temperature（0–2），默认为 1。部分服务商/模型组合只接受 1；修改该值可能触发 invalid-temperature 错误或导致输出稳定性下降。                                      |
+| `gitCommitGenie.rag.enabled`                        | boolean | false   | 启用 RAG 保持 commit message 生成的风格一致性（需要仓库中存在一定数量的历史 commit message 构建本地风格索引）。启用前请先通过"配置 RAG Embedding API Key"命令配置 API Key。 |
+| `gitCommitGenie.rag.embedding.baseUrl`              | string  | `""`    | RAG 使用的 embeddings API Base URL，需兼容 OpenAI SDK 的接口形式。                                                                                     |
+| `gitCommitGenie.rag.embedding.model`                | string  | `""`    | RAG 使用的 embedding 模型。                                                                                                                           |
+| `gitCommitGenie.rag.embedding.dimensions`           | number  | 0       | RAG 使用的可选 embedding 维度（0 = 自动检测）。                                                                                                       |
+| `gitCommitGenie.rag.embedding.batchSize`            | number  | 10      | RAG 生成 embeddings 时使用的批大小（1–512）。                                                                                                          |
 | `gitCommitGenie.repositoryAnalysis.enabled`         | boolean | true    | 启用仓库分析以提供更好的提交信息生成上下文。                                                                                                         |
 | `gitCommitGenie.repositoryAnalysis.excludePatterns` | array   | []      | 仓库分析扫描时要排除的文件模式（gitignore风格）。                                                                                                    |
 | `gitCommitGenie.repositoryAnalysis.updateThreshold` | number  | 10      | 更新仓库分析的提交次数阈值。                                                                                                                         |
@@ -107,6 +113,10 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 - Git Commit Genie: 刷新仓库分析（触发新分析）
 - Git Commit Genie: 清理仓库分析缓存（清除分析缓存）
 - Git Commit Genie: 取消仓库分析（取消分析过程）
+- Git Commit Genie: 配置 RAG Embedding API Key（在 SecretStorage 中存储 Embedding API Key）
+- Git Commit Genie: 清除 RAG Embedding API Key（删除 Embedding API Key）
+- Git Commit Genie: 开始 RAG 索引（为所有历史提交建立风格索引）
+- Git Commit Genie: 停止 RAG 索引（取消正在运行的索引任务）
 - Git Commit Genie: 菜单
 - Git Commit Genie: 查看仓库费用
 - Git Commit Genie: 重置仓库费用
