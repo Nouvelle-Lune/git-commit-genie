@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { BaseProviderUtils } from './baseProviderUtils';
 import { logger } from '../../../logger/index';
+import { ProviderError } from '../errors/providerError';
 
 import { Content, GoogleGenAI, GenerateContentConfig } from '@google/genai';
 import { ChatMessage, RequestType } from '../../llmTypes';
@@ -268,7 +269,10 @@ export class GeminiUtils extends BaseProviderUtils {
             }
         }
 
-        throw lastErr || new Error(`${options.provider} chat failed after retries`);
+        throw ProviderError.wrap(
+            lastErr || new Error(`${options.provider} chat failed after retries`),
+            options.provider
+        );
     }
 
     /**
