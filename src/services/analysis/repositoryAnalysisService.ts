@@ -19,7 +19,7 @@ import { z } from 'zod';
 import { RepoService } from '../repo/repo';
 import { logger } from '../logger';
 import { L10N_KEYS as I18N } from '../../i18n/keys';
-import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../llm/providers/config/providerConfig';
+import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../llm/providers/config/ProviderConfig';
 import { AnthropicRepoAnalysisActionTool, AnthropicCompressionTool } from '../llm/providers/schemas/anthropicSchemas';
 import { GeminiRepoAnalysisFunctionDeclarations } from '../llm/providers/schemas/geminiFunctions';
 import { repoAnalysisActionSchema, compressionResponseSchema } from '../llm/providers/schemas/common';

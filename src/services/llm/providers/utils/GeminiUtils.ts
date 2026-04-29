@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BaseProviderUtils } from './baseProviderUtils';
+import { BaseProviderUtils } from './BaseProviderUtils';
 import { logger } from '../../../logger/index';
 import { ProviderError } from '../errors/providerError';
 

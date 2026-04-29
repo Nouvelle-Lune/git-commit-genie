@@ -4,6 +4,18 @@ import * as path from 'path';
 import { L10N_KEYS as I18N } from '../../../../i18n/keys';
 import { ProviderError } from '../errors/providerError';
 
+export interface ProviderRuntimeConfig {
+    model: string;
+    useChain: boolean;
+    chainMaxParallel: number;
+    maxRetries: number;
+}
+
+export interface ProviderRules {
+    baseRule: string;
+    checklistText: string;
+}
+
 /**
  * Common utility functions for LLM providers
  */

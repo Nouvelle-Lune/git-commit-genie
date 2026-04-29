@@ -11,7 +11,7 @@ import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { GeminiUtils } from './utils/GeminiUtils';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
-import { ProviderRuntimeConfig, ProviderRules } from './utils/baseProviderUtils';
+import { ProviderRuntimeConfig, ProviderRules } from './utils/BaseProviderUtils';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import {
     GeminiCommitMessageSchema,

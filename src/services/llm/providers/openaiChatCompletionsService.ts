@@ -11,7 +11,7 @@ import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
-import { ProviderRules } from './utils/baseProviderUtils';
+import { ProviderRules } from './utils/BaseProviderUtils';
 import { commitMessageSchema } from './schemas/common';
 import { ProviderError } from './errors/providerError';
 
