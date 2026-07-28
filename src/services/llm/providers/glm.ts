@@ -26,12 +26,13 @@ export class GLMService extends OpenAIChatCompletionsService {
 
     public listSupportedModels(): string[] {
         return [
+            'glm-5.2',
+            'glm-5.1',
             'glm-5',
             'glm-5-turbo',
             'glm-4.7',
             'glm-4.7-flashx',
             'glm-4.7-flash',
-            'glm-4.5',
             'glm-4.5-air'
         ];
     }

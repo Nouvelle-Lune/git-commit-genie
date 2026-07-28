@@ -11,6 +11,10 @@
  */
 export const OPENROUTER_MODEL_ALIAS_MAP: Readonly<Record<string, string>> = Object.freeze({
     // OpenAI family
+    'openai/gpt-5.6-sol': 'gpt-5.6-sol',
+    'openai/gpt-5.6-terra': 'gpt-5.6-terra',
+    'openai/gpt-5.6-luna': 'gpt-5.6-luna',
+    'openai/gpt-5.5': 'gpt-5.5',
     'openai/gpt-5.4': 'gpt-5.4',
     'openai/gpt-5.4-mini': 'gpt-5.4-mini',
     'openai/gpt-5.4-nano': 'gpt-5.4-nano',
@@ -24,42 +28,47 @@ export const OPENROUTER_MODEL_ALIAS_MAP: Readonly<Record<string, string>> = Obje
     'deepseek/deepseek-v4-pro': 'deepseek-v4-pro',
 
     // Anthropic family
+    'anthropic/claude-fable-5': 'claude-fable-5',
+    'anthropic/claude-opus-5': 'claude-opus-5',
+    'anthropic/claude-sonnet-5': 'claude-sonnet-5',
+    'anthropic/claude-opus-4.8': 'claude-opus-4-8',
     'anthropic/claude-opus-4.7': 'claude-opus-4-7',
     'anthropic/claude-sonnet-4.6': 'claude-sonnet-4-6',
     'anthropic/claude-opus-4.6': 'claude-opus-4-6',
-    'anthropic/claude-opus-4.1': 'claude-opus-4-1',
     'anthropic/claude-haiku-4.5': 'claude-haiku-4-5',
     'anthropic/claude-sonnet-4.5': 'claude-sonnet-4-5',
     'anthropic/claude-opus-4.5': 'claude-opus-4-5',
 
     // Gemini family
+    'google/gemini-3.6-flash': 'gemini-3.6-flash',
+    'google/gemini-3.5-flash': 'gemini-3.5-flash',
+    'google/gemini-3.1-pro-preview': 'gemini-3.1-pro-preview',
     'google/gemini-2.5-flash': 'gemini-2.5-flash',
     'google/gemini-2.5-pro': 'gemini-2.5-pro',
     'google/gemini-3-flash-preview': 'gemini-3-flash-preview',
-    'google/gemini-3-pro-preview': 'gemini-3-pro-preview',
 
     // Qwen family
-    'qwen/qwen3-max': 'qwen3-max',
-    'qwen/qwen3-235b-a22b': 'qwen3.5-plus',
-    'qwen/qwen3.5-flash': 'qwen3.5-flash',
+    'qwen/qwen3.7-max': 'qwen3.7-max',
+    'qwen/qwen3.7-plus': 'qwen3.7-plus',
+    'qwen/qwen3.7-flash': 'qwen3.7-flash',
+    'qwen/qwen3.6-flash': 'qwen3.6-flash',
+    'qwen/qwen3.5-plus-20260420': 'qwen3.5-plus',
+    'qwen/qwen3.5-flash-02-23': 'qwen3.5-flash',
     'qwen/qwen-plus': 'qwen-plus',
-    'qwen/qwen3-coder-plus': 'qwen3-coder-plus',
-    'qwen/qwen-turbo': 'qwen-flash',
-    'qwen/qwen3-coder-30b-a3b-instruct': 'qwen3-coder-flash',
 
     // GLM family
+    'z-ai/glm-5.2': 'glm-5.2',
+    'z-ai/glm-5.1': 'glm-5.1',
     'z-ai/glm-5': 'glm-5',
     'z-ai/glm-5-turbo': 'glm-5-turbo',
     'z-ai/glm-4.7': 'glm-4.7',
-    'z-ai/glm-4.7-flashx': 'glm-4.7-flashx',
     'z-ai/glm-4.7-flash': 'glm-4.7-flash',
-    'z-ai/glm-4.5': 'glm-4.5',
     'z-ai/glm-4.5-air': 'glm-4.5-air',
 
     // Kimi family
-    'moonshotai/kimi-k2.5': 'kimi-k2.5',
-    'moonshotai/kimi-k2': 'kimi-k2',
-    'moonshotai/kimi-k2-thinking': 'kimi-k2-thinking'
+    'moonshotai/kimi-k3': 'kimi-k3',
+    'moonshotai/kimi-k2.7-code': 'kimi-k2.7-code',
+    'moonshotai/kimi-k2.6': 'kimi-k2.6'
 });
 
 /**

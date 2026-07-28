@@ -26,9 +26,9 @@ export class KimiService extends OpenAIChatCompletionsService {
 
     public listSupportedModels(): string[] {
         return [
-            'kimi-k2.5',
-            'kimi-k2',
-            'kimi-k2-thinking'
+            'kimi-k3',
+            'kimi-k2.7-code',
+            'kimi-k2.6'
         ];
     }
 }

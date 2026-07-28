@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.2.1]
+- feat: Added the latest supported OpenAI GPT-5.6/5.5, Claude 5/4.8, Gemini 3.6/3.5/3.1, Qwen 3.7/3.6, GLM 5.2/5.1, and Kimi K3/K2.7/K2.6 models.
+- fix: Removed retired or scheduled-for-retirement Claude Opus 4.1, Gemini preview, Qwen 3 Max/Coder Plus, GLM 4.5, and Kimi K2/K2.5 model entries.
+- fix: Updated provider context limits, OpenRouter aliases, and official token pricing, including long-context price tiers.
+- fix: Omitted unsupported sampling parameters for current Claude and Kimi models.
+
 ## [3.2.0]
 - feat: Added comprehensive RAG embedding and indexing system with embedding repair, BM25 caching, and commit file loading for enhanced commit message generation.
 - feat: Added support for new Anthropic models — `claude-opus-4-7`, `claude-opus-4-6`, `claude-sonnet-4-6` — and removed retired/deprecated model variants.

@@ -395,11 +395,16 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
             const baseOptions: any = {
                 model: options.model,
                 messages: messages,
-                temperature: resolvedTemperature,
                 response_format: {
                     'type': 'json_object'
                 }
             };
+
+            // Current Kimi models require the provider-controlled default
+            // sampling behavior and reject an explicit temperature value.
+            if (options.provider !== 'Kimi') {
+                baseOptions.temperature = resolvedTemperature;
+            }
 
             return baseOptions;
         }

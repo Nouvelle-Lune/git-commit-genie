@@ -6,6 +6,20 @@ import { ToolUseBlock } from '@anthropic-ai/sdk/resources';
 import { ProviderError } from '../errors/providerError';
 
 /**
+ * Anthropic models that reject non-default sampling parameters.
+ *
+ * These models choose their own sampling behavior, so omitting temperature is
+ * required instead of sending the extension-wide configured value.
+ */
+export const ANTHROPIC_FIXED_SAMPLING_MODELS: ReadonlySet<string> = new Set([
+    'claude-fable-5',
+    'claude-opus-5',
+    'claude-sonnet-5',
+    'claude-opus-4-8',
+    'claude-opus-4-7',
+]);
+
+/**
  * Utilities for Anthropic Claude API
  */
 export class AnthropicUtils extends BaseProviderUtils {
@@ -49,10 +63,13 @@ export class AnthropicUtils extends BaseProviderUtils {
                 const requestOptions: any = {
                     model: options.model,
                     messages,
-                    temperature: options.temperature ?? this.getTemperature(),
                     max_tokens: options.maxTokens ?? 2048,
                     cache_control: { type: "ephemeral" },
                 };
+
+                if (!ANTHROPIC_FIXED_SAMPLING_MODELS.has(options.model)) {
+                    requestOptions.temperature = options.temperature ?? this.getTemperature();
+                }
 
                 // Handle system messages for Anthropic format
                 const systemMessages = messages.filter(m => m.role === 'system');

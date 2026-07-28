@@ -610,7 +610,7 @@ export class Logger {
 
     /**
      * Calculate API call cost
-     * @param modelName - Model name, can include region suffix for Qwen (e.g., 'qwen3-max:china')
+     * @param modelName - Model name, can include region suffix for Qwen (e.g., 'qwen3.7-max:china')
      * @param inputTokens - Number of input tokens
      * @param outputTokens - Number of output tokens
      * @param cachedTokens - Number of cached tokens (optional)
