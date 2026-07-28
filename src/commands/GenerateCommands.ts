@@ -5,6 +5,7 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
 import { Repository } from "../services/git/git";
 import { DiffData } from '../services/git/gitTypes';
 import { getProviderSecretKey, getProviderLabel } from '../services/llm/providers/config/ProviderConfig';
+import { StatusBarManager } from '../ui/StatusBarManager';
 
 /**
  * This class handles the registration of commands related to generating commit messages.
@@ -16,7 +17,8 @@ export class GenerateCommands {
 
     constructor(
         private context: vscode.ExtensionContext,
-        private serviceRegistry: ServiceRegistry
+        private serviceRegistry: ServiceRegistry,
+        private statusBarManager: StatusBarManager
     ) { }
 
     async register(): Promise<void> {
@@ -115,6 +117,9 @@ export class GenerateCommands {
                 if ('content' in result) {
                     await this.fillCommitMessage(result.content, targetRepo);
                     await this.maybeCachePendingRagDocument(targetRepo, diffs, result);
+                    void this.initializeRepositoryAnalysis(targetRepoPath).catch(error => {
+                        logger.error('[Genie][RepoAnalysis] Failed to initialize after commit message generation', error);
+                    });
                 } else {
                     await this.handleError(result);
                 }
@@ -144,6 +149,34 @@ export class GenerateCommands {
             return getProviderSecretKey(provider, region);
         }
         return getProviderSecretKey(provider);
+    }
+
+    /**
+     * Initializes repository analysis only after the extension has generated a
+     * commit message, so opening a repository never mutates or scans it.
+     *
+     * @param repositoryPath Absolute path of the repository used for generation.
+     */
+    private async initializeRepositoryAnalysis(repositoryPath: string): Promise<void> {
+        const enabled = vscode.workspace
+            .getConfiguration('gitCommitGenie.repositoryAnalysis')
+            .get<boolean>('enabled', true);
+        if (!enabled) {
+            return;
+        }
+
+        const analysisService = this.serviceRegistry.getAnalysisService();
+        const existingAnalysis = await analysisService.getAnalysis(repositoryPath);
+        if (existingAnalysis) {
+            return;
+        }
+
+        this.statusBarManager.setRepoAnalysisRunning(true, repositoryPath);
+        try {
+            await analysisService.initializeRepository(repositoryPath);
+        } finally {
+            this.statusBarManager.setRepoAnalysisRunning(false);
+        }
     }
 
     private async fillCommitMessage(content: string, repo: Repository): Promise<void> {

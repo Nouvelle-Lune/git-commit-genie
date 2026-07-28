@@ -32,6 +32,7 @@ import { compressContext } from './tools/compressionTools';
 import { compactToolResultForConversation } from './tools/formattingTools';
 import { DirectoryEntry, SearchFilesResult, ToolResult } from './tools/toolTypes';
 import { getMaxContextByFunction } from './tools/modelContext';
+import { buildGitGenieIgnoreAppend } from '../../utils/gitignore';
 
 /**
  * Tool-driven repository analysis service
@@ -1380,14 +1381,12 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private async ensureGitignoreForGitGenie(repositoryPath: string): Promise<void> {
         try {
             const gitignorePath = path.join(repositoryPath, '.gitignore');
-            const ignoreEntry = '.gitgenie/**';
-            const ignoreSection = `# Ignore Git Commit Genie data\n${ignoreEntry}\n`;
             let existing = '';
             if (fs.existsSync(gitignorePath)) {
                 try { existing = fs.readFileSync(gitignorePath, 'utf-8'); } catch { existing = ''; }
             }
-            if (existing.includes(ignoreEntry) || existing.includes('.gitgenie/')) { return; }
-            const toAppend = existing.length > 0 && !existing.endsWith('\n') ? `\n${ignoreSection}` : ignoreSection;
+            const toAppend = buildGitGenieIgnoreAppend(existing, 'Ignore Git Commit Genie data');
+            if (!toAppend) { return; }
             fs.appendFileSync(gitignorePath, toAppend, { encoding: 'utf-8' });
         } catch (error) {
             logger.warn('[Genie][RepoAnalysis] Failed to update .gitignore for .gitgenie', error as any);

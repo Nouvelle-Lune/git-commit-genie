@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { logger } from '../services/logger';
+import { buildGitGenieIgnoreAppend } from '../utils/gitignore';
 
 // Default starter template placed into new files
 const DEFAULT_TEMPLATE = `Strongly Opinionated Conventional Commit Template\n\nHeader (must follow Conventional Commits):\n<type>(<scope>)!: <description>\n- type: feat | fix | docs | style | refactor | perf | test | build | ci | chore\n- scope: optional; keep short.\n- description: imperative, ≤ 72 chars.\n\nBody:\n- Summarize the changes with short bullets or short paragraphs.\n- Keep each bullet to one sentence.\n- Prefer active voice.\n- Mention risks/limitations if relevant.\n\nFooters:\n- Refs: <ticket or issue id> (optional)\n- Breaking-Change: <reason> (when applicable)\n`;
@@ -156,23 +157,15 @@ export class TemplateService {
 		}
 
 		try {
-			const ignoreEntry = '.gitgenie/**';
-			const ignoreSection = `# Ignore Git Commit Genie templates\n${ignoreEntry}\n`;
-
 			let existing = '';
 			if (fs.existsSync(gitignorePath)) {
 				existing = fs.readFileSync(gitignorePath, 'utf-8');
 			}
 
-			// More precise check: avoid duplicate entries
-			if (existing.includes(ignoreEntry) || existing.includes('.gitgenie/')) {
+			const content = buildGitGenieIgnoreAppend(existing, 'Ignore Git Commit Genie templates');
+			if (!content) {
 				return;
 			}
-
-			// Add appropriate line breaks and ignore entry
-			const content = existing.length > 0 && !existing.endsWith('\n')
-				? `\n${ignoreSection}`
-				: ignoreSection;
 
 			fs.appendFileSync(gitignorePath, content, { encoding: 'utf-8' });
 		} catch (error) {

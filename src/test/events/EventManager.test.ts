@@ -106,6 +106,40 @@ async function flushPromises(): Promise<void> {
 // ============================================================================
 describe('EventManager', () => {
 
+    describe('initialize()', () => {
+        it('should configure watchers without initializing repository analysis', async () => {
+            const sandbox = sinon.createSandbox();
+            const initializeRepository = sandbox.stub().resolves();
+            const watcher = {
+                onDidCreate: () => ({ dispose: () => { } }),
+                onDidChange: () => ({ dispose: () => { } }),
+                onDidDelete: () => ({ dispose: () => { } }),
+                dispose: () => { },
+            } as unknown as vscode.FileSystemWatcher;
+
+            sandbox.stub(vscode.workspace, 'getConfiguration').returns({
+                get: (_section: string, defaultValue: any) => defaultValue,
+            } as unknown as vscode.WorkspaceConfiguration);
+            sandbox.stub(vscode.workspace, 'createFileSystemWatcher').returns(watcher);
+            sandbox.stub(vscode.extensions, 'getExtension').returns(undefined);
+
+            const em = new EventManager(
+                createMockContext(),
+                {
+                    getAnalysisService: () => ({ initializeRepository }),
+                } as unknown as ServiceRegistry,
+                { updateStatusBar: () => { } } as unknown as StatusBarManager
+            );
+
+            try {
+                await em.initialize();
+                assert.strictEqual(initializeRepository.called, false);
+            } finally {
+                sandbox.restore();
+            }
+        });
+    });
+
     describe('constructor & initialization', () => {
         it('should initialize repoDisposables as an empty Map', () => {
             const em = new EventManager(
@@ -194,6 +228,76 @@ describe('EventManager', () => {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (em as any).dispose();
             assert.strictEqual(map.size, 0);
+        });
+    });
+
+    describe('runAnalysisCheck()', () => {
+        let sandbox: sinon.SinonSandbox;
+
+        beforeEach(() => {
+            sandbox = sinon.createSandbox();
+            sandbox.stub(vscode.workspace, 'getConfiguration').returns({
+                get: (_section: string, defaultValue: any) => defaultValue,
+            } as unknown as vscode.WorkspaceConfiguration);
+        });
+
+        afterEach(() => {
+            sandbox.restore();
+        });
+
+        it('should not initialize analysis indirectly when none exists', async () => {
+            const getAnalysis = sandbox.stub().resolves(null);
+            const shouldUpdateAnalysis = sandbox.stub().resolves(true);
+            const updateAnalysis = sandbox.stub().resolves('success');
+            const setRepoAnalysisRunning = sandbox.stub();
+            const em = new EventManager(
+                createMockContext(),
+                {
+                    getAnalysisService: () => ({
+                        getAnalysis,
+                        shouldUpdateAnalysis,
+                        updateAnalysis,
+                    }),
+                } as unknown as ServiceRegistry,
+                { setRepoAnalysisRunning } as unknown as StatusBarManager
+            );
+            const { repo } = createMockRepo('/repo/new');
+
+            await (em as any).runAnalysisCheck(repo, 'HEADChanged');
+
+            assert.strictEqual(getAnalysis.calledOnceWithExactly('/repo/new'), true);
+            assert.strictEqual(shouldUpdateAnalysis.called, false);
+            assert.strictEqual(updateAnalysis.called, false);
+            assert.strictEqual(setRepoAnalysisRunning.called, false);
+        });
+
+        it('should continue updating an existing analysis after HEAD changes', async () => {
+            const getAnalysis = sandbox.stub().resolves({ summary: 'existing' });
+            const shouldUpdateAnalysis = sandbox.stub().resolves(true);
+            const updateAnalysis = sandbox.stub().resolves('success');
+            const setRepoAnalysisRunning = sandbox.stub();
+            const em = new EventManager(
+                createMockContext(),
+                {
+                    getAnalysisService: () => ({
+                        getAnalysis,
+                        shouldUpdateAnalysis,
+                        updateAnalysis,
+                    }),
+                } as unknown as ServiceRegistry,
+                { setRepoAnalysisRunning } as unknown as StatusBarManager
+            );
+            const { repo } = createMockRepo('/repo/existing');
+
+            await (em as any).runAnalysisCheck(repo, 'HEADChanged');
+            await flushPromises();
+
+            assert.strictEqual(shouldUpdateAnalysis.calledOnceWithExactly('/repo/existing'), true);
+            assert.strictEqual(updateAnalysis.calledOnceWithExactly('/repo/existing'), true);
+            assert.deepStrictEqual(
+                setRepoAnalysisRunning.args,
+                [[true, '/repo/existing'], [false]]
+            );
         });
     });
 

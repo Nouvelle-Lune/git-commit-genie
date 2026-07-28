@@ -25,7 +25,7 @@ export class CommandManager {
     async initialize(): Promise<void> {
         // Initialize command modules
         this.modelCommands = new ModelCommands(this.context, this.serviceRegistry, this.statusBarManager);
-        this.generateCommands = new GenerateCommands(this.context, this.serviceRegistry);
+        this.generateCommands = new GenerateCommands(this.context, this.serviceRegistry, this.statusBarManager);
         this.repoAnalysisCommands = new RepoAnalysisCommands(this.context, this.serviceRegistry, this.statusBarManager);
         this.menuCommands = new MenuCommands(this.context, this.serviceRegistry, this.statusBarManager);
         this.costCommands = new CostCommands(this.context, this.serviceRegistry);

@@ -1,6 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
-import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
@@ -321,24 +319,6 @@ export class ModelCommands {
         this.serviceRegistry.updateCurrentLLMService();
 
         await this.context.globalState.update(modelStateKey, modelPick.value);
-
-        // If repository analysis is enabled and missing, try initializing now
-        try {
-            const enabled = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis').get<boolean>('enabled', true);
-            if (!enabled) { return; }
-            const wf = vscode.workspace.workspaceFolders;
-            if (!wf || wf.length === 0) { return; }
-            const repositoryPath = wf[0].uri.fsPath;
-            if (!fs.existsSync(path.join(repositoryPath, '.git'))) { return; }
-            const analysisService = this.serviceRegistry.getAnalysisService();
-            const existing = await analysisService.getAnalysis(repositoryPath);
-            if (!existing) {
-                this.statusBarManager.setRepoAnalysisRunning(true, repositoryPath);
-                analysisService.initializeRepository(repositoryPath).finally(() => this.statusBarManager.setRepoAnalysisRunning(false));
-            }
-        } catch {
-            // best-effort only
-        }
     }
 
     /**

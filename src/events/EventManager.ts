@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
@@ -9,7 +8,6 @@ import { logger } from '../services/logger';
 export class EventManager {
     private lastHeadByRepo = new Map<string, string | undefined>();
     private repoDisposables = new Map<string, vscode.Disposable>();
-    private initializationAttempted = false;
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -20,7 +18,6 @@ export class EventManager {
     async initialize(): Promise<void> {
         await this.setupFileWatchers();
         await this.setupGitWatchers();
-        await this.initializeRepositoryAnalysis();
     }
 
     async dispose(): Promise<void> {
@@ -93,10 +90,8 @@ export class EventManager {
         try {
             // Watch for Git repository initialization (creation/deletion of .git)
             const gitFolderWatcher = vscode.workspace.createFileSystemWatcher('**/.git');
-            gitFolderWatcher.onDidCreate(async (uri) => {
+            gitFolderWatcher.onDidCreate(() => {
                 this.statusBarManager.updateStatusBar();
-                // Trigger analysis automatically once Git repo is initialized
-                await this.initializeRepositoryAnalysis();
             });
             gitFolderWatcher.onDidDelete(() => {
                 this.statusBarManager.updateStatusBar();
@@ -159,7 +154,6 @@ export class EventManager {
             // Listen for new repositories being opened/detected
             const onDidOpenRepo = api.onDidOpenRepository((repo: Repository) => {
                 attachRepoListeners(repo);
-                this.initializeRepositoryAnalysis();
             });
             this.context.subscriptions.push(onDidOpenRepo);
 
@@ -191,6 +185,10 @@ export class EventManager {
             }
 
             const analysisService = this.serviceRegistry.getAnalysisService();
+            const existingAnalysis = await analysisService.getAnalysis(repoPath);
+            if (!existingAnalysis) {
+                return;
+            }
             const should = await analysisService.shouldUpdateAnalysis(repoPath);
             if (should) {
                 logger.info(`[Genie][RepoAnalysis] Triggered by ${reason}; updating analysis...`);
@@ -253,62 +251,6 @@ export class EventManager {
             return repo;
         } catch {
             return null;
-        }
-    }
-
-    private async initializeRepositoryAnalysis(): Promise<void> {
-        const enabled = this.isRepoAnalysisEnabled();
-        if (!enabled) {
-            return;
-        }
-
-        try {
-            // Use VS Code Git API to detect repository
-            const gitExtension = vscode.extensions.getExtension('vscode.git')?.exports;
-            if (!gitExtension) {
-                logger.info('[Genie][RepoAnalysis] VS Code Git extension not found. Skipping analysis init.');
-                return;
-            }
-
-            const api = gitExtension.getAPI(1);
-            if (!api || api.repositories.length === 0) {
-                // Retry
-                if (!this.initializationAttempted) {
-                    this.initializationAttempted = true;
-
-                    // Retry after a delay as a fallback
-                    setTimeout(() => {
-                        this.initializationAttempted = false;
-                        this.initializeRepositoryAnalysis();
-                    }, 2000);
-                }
-                return;
-            }
-
-            const repositoryPath = api.repositories[0].rootUri?.fsPath;
-            if (!repositoryPath) {
-                return;
-            }
-
-            // Check if analysis already exists
-            const analysisService = this.serviceRegistry.getAnalysisService();
-            const existingAnalysis = await analysisService.getAnalysis(repositoryPath);
-            if (!existingAnalysis) {
-                // Only notify when successfully starting initialization
-                logger.info('[Genie][RepoAnalysis] Repository detected, initializing analysis...');
-                // Initialize in the background
-                this.statusBarManager.setRepoAnalysisRunning(true, repositoryPath);
-                analysisService.initializeRepository(repositoryPath).catch(error => {
-                    logger.error('Failed to initialize repository analysis:', error);
-                }).finally(() => {
-                    this.statusBarManager.setRepoAnalysisRunning(false);
-                });
-            }
-
-            // Mark as successfully initialized
-            this.initializationAttempted = true;
-        } catch (error) {
-            logger.error('Error during repository analysis initialization:', error);
         }
     }
 
