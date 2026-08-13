@@ -34,6 +34,34 @@ import { DirectoryEntry, SearchFilesResult, ToolResult } from './tools/toolTypes
 import { getMaxContextByFunction } from './tools/modelContext';
 import { buildGitGenieIgnoreAppend } from '../../utils/gitignore';
 
+const REPOSITORY_ANALYSIS_MARKDOWN_TITLE = '# Repository Analysis Summary';
+
+/**
+ * Removes the file-level title from the beginning of an analysis summary.
+ *
+ * The Markdown file owns this title, while the stored summary owns only the
+ * body. Keeping that boundary explicit prevents a synced or model-generated
+ * title from being prepended again on the next write.
+ */
+function stripRepositoryAnalysisMarkdownTitle(summary: string): string {
+    const lines = summary.split(/\r?\n/);
+    let bodyStart = 0;
+    let removedTitle = false;
+
+    while (bodyStart < lines.length) {
+        while (bodyStart < lines.length && lines[bodyStart].trim() === '') {
+            bodyStart += 1;
+        }
+        if (lines[bodyStart]?.trim() !== REPOSITORY_ANALYSIS_MARKDOWN_TITLE) {
+            break;
+        }
+        removedTitle = true;
+        bodyStart += 1;
+    }
+
+    return removedTitle ? lines.slice(bodyStart).join('\n') : summary;
+}
+
 /**
  * Tool-driven repository analysis service
  * 
@@ -1350,10 +1378,11 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         if (!fs.existsSync(mdDir)) { fs.mkdirSync(mdDir, { recursive: true }); }
         await this.ensureGitignoreForGitGenie(repositoryPath);
         if (fs.existsSync(mdPath) && opts?.overwrite === false) { return mdPath; }
+        const summaryBody = stripRepositoryAnalysisMarkdownTitle(analysis.summary);
         const content = [
-            '# Repository Analysis Summary',
+            REPOSITORY_ANALYSIS_MARKDOWN_TITLE,
             '',
-            analysis.summary,
+            summaryBody,
             '',
         ].filter(Boolean).join('\n');
         fs.writeFileSync(mdPath, content, 'utf-8');
@@ -1504,7 +1533,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             const md = fs.readFileSync(mdPath, 'utf-8');
             let current = await this.getAnalysis(repositoryPath);
             if (current && current.summary) {
-                current.summary = md.trim();
+                current.summary = stripRepositoryAnalysisMarkdownTitle(md).trim();
                 await this.saveAnalysis(repositoryPath, current);
                 logger.info('[Genie][RepoAnalysis] Synced analysis JSON from Markdown.');
                 return;

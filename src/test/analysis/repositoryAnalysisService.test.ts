@@ -1,5 +1,8 @@
 import { describe, it, beforeEach } from 'mocha';
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
 
@@ -50,6 +53,112 @@ function createStubLLMService() {
         refreshFromSettings: sinon.stub().resolves(),
     } as any;
 }
+
+// ============================================================================
+// Repository analysis Markdown title ownership
+// ============================================================================
+describe('RepositoryAnalysisService — Markdown title normalization', () => {
+    it('should write exactly one title when the summary already starts with the file title', async () => {
+        const repositoryPath = fs.mkdtempSync(path.join(os.tmpdir(), 'git-commit-genie-analysis-'));
+        const service = new RepositoryAnalysisService(
+            createStubContext(),
+            createStubLLMService(),
+            createStubRepoService()
+        );
+
+        try {
+            const mdPath = await service.saveAnalysisMarkdown(repositoryPath, {
+                repositoryPath,
+                timestamp: new Date().toISOString(),
+                summary: '# Repository Analysis Summary\n\nThe repository is a minimal Python project.',
+                projectType: 'Python',
+                technologies: ['Python'],
+            });
+            const markdown = fs.readFileSync(mdPath, 'utf-8');
+
+            assert.strictEqual(
+                markdown,
+                '# Repository Analysis Summary\nThe repository is a minimal Python project.'
+            );
+            assert.strictEqual(
+                markdown.match(/^# Repository Analysis Summary$/gm)?.length,
+                1
+            );
+        } finally {
+            fs.rmSync(repositoryPath, { recursive: true, force: true });
+        }
+    });
+
+    it('should remove repeated leading file titles while preserving headings in the body', async () => {
+        const repositoryPath = fs.mkdtempSync(path.join(os.tmpdir(), 'git-commit-genie-analysis-'));
+        const service = new RepositoryAnalysisService(
+            createStubContext(),
+            createStubLLMService(),
+            createStubRepoService()
+        );
+
+        try {
+            const mdPath = await service.saveAnalysisMarkdown(repositoryPath, {
+                repositoryPath,
+                timestamp: new Date().toISOString(),
+                summary: [
+                    '# Repository Analysis Summary',
+                    '',
+                    '# Repository Analysis Summary',
+                    '',
+                    'Body',
+                    '',
+                    '# Repository Analysis Summary',
+                    'This body heading must remain.',
+                ].join('\n'),
+                projectType: 'TypeScript',
+                technologies: ['TypeScript'],
+            });
+            const markdown = fs.readFileSync(mdPath, 'utf-8');
+
+            assert.strictEqual(
+                markdown.match(/^# Repository Analysis Summary$/gm)?.length,
+                2
+            );
+            assert.ok(markdown.startsWith('# Repository Analysis Summary\nBody'));
+            assert.ok(markdown.endsWith('# Repository Analysis Summary\nThis body heading must remain.'));
+        } finally {
+            fs.rmSync(repositoryPath, { recursive: true, force: true });
+        }
+    });
+
+    it('should store only the Markdown body when syncing the generated file', async () => {
+        const repositoryPath = fs.mkdtempSync(path.join(os.tmpdir(), 'git-commit-genie-analysis-'));
+        const context = createStubContext();
+        const service = new RepositoryAnalysisService(
+            context,
+            createStubLLMService(),
+            createStubRepoService()
+        );
+        const analysis = {
+            repositoryPath,
+            timestamp: new Date().toISOString(),
+            summary: 'Old body',
+            projectType: 'Python',
+            technologies: ['Python'],
+        };
+        const getAnalysisStub = sinon.stub(service, 'getAnalysis').resolves(analysis);
+
+        try {
+            const mdPath = service.getAnalysisMarkdownFilePath(repositoryPath);
+            fs.mkdirSync(path.dirname(mdPath), { recursive: true });
+            fs.writeFileSync(mdPath, '# Repository Analysis Summary\n\nEdited body\n', 'utf-8');
+
+            await service.syncAnalysisFromMarkdown(repositoryPath);
+
+            assert.strictEqual(analysis.summary, 'Edited body');
+            assert.strictEqual((context.globalState.update as sinon.SinonStub).callCount, 1);
+        } finally {
+            getAnalysisStub.restore();
+            fs.rmSync(repositoryPath, { recursive: true, force: true });
+        }
+    });
+});
 
 // ============================================================================
 // activeCancelSources Map management — core P1-14 fix
