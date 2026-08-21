@@ -235,6 +235,114 @@ describe('dynamic Thinking evidence compaction', () => {
         assert.deepStrictEqual(result.coveredHunkIds, ['meta', 'h1']);
     });
 
+    it('does not require a reference to structural-only diff metadata', async () => {
+        const diff = makeDiff('src/ordinary.ts', '-old\n+new');
+        const chat: ChatFn = async () => ({
+            changes: [{
+                action: 'update',
+                target: 'ordinary',
+                behavior: 'updates the content hunk',
+                exactSymbols: [],
+                evidenceHunkIds: ['h1'],
+            }],
+            tests: [],
+            breakingSignals: [],
+            uncertainties: [],
+        });
+
+        const result = await summarizeFileEvidence(diff, chat, 10_000, 1);
+
+        assert.deepStrictEqual(result.coveredHunkIds, ['meta', 'h1']);
+        assert.deepStrictEqual(result.changes[0].evidenceHunkIds, ['h1']);
+    });
+
+    it('still requires a reference to rename and mode metadata', async () => {
+        const diff: DiffData = {
+            fileName: 'src/renamed.ts',
+            status: 'renamed',
+            rawDiff: [
+                'diff --git a/src/old.ts b/src/renamed.ts',
+                'old mode 100644',
+                'new mode 100755',
+                'rename from src/old.ts',
+                'rename to src/renamed.ts',
+                '@@ -1 +1 @@',
+                '-old',
+                '+new',
+            ].join('\n'),
+            diffHunks: [{
+                header: '@@ -1 +1 @@',
+                content: '-old\n+new',
+                additions: ['+new'],
+                deletions: ['-old'],
+            }],
+        };
+        const chat: ChatFn = async () => ({
+            changes: [{
+                action: 'update',
+                target: 'renamed',
+                behavior: 'updates the content hunk',
+                exactSymbols: [],
+                evidenceHunkIds: ['h1'],
+            }],
+            tests: [],
+            breakingSignals: [],
+            uncertainties: [],
+        });
+
+        await assert.rejects(
+            () => summarizeFileEvidence(diff, chat, 10_000, 1),
+            /omitted hunk ids: meta/
+        );
+    });
+
+    it('preserves optional structural metadata coverage across split meta chunks', async () => {
+        const fileName = 'src/large-meta.ts';
+        const rawDiff = [
+            `diff --git a/${fileName} b/${fileName}`,
+            ...Array.from({ length: 12 }, (_, index) => `index ${index.toString(16).padStart(2, '0')}${'a'.repeat(360)} ${'b'.repeat(360)}`),
+            '@@ -1 +1 @@',
+            '-old',
+            '+new',
+        ].join('\n');
+        const diff: DiffData = {
+            fileName,
+            status: 'modified',
+            rawDiff,
+            diffHunks: [{
+                header: '@@ -1 +1 @@',
+                content: '-old\n+new',
+                additions: ['+new'],
+                deletions: ['-old'],
+            }],
+        };
+        const observedIds: string[] = [];
+        const chat: ChatFn = async messages => {
+            const ids = Array.from(messages[1].content.matchAll(/"id": "([^"]+)"/g), match => match[1]);
+            observedIds.push(...ids);
+            const contentIds = ids.filter(id => !id.startsWith('meta'));
+            return {
+                changes: contentIds.map(id => ({
+                    action: 'update',
+                    target: 'largeMeta',
+                    behavior: `captures ${id}`,
+                    exactSymbols: [],
+                    evidenceHunkIds: [id],
+                })),
+                tests: [],
+                breakingSignals: [],
+                uncertainties: [],
+            };
+        };
+
+        const result = await summarizeFileEvidence(diff, chat, 1_200, 1);
+
+        assert.ok(observedIds.filter(id => id.startsWith('meta:p')).length > 1,
+            'structural metadata should be split into multiple chunks');
+        assert.ok(result.coveredHunkIds.every(id => observedIds.includes(id)));
+        assert.deepStrictEqual(result.changes.map(change => change.evidenceHunkIds), [['h1']]);
+    });
+
     it('preserves source chunk order when summary calls finish out of order', async () => {
         const diff = makeDiff('src/ordered.ts', `-${'a'.repeat(10_000)}\n+${'b'.repeat(10_000)}`);
         const observedIds: string[] = [];

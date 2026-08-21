@@ -187,22 +187,27 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                     const usage = options.trackUsage ? (response as any).usage : undefined;
 
                     // Token usage logging is handled at provider level to avoid duplication
-                    const parsedResponse = content ? JSON.parse(content.trim()) : undefined;
+                    const trimmedContent = content.trim();
+                    const parsedResponse = trimmedContent ? JSON.parse(trimmedContent) : undefined;
 
-                    // Update log with function call result
-                    if (parsedResponse) {
-                        const isFinal = parsedResponse.action === 'final';
-                        if (logId) {
-                            logger.logApiRequestWithResult(
-                                logId,
-                                options.provider,
-                                options.model,
-                                parsedResponse,
-                                usage,
-                                isFinal,
-                                options.repoPath
-                            );
-                        }
+                    // A completed HTTP response must close its pending Webview
+                    // entry even when JSON Output returns an empty content field.
+                    // The base validation loop classifies and retries that case.
+                    if (logId) {
+                        const logResult = parsedResponse === undefined ? {
+                            warning: 'Provider returned empty structured output.',
+                            finishReason: response.choices[0]?.finish_reason ?? null,
+                            hasReasoningContent: Boolean((response.choices[0]?.message as any)?.reasoning_content),
+                        } : parsedResponse;
+                        logger.logApiRequestWithResult(
+                            logId,
+                            options.provider,
+                            options.model,
+                            logResult,
+                            usage,
+                            parsedResponse?.action === 'final',
+                            options.repoPath
+                        );
                     }
 
                     const parsedAssistantResponse = response.choices[0]?.message;

@@ -49,6 +49,35 @@ describe('pipeline display model', () => {
         }), false);
     });
 
+    it('rejects malformed structured-validation logs before Webview rendering', () => {
+        const base = {
+            id: 'validation-1',
+            timestamp: 1,
+            type: 'toolCall',
+            title: 'Structured output retry: summary',
+        };
+        assert.strictEqual(isCurrentPersistedLogEntry({
+            ...base,
+            content: JSON.stringify({
+                stage: 'summary',
+                attempt: 1,
+                totalAttempts: 4,
+                missingResponse: true,
+                finalFailure: false,
+            }),
+        }), true);
+
+        for (const content of ['{not-json}', JSON.stringify({ stage: '' }), JSON.stringify({ finalFailure: true })]) {
+            assert.strictEqual(isCurrentPersistedLogEntry({ ...base, content }), false);
+        }
+        assert.strictEqual(isCurrentPersistedLogEntry({
+            ...base,
+            title: 'Tool call',
+            reason: 'Structured output failed',
+            content: '{not-json}',
+        }), false);
+    });
+
     it('localizes only the exact VS Code languages supported by the extension', () => {
         assert.strictEqual(isLocalizedPipelineLanguage('zh-cn'), true);
         assert.strictEqual(isLocalizedPipelineLanguage('ZH-TW'), true);

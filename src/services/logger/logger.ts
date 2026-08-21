@@ -313,7 +313,9 @@ export class Logger {
                 case 'schemaValidation': {
                     const stage = String(parsedArgs.stage || '').replace(/([A-Z])/g, ' $1').trim();
                     const final = !!parsedArgs.finalFailure;
-                    const prefix = final ? 'Schema validation failed' : 'Schema validation retry';
+                    const prefix = parsedArgs.missingResponse
+                        ? (final ? 'Structured output failed' : 'Structured output retry')
+                        : (final ? 'Schema validation failed' : 'Schema validation retry');
                     return `${prefix}: ${stage || 'unknown'}`;
                 }
                 default:

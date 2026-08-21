@@ -21,6 +21,8 @@ export interface PipelineTextCatalog {
     stateReady: string;
     stateDegraded: string;
     stateRunning: string;
+    stateRetrying: string;
+    stateFailed: string;
     stagesLabel: string;
     stepEvidence: string;
     stepSummary: string;
@@ -53,6 +55,10 @@ export interface PipelineTextCatalog {
     metricType: string;
     metricScope: string;
     metricReferences: string;
+    schemaValidationRetryTitle: string;
+    schemaValidationFailedTitle: string;
+    structuredOutputRetryTitle: string;
+    structuredOutputFailedTitle: string;
     evidenceReadyTitle: string;
     evidenceReadyDescription: string;
     summarizeStartTitle: string;
@@ -102,6 +108,8 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     stateReady: 'Ready',
     stateDegraded: 'Degraded',
     stateRunning: 'Running',
+    stateRetrying: 'Retrying',
+    stateFailed: 'Failed',
     stagesLabel: 'Commit generation stages',
     stepEvidence: 'Evidence',
     stepSummary: 'Summary',
@@ -134,6 +142,10 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     metricType: 'Type',
     metricScope: 'Scope',
     metricReferences: 'References',
+    schemaValidationRetryTitle: 'Schema validation retry: {0}',
+    schemaValidationFailedTitle: 'Schema validation failed: {0}',
+    structuredOutputRetryTitle: 'Empty structured output, retrying: {0}',
+    structuredOutputFailedTitle: 'Structured output failed: {0}',
     evidenceReadyTitle: 'Change evidence collected',
     evidenceReadyDescription: '{0} staged files entered the pipeline as complete raw diffs.',
     summarizeStartTitle: 'Evidence compaction started',

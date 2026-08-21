@@ -188,6 +188,7 @@ export const LogSection: React.FC = () => {
     };
 
     const isFailureLog = (log: LogEntry) => {
+        if (isValidationRetryLog(log)) return false;
         if (isSchemaValidationLog(log)) return true;
         if (getPipelinePresentation(log)?.tone === 'warning') return true;
         const t = (log.title || '').toLowerCase();
@@ -233,7 +234,41 @@ export const LogSection: React.FC = () => {
     const isSchemaValidationLog = (log: LogEntry) => {
         const t = (log.title || '').toLowerCase();
         const r = (log.reason || '').toLowerCase();
-        return log.type === LogType.ToolCall && (t.includes('schema validation') || r.includes('schema validation'));
+        return log.type === LogType.ToolCall && (
+            t.includes('schema validation')
+            || t.includes('structured output')
+            || r.includes('schema validation')
+            || r.includes('structured output')
+        );
+    };
+
+    const isValidationRetryLog = (log: LogEntry) => {
+        const title = (log.title || '').toLowerCase();
+        return log.type === LogType.ToolCall && (
+            title.includes('schema validation retry')
+            || title.includes('structured output retry')
+        );
+    };
+
+    const getValidationTitle = (log: LogEntry): string | null => {
+        if (!isSchemaValidationLog(log)) {
+            return null;
+        }
+        if (!log.content) {
+            throw new Error(`Structured validation log '${log.id}' is missing its payload.`);
+        }
+        const payload = JSON.parse(log.content) as { stage?: unknown; finalFailure?: unknown; missingResponse?: unknown };
+        if (typeof payload.stage !== 'string' || payload.stage.length === 0) {
+            throw new Error(`Structured validation log '${log.id}' is missing its stage.`);
+        }
+        const template = payload.missingResponse
+            ? (payload.finalFailure
+                ? state.i18n.pipeline.structuredOutputFailedTitle
+                : state.i18n.pipeline.structuredOutputRetryTitle)
+            : (payload.finalFailure
+                ? state.i18n.pipeline.schemaValidationFailedTitle
+                : state.i18n.pipeline.schemaValidationRetryTitle);
+        return formatPipelineText(template, payload.stage);
     };
 
     const getRepoInfoForLog = (log: LogEntry): { name: string; colorIdx: number } | null => {
@@ -298,9 +333,14 @@ export const LogSection: React.FC = () => {
                 throw new Error(`Unknown commit pipeline stage '${stage}'.`);
             }
 
-            // Schema validation
-            if (title.includes('Schema validation')) {
-                return { label: 'FAILED', className: 'stage-badge-validation' };
+            // Structured-output validation and provider-empty retries
+            if (isSchemaValidationLog(log)) {
+                return {
+                    label: isValidationRetryLog(log)
+                        ? state.i18n.pipeline.stateRetrying
+                        : state.i18n.pipeline.stateFailed,
+                    className: 'stage-badge-validation'
+                };
             }
 
             // Repository analysis tools
@@ -430,7 +470,7 @@ export const LogSection: React.FC = () => {
                                                         <span className="log-title-text">
                                                             {(() => { const info = getRepoInfoForLog(log); return info ? (<span className={`log-repo-badge repo-badge-c${info.colorIdx}`}>{info.name}</span>) : null; })()}
                                                             {(() => { const badge = getStageBadge(log); return badge ? (<span className={`stage-badge ${badge.className}`}>{badge.label}</span>) : null; })()}
-                                                            <span className="log-display-title">{pipeline?.title || log.title}</span>
+                                                            <span className="log-display-title">{pipeline?.title || getValidationTitle(log) || log.title}</span>
                                                         </span>
                                                         {/* inline reason removed; reason is a separate log */}
                                                     </div>

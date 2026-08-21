@@ -19,6 +19,32 @@ export const ANTHROPIC_FIXED_SAMPLING_MODELS: ReadonlySet<string> = new Set([
     'claude-opus-4-7',
 ]);
 
+type AnthropicContentBlock = {
+    type: string;
+    name?: string;
+    input?: unknown;
+};
+
+/**
+ * Select the single structured tool result requested by the caller.
+ * Anthropic may emit thinking or text blocks before tool_use, so positional
+ * access would incorrectly discard a valid structured response.
+ */
+export function findAnthropicToolUseBlock(
+    content: readonly AnthropicContentBlock[],
+    requiredToolName?: string
+): AnthropicContentBlock | undefined {
+    const matchingBlocks = content.filter(block => (
+        block.type === 'tool_use'
+        && (requiredToolName === undefined || block.name === requiredToolName)
+    ));
+    if (matchingBlocks.length > 1) {
+        const toolLabel = requiredToolName ? `'${requiredToolName}'` : 'the structured response';
+        throw new Error(`Anthropic returned multiple tool_use blocks for ${toolLabel}.`);
+    }
+    return matchingBlocks[0];
+}
+
 /**
  * Utilities for Anthropic Claude API
  */
@@ -101,25 +127,31 @@ export class AnthropicUtils extends BaseProviderUtils {
                     signal: controller.signal
                 });
 
-                const block = response.content[0] as ToolUseBlock;
-
+                const requiredToolName = typeof options.toolChoice?.name === 'string'
+                    ? options.toolChoice.name
+                    : undefined;
+                const block = findAnthropicToolUseBlock(
+                    response.content as ToolUseBlock[],
+                    requiredToolName
+                );
                 const parsedResponse = block?.input;
 
                 // Update log with function call result
-                if (parsedResponse) {
-                    const isFinal = (parsedResponse as any).action === 'final';
-                    const usage = response.usage;
-                    if (logId) {
-                        logger.logApiRequestWithResult(
+                if (logId) {
+                    const logResult = parsedResponse === undefined ? {
+                        warning: 'Provider returned no matching tool_use block.',
+                        requiredToolName: requiredToolName ?? null,
+                        returnedBlockTypes: response.content.map(item => item.type),
+                    } : parsedResponse;
+                    logger.logApiRequestWithResult(
                         logId,
                         options.provider,
                         options.model,
-                        parsedResponse,
-                        usage,
-                        isFinal,
+                        logResult,
+                        response.usage,
+                        (parsedResponse as any)?.action === 'final',
                         options.repoPath
-                        );
-                    }
+                    );
                 }
 
                 const parsedAssistantResponse = {

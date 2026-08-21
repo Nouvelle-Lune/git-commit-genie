@@ -2,11 +2,16 @@ import { describe, it, beforeEach, afterEach } from 'mocha';
 import * as assert from 'assert';
 import * as sinon from 'sinon';
 import * as vscode from 'vscode';
+import { z } from 'zod';
 
 import { BaseLLMService } from '../../services/llm/baseLLMService';
 import { DiffData } from '../../services/git/gitTypes';
+import { ChatMessage } from '../../services/llm/llmTypes';
 import { IRepositoryAnalysisService } from '../../services/analysis/analysisTypes';
 import { TemplateService } from '../../template/templateService';
+import { OpenAICompatibleUtils } from '../../services/llm/providers/utils/OpenAIUtils';
+import { findAnthropicToolUseBlock } from '../../services/llm/providers/utils/AnthropicUtils';
+import { logger } from '../../services/logger';
 
 // ============================================================================
 // Concrete test subclass of BaseLLMService — exposes buildJsonMessage publicly
@@ -26,6 +31,22 @@ class TestableLLMService extends BaseLLMService {
         return super['getRepositoryPath'](repo);
     }
 
+    public runValidated(params: {
+        reqType: string | undefined;
+        totalAttempts: number;
+        initialMessages: ChatMessage[];
+        repoPath: string;
+        validationSchema: z.ZodTypeAny | undefined;
+        callOnce: (messages: ChatMessage[]) => Promise<{
+            parsedResponse?: any;
+            parsedAssistantResponse?: ChatMessage;
+            usage?: any;
+        }>;
+        onUsage?: (usage: any | undefined) => void;
+    }): Promise<any> {
+        return super['runValidatedChatCall'](params);
+    }
+
     // Abstract method stubs — not used in buildJsonMessage tests
     async refreshFromSettings(): Promise<void> {}
     async validateApiKeyAndListModels(_apiKey: string): Promise<string[]> { return []; }
@@ -38,6 +59,143 @@ class TestableLLMService extends BaseLLMService {
     protected getProviderName(): string { return 'TestProvider'; }
     protected getCurrentModel(): string { return 'test-model'; }
 }
+
+describe('runValidatedChatCall — missing structured output', () => {
+    it('retries an undefined response without appending an empty assistant turn', async () => {
+        const service = new TestableLLMService(createStubContext(), createStubTemplateService());
+        const observedMessages: Array<Array<{ role: string; content: string }>> = [];
+        let calls = 0;
+
+        const result = await service.runValidated({
+            reqType: 'summary',
+            totalAttempts: 2,
+            initialMessages: [{ role: 'user', content: 'Return JSON.' }],
+            repoPath: '/test-repo',
+            validationSchema: z.object({ value: z.string() }),
+            callOnce: async messages => {
+                observedMessages.push(messages);
+                calls += 1;
+                return calls === 1
+                    ? { parsedResponse: undefined }
+                    : { parsedResponse: { value: 'ok' } };
+            },
+        });
+
+        assert.deepStrictEqual(result, { value: 'ok' });
+        assert.strictEqual(observedMessages[1].length, 2);
+        assert.deepStrictEqual(observedMessages[1].map(message => message.role), ['user', 'user']);
+        assert.match(observedMessages[1][1].content, /no final JSON object/);
+    });
+
+    it('fails explicitly after every structured response is missing', async () => {
+        const service = new TestableLLMService(createStubContext(), createStubTemplateService());
+
+        await assert.rejects(
+            () => service.runValidated({
+                reqType: 'summary',
+                totalAttempts: 2,
+                initialMessages: [{ role: 'user', content: 'Return JSON.' }],
+                repoPath: '/test-repo',
+                validationSchema: z.object({ value: z.string() }),
+                callOnce: async () => ({ parsedResponse: undefined }),
+            }),
+            /returned no structured output for summary after 2 attempts/
+        );
+    });
+});
+
+describe('provider structured output extraction', () => {
+    it('closes an empty OpenAI-compatible response log with useful diagnostics', async () => {
+        const utils = new OpenAICompatibleUtils({} as vscode.ExtensionContext);
+        const logApiRequest = sinon.stub(logger, 'logApiRequest').returns('api-empty');
+        const logApiRequestWithResult = sinon.stub(logger, 'logApiRequestWithResult');
+        try {
+            const client = {
+                chat: {
+                    completions: {
+                        create: async () => ({
+                            choices: [{
+                                message: { content: '   ', reasoning_content: 'internal reasoning' },
+                                finish_reason: 'length',
+                            }],
+                            usage: { total_tokens: 4 },
+                        }),
+                    },
+                },
+            } as any;
+
+            const result = await utils.callChatCompletion(
+                client,
+                [{ role: 'user', content: 'Return JSON.' }],
+                { model: 'deepseek-v4-flash', provider: 'DeepSeek', requestType: 'summary' }
+            );
+
+            assert.strictEqual(result.parsedResponse, undefined);
+            assert.deepStrictEqual(logApiRequestWithResult.firstCall.args.slice(0, 4), [
+                'api-empty',
+                'DeepSeek',
+                'deepseek-v4-flash',
+                {
+                    warning: 'Provider returned empty structured output.',
+                    finishReason: 'length',
+                    hasReasoningContent: true,
+                },
+            ]);
+        } finally {
+            logApiRequest.restore();
+            logApiRequestWithResult.restore();
+        }
+    });
+
+    it('preserves JSON null instead of classifying it as an empty response', async () => {
+        const utils = new OpenAICompatibleUtils({} as vscode.ExtensionContext);
+        const logApiRequest = sinon.stub(logger, 'logApiRequest').returns('api-null');
+        const logApiRequestWithResult = sinon.stub(logger, 'logApiRequestWithResult');
+        try {
+            const client = {
+                chat: {
+                    completions: {
+                        create: async () => ({
+                            choices: [{ message: { content: 'null' }, finish_reason: 'stop' }],
+                        }),
+                    },
+                },
+            } as any;
+
+            const result = await utils.callChatCompletion(
+                client,
+                [{ role: 'user', content: 'Return JSON.' }],
+                { model: 'deepseek-v4-flash', provider: 'DeepSeek', requestType: 'summary' }
+            );
+
+            assert.strictEqual(result.parsedResponse, null);
+            assert.strictEqual(logApiRequestWithResult.firstCall.args[3], null);
+        } finally {
+            logApiRequest.restore();
+            logApiRequestWithResult.restore();
+        }
+    });
+
+    it('finds the requested Anthropic tool_use block after thinking and text blocks', () => {
+        const selected = findAnthropicToolUseBlock([
+            { type: 'thinking' },
+            { type: 'text' },
+            { type: 'tool_use', name: 'evidence_summary', input: { changes: [] } },
+        ], 'evidence_summary');
+
+        assert.deepStrictEqual(selected?.input, { changes: [] });
+        assert.strictEqual(findAnthropicToolUseBlock([
+            { type: 'tool_use', name: 'other_tool', input: {} },
+        ], 'evidence_summary'), undefined);
+    });
+
+    it('rejects ambiguous Anthropic tool results instead of choosing one silently', () => {
+        assert.throws(() => findAnthropicToolUseBlock([
+            { type: 'tool_use', name: 'evidence_summary', input: { value: 1 } },
+            { type: 'tool_use', name: 'evidence_summary', input: { value: 2 } },
+        ], 'evidence_summary'), /multiple tool_use blocks/);
+    });
+});
 
 // ============================================================================
 // Helper: create a minimal stub ExtensionContext

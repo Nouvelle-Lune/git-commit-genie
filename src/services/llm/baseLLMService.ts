@@ -137,6 +137,26 @@ export abstract class BaseLLMService implements LLMService {
     }
 
     /**
+     * Build a clean retry turn when the provider returned no final structured
+     * content. An empty assistant message is intentionally excluded because it
+     * does not give the model a response to repair and some chat-compatible
+     * providers reject empty assistant content on the next request.
+     */
+    protected buildMissingStructuredResponseRetryMessages(
+        originalMessages: ChatMessage[],
+        schema: z.ZodSchema
+    ): ChatMessage[] {
+        const jsonSchemaString = JSON.stringify(z.toJSONSchema(schema), null, 2);
+        return [
+            ...originalMessages,
+            {
+                role: 'user',
+                content: `The previous response contained no final JSON object. Return exactly one complete JSON object matching this schema: ${jsonSchemaString}. Do not include markdown or explanation.`
+            }
+        ];
+    }
+
+    /**
      * Log schema validation retry warning
      * 
      * @param requestType The type of request being retried
@@ -180,6 +200,35 @@ export abstract class BaseLLMService implements LLMService {
 
             if (!validationSchema) {
                 return result.parsedResponse;
+            }
+
+            if (result.parsedResponse === undefined) {
+                const retryPayload = {
+                    stage: reqType,
+                    attempt: attempt + 1,
+                    totalAttempts,
+                    missingResponse: true,
+                    finalFailure: attempt === totalAttempts - 1,
+                };
+                if (attempt < totalAttempts - 1) {
+                    logger.warn(`[Genie][${providerName}] Provider returned no structured output for ${reqType || 'unknown'} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
+                    safeRun(`${providerName}.logStructuredOutputRetry`, () => logger.logToolCall(
+                        'schemaValidation',
+                        JSON.stringify(retryPayload),
+                        'Structured output missing',
+                        repoPath,
+                    ));
+                    messages = this.buildMissingStructuredResponseRetryMessages(messages, validationSchema);
+                    continue;
+                }
+
+                safeRun(`${providerName}.logStructuredOutputFinal`, () => logger.logToolCall(
+                    'schemaValidation',
+                    JSON.stringify(retryPayload),
+                    'Structured output missing',
+                    repoPath,
+                ));
+                throw new Error(`${providerName} returned no structured output for ${reqType ?? 'unknown'} after ${totalAttempts} attempts`);
             }
 
             const safe = validationSchema.safeParse(result.parsedResponse);

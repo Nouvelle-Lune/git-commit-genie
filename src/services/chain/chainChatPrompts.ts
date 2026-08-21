@@ -20,6 +20,7 @@ export function buildSummarizeEvidenceMessages(input: {
             '',
             '<critical>',
             'No commentary. Return ONLY JSON.',
+            'Always emit one complete JSON object; never leave the final answer empty.',
             '</critical>'
         ].join('\n')
     };
@@ -37,8 +38,10 @@ export function buildSummarizeEvidenceMessages(input: {
             '- A context-only slice may return an empty changes array; never invent a change to fill it',
             '- Hunk ids with :pN are ordered slices and may continue a line from the previous slice',
             '- The meta hunk contains diff headers such as paths, modes, and rename metadata',
+            '- A meta hunk containing only structural diff/index/path headers is context-only and does not require a reference',
+            '- A meta hunk containing rename, copy, mode, similarity, or file lifecycle evidence must be referenced',
             '- Record ambiguity in uncertainties instead of guessing, with the relevant hunk ids',
-            '- Every provided hunk id must appear in at least one change, test, breaking signal, or uncertainty',
+            '- Every provided code/content hunk id must appear in at least one change, test, breaking signal, or uncertainty',
             '- Respond ONLY with JSON using the specified schema',
             '',
             // Guardrails for documentation files to avoid misclassification later

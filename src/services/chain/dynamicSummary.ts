@@ -15,6 +15,7 @@ type EvidenceUnit = {
     id: string;
     header: string;
     content: string;
+    requiresCoverage: boolean;
 };
 
 type SummaryTaskScheduler = <T>(task: () => Promise<T>) => Promise<T>;
@@ -179,7 +180,12 @@ async function summarizeFileEvidenceWithScheduler(
         scheduleSummaryTask(async () => {
             const messages = buildSummaryMessages(diff, chunk);
             const parsed = await chat(messages, { requestType: 'summary' }) as EvidenceSummaryResponse;
-            validateEvidenceReferences(parsed, new Set(chunk.map(unit => unit.id)), diff.fileName);
+            validateEvidenceReferences(
+                parsed,
+                new Set(chunk.map(unit => unit.id)),
+                new Set(chunk.filter(unit => unit.requiresCoverage).map(unit => unit.id)),
+                diff.fileName
+            );
             return { index, value: parsed };
         })
     ));
@@ -290,16 +296,29 @@ function buildEvidenceUnits(diff: DiffData, maxInputTokens: number): EvidenceUni
     const preamble = extractDiffPreamble(diff.rawDiff);
     const baseUnits: EvidenceUnit[] = diff.diffHunks.length > 0
         ? [
-            ...(preamble.trim() ? [{ id: 'meta', header: '', content: preamble }] : []),
+            ...(preamble.trim() ? [{
+                id: 'meta',
+                header: '',
+                content: preamble,
+                requiresCoverage: metaContainsChangeEvidence(preamble),
+            }] : []),
             ...diff.diffHunks.map((hunk, index) => ({
                 id: `h${index + 1}`,
                 header: hunk.header,
                 content: hunk.content,
+                requiresCoverage: true,
             })),
         ]
-        : [{ id: 'h1', header: '', content: diff.rawDiff }];
+        : [{ id: 'h1', header: '', content: diff.rawDiff, requiresCoverage: true }];
 
     return baseUnits.flatMap(unit => splitEvidenceUnit(diff, unit, maxInputTokens));
+}
+
+function metaContainsChangeEvidence(preamble: string): boolean {
+    // Plain diff/index/path headers only identify the file and should not force
+    // the model to invent a semantic observation. Lifecycle, mode, copy, and
+    // rename lines are actual changes and must remain coverage-checked.
+    return preamble.split('\n').some(line => /^(?:old mode|new mode|new file mode|deleted file mode|rename from|rename to|copy from|copy to|similarity index|dissimilarity index)\b/.test(line));
 }
 
 function extractDiffPreamble(rawDiff: string): string {
@@ -326,7 +345,12 @@ function splitEvidenceUnit(diff: DiffData, unit: EvidenceUnit, maxInputTokens: n
 
     for (const line of lines) {
         const candidate = [...currentLines, line].join('\n');
-        const probe = { id: `${unit.id}:p9999`, header: unit.header, content: candidate };
+        const probe = {
+            id: `${unit.id}:p9999`,
+            header: unit.header,
+            content: candidate,
+            requiresCoverage: unit.requiresCoverage,
+        };
         if (messagesFitBudget(buildSummaryMessages(diff, [probe]), maxInputTokens)) {
             currentLines.push(line);
             continue;
@@ -353,6 +377,7 @@ function splitEvidenceUnit(diff: DiffData, unit: EvidenceUnit, maxInputTokens: n
         id: `${unit.id}:p${index + 1}`,
         header: unit.header,
         content,
+        requiresCoverage: unit.requiresCoverage,
     }));
 }
 
@@ -379,6 +404,7 @@ function splitOversizedLine(
                 id: `${unit.id}:p9999`,
                 header: unit.header,
                 content: remaining.slice(0, mid),
+                requiresCoverage: unit.requiresCoverage,
             };
             if (messagesFitBudget(buildSummaryMessages(diff, [probe]), maxInputTokens)) {
                 best = mid;
@@ -443,6 +469,7 @@ function messagesFitBudget(messages: ChatMessage[], maxInputTokens: number): boo
 function validateEvidenceReferences(
     response: EvidenceSummaryResponse,
     allowedIds: Set<string>,
+    requiredIds: Set<string>,
     fileName: string
 ): void {
     const references = [
@@ -457,7 +484,7 @@ function validateEvidenceReferences(
     }
 
     const referencedIds = new Set(references);
-    const missing = Array.from(allowedIds).filter(id => !referencedIds.has(id));
+    const missing = Array.from(requiredIds).filter(id => !referencedIds.has(id));
     if (missing.length > 0) {
         throw new Error(`Evidence summary for '${fileName}' omitted hunk ids: ${missing.join(', ')}.`);
     }
