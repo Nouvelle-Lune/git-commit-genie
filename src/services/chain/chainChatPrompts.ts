@@ -113,13 +113,6 @@ export function buildClassifyAndDraftMessages(
         change_evidence: evidence,
         target_language: targetLanguage || '',
         repo_analysis: repoAnalysisForPayload,
-        rag_style_references: (ragStyleReferences || []).map(reference => ({
-            commit_message: reference.message,
-            type: reference.type || null,
-            scope: reference.scope ?? null,
-            matched_by: reference.matchedBy,
-            style_reason: reference.styleReason,
-        }))
     };
 
     const lines: string[] = [
@@ -193,14 +186,25 @@ export function buildClassifyAndDraftMessages(
     }
 
     if (ragStyleReferences?.length) {
+
+        const styleRefs = ragStyleReferences.map(ref => ({
+            commit_message: ref.message,
+            type: ref.type || null,
+            scope: ref.scope ?? null,
+            matched_by: ref.matchedBy,
+            style_reason: ref.styleReason,
+        }));
+
         lines.push(
             '',
             '<rag_style_reference>',
             'Historical commit messages below are STYLE REFERENCES ONLY.',
-            '- Use them only to infer writing habits such as type/scope granularity, header length, tone, and body structure.',
+            'You will receive a set of historical commit message examples, each accompanied by a `style_reason` field that explicitly describes the stylistic features worth learning from in that example (such as type/scope granularity, title length, tone, body structure, etc.).',
+            '**Your core reference is the textual description in `style_reason`**, rather than the specific content of the example messages themselves.',
             '- Do NOT copy, paraphrase, or reuse any concrete facts, entities, file names, feature names, bug names, or claims from these examples.',
             '- Every factual statement in the new commit message must be grounded in the current change_evidence input, not in the historical examples.',
             '- If a style example conflicts with the current changes, ignore it.',
+            JSON.stringify(styleRefs, null, 2),
             '</rag_style_reference>'
         );
     }
