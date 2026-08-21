@@ -8,7 +8,7 @@ import { isOpenAIChatProvider, isOpenAIResponsesProvider } from '../config/Provi
 
 import { ChatMessage, RequestType } from "../../llmTypes";
 
-import { commitMessageSchema, fileSummarySchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, ragPreparationResponseSchema, ragRerankResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema, compressionResponseSchema } from "../schemas/common";
+import { commitMessageSchema, evidenceSummaryResponseSchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, ragPreparationResponseSchema, ragRerankResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema, compressionResponseSchema } from "../schemas/common";
 import { OpenAIRepoAnalysisFunctions } from "../schemas/openaiFunctions";
 
 
@@ -324,7 +324,7 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
         if (isOpenAIResponsesProvider(options.provider)) {
             const requestTypeSchemaMap = new Map<RequestType, { schema: any; name: string }>([
                 ['commitMessage', { schema: commitMessageSchema, name: 'commitMessage' }],
-                ['summary', { schema: fileSummarySchema, name: 'fileSummary' }],
+                ['summary', { schema: evidenceSummaryResponseSchema, name: 'evidenceSummary' }],
                 ['draft', { schema: classifyAndDraftResponseSchema, name: 'classifyAndDraftResponse' }],
                 ['fix', { schema: validateAndFixResponseSchema, name: 'validateAndFixResponse' }],
                 ['ragPreparation', { schema: ragPreparationResponseSchema, name: 'ragPreparationResponse' }],

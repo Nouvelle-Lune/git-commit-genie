@@ -12,6 +12,7 @@ import { OpenAICompatibleUtils } from './utils/OpenAIUtils';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
 import { ProviderRuntimeConfig, ProviderRules } from './utils/BaseProviderUtils';
+import { assertChatMessagesWithinTokenBudget } from '../../chain/tokenBudget';
 import { commitMessageSchema } from './schemas/common';
 import { ProviderError } from './errors/providerError';
 
@@ -192,14 +193,17 @@ export class OpenAIService extends BaseLLMService {
                 initialMessages: messages,
                 repoPath,
                 validationSchema: getValidationSchemaFor(reqType),
-                callOnce: (msgs) => this.utils.callChatCompletion(this.openai!, msgs, {
-                    model: config.model,
-                    provider: 'OpenAI',
-                    token: options?.token,
-                    trackUsage: true,
-                    requestType: _options!.requestType,
-                    repoPath,
-                }),
+                callOnce: (msgs) => {
+                    assertChatMessagesWithinTokenBudget(msgs, config.chainMaxInputTokens, reqType);
+                    return this.utils.callChatCompletion(this.openai!, msgs, {
+                        model: config.model,
+                        provider: 'OpenAI',
+                        token: options?.token,
+                        trackUsage: true,
+                        requestType: _options!.requestType,
+                        repoPath,
+                    });
+                },
                 onUsage: (usage) => {
                     callCount += 1;
                     if (usage) {
@@ -231,6 +235,8 @@ export class OpenAIService extends BaseLLMService {
                 chat,
                 {
                     maxParallel: config.chainMaxParallel,
+                    maxInputTokens: config.chainMaxInputTokens,
+                    model: config.model,
                     retrieveRagExamples: async (context) => {
                         if (!options?.ragRetrievalService || !options?.targetRepo) {
                             return [];

@@ -8,11 +8,22 @@ export const commitMessageSchema = z.object({
   commitMessage: z.string().min(1)
 } as const);
 
-export const fileSummarySchema = z.object({
-  file: z.string().min(1),
-  status: z.enum(['added', 'modified', 'deleted', 'renamed', 'untracked', 'ignored']),
-  summary: z.string().min(1),
-  breaking: z.boolean()
+const evidenceReferenceSchema = z.object({
+  detail: z.string().min(1),
+  evidenceHunkIds: z.array(z.string().min(1)).min(1),
+} as const);
+
+export const evidenceSummaryResponseSchema = z.object({
+  changes: z.array(z.object({
+    action: z.string().min(1),
+    target: z.string().min(1),
+    behavior: z.string().min(1),
+    exactSymbols: z.array(z.string().min(1)),
+    evidenceHunkIds: z.array(z.string().min(1)).min(1),
+  } as const)),
+  tests: z.array(evidenceReferenceSchema),
+  breakingSignals: z.array(evidenceReferenceSchema),
+  uncertainties: z.array(evidenceReferenceSchema),
 } as const);
 
 export const classifyAndDraftResponseSchema = z.object({

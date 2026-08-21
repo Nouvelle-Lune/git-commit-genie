@@ -14,11 +14,13 @@ import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestType
 import { ProviderRules } from './utils/BaseProviderUtils';
 import { commitMessageSchema } from './schemas/common';
 import { ProviderError } from './errors/providerError';
+import { assertChatMessagesWithinTokenBudget } from '../../chain/tokenBudget';
 
 interface OpenAIChatRuntimeConfig {
     model: string;
     useChain: boolean;
     chainMaxParallel: number;
+    chainMaxInputTokens: number;
     maxRetries: number;
     temperature: number;
 }
@@ -190,6 +192,7 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
         return {
             useChain: cfg.get<boolean>('chain.enabled', true),
             chainMaxParallel: cfg.get<number>('chain.maxParallel', 2),
+            chainMaxInputTokens: cfg.get<number>('chain.maxInputTokens', 32_000),
             maxRetries: cfg.get<number>('llm.maxRetries', 2),
             temperature: cfg.get<number>('llm.temperature', 1),
             model: this.context.globalState.get<string>(this.providerOptions.modelStateKey, '')
@@ -251,14 +254,17 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
                 initialMessages: messages,
                 repoPath,
                 validationSchema: getValidationSchemaFor(reqType),
-                callOnce: (msgs) => this.utils.callChatCompletion(this.openai!, msgs, {
-                    model: config.model,
-                    provider: providerName,
-                    token: options?.token,
-                    trackUsage: true,
-                    requestType: _options!.requestType,
-                    repoPath,
-                }),
+                callOnce: (msgs) => {
+                    assertChatMessagesWithinTokenBudget(msgs, config.chainMaxInputTokens, reqType);
+                    return this.utils.callChatCompletion(this.openai!, msgs, {
+                        model: config.model,
+                        provider: providerName,
+                        token: options?.token,
+                        trackUsage: true,
+                        requestType: _options!.requestType,
+                        repoPath,
+                    });
+                },
                 onUsage: (usage) => {
                     callCount += 1;
                     if (usage) {
@@ -289,6 +295,8 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
                 chat,
                 {
                     maxParallel: config.chainMaxParallel,
+                    maxInputTokens: config.chainMaxInputTokens,
+                    model: config.model,
                     retrieveRagExamples: async (context) => {
                         if (!options?.ragRetrievalService || !options?.targetRepo) {
                             return [];

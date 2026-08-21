@@ -1,6 +1,6 @@
 import type { z } from 'zod';
 import {
-    fileSummarySchema,
+    evidenceSummaryResponseSchema,
     classifyAndDraftResponseSchema,
     validateAndFixResponseSchema,
     commitMessageSchema,
@@ -43,7 +43,7 @@ export function getValidationSchemaFor(reqType?: string): z.ZodTypeAny | undefin
         return undefined;
     }
     const map: Record<string, z.ZodTypeAny> = {
-        summary: fileSummarySchema,
+        summary: evidenceSummaryResponseSchema,
         draft: classifyAndDraftResponseSchema,
         fix: validateAndFixResponseSchema,
         ragPreparation: ragPreparationResponseSchema,

@@ -3,12 +3,22 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
 import { safeRun } from '../utils/safeRun';
 
 export type StageEventType =
+  | 'evidenceReady'
+  | 'evidenceRouted'
   | 'summarizeStart'
   | 'summarizeProgress'
+  | 'ragDisabled'
+  | 'ragPreparationStart'
+  | 'ragPrepared'
+  | 'ragRetrievalStart'
   | 'classifyDraft'
+  | 'draftStart'
   | 'validateFix'
+  | 'validationStart'
   | 'strictFix'
+  | 'strictFixStart'
   | 'enforceLanguage'
+  | 'enforceLanguageStart'
   | 'ragPreparationSkipped'
   | 'ragRetrieved'
   | 'ragRetrievalSkipped'
@@ -26,6 +36,18 @@ export interface StageEventData {
   message?: string;
   finalMessage?: string;
   error?: string;
+  target?: 'ragPreparation' | 'draft';
+  maxInputTokens?: number;
+  initialEstimatedInputTokens?: number;
+  estimatedInputTokens?: number;
+  rawFiles?: number;
+  summarizedFiles?: number;
+  didSummarize?: boolean;
+  files?: Array<{ file: string; status: string }>;
+  changeSetSummary?: unknown;
+  retrievalFeatures?: unknown;
+  references?: unknown[];
+  reason?: string;
   [extra: string]: unknown;
 }
 
@@ -47,7 +69,7 @@ class ProgressSession {
   start(): void {
     void vscode.window.withProgress(
       {
-        location: vscode.ProgressLocation.Notification,
+        location: vscode.ProgressLocation.Window,
         cancellable: false,
       },
       async (progress, token) => {
@@ -105,6 +127,17 @@ export class StageNotificationManager {
     if (!this.enabled || !this.active) { return; }
     const t = vscode.l10n.t;
     switch (event.type) {
+      case 'evidenceReady':
+        this.active.updateMessage(t(I18N.stages.evidenceReady));
+        break;
+      case 'evidenceRouted':
+        this.active.updateMessage(t(
+          I18N.stages.evidenceRouted,
+          event.data?.target === 'ragPreparation'
+            ? t(I18N.pipeline.ragInput)
+            : t(I18N.pipeline.draftInput)
+        ));
+        break;
       case 'summarizeStart':
         this.active.updateMessage(t(I18N.stages.summarizingStart));
         break;
@@ -114,14 +147,45 @@ export class StageNotificationManager {
         this.active.updateMessage(t(I18N.stages.summarizingProgress, cur, total));
         break;
       }
+      case 'ragDisabled':
+        this.active.updateMessage(t(I18N.stages.ragDisabled));
+        break;
+      case 'ragPreparationStart':
+        this.active.updateMessage(t(I18N.stages.ragPreparationStart));
+        break;
+      case 'ragPrepared':
+        this.active.updateMessage(t(I18N.stages.ragPrepared));
+        break;
+      case 'ragRetrievalStart':
+        this.active.updateMessage(t(I18N.stages.ragRetrievalStart));
+        break;
+      case 'ragRetrieved':
+        this.active.updateMessage(t(I18N.stages.ragRetrieved, Number(event.data?.count ?? 0)));
+        break;
+      case 'ragPreparationSkipped':
+      case 'ragRetrievalSkipped':
+        this.active.updateMessage(t(I18N.stages.ragSkipped));
+        break;
+      case 'draftStart':
+        this.active.updateMessage(t(I18N.stages.draftStart));
+        break;
       case 'classifyDraft':
         this.active.updateMessage(t(I18N.stages.classifyDraft));
+        break;
+      case 'validationStart':
+        this.active.updateMessage(t(I18N.stages.validationStart));
         break;
       case 'validateFix':
         this.active.updateMessage(t(I18N.stages.validateFix));
         break;
+      case 'strictFixStart':
+        this.active.updateMessage(t(I18N.stages.strictFixStart));
+        break;
       case 'strictFix':
         this.active.updateMessage(t(I18N.stages.strictFix));
+        break;
+      case 'enforceLanguageStart':
+        this.active.updateMessage(t(I18N.stages.enforceLanguageStart));
         break;
       case 'enforceLanguage':
         this.active.updateMessage(t(I18N.stages.enforceLanguage));

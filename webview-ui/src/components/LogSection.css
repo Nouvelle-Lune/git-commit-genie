@@ -278,6 +278,14 @@
   display: flex;
   align-items: center;
   gap: 4px;
+  min-width: 0;
+}
+
+.log-display-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ── Repo badge ── */
@@ -326,7 +334,10 @@
 .stage-badge-api,
 .stage-badge-tool,
 .stage-badge-reason,
-.stage-badge-analyze {
+.stage-badge-analyze,
+.stage-badge-data,
+.stage-badge-rag,
+.stage-badge-verify {
   background: color-mix(in srgb, var(--semantic-process) 18%, transparent);
   color: var(--semantic-process);
   border: 1px solid color-mix(in srgb, var(--semantic-process) 30%, transparent);
@@ -356,6 +367,24 @@
   background: color-mix(in srgb, var(--semantic-error) 18%, transparent);
   color: var(--semantic-error);
   border: 1px solid color-mix(in srgb, var(--semantic-error) 30%, transparent);
+}
+
+.stage-badge-data {
+  background: color-mix(in srgb, var(--semantic-info) 13%, transparent);
+  color: var(--semantic-info);
+  border-color: color-mix(in srgb, var(--semantic-info) 28%, transparent);
+}
+
+.stage-badge-rag {
+  background: color-mix(in srgb, var(--semantic-process) 13%, transparent);
+  color: var(--semantic-process);
+  border-color: color-mix(in srgb, var(--semantic-process) 28%, transparent);
+}
+
+.stage-badge-verify {
+  background: color-mix(in srgb, var(--semantic-info) 10%, transparent);
+  color: var(--vscode-editor-foreground);
+  border-color: color-mix(in srgb, var(--semantic-info) 24%, transparent);
 }
 
 /* ── Trailing cluster ── */

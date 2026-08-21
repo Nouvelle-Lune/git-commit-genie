@@ -92,15 +92,37 @@ export const AnthropicCompressionTool = {
 
 // ----- Additional tools used in chain mode -----
 
-export const FileSummaryJSONSchema = {
+const EvidenceReferenceJSONSchema = {
   type: 'object',
   properties: {
-    file: { type: 'string', minLength: 1 },
-    status: { type: 'string', enum: ['added', 'modified', 'deleted', 'renamed', 'untracked', 'ignored'] },
-    summary: { type: 'string', minLength: 1, maxLength: 200 },
-    breaking: { type: 'boolean' }
+    detail: { type: 'string', minLength: 1 },
+    evidenceHunkIds: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 1 }
   },
-  required: ['file', 'status', 'summary', 'breaking']
+  required: ['detail', 'evidenceHunkIds']
+} as const;
+
+export const EvidenceSummaryJSONSchema = {
+  type: 'object',
+  properties: {
+    changes: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', minLength: 1 },
+          target: { type: 'string', minLength: 1 },
+          behavior: { type: 'string', minLength: 1 },
+          exactSymbols: { type: 'array', items: { type: 'string', minLength: 1 } },
+          evidenceHunkIds: { type: 'array', items: { type: 'string', minLength: 1 }, minItems: 1 }
+        },
+        required: ['action', 'target', 'behavior', 'exactSymbols', 'evidenceHunkIds']
+      }
+    },
+    tests: { type: 'array', items: EvidenceReferenceJSONSchema },
+    breakingSignals: { type: 'array', items: EvidenceReferenceJSONSchema },
+    uncertainties: { type: 'array', items: EvidenceReferenceJSONSchema }
+  },
+  required: ['changes', 'tests', 'breakingSignals', 'uncertainties']
 } as const;
 
 export const ClassifyAndDraftJSONSchema = {
@@ -200,10 +222,10 @@ export const RagRerankJSONSchema = {
   required: ['selected']
 } as const;
 
-export const AnthropicFileSummaryTool = {
-  name: 'file_summary',
-  description: 'Return a structured summary for a single file diff.',
-  input_schema: FileSummaryJSONSchema
+export const AnthropicEvidenceSummaryTool = {
+  name: 'evidence_summary',
+  description: 'Return structured, hunk-referenced evidence for one file diff chunk.',
+  input_schema: EvidenceSummaryJSONSchema
 } as const;
 
 export const AnthropicClassifyAndDraftTool = {

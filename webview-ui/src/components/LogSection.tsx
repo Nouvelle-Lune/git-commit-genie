@@ -4,6 +4,8 @@ import { LogEntry, LogType } from '../types/messages';
 import { vscodeApi } from '../utils/vscode';
 import './LogSection.css';
 import { GenieCheckIcon, GenieCloudIcon, GenieReadIcon, GenieReasonIcon, GenieToolIcon, GenieWarningIcon } from './icons';
+import { PipelineFlow } from './PipelineFlow';
+import { formatPipelineText, parseCommitStageLog, presentPipelineEvent } from '../../../src/ui/pipelineDisplay';
 // @ts-ignore - react-markdown types
 import ReactMarkdown from 'react-markdown';
 
@@ -163,8 +165,31 @@ export const LogSection: React.FC = () => {
         return title.includes('commit stage:') && title.includes('done');
     };
 
+    const getPipelinePresentation = (log: LogEntry) => {
+        const payload = parseCommitStageLog(log);
+        return payload ? presentPipelineEvent(payload, state.i18n.pipeline) : null;
+    };
+
+    const getGenerationStartTitle = (log: LogEntry): string => {
+        if (log.type !== LogType.GenerationStart) {
+            return log.title;
+        }
+        if (!log.repoPath || !log.generationMode) {
+            throw new Error(`Generation start log '${log.id}' is missing pipeline metadata.`);
+        }
+        const repositoryName = log.repoPath.replace(/\\/g, '/').split('/').filter(Boolean).pop();
+        if (!repositoryName) {
+            throw new Error(`Generation start log '${log.id}' contains an invalid repository path.`);
+        }
+        const mode = log.generationMode === 'thinking'
+            ? state.i18n.pipeline.modeThinking
+            : state.i18n.pipeline.modeDefault;
+        return formatPipelineText(state.i18n.pipeline.generationStarted, repositoryName, mode);
+    };
+
     const isFailureLog = (log: LogEntry) => {
         if (isSchemaValidationLog(log)) return true;
+        if (getPipelinePresentation(log)?.tone === 'warning') return true;
         const t = (log.title || '').toLowerCase();
         const r = (log.reason || '').toLowerCase();
         return t.includes('error') || t.includes('failed') || t.includes('retry') || r.includes('error') || r.includes('failed') || r.includes('retry');
@@ -175,6 +200,13 @@ export const LogSection: React.FC = () => {
     };
 
     const renderLogIcon = (log: LogEntry) => {
+        const pipeline = getPipelinePresentation(log);
+        if (pipeline?.tone === 'warning') {
+            return <GenieWarningIcon size={13} />;
+        }
+        if (pipeline?.tone === 'success') {
+            return <GenieCheckIcon size={13} />;
+        }
         if (isSchemaValidationLog(log)) {
             return <GenieWarningIcon size={13} />;
         }
@@ -252,16 +284,18 @@ export const LogSection: React.FC = () => {
 
             // Commit generation stages
             if (title.includes('Commit stage:')) {
-                const stage = title.replace('Commit stage:', '').trim().toLowerCase();
-                if (stage.includes('summarize')) return { label: 'Sum', className: 'stage-badge-summarize' };
-                if (stage.includes('rag')) return { label: 'RAG', className: 'stage-badge-tool' };
-                if (stage.includes('classify')) return { label: 'Draft', className: 'stage-badge-classify' };
-                if (stage.includes('validate')) return { label: 'Vld', className: 'stage-badge-validate' };
-                if (stage.includes('strict')) return { label: 'Fix', className: 'stage-badge-strict' };
-                if (stage.includes('enforce')) return { label: 'Lang', className: 'stage-badge-language' };
-                if (stage.includes('done')) return { label: 'Done', className: 'stage-badge-done' };
-                // Capitalize first letter for display
-                return { label: stage.charAt(0).toUpperCase() + stage.slice(1), className: 'stage-badge-tool' };
+                const stage = parseCommitStageLog(log)!.stage.toLowerCase();
+                if (stage.includes('evidence')) return { label: state.i18n.pipeline.stepEvidence, className: 'stage-badge-data' };
+                if (stage.includes('summarize')) return { label: state.i18n.pipeline.stepSummary, className: 'stage-badge-summarize' };
+                if (stage.includes('rag')) return { label: state.i18n.pipeline.stepRag, className: 'stage-badge-rag' };
+                if (stage.includes('draft') || stage.includes('classify')) {
+                    return { label: state.i18n.pipeline.stepDraft, className: 'stage-badge-classify' };
+                }
+                if (stage.includes('validate') || stage.includes('validation') || stage.includes('strict') || stage.includes('language')) {
+                    return { label: state.i18n.pipeline.stepVerify, className: 'stage-badge-verify' };
+                }
+                if (stage.includes('done')) return { label: state.i18n.pipeline.stateReady, className: 'stage-badge-done' };
+                throw new Error(`Unknown commit pipeline stage '${stage}'.`);
             }
 
             // Schema validation
@@ -345,6 +379,7 @@ export const LogSection: React.FC = () => {
                     <i className="codicon codicon-trash"></i>
                 </button>
             </div>
+            <PipelineFlow logs={state.logs} text={state.i18n.pipeline} />
             <div className="panel-box log-panel">
                 {state.logs.length === 0 ? (
                     <div className="log-empty">
@@ -360,12 +395,13 @@ export const LogSection: React.FC = () => {
                                 const isNew = hasMountedRef.current && idx >= lastLogCountRef.current;
                                 const success = isSuccessLog(log);
                                 const failure = isFailureLog(log);
+                                const pipeline = getPipelinePresentation(log);
                                 return (
                                     <div key={log.id} className={`log-item ${(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? 'log-divider' : ''} ${failure ? 'log-error' : ''} ${success ? 'log-success' : ''} ${isNew ? 'log-item-new' : ''}`}>
                                         {(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? (
                                             <div className="analysis-start">
                                                 <span className="log-icon">{renderLogIcon(log)}</span>
-                                                <span className="analysis-start-text">{log.title}</span>
+                                                <span className="analysis-start-text">{getGenerationStartTitle(log)}</span>
                                                 <span className="log-time">{formatTime(log.timestamp)}</span>
                                             </div>
                                         ) : (
@@ -394,6 +430,7 @@ export const LogSection: React.FC = () => {
                                                         <span className="log-title-text">
                                                             {(() => { const info = getRepoInfoForLog(log); return info ? (<span className={`log-repo-badge repo-badge-c${info.colorIdx}`}>{info.name}</span>) : null; })()}
                                                             {(() => { const badge = getStageBadge(log); return badge ? (<span className={`stage-badge ${badge.className}`}>{badge.label}</span>) : null; })()}
+                                                            <span className="log-display-title">{pipeline?.title || log.title}</span>
                                                         </span>
                                                         {/* inline reason removed; reason is a separate log */}
                                                     </div>

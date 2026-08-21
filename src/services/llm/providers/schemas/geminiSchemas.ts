@@ -60,22 +60,40 @@ export const GeminiCommitMessageSchema = {
     propertyOrdering: ['commitMessage']
 };
 
-/**
- * Schema for file summary analysis
- */
-export const GeminiFileSummarySchema = {
+const GeminiEvidenceReferenceSchema = {
     type: Type.OBJECT,
     properties: {
-        file: createStringType('The file path relative to repository root'),
-        status: createEnumType(['added', 'modified', 'deleted', 'renamed', 'untracked', 'ignored'], 'The git status of the file'),
-        summary: createStringType('A concise summary of changes in this file (max 200 chars)'),
-        breaking: createBooleanType('Whether this file contains breaking changes')
+        detail: createStringType('Evidence-grounded observation'),
+        evidenceHunkIds: createArrayType(createStringType(), 'Hunk ids supporting this observation')
     },
-    required: ['file', 'status', 'summary', 'breaking'],
-    propertyOrdering: ['file', 'status', 'summary', 'breaking']
+    required: ['detail', 'evidenceHunkIds'],
+    propertyOrdering: ['detail', 'evidenceHunkIds']
 };
 
-
+/**
+ * Schema for hunk-referenced evidence extracted from one file diff chunk.
+ */
+export const GeminiEvidenceSummarySchema = {
+    type: Type.OBJECT,
+    properties: {
+        changes: createArrayType({
+            type: Type.OBJECT,
+            properties: {
+                action: createStringType('Concise change action'),
+                target: createStringType('Changed technical target'),
+                behavior: createStringType('Observable behavior change'),
+                exactSymbols: createArrayType(createStringType(), 'Exact identifiers, settings, flags, or API names'),
+                evidenceHunkIds: createArrayType(createStringType(), 'Hunk ids supporting this change')
+            },
+            required: ['action', 'target', 'behavior', 'exactSymbols', 'evidenceHunkIds']
+        }, 'Evidence-grounded changes'),
+        tests: createArrayType(GeminiEvidenceReferenceSchema, 'Test-related evidence'),
+        breakingSignals: createArrayType(GeminiEvidenceReferenceSchema, 'Potential breaking-change evidence'),
+        uncertainties: createArrayType(GeminiEvidenceReferenceSchema, 'Hunk-referenced details that cannot be concluded')
+    },
+    required: ['changes', 'tests', 'breakingSignals', 'uncertainties'],
+    propertyOrdering: ['changes', 'tests', 'breakingSignals', 'uncertainties']
+};
 
 /**
  * Schema for classify and draft response

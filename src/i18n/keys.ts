@@ -2,6 +2,8 @@
 // Use vscode.l10n.t(I18N.something) to translate. In the default
 // language (en), vscode.l10n returns the message as-is.
 
+import { DEFAULT_PIPELINE_TEXT } from '../ui/pipelineDisplay';
+
 export const L10N_KEYS = {
   statusBar: {
     tooltipConfigured: 'Git Commit Genie: {0} / {1}',
@@ -59,11 +61,23 @@ export const L10N_KEYS = {
   },
   stages: {
     title: 'AI Thinking…',
+    evidenceReady: 'Change evidence collected…',
+    evidenceRouted: 'Preparing {0}…',
     summarizingStart: 'Analyzing changes…',
     summarizingProgress: 'Analyzing changes ({0}/{1})…',
+    ragDisabled: 'RAG disabled; continuing to draft…',
+    ragPreparationStart: 'Building RAG query…',
+    ragPrepared: 'RAG query ready…',
+    ragRetrievalStart: 'Searching commit history…',
+    ragRetrieved: 'RAG references ready ({0})…',
+    ragSkipped: 'RAG unavailable; continuing to draft…',
+    draftStart: 'Drafting commit message…',
     classifyDraft: 'Drafting commit message…',
+    validationStart: 'Validating against rules…',
     validateFix: 'Validating against rules…',
+    strictFixStart: 'Fixing format issues…',
     strictFix: 'Fixing format issues…',
+    enforceLanguageStart: 'Enforcing target language…',
     enforceLanguage: 'Enforcing target language…',
     done: 'Done',
     cancelled: 'Cancelled'
@@ -194,6 +208,7 @@ export const L10N_KEYS = {
     analysisStatusIdle: 'Up to date',
     repairRagEmbeddings: 'Repair RAG Embeddings'
   },
+  pipeline: DEFAULT_PIPELINE_TEXT,
   rag: {
     enterEmbeddingKeyTitle: 'Configure RAG Embedding API Key',
     enterEmbeddingKeyPrompt: 'Enter your embedding API key',

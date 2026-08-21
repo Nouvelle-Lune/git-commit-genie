@@ -4,6 +4,7 @@ import { PRICING_TABLE } from '../cost/pricing';
 import { WebviewProvider } from '../../ui/WebviewProvider';
 import { LogType, LogEntry } from '../../ui/types/messages';
 import { normalizeOpenRouterPricingAlias } from '../llm/providers/config/openrouterModels';
+import { isCurrentPersistedLogEntry } from '../../ui/persistedLogSchema';
 
 export enum LogLevel {
     Debug = 0,
@@ -178,7 +179,13 @@ export class Logger {
                 }
             }
             if (Array.isArray(arr)) {
-                this.logBuffer = arr.slice(-this.maxLogBuffer);
+                const recentLogs = arr.slice(-this.maxLogBuffer);
+                this.logBuffer = recentLogs.filter(isCurrentPersistedLogEntry);
+                const discardedCount = recentLogs.length - this.logBuffer.length;
+                if (discardedCount > 0) {
+                    await this.context?.globalState.update(Logger.LOGS_STATE_KEY, this.logBuffer);
+                    this.warn(`Discarded ${discardedCount} incompatible persisted Webview log entries.`);
+                }
             }
         } catch { /* ignore */ }
     }
@@ -217,7 +224,8 @@ export class Logger {
                 id: `generation-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                 timestamp: Date.now(),
                 type: LogType.GenerationStart,
-                title: `Generation Started: ${repoName} — ${modeLabel}`
+                title: `Generation Started: ${repoName} — ${modeLabel}`,
+                generationMode: mode,
             };
             (log as any).repoPath = repositoryPath;
             this.sendLogToWebview(log);

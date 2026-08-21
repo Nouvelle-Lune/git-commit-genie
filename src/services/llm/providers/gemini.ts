@@ -12,10 +12,11 @@ import { GeminiUtils } from './utils/GeminiUtils';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
 import { ProviderRuntimeConfig, ProviderRules } from './utils/BaseProviderUtils';
+import { assertChatMessagesWithinTokenBudget } from '../../chain/tokenBudget';
 import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
 import {
     GeminiCommitMessageSchema,
-    GeminiFileSummarySchema,
+    GeminiEvidenceSummarySchema,
     GeminiClassifyAndDraftSchema,
     GeminiValidateAndFixSchema,
     GeminiRagPreparationSchema,
@@ -161,7 +162,7 @@ export class GeminiService extends BaseLLMService {
 
         // Map request type to Gemini's response schema (provider-specific).
         const responseSchemaMap: Record<string, any> = {
-            summary: GeminiFileSummarySchema,
+            summary: GeminiEvidenceSummarySchema,
             draft: GeminiClassifyAndDraftSchema,
             fix: GeminiValidateAndFixSchema,
             ragPreparation: GeminiRagPreparationSchema,
@@ -185,14 +186,17 @@ export class GeminiService extends BaseLLMService {
                 initialMessages: messages,
                 repoPath,
                 validationSchema: getValidationSchemaFor(reqType),
-                callOnce: (msgs) => this.utils.callChatCompletion(this.client!, msgs, {
-                    model: config.model,
-                    provider: 'Gemini',
-                    responseSchema,
-                    token: options?.token,
-                    trackUsage: true,
-                    repoPath,
-                }),
+                callOnce: (msgs) => {
+                    assertChatMessagesWithinTokenBudget(msgs, config.chainMaxInputTokens, reqType);
+                    return this.utils.callChatCompletion(this.client!, msgs, {
+                        model: config.model,
+                        provider: 'Gemini',
+                        responseSchema,
+                        token: options?.token,
+                        trackUsage: true,
+                        repoPath,
+                    });
+                },
                 onUsage: (usage) => {
                     callCount += 1;
                     if (usage) {
@@ -223,6 +227,8 @@ export class GeminiService extends BaseLLMService {
                 chat,
                 {
                     maxParallel: config.chainMaxParallel,
+                    maxInputTokens: config.chainMaxInputTokens,
+                    model: config.model,
                     retrieveRagExamples: async (context) => {
                         if (!options?.ragRetrievalService || !options?.targetRepo) {
                             return [];

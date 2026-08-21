@@ -1,6 +1,6 @@
 import * as vscode from "vscode";
 import { ChatFn } from "../llm/llmTypes";
-import { ChangeSetSummary, FileSummary, RetrievalFeatures } from "./chainTypes";
+import { ChangeSetSummary, DraftEvidence, RetrievalFeatures } from "./chainTypes";
 import { DiffData } from "../git/gitTypes";
 import { buildRagPreparationMessages } from "./chainChatPrompts";
 
@@ -45,11 +45,12 @@ export function isRagPreparationEnabled(): boolean {
 
 export async function prepareRagContext(
     diffs: DiffData[],
-    summaries: FileSummary[],
+    evidence: DraftEvidence[],
     chat: ChatFn
 ): Promise<RagPreparationContext> {
-    const messages = buildRagPreparationMessages(summaries, diffs);
+    const messages = buildRagPreparationMessages(evidence);
     const parsed = await chat(messages, { requestType: "ragPreparation" }) as RagPreparationResponse;
+    const deterministic = deriveDeterministicRetrievalFeatures(diffs);
 
     return {
         changeSetSummary: {
@@ -68,10 +69,13 @@ export async function prepareRagContext(
             fileKinds: parsed.retrievalFeatures.fileKinds ?? [],
             changeActions: parsed.retrievalFeatures.changeActions ?? [],
             entities: parsed.retrievalFeatures.entities ?? [],
-            touchedPaths: parsed.retrievalFeatures.touchedPaths ?? [],
-            fileExtensions: parsed.retrievalFeatures.fileExtensions ?? [],
-            statusMix: parsed.retrievalFeatures.statusMix ?? [],
-            fileCount: parsed.retrievalFeatures.fileCount ?? diffs.length,
+            // These fields are exact properties of DiffData. Computing them
+            // locally prevents summary compaction from changing structural RAG
+            // filters while semantic fields retain the existing model behavior.
+            touchedPaths: deterministic.touchedPaths,
+            fileExtensions: deterministic.fileExtensions,
+            statusMix: deterministic.statusMix,
+            fileCount: deterministic.fileCount,
             hasDocs: !!parsed.retrievalFeatures.hasDocs,
             hasTests: !!parsed.retrievalFeatures.hasTests,
             hasConfig: !!parsed.retrievalFeatures.hasConfig,
@@ -79,5 +83,31 @@ export async function prepareRagContext(
             isCrossLayer: !!parsed.retrievalFeatures.isCrossLayer,
             breakingLike: !!parsed.retrievalFeatures.breakingLike,
         }
+    };
+}
+
+export function deriveDeterministicRetrievalFeatures(diffs: DiffData[]): Pick<
+    RetrievalFeatures,
+    'touchedPaths' | 'fileExtensions' | 'statusMix' | 'fileCount'
+> {
+    const touchedPaths = diffs.map(diff => diff.fileName);
+    const fileExtensions = new Set<string>();
+    const statusMix = new Set<DiffData['status']>();
+
+    for (const diff of diffs) {
+        const filePath = diff.fileName;
+        const baseName = filePath.slice(filePath.lastIndexOf('/') + 1);
+        const dotIndex = baseName.lastIndexOf('.');
+        if (dotIndex > 0 && dotIndex < baseName.length - 1) {
+            fileExtensions.add(baseName.slice(dotIndex + 1).toLowerCase());
+        }
+        statusMix.add(diff.status);
+    }
+
+    return {
+        touchedPaths,
+        fileExtensions: Array.from(fileExtensions),
+        statusMix: Array.from(statusMix),
+        fileCount: diffs.length,
     };
 }

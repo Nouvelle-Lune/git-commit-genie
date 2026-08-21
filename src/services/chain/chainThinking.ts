@@ -1,37 +1,23 @@
 import { DiffData } from "../git/gitTypes";
-import { ChatFn } from "../llm/llmTypes";
-import { ChainInputs, ChangeSetSummary, FileSummary, ChainOutputs, RagStyleReference, RetrievalFeatures } from "./chainTypes";
+import { ChatFn, ChatMessage } from "../llm/llmTypes";
+import { ChainInputs, ChangeSetSummary, DraftEvidence, FileEvidence, FileSummary, ChainOutputs, RagStyleReference, RetrievalFeatures } from "./chainTypes";
 import {
-	buildSummarizeFileMessages,
 	buildClassifyAndDraftMessages,
+	buildRagPreparationMessages,
 	buildValidateAndFixMessages,
 	buildEnforceStrictFixMessages,
 	buildEnforceLanguageMessages,
 } from "./chainChatPrompts";
 
-import { normalizeLanguageCode, extractNarrativeTextForLanguageCheck, isLikelyTargetLanguage } from "./langDetector";
+import { normalizeLanguageCode, isLikelyTargetLanguage } from "./langDetector";
 import { isRagPreparationEnabled, prepareRagContext } from "./ragPreparation";
 import { logger } from "../logger";
 import { safeRun } from "../../utils/safeRun";
-
-
-async function summarizeSingleFile(diff: DiffData, chat: ChatFn): Promise<FileSummary> {
-	const messages = buildSummarizeFileMessages(diff);
-	const parsed = await chat(messages, { requestType: 'summary' });
-
-	if (!parsed || !parsed.file || !parsed.summary) {
-		return {
-			file: diff.fileName,
-			status: diff.status,
-			summary: 'Summarize file change (fallback): minor update',
-			breaking: false
-		};
-	}
-	return parsed;
-}
+import { compactEvidenceToFit, createRawDraftEvidence } from "./dynamicSummary";
+import { DEFAULT_CHAIN_MAX_INPUT_TOKENS, resolveChainInputTokenBudget } from "./tokenBudget";
 
 async function classifyAndDraft(
-	summaries: FileSummary[],
+	evidence: DraftEvidence[],
 	inputs: ChainInputs,
 	chat: ChatFn
 ): Promise<{
@@ -46,7 +32,7 @@ async function classifyAndDraft(
 		footers?: { token: string; value: string }[];
 	}
 }> {
-	const messages = buildClassifyAndDraftMessages(summaries, inputs);
+	const messages = buildClassifyAndDraftMessages(evidence, inputs);
 	const parsed = await chat(messages, { requestType: 'draft' });
 
 	let draft = parsed?.commitMessage || '';
@@ -203,6 +189,8 @@ export async function generateCommitMessageChain(
 	chat: ChatFn,
 	options?: {
 		maxParallel?: number;
+		maxInputTokens?: number;
+		model?: string;
 		onStage?: (event: import('../../ui/StageNotificationManager').StageEvent) => void;
 		retrieveRagExamples?: (context: {
 			changeSetSummary: ChangeSetSummary;
@@ -212,41 +200,90 @@ export async function generateCommitMessageChain(
 ): Promise<ChainOutputs> {
 	const { diffs } = inputs;
 	const maxParallel = options?.maxParallel ?? Math.max(4, Math.min(8, diffs.length));
+	const maxInputTokens = resolveChainInputTokenBudget(
+		options?.model || '',
+		options?.maxInputTokens ?? DEFAULT_CHAIN_MAX_INPUT_TOKENS
+	);
+	let evidence = createRawDraftEvidence(diffs);
+	let summaryStageStarted = false;
+	let summarizedCount = 0;
 
-	const queue = [...diffs];
-	const results: FileSummary[] = [];
-
-	// Notify: summarizing has started
-	safeRun('Chain.onStage.summarizeStart', () => options?.onStage?.({ type: 'summarizeStart' }));
-
-	async function worker() {
-		while (queue.length) {
-			const item = queue.shift();
-			if (!item) { break; };
-			const summary = await summarizeSingleFile(item, chat);
-			results.push(summary);
-			// progress update + last summary text for visibility
-			safeRun('Chain.onStage.summarizeProgress', () => options?.onStage?.({
-				type: 'summarizeProgress',
-				data: { current: results.length, total: diffs.length, file: summary.file, summary: summary.summary, breaking: !!summary.breaking }
-			}));
+	safeRun('Chain.onStage.evidenceReady', () => options?.onStage?.({
+		type: 'evidenceReady',
+		data: {
+			fileCount: diffs.length,
+			rawFiles: diffs.length,
+			summarizedFiles: 0,
+			maxInputTokens,
+			files: diffs.map(diff => ({ file: diff.fileName, status: diff.status })),
 		}
-	}
+	}));
 
-	const workers = Array.from({ length: Math.min(maxParallel, diffs.length || 1) }, () => worker());
+	const compactFor = async (
+		target: 'ragPreparation' | 'draft',
+		buildTargetMessages: (current: DraftEvidence[]) => ChatMessage[]
+	) => {
+		const result = await compactEvidenceToFit({
+			diffs,
+			evidence,
+			chat,
+			maxInputTokens,
+			maxParallel,
+			buildTargetMessages,
+			onSummarizeStart: () => {
+				if (!summaryStageStarted) {
+					summaryStageStarted = true;
+					safeRun('Chain.onStage.summarizeStart', () => options?.onStage?.({ type: 'summarizeStart' }));
+				}
+			},
+			onFileSummarized: (file) => {
+				summarizedCount += 1;
+				safeRun('Chain.onStage.summarizeProgress', () => options?.onStage?.({
+					type: 'summarizeProgress',
+					data: {
+						current: summarizedCount,
+						total: diffs.length,
+						file: file.fileName,
+						summary: summarizeEvidenceForDisplay(file),
+						breaking: file.breakingSignals.length > 0,
+					}
+				}));
+			},
+		});
+		evidence = result.evidence;
+		safeRun('Chain.onStage.evidenceRouted', () => options?.onStage?.({
+			type: 'evidenceRouted',
+			data: {
+				target,
+				fileCount: evidence.length,
+				rawFiles: evidence.filter(item => item.kind === 'raw').length,
+				summarizedFiles: evidence.filter(item => item.kind === 'summary').length,
+				initialEstimatedInputTokens: result.initialEstimatedInputTokens,
+				estimatedInputTokens: result.estimatedInputTokens,
+				maxInputTokens,
+				didSummarize: result.didSummarize,
+			}
+		}));
+	};
 
-	// Waiting for all workers to complete
-	await Promise.all(workers);
-
-	let changeSetSummary = undefined;
-	let retrievalFeatures = undefined;
+	let changeSetSummary: ChangeSetSummary | undefined;
+	let retrievalFeatures: RetrievalFeatures | undefined;
 	let ragStyleReferences: RagStyleReference[] = [];
 
 	if (isRagPreparationEnabled()) {
 		try {
-			const ragContext = await prepareRagContext(diffs, results, chat);
+			await compactFor('ragPreparation', current => buildRagPreparationMessages(current));
+			safeRun('Chain.onStage.ragPreparationStart', () => options?.onStage?.({ type: 'ragPreparationStart' }));
+			const ragContext = await prepareRagContext(diffs, evidence, chat);
 			changeSetSummary = ragContext.changeSetSummary;
 			retrievalFeatures = ragContext.retrievalFeatures;
+			safeRun('Chain.onStage.ragPrepared', () => options?.onStage?.({
+				type: 'ragPrepared',
+				data: {
+					changeSetSummary,
+					retrievalFeatures,
+				}
+			}));
 		} catch (error) {
 			const errorMessage = String((error as any)?.message || error || 'Unknown error');
 			logger.warn('[Genie][Chain] RAG preparation failed; continuing without RAG context.', error);
@@ -255,16 +292,29 @@ export async function generateCommitMessageChain(
 				data: { error: errorMessage }
 			}));
 		}
+	} else {
+		safeRun('Chain.onStage.ragDisabled', () => options?.onStage?.({
+			type: 'ragDisabled',
+			data: { reason: 'disabled' }
+		}));
 	}
 
 	if (changeSetSummary && retrievalFeatures && options?.retrieveRagExamples) {
 		try {
+			safeRun('Chain.onStage.ragRetrievalStart', () => options?.onStage?.({ type: 'ragRetrievalStart' }));
 			ragStyleReferences = await options.retrieveRagExamples({ changeSetSummary, retrievalFeatures });
 			safeRun('Chain.onStage.ragRetrieved', () => options?.onStage?.({
 				type: 'ragRetrieved',
 				data: {
 					count: ragStyleReferences.length,
 					messages: ragStyleReferences.map(reference => reference.message),
+					references: ragStyleReferences.map(reference => ({
+						message: reference.message,
+						matchedBy: reference.matchedBy,
+						styleReason: reference.styleReason,
+						type: reference.type ?? null,
+						scope: reference.scope ?? null,
+					})),
 				}
 			}));
 		} catch (error) {
@@ -277,10 +327,13 @@ export async function generateCommitMessageChain(
 		}
 	}
 
-	const { draft, notes: classificationNotes } = await classifyAndDraft(results, { ...inputs, ragStyleReferences }, chat);
+	await compactFor('draft', current => buildClassifyAndDraftMessages(current, { ...inputs, ragStyleReferences }));
+	safeRun('Chain.onStage.draftStart', () => options?.onStage?.({ type: 'draftStart' }));
+	const { draft, notes: classificationNotes } = await classifyAndDraft(evidence, { ...inputs, ragStyleReferences }, chat);
 
 	safeRun('Chain.onStage.classifyDraft', () => options?.onStage?.({ type: 'classifyDraft', data: { draft } }));
 
+	safeRun('Chain.onStage.validationStart', () => options?.onStage?.({ type: 'validationStart' }));
 	const { validMessage, notes: validationNotes } = await validateAndFix(draft, inputs.validationChecklist ?? '', chat, inputs.userTemplate);
 	safeRun('Chain.onStage.validateFix', () => options?.onStage?.({ type: 'validateFix', data: { validMessage } }));
 
@@ -288,6 +341,10 @@ export async function generateCommitMessageChain(
 	let finalMessage = validMessage;
 	const check = localStrictCheck(finalMessage);
 	if (!check.ok) {
+		safeRun('Chain.onStage.strictFixStart', () => options?.onStage?.({
+			type: 'strictFixStart',
+			data: { problems: check.problems }
+		}));
 		finalMessage = await enforceStrictWithLLM(finalMessage, check.problems, chat, inputs.userTemplate);
 		safeRun('Chain.onStage.strictFix', () => options?.onStage?.({ type: 'strictFix', data: { message: finalMessage } }));
 	}
@@ -295,6 +352,10 @@ export async function generateCommitMessageChain(
 	// Enforce target language strictly while preserving tokens/structure
 	if ((inputs.targetLanguage || '').trim()) {
 		try {
+			safeRun('Chain.onStage.enforceLanguageStart', () => options?.onStage?.({
+				type: 'enforceLanguageStart',
+				data: { targetLanguage: inputs.targetLanguage }
+			}));
 			const out = await enforceTargetLanguageForCommit(finalMessage, inputs.targetLanguage, chat, inputs.userTemplate);
 			finalMessage = out;
 			safeRun('Chain.onStage.enforceLanguage', () => options?.onStage?.({ type: 'enforceLanguage', data: { message: finalMessage } }));
@@ -307,7 +368,7 @@ export async function generateCommitMessageChain(
 
 	return {
 		commitMessage: finalMessage,
-		fileSummaries: results,
+		fileSummaries: toFileSummaries(evidence, diffs),
 		changeSetSummary,
 		retrievalFeatures,
 		ragStyleReferences,
@@ -317,4 +378,37 @@ export async function generateCommitMessageChain(
 			validationNotes: validationNotes ?? ''
 		}
 	};
+}
+
+function summarizeEvidenceForDisplay(evidence: FileEvidence): string {
+	return [
+		...evidence.changes.map(change => `${change.action} ${change.target}: ${change.behavior}`),
+		...evidence.tests.map(test => `test: ${test.detail}`),
+		...evidence.breakingSignals.map(signal => `breaking: ${signal.detail}`),
+		...evidence.uncertainties.map(uncertainty => `uncertain: ${uncertainty.detail}`),
+	].slice(0, 2).join('; ');
+}
+
+function toFileSummaries(evidence: DraftEvidence[], diffs: DiffData[]): FileSummary[] {
+	const diffByFile = new Map(diffs.map(diff => [diff.fileName, diff]));
+	return evidence.map(item => {
+		if (item.kind === 'summary') {
+			return {
+				file: item.fileName,
+				status: item.status,
+				summary: summarizeEvidenceForDisplay(item),
+				breaking: item.breakingSignals.length > 0,
+			};
+		}
+
+		const diff = diffByFile.get(item.fileName);
+		const additions = diff?.diffHunks.reduce((count, hunk) => count + hunk.additions.length, 0) ?? 0;
+		const deletions = diff?.diffHunks.reduce((count, hunk) => count + hunk.deletions.length, 0) ?? 0;
+		return {
+			file: item.fileName,
+			status: item.status,
+			summary: `Raw diff retained (${additions} additions, ${deletions} deletions)`,
+			breaking: false,
+		};
+	});
 }

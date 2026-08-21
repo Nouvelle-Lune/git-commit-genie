@@ -12,12 +12,13 @@ import { AnthropicUtils } from './utils/AnthropicUtils';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
 import { ProviderRuntimeConfig, ProviderRules } from './utils/BaseProviderUtils';
+import { assertChatMessagesWithinTokenBudget } from '../../chain/tokenBudget';
 import { ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from '../baseLLMService';
 import { ProviderError } from './errors/providerError';
 import {
     AnthropicCommitMessageTool,
-    AnthropicFileSummaryTool,
+    AnthropicEvidenceSummaryTool,
     AnthropicClassifyAndDraftTool,
     AnthropicValidateAndFixTool,
     AnthropicRagPreparationTool,
@@ -189,7 +190,7 @@ export class AnthropicService extends BaseLLMService {
         // validation schema is shared across providers and resolved via
         // getValidationSchemaFor.
         const toolMap: Record<string, any> = {
-            summary: AnthropicFileSummaryTool,
+            summary: AnthropicEvidenceSummaryTool,
             draft: AnthropicClassifyAndDraftTool,
             fix: AnthropicValidateAndFixTool,
             ragPreparation: AnthropicRagPreparationTool,
@@ -213,15 +214,18 @@ export class AnthropicService extends BaseLLMService {
                 initialMessages: messages,
                 repoPath,
                 validationSchema: getValidationSchemaFor(reqType),
-                callOnce: (msgs) => this.utils.callChatCompletion(this.client!, msgs, {
-                    model: config.model,
-                    provider: 'Anthropic',
-                    token: options?.token,
-                    trackUsage: true,
-                    tools: tool ? [tool] : undefined,
-                    toolChoice: tool ? { type: 'tool', name: tool.name } : undefined,
-                    repoPath,
-                }),
+                callOnce: (msgs) => {
+                    assertChatMessagesWithinTokenBudget(msgs, config.chainMaxInputTokens, reqType);
+                    return this.utils.callChatCompletion(this.client!, msgs, {
+                        model: config.model,
+                        provider: 'Anthropic',
+                        token: options?.token,
+                        trackUsage: true,
+                        tools: tool ? [tool] : undefined,
+                        toolChoice: tool ? { type: 'tool', name: tool.name } : undefined,
+                        repoPath,
+                    });
+                },
                 onUsage: (usage) => {
                     callCount += 1;
                     if (usage) {
@@ -252,6 +256,8 @@ export class AnthropicService extends BaseLLMService {
                 chat,
                 {
                     maxParallel: config.chainMaxParallel,
+                    maxInputTokens: config.chainMaxInputTokens,
+                    model: config.model,
                     retrieveRagExamples: async (context) => {
                         if (!options?.ragRetrievalService || !options?.targetRepo) {
                             return [];

@@ -64,7 +64,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | 生成取消                 | SCM 标题栏按钮可实时取消正在进行的生成。                                                                                                                          |
 | 安全存储                 | API Key 使用 VS Code SecretStorage，不写入明文设置。                                                                                                              |
 | 国际化支持               | 内置英文、简体中文、繁体中文等多语言支持。                                                                                                                        |
-| 阶段通知                 | 右下角展示链式阶段进度，支持开关配置。                                                                                                                            |
+| 阶段进度                 | 在 VS Code 状态栏展示当前 Thinking 阶段，不弹出通知。                                                                                                             |
 
 ## 工作流程
 
@@ -81,6 +81,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `gitCommitGenie.autoStageAllForDiff`                | boolean | false   | 仅当暂存区为空时：临时将所有更改加入暂存用于生成 diff，生成后会自动还原暂存状态。谨慎使用，可能会把无关更改包含进提示。                              |
 | `gitCommitGenie.chain.enabled`                      | boolean | false   | 启用链式多步提示生成提交信息（使得生成的提交信息更加详准确，且可以更加贴合用户模版，但将增加延迟与 Token 消耗）                                      |
 | `gitCommitGenie.chain.maxParallel`                  | number  | 2       | 链式提示并行 LLM 调用最大数量。谨慎增大以避免触发速率限制。                                                                                          |
+| `gitCommitGenie.chain.maxInputTokens`               | integer | 32000   | Thinking 每次请求允许的最大估算输入 Token 数；预算内保留原始 diff，超出预算时按 hunk 动态摘要。                                                      |
 | `gitCommitGenie.llm.maxRetries`                     | number  | 2       | API请求失败最大重试次数。                                                                                                                            |
 | `gitCommitGenie.llm.temperature`                    | number  | 1       | Temperature（0–2），默认为 1。部分服务商/模型组合只接受 1；修改该值可能触发 invalid-temperature 错误或导致输出稳定性下降。                                      |
 | `gitCommitGenie.rag.enabled`                        | boolean | false   | 启用 RAG 保持 commit message 生成的风格一致性（需要仓库中存在一定数量的历史 commit message 构建本地风格索引）。启用前请先通过"配置 RAG Embedding API Key"命令配置 API Key。 |
@@ -96,7 +97,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `gitCommitGenie.commitLanguage`                     | string  | `auto`  | 生成的提交信息目标语言。选项：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。                                       |
 | `gitCommitGenie.typingAnimationSpeed`               | number  | 15      | 提交信息框打字动画速度，单位为每字符毫秒。设置 -1 关闭动画。                                                                                         |  |
 | `gitCommitGenie.showUsageCost`                      | boolean | true    | 启用后在生成文本时弹出通知，显示本次生成的估计总费用。                                                                                               |
-| `gitCommitGenie.ui.stageNotifications.enabled`      | boolean | true    | 在 Thinking 过程中在右下角显示阶段通知（精简气泡，无标题）。                                                                                         |
+| `gitCommitGenie.ui.stageNotifications.enabled`      | boolean | true    | 在 VS Code 状态栏显示 Thinking 阶段进度。                                                                                                             |
 
 
 

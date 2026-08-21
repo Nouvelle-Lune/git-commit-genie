@@ -30,6 +30,19 @@ src/test/
 **/*.test.*
 **/*.spec.*
 **/__tests__/
+!src/test/
+!src/test/chain/
+!src/test/chain/tokenBudget.test.ts
+!src/test/chain/dynamicSummary.test.ts
+!src/test/chain/chainChatPrompts.test.ts
+!src/test/llm/
+!src/test/llm/providers/
+!src/test/llm/providers/schemas/
+!src/test/llm/providers/schemas/common.test.ts
+!src/test/llm/providers/schemas/anthropicSchemas.test.ts
+!src/test/llm/providers/schemas/geminiSchemas.test.ts
+!src/test/ui/
+!src/test/ui/pipelineDisplay.test.ts
 
 TODO.md
 # Ignore Git Commit Genie templates

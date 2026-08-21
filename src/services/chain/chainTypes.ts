@@ -39,6 +39,46 @@ export interface FileSummary {
     breaking: boolean;
 }
 
+export interface EvidenceChange {
+    action: string;
+    target: string;
+    behavior: string;
+    exactSymbols: string[];
+    evidenceHunkIds: string[];
+}
+
+export interface EvidenceObservation {
+    detail: string;
+    evidenceHunkIds: string[];
+}
+
+export interface EvidenceSummaryResponse {
+    changes: EvidenceChange[];
+    tests: EvidenceObservation[];
+    breakingSignals: EvidenceObservation[];
+    uncertainties: EvidenceObservation[];
+}
+
+export interface RawDiffEvidence {
+    kind: 'raw';
+    fileName: string;
+    status: DiffData['status'];
+    rawDiff: string;
+}
+
+export interface FileEvidence {
+    kind: 'summary';
+    fileName: string;
+    status: DiffData['status'];
+    coveredHunkIds: string[];
+    changes: EvidenceChange[];
+    tests: EvidenceObservation[];
+    breakingSignals: EvidenceObservation[];
+    uncertainties: EvidenceObservation[];
+}
+
+export type DraftEvidence = RawDiffEvidence | FileEvidence;
+
 export interface ChangeSetSummary {
     text: string;
     dominantType?: string;

@@ -3,7 +3,7 @@
   "displayName": "%displayName%",
   "publisher": "Lune-99",
   "description": "%description%",
-  "version": "3.2.2",
+  "version": "3.3.0",
   "license": "MIT",
   "engines": {
     "vscode": "^1.103.0"
@@ -138,15 +138,22 @@
           "minimum": 1,
           "markdownDescription": "%config.chain.maxParallel.desc%"
         },
-        "gitCommitGenie.llm.maxRetries": {
+        "gitCommitGenie.chain.maxInputTokens": {
           "order": 5,
+          "type": "integer",
+          "default": 32000,
+          "minimum": 1,
+          "markdownDescription": "%config.chain.maxInputTokens.desc%"
+        },
+        "gitCommitGenie.llm.maxRetries": {
+          "order": 6,
           "type": "number",
           "default": 2,
           "minimum": 1,
           "markdownDescription": "%config.llm.maxRetries.desc%"
         },
         "gitCommitGenie.llm.temperature": {
-          "order": 6,
+          "order": 7,
           "type": "number",
           "default": 1,
           "minimum": 0,

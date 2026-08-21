@@ -49,6 +49,12 @@ describe('BaseProviderUtils.getCommonConfig', () => {
             assert.strictEqual(config.chainMaxParallel, 5);
         });
 
+        it('should use chain.maxInputTokens key with 32000 default', () => {
+            configGetStub.withArgs('chain.maxInputTokens', 32_000).returns(64_000);
+            const config = utils.getCommonConfig();
+            assert.strictEqual(config.chainMaxInputTokens, 64_000);
+        });
+
         it('should use llm.maxRetries key with 2 default', () => {
             configGetStub.withArgs('llm.maxRetries', 2).returns(3);
             const config = utils.getCommonConfig();
@@ -69,6 +75,12 @@ describe('BaseProviderUtils.getCommonConfig', () => {
             assert.strictEqual(config.chainMaxParallel, 2);
         });
 
+        it('should default chainMaxInputTokens to 32000', () => {
+            configGetStub.returns(undefined);
+            const config = utils.getCommonConfig();
+            assert.strictEqual(config.chainMaxInputTokens, 32_000);
+        });
+
         it('should default maxRetries to 2', () => {
             configGetStub.returns(undefined);
             const config = utils.getCommonConfig();
@@ -79,10 +91,12 @@ describe('BaseProviderUtils.getCommonConfig', () => {
             // VS Code WorkspaceConfiguration.get() returns undefined for missing keys
             configGetStub.withArgs('chain.enabled', true).returns(undefined);
             configGetStub.withArgs('chain.maxParallel', 2).returns(undefined);
+            configGetStub.withArgs('chain.maxInputTokens', 32_000).returns(undefined);
             configGetStub.withArgs('llm.maxRetries', 2).returns(undefined);
             const config = utils.getCommonConfig();
             assert.strictEqual(config.useChain, true);
             assert.strictEqual(config.chainMaxParallel, 2);
+            assert.strictEqual(config.chainMaxInputTokens, 32_000);
             assert.strictEqual(config.maxRetries, 2);
         });
     });
@@ -98,6 +112,12 @@ describe('BaseProviderUtils.getCommonConfig', () => {
             configGetStub.withArgs('chain.maxParallel', 2).returns(10);
             const config = utils.getCommonConfig();
             assert.strictEqual(config.chainMaxParallel, 10);
+        });
+
+        it('should read chainMaxInputTokens from chain.maxInputTokens', () => {
+            configGetStub.withArgs('chain.maxInputTokens', 32_000).returns(96_000);
+            const config = utils.getCommonConfig();
+            assert.strictEqual(config.chainMaxInputTokens, 96_000);
         });
 
         it('should read maxRetries from llm.maxRetries', () => {
@@ -141,9 +161,10 @@ describe('BaseProviderUtils.getCommonConfig', () => {
         it('should use same config keys as OpenAIChatCompletionsService', () => {
             // Verify that getCommonConfig config keys match those used in
             // OpenAIChatCompletionsService.getProviderConfig():
-            //   chain.enabled, chain.maxParallel, llm.maxRetries
+            //   chain.enabled, chain.maxParallel, chain.maxInputTokens, llm.maxRetries
             configGetStub.withArgs('chain.enabled', sinon.match.any).returns(true);
             configGetStub.withArgs('chain.maxParallel', sinon.match.any).returns(2);
+            configGetStub.withArgs('chain.maxInputTokens', sinon.match.any).returns(32_000);
             configGetStub.withArgs('llm.maxRetries', sinon.match.any).returns(2);
 
             const config = utils.getCommonConfig();
@@ -154,6 +175,8 @@ describe('BaseProviderUtils.getCommonConfig', () => {
                 'should read chain.enabled');
             assert.ok(configGetStub.calledWith('chain.maxParallel', sinon.match.any),
                 'should read chain.maxParallel');
+            assert.ok(configGetStub.calledWith('chain.maxInputTokens', sinon.match.any),
+                'should read chain.maxInputTokens');
             assert.ok(configGetStub.calledWith('llm.maxRetries', sinon.match.any),
                 'should read llm.maxRetries');
         });
@@ -162,11 +185,13 @@ describe('BaseProviderUtils.getCommonConfig', () => {
             // OpenAIChatCompletionsService.getProviderConfig() defaults:
             //   chain.enabled → true
             //   chain.maxParallel → 2
+            //   chain.maxInputTokens → 32000
             //   llm.maxRetries → 2
             configGetStub.returns(undefined);
             const config = utils.getCommonConfig();
             assert.strictEqual(config.useChain, true);
             assert.strictEqual(config.chainMaxParallel, 2);
+            assert.strictEqual(config.chainMaxInputTokens, 32_000);
             assert.strictEqual(config.maxRetries, 2);
         });
 
@@ -383,6 +408,7 @@ describe('BaseProviderUtils.getProviderConfig', () => {
         it('should combine common config with provider-specific model', () => {
             configGetStub.withArgs('chain.enabled', true).returns(true);
             configGetStub.withArgs('chain.maxParallel', 2).returns(2);
+            configGetStub.withArgs('chain.maxInputTokens', 32_000).returns(48_000);
             configGetStub.withArgs('llm.maxRetries', 2).returns(2);
             globalStateGet.withArgs('gitCommitGenie.openaiModel').returns('gpt-4o');
 
@@ -391,6 +417,7 @@ describe('BaseProviderUtils.getProviderConfig', () => {
             assert.strictEqual(config.model, 'gpt-4o');
             assert.strictEqual(config.useChain, true);
             assert.strictEqual(config.chainMaxParallel, 2);
+            assert.strictEqual(config.chainMaxInputTokens, 48_000);
             assert.strictEqual(config.maxRetries, 2);
         });
 
@@ -417,6 +444,7 @@ describe('BaseProviderUtils.getProviderConfig', () => {
             // Set up specific values and verify they propagate through getProviderConfig
             configGetStub.withArgs('chain.enabled', true).returns(false);
             configGetStub.withArgs('chain.maxParallel', 2).returns(8);
+            configGetStub.withArgs('chain.maxInputTokens', 32_000).returns(48_000);
             configGetStub.withArgs('llm.maxRetries', 2).returns(5);
             globalStateGet.returns('test-model');
 
@@ -424,6 +452,7 @@ describe('BaseProviderUtils.getProviderConfig', () => {
 
             assert.strictEqual(config.useChain, false);
             assert.strictEqual(config.chainMaxParallel, 8);
+            assert.strictEqual(config.chainMaxInputTokens, 48_000);
             assert.strictEqual(config.maxRetries, 5);
             assert.strictEqual(config.model, 'test-model');
         });

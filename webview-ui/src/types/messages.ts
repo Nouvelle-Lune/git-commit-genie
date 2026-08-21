@@ -2,6 +2,8 @@
  * Message types for webview communication
  */
 
+import type { PipelineTextCatalog } from '../../../src/ui/pipelineDisplay';
+
 // Extension -> Webview Messages
 export interface UpdateRepoMessage {
     type: 'updateRepo';
@@ -97,6 +99,7 @@ export interface I18nTexts {
     analysisStatusIdle: string;
     openSettings: string;
     repairRagEmbeddings: string;
+    pipeline: PipelineTextCatalog;
 }
 
 // Log Types
@@ -119,6 +122,7 @@ export interface LogEntry {
     content?: string; // For API requests (markdown format)
     filePath?: string; // For file reads
     repoPath?: string; // Repository root path for this log
+    generationMode?: 'default' | 'thinking';
     fileContent?: string; // For file read content preview
     startLine?: number; // For file read start line
     endLine?: number; // For file read end line

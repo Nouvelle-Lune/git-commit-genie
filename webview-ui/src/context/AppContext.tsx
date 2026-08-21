@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useReducer, useEffect, ReactNode } from 'react';
 import { ExtensionMessage, RepositoryInfo, I18nTexts, LogEntry } from '../types/messages';
 import { vscodeApi } from '../utils/vscode';
+import { DEFAULT_PIPELINE_TEXT } from '../../../src/ui/pipelineDisplay';
 
 // State Types
 export interface AppState {
@@ -36,7 +37,8 @@ const initialState: AppState = {
         analysisStatusAnalyzing: 'Analyzing...',
         analysisStatusIdle: 'Up to date',
         openSettings: 'Open Settings',
-        repairRagEmbeddings: 'Repair missing RAG embeddings'
+        repairRagEmbeddings: 'Repair missing RAG embeddings',
+        pipeline: DEFAULT_PIPELINE_TEXT,
     },
     logs: [],
     analysisRunning: false

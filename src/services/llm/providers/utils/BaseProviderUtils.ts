@@ -8,6 +8,7 @@ export interface ProviderRuntimeConfig {
     model: string;
     useChain: boolean;
     chainMaxParallel: number;
+    chainMaxInputTokens: number;
     maxRetries: number;
 }
 
@@ -63,6 +64,7 @@ export abstract class BaseProviderUtils {
         model: string;
         useChain: boolean;
         chainMaxParallel: number;
+        chainMaxInputTokens: number;
         maxRetries: number;
     } {
         const commonConfig = this.getCommonConfig();
@@ -148,6 +150,7 @@ export abstract class BaseProviderUtils {
         return {
             useChain: cfg.get<boolean>('chain.enabled', true),
             chainMaxParallel: cfg.get<number>('chain.maxParallel', 2),
+            chainMaxInputTokens: cfg.get<number>('chain.maxInputTokens', 32_000),
             maxRetries: cfg.get<number>('llm.maxRetries', 2)
         };
     }

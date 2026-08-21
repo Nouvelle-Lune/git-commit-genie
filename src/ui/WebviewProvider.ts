@@ -5,6 +5,7 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
 import { WebviewMessage, ExtensionMessage, RepositoryInfo, I18nTexts } from './types/messages';
 import { logger } from '../services/logger';
 import { StatusBarManager } from './StatusBarManager';
+import { isLocalizedPipelineLanguage } from './pipelineDisplay';
 
 /**
  * WebviewViewProvider for Git Commit Genie panel
@@ -380,7 +381,17 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 analysisStatusAnalyzing: vscode.l10n.t(I18N.dashboard.analysisStatusAnalyzing),
                 analysisStatusIdle: vscode.l10n.t(I18N.dashboard.analysisStatusIdle),
                 openSettings: vscode.l10n.t(I18N.actions.openSettings),
-                repairRagEmbeddings: vscode.l10n.t(I18N.dashboard.repairRagEmbeddings)
+                repairRagEmbeddings: vscode.l10n.t(I18N.dashboard.repairRagEmbeddings),
+                pipeline: (() => {
+                    const translated: I18nTexts['pipeline'] = { ...I18N.pipeline };
+                    if (!isLocalizedPipelineLanguage(vscode.env.language)) {
+                        return translated;
+                    }
+                    for (const key of Object.keys(translated) as Array<keyof I18nTexts['pipeline']>) {
+                        translated[key] = vscode.l10n.t(translated[key]);
+                    }
+                    return translated;
+                })(),
             }
         };
     }
