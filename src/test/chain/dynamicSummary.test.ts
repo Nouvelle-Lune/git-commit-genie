@@ -1,5 +1,7 @@
 import { describe, it } from 'mocha';
 import * as assert from 'assert';
+import * as sinon from 'sinon';
+import * as vscode from 'vscode';
 import { ChatFn, ChatMessage } from '../../services/llm/llmTypes';
 import { DiffData } from '../../services/git/gitTypes';
 import {
@@ -8,6 +10,8 @@ import {
     summarizeFileEvidence,
 } from '../../services/chain/dynamicSummary';
 import { estimateChatMessagesTokens } from '../../services/chain/tokenBudget';
+import { generateCommitMessageChain } from '../../services/chain/chainThinking';
+import { StageEvent } from '../../ui/StageNotificationManager';
 
 function makeDiff(fileName: string, content: string): DiffData {
     return {
@@ -40,6 +44,92 @@ function summaryResponseFor(messages: ChatMessage[]) {
 }
 
 describe('dynamic Thinking evidence compaction', () => {
+    it('keeps Summary failures separate from RAG preparation failures', async () => {
+        const configStub = sinon.stub(vscode.workspace, 'getConfiguration').callsFake((section?: string) => ({
+            get: <T>(key: string, defaultValue?: T): T | undefined => {
+                if (section === 'gitCommitGenie.rag' && key === 'enabled') {
+                    return true as T;
+                }
+                return defaultValue;
+            },
+        } as vscode.WorkspaceConfiguration));
+        const events: StageEvent[] = [];
+        const diff = makeDiff('src/large.ts', `-${'a'.repeat(8_000)}\n+${'b'.repeat(8_000)}`);
+        const chat: ChatFn = async (_messages, options) => {
+            if (options?.requestType === 'summary') {
+                throw new Error('summary context limit exceeded');
+            }
+            throw new Error(`Unexpected request type '${options?.requestType}'.`);
+        };
+
+        try {
+            await assert.rejects(
+                () => generateCommitMessageChain(
+                    { diffs: [diff] },
+                    chat,
+                    {
+                        maxInputTokens: 1_200,
+                        maxParallel: 2,
+                        onStage: event => events.push(event),
+                    }
+                ),
+                /summary context limit exceeded/
+            );
+        } finally {
+            configStub.restore();
+        }
+
+        assert.deepStrictEqual(
+            events.filter(event => event.type === 'summarizeFailed').map(event => event.data?.target),
+            ['ragPreparation', 'draft']
+        );
+        assert.strictEqual(events.some(event => event.type === 'ragPreparationStart'), false);
+        assert.strictEqual(events.some(event => event.type === 'ragPreparationSkipped'), false);
+    });
+
+    it('keeps genuine RAG preparation failures on the RAG stage', async () => {
+        const configStub = sinon.stub(vscode.workspace, 'getConfiguration').callsFake((section?: string) => ({
+            get: <T>(key: string, defaultValue?: T): T | undefined => {
+                if (section === 'gitCommitGenie.rag' && key === 'enabled') {
+                    return true as T;
+                }
+                return defaultValue;
+            },
+        } as vscode.WorkspaceConfiguration));
+        const events: StageEvent[] = [];
+        const chat: ChatFn = async (_messages, options) => {
+            if (options?.requestType === 'ragPreparation') {
+                throw new Error('RAG query construction failed');
+            }
+            if (options?.requestType === 'draft') {
+                return { commitMessage: 'chore: update parser' };
+            }
+            return {};
+        };
+
+        try {
+            const result = await generateCommitMessageChain(
+                { diffs: [makeDiff('src/parser.ts', '-old\n+new')] },
+                chat,
+                {
+                    maxInputTokens: 10_000,
+                    maxParallel: 2,
+                    onStage: event => events.push(event),
+                }
+            );
+
+            assert.strictEqual(result.commitMessage, 'chore: update parser');
+        } finally {
+            configStub.restore();
+        }
+
+        assert.strictEqual(events.some(event => event.type === 'summarizeFailed'), false);
+        assert.deepStrictEqual(
+            events.filter(event => event.type === 'ragPreparationSkipped').map(event => event.data?.error),
+            ['RAG query construction failed']
+        );
+    });
+
     it('keeps complete raw diffs when the target request already fits', async () => {
         const diffs = [makeDiff('src/small.ts', '-old\n+new')];
         let chatCalls = 0;

@@ -65,6 +65,8 @@ export interface PipelineTextCatalog {
     summarizeStartDescription: string;
     summarizeProgressTitle: string;
     summarizeProgressDefault: string;
+    summarizeFailedTitle: string;
+    summarizeFailedDefault: string;
     evidenceRoutedTitle: string;
     evidenceRoutedSummarized: string;
     evidenceRoutedRaw: string;
@@ -152,6 +154,8 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     summarizeStartDescription: 'The target request exceeded its input budget, so the largest raw diff is being summarized.',
     summarizeProgressTitle: 'Summarized {0}',
     summarizeProgressDefault: 'Raw diff replaced with grounded, hunk-referenced evidence.',
+    summarizeFailedTitle: 'Evidence compaction failed',
+    summarizeFailedDefault: 'Change evidence could not be compacted for the target request.',
     evidenceRoutedTitle: 'Evidence ready for {0}',
     evidenceRoutedSummarized: 'The largest raw diffs were replaced until the complete request fit the configured budget.',
     evidenceRoutedRaw: 'The complete request fits the configured budget; raw diffs remain intact.',
@@ -341,6 +345,16 @@ export function presentPipelineEvent(
                 data,
             };
         }
+        case 'summarizeFailed':
+            return {
+                stage,
+                phase: text.phaseTransform,
+                title: text.summarizeFailedTitle,
+                description: asString(data.error) || text.summarizeFailedDefault,
+                metrics: [{ label: text.metricInput, value: target, tone: 'summary' }],
+                tone: 'warning',
+                data,
+            };
         case 'evidenceRouted': {
             const didSummarize = data.didSummarize === true;
             return {
@@ -596,6 +610,13 @@ export function deriveLatestPipelineSnapshot(
             case 'summarizeStart':
             case 'summarizeProgress':
                 stepStates.summary = stage === 'summarizeStart' ? 'active' : 'complete';
+                break;
+            case 'summarizeFailed':
+                stepStates.summary = 'warning';
+                if (data.target === 'ragPreparation' && stepStates.rag === 'pending') {
+                    stepStates.rag = 'skipped';
+                }
+                degraded = true;
                 break;
             case 'evidenceRouted':
                 if (data.didSummarize === true) {

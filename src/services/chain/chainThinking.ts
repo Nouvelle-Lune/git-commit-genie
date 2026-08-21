@@ -223,47 +223,57 @@ export async function generateCommitMessageChain(
 		target: 'ragPreparation' | 'draft',
 		buildTargetMessages: (current: DraftEvidence[]) => ChatMessage[]
 	) => {
-		const result = await compactEvidenceToFit({
-			diffs,
-			evidence,
-			chat,
-			maxInputTokens,
-			maxParallel,
-			buildTargetMessages,
-			onSummarizeStart: () => {
-				if (!summaryStageStarted) {
-					summaryStageStarted = true;
-					safeRun('Chain.onStage.summarizeStart', () => options?.onStage?.({ type: 'summarizeStart' }));
-				}
-			},
-			onFileSummarized: (file) => {
-				summarizedCount += 1;
-				safeRun('Chain.onStage.summarizeProgress', () => options?.onStage?.({
-					type: 'summarizeProgress',
-					data: {
-						current: summarizedCount,
-						total: diffs.length,
-						file: file.fileName,
-						summary: summarizeEvidenceForDisplay(file),
-						breaking: file.breakingSignals.length > 0,
-					}
-				}));
-			},
-		});
-		evidence = result.evidence;
-		safeRun('Chain.onStage.evidenceRouted', () => options?.onStage?.({
-			type: 'evidenceRouted',
-			data: {
-				target,
-				fileCount: evidence.length,
-				rawFiles: evidence.filter(item => item.kind === 'raw').length,
-				summarizedFiles: evidence.filter(item => item.kind === 'summary').length,
-				initialEstimatedInputTokens: result.initialEstimatedInputTokens,
-				estimatedInputTokens: result.estimatedInputTokens,
+		try {
+			const result = await compactEvidenceToFit({
+				diffs,
+				evidence,
+				chat,
 				maxInputTokens,
-				didSummarize: result.didSummarize,
-			}
-		}));
+				maxParallel,
+				buildTargetMessages,
+				onSummarizeStart: () => {
+					if (!summaryStageStarted) {
+						summaryStageStarted = true;
+						safeRun('Chain.onStage.summarizeStart', () => options?.onStage?.({ type: 'summarizeStart' }));
+					}
+				},
+				onFileSummarized: (file) => {
+					summarizedCount += 1;
+					safeRun('Chain.onStage.summarizeProgress', () => options?.onStage?.({
+						type: 'summarizeProgress',
+						data: {
+							current: summarizedCount,
+							total: diffs.length,
+							file: file.fileName,
+							summary: summarizeEvidenceForDisplay(file),
+							breaking: file.breakingSignals.length > 0,
+						}
+					}));
+				},
+			});
+			evidence = result.evidence;
+			safeRun('Chain.onStage.evidenceRouted', () => options?.onStage?.({
+				type: 'evidenceRouted',
+				data: {
+					target,
+					fileCount: evidence.length,
+					rawFiles: evidence.filter(item => item.kind === 'raw').length,
+					summarizedFiles: evidence.filter(item => item.kind === 'summary').length,
+					initialEstimatedInputTokens: result.initialEstimatedInputTokens,
+					estimatedInputTokens: result.estimatedInputTokens,
+					maxInputTokens,
+					didSummarize: result.didSummarize,
+				}
+			}));
+		} catch (error) {
+			const errorMessage = String((error as any)?.message || error || 'Unknown error');
+			logger.warn(`[Genie][Chain] Evidence compaction failed for ${target}.`, error);
+			safeRun('Chain.onStage.summarizeFailed', () => options?.onStage?.({
+				type: 'summarizeFailed',
+				data: { target, error: errorMessage }
+			}));
+			throw error;
+		}
 	};
 
 	let changeSetSummary: ChangeSetSummary | undefined;
@@ -271,26 +281,36 @@ export async function generateCommitMessageChain(
 	let ragStyleReferences: RagStyleReference[] = [];
 
 	if (isRagPreparationEnabled()) {
+		let ragEvidenceReady = false;
 		try {
 			await compactFor('ragPreparation', current => buildRagPreparationMessages(current));
-			safeRun('Chain.onStage.ragPreparationStart', () => options?.onStage?.({ type: 'ragPreparationStart' }));
-			const ragContext = await prepareRagContext(diffs, evidence, chat);
-			changeSetSummary = ragContext.changeSetSummary;
-			retrievalFeatures = ragContext.retrievalFeatures;
-			safeRun('Chain.onStage.ragPrepared', () => options?.onStage?.({
-				type: 'ragPrepared',
-				data: {
-					changeSetSummary,
-					retrievalFeatures,
-				}
-			}));
-		} catch (error) {
-			const errorMessage = String((error as any)?.message || error || 'Unknown error');
-			logger.warn('[Genie][Chain] RAG preparation failed; continuing without RAG context.', error);
-			safeRun('Chain.onStage.ragPreparationSkipped', () => options?.onStage?.({
-				type: 'ragPreparationSkipped',
-				data: { error: errorMessage }
-			}));
+			ragEvidenceReady = true;
+		} catch {
+			// compactFor already reports this as a Summary-stage failure. RAG is optional,
+			// so generation can continue without misclassifying the failed prerequisite.
+		}
+
+		if (ragEvidenceReady) {
+			try {
+				safeRun('Chain.onStage.ragPreparationStart', () => options?.onStage?.({ type: 'ragPreparationStart' }));
+				const ragContext = await prepareRagContext(diffs, evidence, chat);
+				changeSetSummary = ragContext.changeSetSummary;
+				retrievalFeatures = ragContext.retrievalFeatures;
+				safeRun('Chain.onStage.ragPrepared', () => options?.onStage?.({
+					type: 'ragPrepared',
+					data: {
+						changeSetSummary,
+						retrievalFeatures,
+					}
+				}));
+			} catch (error) {
+				const errorMessage = String((error as any)?.message || error || 'Unknown error');
+				logger.warn('[Genie][Chain] RAG preparation failed; continuing without RAG context.', error);
+				safeRun('Chain.onStage.ragPreparationSkipped', () => options?.onStage?.({
+					type: 'ragPreparationSkipped',
+					data: { error: errorMessage }
+				}));
+			}
 		}
 	} else {
 		safeRun('Chain.onStage.ragDisabled', () => options?.onStage?.({

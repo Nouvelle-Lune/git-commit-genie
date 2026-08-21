@@ -159,6 +159,7 @@ describe('pipeline display model', () => {
             { stage: 'evidenceRouted', data: { target: 'draft', rawFiles: 1, summarizedFiles: 0, estimatedInputTokens: 100, maxInputTokens: 32_000 } },
             { stage: 'summarizeStart', data: {} },
             { stage: 'summarizeProgress', data: { file: 'src/a.ts', current: 1, total: 1 } },
+            { stage: 'summarizeFailed', data: { target: 'ragPreparation', error: 'context limit exceeded' } },
             { stage: 'ragDisabled', data: {} },
             { stage: 'ragPreparationStart', data: {} },
             { stage: 'ragPrepared', data: { changeSetSummary: { text: 'Update parser' }, retrievalFeatures: {} } },
@@ -259,6 +260,27 @@ describe('pipeline display model', () => {
         assert.strictEqual(presentation.title, 'Retrieval query prepared');
         assert.strictEqual(presentation.description, 'Configure an MCP project.');
         assert.deepStrictEqual(presentation.metrics.map(metric => metric.value), ['chore', 'mcp', '5']);
+    });
+
+    it('attributes RAG-input compaction errors to Summary without marking RAG preparation as failed', () => {
+        const snapshot = deriveLatestPipelineSnapshot([
+            generationStart(),
+            stageLog('evidenceReady', { fileCount: 3, rawFiles: 3, maxInputTokens: 14_000 }, 2),
+            stageLog('summarizeStart', {}, 3),
+            stageLog('summarizeFailed', {
+                target: 'ragPreparation',
+                error: 'maximum context length exceeded',
+            }, 4),
+        ]);
+
+        assert.ok(snapshot);
+        assert.strictEqual(snapshot.latest.stage, 'summarizeFailed');
+        assert.strictEqual(snapshot.latest.title, 'Evidence compaction failed');
+        assert.strictEqual(snapshot.latest.description, 'maximum context length exceeded');
+        assert.strictEqual(snapshot.latest.phase, 'Transform');
+        assert.strictEqual(snapshot.steps.find(step => step.id === 'summary')?.state, 'warning');
+        assert.strictEqual(snapshot.steps.find(step => step.id === 'rag')?.state, 'skipped');
+        assert.strictEqual(snapshot.state, 'degraded');
     });
 
     it('uses the localized catalog for the visible flow labels', () => {

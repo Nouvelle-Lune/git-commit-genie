@@ -7,6 +7,7 @@ export type StageEventType =
   | 'evidenceRouted'
   | 'summarizeStart'
   | 'summarizeProgress'
+  | 'summarizeFailed'
   | 'ragDisabled'
   | 'ragPreparationStart'
   | 'ragPrepared'
@@ -147,6 +148,9 @@ export class StageNotificationManager {
         this.active.updateMessage(t(I18N.stages.summarizingProgress, cur, total));
         break;
       }
+      case 'summarizeFailed':
+        this.active.updateMessage(t(I18N.stages.summarizingFailed));
+        break;
       case 'ragDisabled':
         this.active.updateMessage(t(I18N.stages.ragDisabled));
         break;

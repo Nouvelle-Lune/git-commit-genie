@@ -65,6 +65,7 @@ export const L10N_KEYS = {
     evidenceRouted: 'Preparing {0}…',
     summarizingStart: 'Analyzing changes…',
     summarizingProgress: 'Analyzing changes ({0}/{1})…',
+    summarizingFailed: 'Evidence compaction failed…',
     ragDisabled: 'RAG disabled; continuing to draft…',
     ragPreparationStart: 'Building RAG query…',
     ragPrepared: 'RAG query ready…',
