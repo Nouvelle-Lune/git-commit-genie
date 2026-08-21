@@ -4,7 +4,6 @@ import { LogEntry, LogType } from '../types/messages';
 import { vscodeApi } from '../utils/vscode';
 import './LogSection.css';
 import { GenieCheckIcon, GenieCloudIcon, GenieReadIcon, GenieReasonIcon, GenieToolIcon, GenieWarningIcon } from './icons';
-import { PipelineFlow } from './PipelineFlow';
 import { formatPipelineText, parseCommitStageLog, presentPipelineEvent } from '../../../src/ui/pipelineDisplay';
 // @ts-ignore - react-markdown types
 import ReactMarkdown from 'react-markdown';
@@ -320,49 +319,47 @@ export const LogSection: React.FC = () => {
             // Commit generation stages
             if (title.includes('Commit stage:')) {
                 const stage = parseCommitStageLog(log)!.stage.toLowerCase();
-                if (stage.includes('evidence')) return { label: state.i18n.pipeline.stepEvidence, className: 'stage-badge-data' };
-                if (stage.includes('summarize')) return { label: state.i18n.pipeline.stepSummary, className: 'stage-badge-summarize' };
-                if (stage.includes('rag')) return { label: state.i18n.pipeline.stepRag, className: 'stage-badge-rag' };
+                if (stage.includes('evidence')) return { label: 'EVD', className: 'stage-badge-data' };
+                if (stage.includes('summarize')) return { label: 'SUM', className: 'stage-badge-summarize' };
+                if (stage.includes('rag')) return { label: 'RAG', className: 'stage-badge-rag' };
                 if (stage.includes('draft') || stage.includes('classify')) {
-                    return { label: state.i18n.pipeline.stepDraft, className: 'stage-badge-classify' };
+                    return { label: 'DRFT', className: 'stage-badge-classify' };
                 }
                 if (stage.includes('validate') || stage.includes('validation') || stage.includes('strict') || stage.includes('language')) {
-                    return { label: state.i18n.pipeline.stepVerify, className: 'stage-badge-verify' };
+                    return { label: 'CHK', className: 'stage-badge-verify' };
                 }
-                if (stage.includes('done')) return { label: state.i18n.pipeline.stateReady, className: 'stage-badge-done' };
+                if (stage.includes('done')) return { label: 'DONE', className: 'stage-badge-done' };
                 throw new Error(`Unknown commit pipeline stage '${stage}'.`);
             }
 
             // Structured-output validation and provider-empty retries
             if (isSchemaValidationLog(log)) {
                 return {
-                    label: isValidationRetryLog(log)
-                        ? state.i18n.pipeline.stateRetrying
-                        : state.i18n.pipeline.stateFailed,
+                    label: isValidationRetryLog(log) ? 'RTY' : 'FAIL',
                     className: 'stage-badge-validation'
                 };
             }
 
             // Repository analysis tools
-            if (title.includes('wants to read:')) return { label: 'Read', className: 'stage-badge-read' };
-            if (title.includes('wants to search')) return { label: 'Search', className: 'stage-badge-search' };
-            if (title.includes('wants to explore:')) return { label: 'Explore', className: 'stage-badge-explore' };
-            if (title.includes('compressed context')) return { label: 'Analyze', className: 'stage-badge-analyze' };
+            if (title.includes('wants to read:')) return { label: 'READ', className: 'stage-badge-read' };
+            if (title.includes('wants to search')) return { label: 'SRCH', className: 'stage-badge-search' };
+            if (title.includes('wants to explore:')) return { label: 'EXPL', className: 'stage-badge-explore' };
+            if (title.includes('compressed context')) return { label: 'ANLY', className: 'stage-badge-analyze' };
 
             // Default for other tool calls
-            return { label: 'Tool', className: 'stage-badge-tool' };
+            return { label: 'TOOL', className: 'stage-badge-tool' };
         }
 
         // For other types
         switch (type) {
             case LogType.FileRead:
-                return { label: 'Read', className: 'stage-badge-read' };
+                return { label: 'READ', className: 'stage-badge-read' };
             case LogType.ApiRequest:
                 return { label: 'API', className: 'stage-badge-api' };
             case LogType.Reason:
-                return { label: 'Think', className: 'stage-badge-reason' };
+                return { label: 'THNK', className: 'stage-badge-reason' };
             case LogType.FinalResult:
-                return { label: 'Result', className: 'stage-badge-result' };
+                return { label: 'OUT', className: 'stage-badge-result' };
             default:
                 return null;
         }
@@ -419,7 +416,6 @@ export const LogSection: React.FC = () => {
                     <i className="codicon codicon-trash"></i>
                 </button>
             </div>
-            <PipelineFlow logs={state.logs} text={state.i18n.pipeline} />
             <div className="panel-box log-panel">
                 {state.logs.length === 0 ? (
                     <div className="log-empty">
