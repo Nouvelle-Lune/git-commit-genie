@@ -10,7 +10,7 @@ import {
     ToolResult,
     ReadFileOptions,
     ReadFileResult
-} from './toolTypes';
+} from './types';
 import { logger } from '../../logger';
 
 /**

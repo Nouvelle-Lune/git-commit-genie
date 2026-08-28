@@ -85,6 +85,169 @@ export const ragRerankResponseSchema = z.object({
   notes: z.string().nullable().default(null),
 } as const);
 
+// ----- Change-Conditioned Chain -----
+
+export const CHANGED_SYMBOL_TYPES = [
+  'function', 'method', 'class', 'interface', 'type',
+  'constant', 'variable', 'config_key', 'route', 'cli_flag', 'unknown'
+] as const;
+
+export const CHANGE_KINDS = [
+  'added', 'removed', 'signature', 'function_body',
+  'type_shape', 'value', 'renamed', 'moved', 'unknown'
+] as const;
+
+export const INVESTIGATION_TARGET_KINDS = [
+  'symbol', 'config', 'type', 'dependency', 'interface', 'cli_or_api'
+] as const;
+
+export const INVESTIGATION_TOOL_NAMES = [
+  'getChangedSymbols',
+  'findSymbolDefinition',
+  'findSymbolReferences',
+  'findCallers',
+  'findCallees',
+  'findImplementations',
+  'findTypeDefinition',
+  'searchCode',
+  'readFileContent',
+  'listDirectory'
+] as const;
+
+export const changeExtractionResponseSchema = z.object({
+  changedSymbols: z.array(z.object({
+    name: z.string().min(1),
+    file: z.string().min(1),
+    symbolType: z.enum(CHANGED_SYMBOL_TYPES),
+    changeKind: z.enum(CHANGE_KINDS),
+    evidenceRefs: z.array(z.string().min(1)),
+  } as const)),
+  introducedSymbols: z.array(z.string().min(1)),
+  removedSymbols: z.array(z.string().min(1)),
+  changedCalls: z.array(z.string().min(1)),
+  changedConfigs: z.array(z.string().min(1)),
+  changedTypes: z.array(z.string().min(1)),
+  changedDependencies: z.array(z.string().min(1)),
+} as const);
+
+export const investigationPlanResponseSchema = z.object({
+  targets: z.array(z.object({
+    target: z.string().min(1),
+    kind: z.enum(INVESTIGATION_TARGET_KINDS),
+    file: z.string().nullable(),
+    questions: z.array(z.string().min(1)).min(1).max(6),
+  } as const)).max(4),
+  notes: z.string().nullable(),
+} as const);
+
+/**
+ * Tool arguments are flattened onto the action instead of nested in a free-form
+ * `args` object so a single schema stays valid under every provider's
+ * structured-output subset, including the OpenAI strict JSON Schema profile.
+ */
+export const investigationActionSchema = z.object({
+  action: z.enum(['tool', 'final']),
+  tool: z.enum(INVESTIGATION_TOOL_NAMES).nullable(),
+  reason: z.string().nullable(),
+  symbol: z.string().nullable(),
+  filePath: z.string().nullable(),
+  dirPath: z.string().nullable(),
+  query: z.string().nullable(),
+  searchType: z.enum(['name', 'content']).nullable(),
+  useRegex: z.boolean().nullable(),
+  startLine: z.number().int().min(1).nullable(),
+  maxLines: z.number().int().min(1).nullable(),
+  maxResults: z.number().int().min(1).nullable(),
+  final: z.object({
+    findings: z.array(z.object({
+      target: z.string().min(1),
+      question: z.string().min(1),
+      answer: z.string().min(1),
+      evidenceRefs: z.array(z.string().min(1)),
+    } as const)),
+    unresolvedQuestions: z.array(z.string().min(1)),
+    stopReason: z.string().min(1),
+  } as const).nullable(),
+} as const).superRefine((value, context) => {
+  if (value.action === 'final' && value.final === null) {
+    context.addIssue({
+      code: 'custom',
+      path: ['final'],
+      message: 'final must be an object when action is final',
+    });
+  }
+  if (value.action === 'tool' && value.tool === null) {
+    context.addIssue({
+      code: 'custom',
+      path: ['tool'],
+      message: 'tool must be set when action is tool',
+    });
+  }
+  if (value.action === 'tool' && (!value.reason || !value.reason.trim())) {
+    context.addIssue({
+      code: 'custom',
+      path: ['reason'],
+      message: 'reason must be set when action is tool',
+    });
+  }
+});
+
+const evidenceBackedClaimSchema = z.object({
+  claim: z.string().min(1),
+  evidenceRefs: z.array(z.string().min(1)),
+} as const);
+
+export const semanticAnalysisResponseSchema = z.object({
+  changeTargets: z.array(z.object({
+    symbol: z.string().min(1),
+    file: z.string().min(1),
+    role: z.string().min(1),
+    evidenceRefs: z.array(z.string().min(1)),
+  } as const)),
+  dependencyContext: z.object({
+    callers: z.array(z.string().min(1)),
+    callees: z.array(z.string().min(1)),
+    stateDependencies: z.array(z.string().min(1)),
+    relatedConfigs: z.array(z.string().min(1)),
+    relatedTypes: z.array(z.string().min(1)),
+  } as const),
+  observedChanges: z.array(evidenceBackedClaimSchema),
+  repositoryFacts: z.array(evidenceBackedClaimSchema),
+  behaviorAnalysis: z.object({
+    before: z.string().nullable(),
+    after: z.string().nullable(),
+    observableEffect: z.string().nullable(),
+  } as const),
+  capabilityContext: z.object({
+    technicalCapability: z.string().nullable(),
+    productCapability: z.string().nullable(),
+  } as const),
+  supportedInferences: z.array(evidenceBackedClaimSchema),
+  uncertainInferences: z.array(evidenceBackedClaimSchema),
+  intentAnalysis: z.object({
+    primaryIntent: z.string().nullable(),
+    supportedBy: z.array(z.string().min(1)),
+    confidence: z.enum(['low', 'medium', 'high']),
+  } as const),
+  changeClassification: z.object({
+    existingBehaviorCorrected: z.boolean(),
+    newCapabilityAdded: z.boolean(),
+    externalBehaviorChanged: z.boolean(),
+    structuralOnly: z.boolean(),
+    recommendedType: z.string().nullable(),
+    reason: z.string().nullable(),
+  } as const),
+  uncertainties: z.array(z.string().min(1)),
+} as const);
+
+export const informationSelectionResponseSchema = z.object({
+  mustExpress: z.array(z.string().min(1)).min(1).max(3),
+  optional: z.array(z.string().min(1)).max(4),
+  omit: z.array(z.string().min(1)).max(8),
+  suggestedScope: z.string().nullable(),
+  notes: z.string().nullable(),
+} as const);
+
 export const repoAnalysisResponseSchema = z.object({
   summary: z.string().min(1).describe("Brief but comprehensive summary of the repository purpose and architecture"),
   projectType: z.string().min(1).default('Unknown Project').describe("Main project type (e.g., Web App, Library, CLI Tool, etc.)"),

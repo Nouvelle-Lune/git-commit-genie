@@ -387,6 +387,25 @@
   border-color: color-mix(in srgb, var(--semantic-info) 24%, transparent);
 }
 
+/* Change-conditioned chain: Extract, Plan, Investigate, Semantics, Select */
+.stage-badge-extract,
+.stage-badge-plan,
+.stage-badge-investigate,
+.stage-badge-semantic,
+.stage-badge-select {
+  background: color-mix(in srgb, var(--semantic-investigate) 16%, transparent);
+  color: var(--semantic-investigate);
+  border: 1px solid color-mix(in srgb, var(--semantic-investigate) 30%, transparent);
+}
+
+/* A stage that deliberately did not run. Muted so a skip reads as information
+   rather than as a failure. */
+.stage-badge-skipped {
+  background: color-mix(in srgb, var(--vscode-descriptionForeground) 12%, transparent);
+  color: var(--vscode-descriptionForeground);
+  border: 1px solid color-mix(in srgb, var(--vscode-descriptionForeground) 26%, transparent);
+}
+
 /* ── Trailing cluster ── */
 .log-trailing {
   display: flex;

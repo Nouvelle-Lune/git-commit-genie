@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { DiffData } from '../git/gitTypes';
 import { Repository } from '../git/git';
-import { ChangeSetSummary, FileSummary, RagStyleReference, RetrievalFeatures } from '../chain/chainTypes';
+import { ChangeSetSummary, FileSummary, RagStyleReference, RetrievalFeatures } from '../chain/types';
 
 export type ChatRole = 'system' | 'user' | 'assistant' | 'developer';
 
@@ -20,6 +20,12 @@ export type RequestType =
     | 'repoAnalysis'
     | 'repoAnalysisAction'
     | 'compression'
+    // Change-conditioned chain stages
+    | 'changeExtraction'
+    | 'investigationPlan'
+    | 'investigationAction'
+    | 'semanticAnalysis'
+    | 'informationSelection'
     // More granular chain stages for clearer logging
     | 'strictFix'
     | 'enforceLanguage';

@@ -1,4 +1,43 @@
-import { NormalizedLang } from "./chainTypes";
+import { NormalizedLang } from "../types";
+import { ChatFn } from '../../llm/llmTypes';
+import { buildEnforceLanguageMessages } from './prompts';
+
+export async function enforceCommitLanguage(
+    commitMessage: string,
+    targetLanguage: string | undefined,
+    chat: ChatFn,
+    userTemplate?: string
+): Promise<string> {
+    const language = (targetLanguage || '').trim();
+    if (!language) {
+        return commitMessage;
+    }
+
+    const normalized = normalizeLanguageCode(language);
+    if (normalized !== 'other') {
+        const lines = commitMessage.split('\n');
+        const header = lines[0] || '';
+        const colonIndex = header.indexOf(':');
+        const headerDescription = colonIndex !== -1 ? header.slice(colonIndex + 1).trim() : header.trim();
+
+        let bodyStartIndex = 1;
+        while (bodyStartIndex < lines.length && lines[bodyStartIndex].trim() === '') {
+            bodyStartIndex++;
+        }
+        const bodyContent = lines.slice(bodyStartIndex).join(' ').trim();
+
+        const headerVerdict = isLikelyTargetLanguage(headerDescription, normalized);
+        if (headerVerdict === 'yes') {
+            if (!bodyContent || isLikelyTargetLanguage(bodyContent, normalized) === 'yes') {
+                return commitMessage;
+            }
+        }
+    }
+
+    const messages = buildEnforceLanguageMessages(commitMessage, language, userTemplate);
+    const parsed = await chat(messages, { requestType: 'enforceLanguage' });
+    return parsed.commitMessage.trim();
+}
 
 export function normalizeLanguageCode(input: string): NormalizedLang {
     const t = (input || '').trim().toLowerCase();
@@ -193,4 +232,3 @@ function countScripts(text: string): {
     }
     return { asciiLetters, cjk, hiragana, katakana, hangul, cyrillic };
 }
-

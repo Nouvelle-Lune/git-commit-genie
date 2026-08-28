@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { TemplateService } from '../../../template/templateService';
-import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
+import { IRepositoryAnalysisService } from '../../analysis/repository/repositoryAnalysisTypes';
 import { OpenAIChatCompletionsService } from './openaiChatCompletionsService';
 
 const GLM_API_URL_CHINA = 'https://open.bigmodel.cn/api/paas/v4';

@@ -4,8 +4,8 @@ import * as vscode from 'vscode';
 import OpenAI from 'openai';
 import { Repository } from '../git/git';
 import { RepoService } from '../repo/repo';
-import { buildRagRerankMessages } from '../chain/chainChatPrompts';
-import { ChangeSetSummary, RagStyleReference, RetrievalFeatures } from '../chain/chainTypes';
+import { buildRagRerankMessages } from '../chain/rag/prompts';
+import { ChangeSetSummary, RagStyleReference, RetrievalFeatures } from '../chain/types';
 import { logger } from '../logger';
 import { RAG_DOCUMENTS_FILE, RAG_STATE_FILE, RagEmbeddingConfig, normalizeVector, readEmbeddingConfig } from './ragShared';
 

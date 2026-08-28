@@ -1,7 +1,8 @@
-// Types related to chain-of-thought prompting and chat interactions
+// Public data contracts for the commit-message pipeline.
 
 import { DiffData } from "../git/gitTypes";
 import { Repository } from "../git/git";
+import { ChangeAnalysisTrace, RepositoryAnalysisContext } from "../analysis/change/types";
 
 
 export type NormalizedLang =
@@ -11,14 +12,6 @@ export type NormalizedLang =
 
 
 
-// Structured repository analysis type
-export interface RepositoryAnalysis {
-    summary?: string;
-    projectType?: string;
-    technologies?: string[];
-    insights?: string[];
-}
-
 export interface ChainInputs {
     diffs: DiffData[];
     currentTime?: string;
@@ -27,8 +20,7 @@ export interface ChainInputs {
     validationChecklist?: string;
     repositoryPath?: string;
     targetRepo?: Repository;
-    // Optional repository analysis (can be string for backward compatibility or structured object)
-    repositoryAnalysis?: string | RepositoryAnalysis;
+    repositoryAnalysis?: RepositoryAnalysisContext;
     ragStyleReferences?: RagStyleReference[];
 }
 
@@ -38,46 +30,6 @@ export interface FileSummary {
     summary: string;
     breaking: boolean;
 }
-
-export interface EvidenceChange {
-    action: string;
-    target: string;
-    behavior: string;
-    exactSymbols: string[];
-    evidenceHunkIds: string[];
-}
-
-export interface EvidenceObservation {
-    detail: string;
-    evidenceHunkIds: string[];
-}
-
-export interface EvidenceSummaryResponse {
-    changes: EvidenceChange[];
-    tests: EvidenceObservation[];
-    breakingSignals: EvidenceObservation[];
-    uncertainties: EvidenceObservation[];
-}
-
-export interface RawDiffEvidence {
-    kind: 'raw';
-    fileName: string;
-    status: DiffData['status'];
-    rawDiff: string;
-}
-
-export interface FileEvidence {
-    kind: 'summary';
-    fileName: string;
-    status: DiffData['status'];
-    coveredHunkIds: string[];
-    changes: EvidenceChange[];
-    tests: EvidenceObservation[];
-    breakingSignals: EvidenceObservation[];
-    uncertainties: EvidenceObservation[];
-}
-
-export type DraftEvidence = RawDiffEvidence | FileEvidence;
 
 export interface ChangeSetSummary {
     text: string;
@@ -126,6 +78,8 @@ export interface ChainOutputs {
     changeSetSummary?: ChangeSetSummary;
     retrievalFeatures?: RetrievalFeatures;
     ragStyleReferences?: RagStyleReference[];
+    /** Stage-by-stage record of the change analysis, for logs and benchmarks. */
+    changeAnalysis: ChangeAnalysisTrace;
     raw?: {
         draft?: string;
         classificationNotes?: string;

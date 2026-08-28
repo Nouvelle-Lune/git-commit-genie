@@ -3,7 +3,7 @@
  * into the LLM conversation, without losing essential semantics.
  */
 
-import { ToolResult } from './toolTypes';
+import { ToolResult } from './types';
 
 /** Optional caller-supplied truncation thresholds. */
 export interface CompactToolResultLimits {
@@ -198,4 +198,3 @@ export function toRelativePath(repoPath: string, fullPath: string): string {
 		return fullPath;
 	}
 }
-

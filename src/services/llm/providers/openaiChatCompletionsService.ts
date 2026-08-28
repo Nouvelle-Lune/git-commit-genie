@@ -4,17 +4,17 @@ import { ChatMessage, ChatFn, GenerateCommitMessageOptions, LLMError, LLMRespons
 import { BaseLLMService } from '../baseLLMService';
 import { TemplateService } from '../../../template/templateService';
 import { DiffData } from '../../git/gitTypes';
-import { generateCommitMessageChain } from '../../chain/chainThinking';
+import { generateCommitMessageChain } from '../../chain/commitMessageChain';
 import { logger } from '../../logger';
 import { OpenAICompatibleUtils } from './utils/index';
-import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
+import { IRepositoryAnalysisService } from '../../analysis/repository/repositoryAnalysisTypes';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
 import { ProviderRules } from './utils/BaseProviderUtils';
 import { commitMessageSchema } from './schemas/common';
 import { ProviderError } from './errors/providerError';
-import { assertChatMessagesWithinTokenBudget } from '../../chain/tokenBudget';
+import { assertChatMessagesWithinTokenBudget } from '../inputTokenBudget';
 
 interface OpenAIChatRuntimeConfig {
     model: string;
@@ -295,8 +295,10 @@ export abstract class OpenAIChatCompletionsService extends BaseLLMService {
                 chat,
                 {
                     maxParallel: config.chainMaxParallel,
+                    maxRetries: config.maxRetries,
                     maxInputTokens: config.chainMaxInputTokens,
                     model: config.model,
+                    repositoryAnalysisService: this.analysisService,
                     retrieveRagExamples: async (context) => {
                         if (!options?.ragRetrievalService || !options?.targetRepo) {
                             return [];

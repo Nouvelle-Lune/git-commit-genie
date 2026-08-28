@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import { z } from 'zod';
 import { DiffData } from '../git/gitTypes';
 import { TemplateService } from '../../template/templateService';
-import { IRepositoryAnalysisService } from '../analysis/analysisTypes';
+import { IRepositoryAnalysisService } from '../analysis/repository/repositoryAnalysisTypes';
 import { Repository } from '../git/git';
 import { RepoService } from '../repo/repo';
 import { ProviderError } from './providers/errors/providerError';

@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { BaseLLMService } from '../../services/llm/baseLLMService';
 import { DiffData } from '../../services/git/gitTypes';
 import { ChatMessage } from '../../services/llm/llmTypes';
-import { IRepositoryAnalysisService } from '../../services/analysis/analysisTypes';
+import { IRepositoryAnalysisService } from '../../services/analysis/repository/repositoryAnalysisTypes';
 import { TemplateService } from '../../template/templateService';
 import { OpenAICompatibleUtils } from '../../services/llm/providers/utils/OpenAIUtils';
 import { findAnthropicToolUseBlock } from '../../services/llm/providers/utils/AnthropicUtils';

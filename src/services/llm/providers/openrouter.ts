@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import OpenAI from 'openai';
 import { TemplateService } from '../../../template/templateService';
-import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
+import { IRepositoryAnalysisService } from '../../analysis/repository/repositoryAnalysisTypes';
 import { OpenAIChatCompletionsService } from './openaiChatCompletionsService';
 import { getOpenRouterModelIds } from './config/openrouterModels';
 

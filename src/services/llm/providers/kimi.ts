@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { TemplateService } from '../../../template/templateService';
-import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
+import { IRepositoryAnalysisService } from '../../analysis/repository/repositoryAnalysisTypes';
 import { OpenAIChatCompletionsService } from './openaiChatCompletionsService';
 
 const KIMI_API_URL_CHINA = 'https://api.moonshot.cn/v1';

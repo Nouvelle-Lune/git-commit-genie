@@ -4,7 +4,7 @@ import { LLMError, LLMResponse, ChatFn, ChatMessage, GenerateCommitMessageOption
 import { BaseLLMService } from '../baseLLMService';
 import { TemplateService } from '../../../template/templateService';
 import { DiffData } from '../../git/gitTypes';
-import { generateCommitMessageChain } from '../../chain/chainThinking';
+import { generateCommitMessageChain } from '../../chain/commitMessageChain';
 
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
@@ -12,8 +12,8 @@ import { GeminiUtils } from './utils/GeminiUtils';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
 import { ProviderRuntimeConfig, ProviderRules } from './utils/BaseProviderUtils';
-import { assertChatMessagesWithinTokenBudget } from '../../chain/tokenBudget';
-import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
+import { assertChatMessagesWithinTokenBudget } from '../inputTokenBudget';
+import { IRepositoryAnalysisService } from '../../analysis/repository/repositoryAnalysisTypes';
 import {
     GeminiCommitMessageSchema,
     GeminiEvidenceSummarySchema,
@@ -22,7 +22,12 @@ import {
     GeminiRagPreparationSchema,
     GeminiRagRerankSchema,
     GeminiRepoAnalysisSchema,
-    GeminiRepoAnalysisActionSchema
+    GeminiRepoAnalysisActionSchema,
+    GeminiChangeExtractionSchema,
+    GeminiInvestigationPlanSchema,
+    GeminiInvestigationActionSchema,
+    GeminiSemanticAnalysisSchema,
+    GeminiInformationSelectionSchema
 } from './schemas/geminiSchemas';
 
 import { commitMessageSchema } from './schemas/common';
@@ -172,6 +177,11 @@ export class GeminiService extends BaseLLMService {
             enforceLanguage: GeminiCommitMessageSchema,
             repoAnalysis: GeminiRepoAnalysisSchema,
             repoAnalysisAction: GeminiRepoAnalysisActionSchema,
+            changeExtraction: GeminiChangeExtractionSchema,
+            investigationPlan: GeminiInvestigationPlanSchema,
+            investigationAction: GeminiInvestigationActionSchema,
+            semanticAnalysis: GeminiSemanticAnalysisSchema,
+            informationSelection: GeminiInformationSelectionSchema,
         };
 
         const chat: ChatFn = async (messages, chainOptions) => {
@@ -227,8 +237,10 @@ export class GeminiService extends BaseLLMService {
                 chat,
                 {
                     maxParallel: config.chainMaxParallel,
+                    maxRetries: config.maxRetries,
                     maxInputTokens: config.chainMaxInputTokens,
                     model: config.model,
+                    repositoryAnalysisService: this.analysisService,
                     retrieveRagExamples: async (context) => {
                         if (!options?.ragRetrievalService || !options?.targetRepo) {
                             return [];

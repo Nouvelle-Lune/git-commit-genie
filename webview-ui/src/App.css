@@ -23,6 +23,9 @@
   --semantic-generate: #8b5cf6;
   --semantic-success: #16a34a;
   --semantic-error: #ef4444;
+  /* The change-conditioned investigation stages read as one phase, so they
+     share a single hue and are told apart by their label. */
+  --semantic-investigate: #0d9488;
 }
 
 /* ── Base ── */

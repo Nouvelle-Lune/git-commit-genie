@@ -52,7 +52,10 @@ export const RepoAnalysisActionJSONSchema = {
       required: ['summary', 'projectType', 'technologies', 'insights']
     }
   },
-  required: ['action']
+  required: [
+    'action', 'tool', 'reason', 'symbol', 'filePath', 'dirPath', 'query',
+    'searchType', 'useRegex', 'startLine', 'maxLines', 'maxResults', 'final'
+  ]
 } as const;
 
 export const CompressionJSONSchema = {
@@ -220,6 +223,252 @@ export const RagRerankJSONSchema = {
     notes: { type: ['string', 'null'] }
   },
   required: ['selected']
+} as const;
+
+// ----- Change-Conditioned Chain -----
+
+const CHANGED_SYMBOL_TYPE_ENUM = [
+  'function', 'method', 'class', 'interface', 'type',
+  'constant', 'variable', 'config_key', 'route', 'cli_flag', 'unknown'
+] as const;
+
+const CHANGE_KIND_ENUM = [
+  'added', 'removed', 'signature', 'function_body',
+  'type_shape', 'value', 'renamed', 'moved', 'unknown'
+] as const;
+
+const INVESTIGATION_TOOL_ENUM = [
+  'getChangedSymbols', 'findSymbolDefinition', 'findSymbolReferences',
+  'findCallers', 'findCallees', 'findImplementations', 'findTypeDefinition',
+  'searchCode', 'readFileContent', 'listDirectory'
+] as const;
+
+const StringArrayJSONSchema = { type: 'array', items: { type: 'string' } } as const;
+
+export const ChangeExtractionJSONSchema = {
+  type: 'object',
+  properties: {
+    changedSymbols: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          name: { type: 'string', minLength: 1 },
+          file: { type: 'string', minLength: 1 },
+          symbolType: { type: 'string', enum: CHANGED_SYMBOL_TYPE_ENUM },
+          changeKind: { type: 'string', enum: CHANGE_KIND_ENUM },
+          evidenceRefs: StringArrayJSONSchema
+        },
+        required: ['name', 'file', 'symbolType', 'changeKind', 'evidenceRefs']
+      }
+    },
+    introducedSymbols: StringArrayJSONSchema,
+    removedSymbols: StringArrayJSONSchema,
+    changedCalls: StringArrayJSONSchema,
+    changedConfigs: StringArrayJSONSchema,
+    changedTypes: StringArrayJSONSchema,
+    changedDependencies: StringArrayJSONSchema
+  },
+  required: [
+    'changedSymbols', 'introducedSymbols', 'removedSymbols',
+    'changedCalls', 'changedConfigs', 'changedTypes', 'changedDependencies'
+  ]
+} as const;
+
+export const InvestigationPlanJSONSchema = {
+  type: 'object',
+  properties: {
+    targets: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          target: { type: 'string', minLength: 1 },
+          kind: { type: 'string', enum: ['symbol', 'config', 'type', 'dependency', 'interface', 'cli_or_api'] },
+          file: { type: ['string', 'null'] },
+          questions: StringArrayJSONSchema
+        },
+        required: ['target', 'kind', 'file', 'questions']
+      }
+    },
+    notes: { type: ['string', 'null'] }
+  },
+  required: ['targets', 'notes']
+} as const;
+
+export const InvestigationActionJSONSchema = {
+  type: 'object',
+  properties: {
+    action: { type: 'string', enum: ['tool', 'final'] },
+    tool: { type: ['string', 'null'], enum: [...INVESTIGATION_TOOL_ENUM, null] },
+    reason: { type: ['string', 'null'] },
+    symbol: { type: ['string', 'null'] },
+    filePath: { type: ['string', 'null'] },
+    dirPath: { type: ['string', 'null'] },
+    query: { type: ['string', 'null'] },
+    searchType: { type: ['string', 'null'], enum: ['name', 'content', null] },
+    useRegex: { type: ['boolean', 'null'] },
+    startLine: { type: ['number', 'null'] },
+    maxLines: { type: ['number', 'null'] },
+    maxResults: { type: ['number', 'null'] },
+    final: {
+      type: ['object', 'null'],
+      properties: {
+        findings: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              target: { type: 'string', minLength: 1 },
+              question: { type: 'string', minLength: 1 },
+              answer: { type: 'string', minLength: 1 },
+              evidenceRefs: StringArrayJSONSchema
+            },
+            required: ['target', 'question', 'answer', 'evidenceRefs']
+          }
+        },
+        unresolvedQuestions: StringArrayJSONSchema,
+        stopReason: { type: 'string', minLength: 1 }
+      },
+      required: ['findings', 'unresolvedQuestions', 'stopReason']
+    }
+  },
+  required: [
+    'action', 'tool', 'reason', 'symbol', 'filePath', 'dirPath', 'query',
+    'searchType', 'useRegex', 'startLine', 'maxLines', 'maxResults', 'final'
+  ]
+} as const;
+
+const EvidenceBackedClaimJSONSchema = {
+  type: 'object',
+  properties: {
+    claim: { type: 'string', minLength: 1 },
+    evidenceRefs: StringArrayJSONSchema
+  },
+  required: ['claim', 'evidenceRefs']
+} as const;
+
+export const SemanticAnalysisJSONSchema = {
+  type: 'object',
+  properties: {
+    changeTargets: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          symbol: { type: 'string', minLength: 1 },
+          file: { type: 'string', minLength: 1 },
+          role: { type: 'string', minLength: 1 },
+          evidenceRefs: StringArrayJSONSchema
+        },
+        required: ['symbol', 'file', 'role', 'evidenceRefs']
+      }
+    },
+    dependencyContext: {
+      type: 'object',
+      properties: {
+        callers: StringArrayJSONSchema,
+        callees: StringArrayJSONSchema,
+        stateDependencies: StringArrayJSONSchema,
+        relatedConfigs: StringArrayJSONSchema,
+        relatedTypes: StringArrayJSONSchema
+      },
+      required: ['callers', 'callees', 'stateDependencies', 'relatedConfigs', 'relatedTypes']
+    },
+    observedChanges: { type: 'array', items: EvidenceBackedClaimJSONSchema },
+    repositoryFacts: { type: 'array', items: EvidenceBackedClaimJSONSchema },
+    behaviorAnalysis: {
+      type: 'object',
+      properties: {
+        before: { type: ['string', 'null'] },
+        after: { type: ['string', 'null'] },
+        observableEffect: { type: ['string', 'null'] }
+      },
+      required: ['before', 'after', 'observableEffect']
+    },
+    capabilityContext: {
+      type: 'object',
+      properties: {
+        technicalCapability: { type: ['string', 'null'] },
+        productCapability: { type: ['string', 'null'] }
+      },
+      required: ['technicalCapability', 'productCapability']
+    },
+    supportedInferences: { type: 'array', items: EvidenceBackedClaimJSONSchema },
+    uncertainInferences: { type: 'array', items: EvidenceBackedClaimJSONSchema },
+    intentAnalysis: {
+      type: 'object',
+      properties: {
+        primaryIntent: { type: ['string', 'null'] },
+        supportedBy: StringArrayJSONSchema,
+        confidence: { type: 'string', enum: ['low', 'medium', 'high'] }
+      },
+      required: ['primaryIntent', 'supportedBy', 'confidence']
+    },
+    changeClassification: {
+      type: 'object',
+      properties: {
+        existingBehaviorCorrected: { type: 'boolean' },
+        newCapabilityAdded: { type: 'boolean' },
+        externalBehaviorChanged: { type: 'boolean' },
+        structuralOnly: { type: 'boolean' },
+        recommendedType: { type: ['string', 'null'] },
+        reason: { type: ['string', 'null'] }
+      },
+      required: [
+        'existingBehaviorCorrected', 'newCapabilityAdded',
+        'externalBehaviorChanged', 'structuralOnly', 'recommendedType', 'reason'
+      ]
+    },
+    uncertainties: StringArrayJSONSchema
+  },
+  required: [
+    'changeTargets', 'dependencyContext', 'observedChanges', 'repositoryFacts',
+    'behaviorAnalysis', 'capabilityContext', 'supportedInferences',
+    'uncertainInferences', 'intentAnalysis', 'changeClassification', 'uncertainties'
+  ]
+} as const;
+
+export const InformationSelectionJSONSchema = {
+  type: 'object',
+  properties: {
+    mustExpress: StringArrayJSONSchema,
+    optional: StringArrayJSONSchema,
+    omit: StringArrayJSONSchema,
+    suggestedScope: { type: ['string', 'null'] },
+    notes: { type: ['string', 'null'] }
+  },
+  required: ['mustExpress', 'optional', 'omit', 'suggestedScope', 'notes']
+} as const;
+
+export const AnthropicChangeExtractionTool = {
+  name: 'change_extraction',
+  description: 'Return the changed symbols, calls, configs, types, and dependencies observed in the diff.',
+  input_schema: ChangeExtractionJSONSchema
+} as const;
+
+export const AnthropicInvestigationPlanTool = {
+  name: 'investigation_plan',
+  description: 'Return the repository investigation targets and the questions each target must answer.',
+  input_schema: InvestigationPlanJSONSchema
+} as const;
+
+export const AnthropicInvestigationActionTool = {
+  name: 'investigation_action',
+  description: 'Return the next repository investigation tool call, or finalize with grounded findings.',
+  input_schema: InvestigationActionJSONSchema
+} as const;
+
+export const AnthropicSemanticAnalysisTool = {
+  name: 'semantic_analysis',
+  description: 'Return evidence-backed semantic analysis of the current change.',
+  input_schema: SemanticAnalysisJSONSchema
+} as const;
+
+export const AnthropicInformationSelectionTool = {
+  name: 'information_selection',
+  description: 'Return which semantic information belongs in the commit message.',
+  input_schema: InformationSelectionJSONSchema
 } as const;
 
 export const AnthropicEvidenceSummaryTool = {

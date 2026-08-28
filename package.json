@@ -145,6 +145,32 @@
           "minimum": 1,
           "markdownDescription": "%config.chain.maxInputTokens.desc%"
         },
+        "gitCommitGenie.chain.investigation.enabled": {
+          "order": 5.2,
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.chain.investigation.enabled.desc%",
+          "tags": [
+            "experimental"
+          ]
+        },
+        "gitCommitGenie.chain.investigation.maxSteps": {
+          "order": 5.3,
+          "type": "integer",
+          "default": 12,
+          "minimum": 1,
+          "maximum": 40,
+          "markdownDescription": "%config.chain.investigation.maxSteps.desc%"
+        },
+        "gitCommitGenie.chain.investigation.excludePatterns": {
+          "order": 5.4,
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "%config.chain.investigation.excludePatterns.desc%"
+        },
         "gitCommitGenie.llm.maxRetries": {
           "order": 6,
           "type": "number",

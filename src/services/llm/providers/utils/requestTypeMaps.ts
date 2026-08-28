@@ -1,4 +1,5 @@
 import type { z } from 'zod';
+import type { RequestType } from '../../llmTypes';
 import {
     evidenceSummaryResponseSchema,
     classifyAndDraftResponseSchema,
@@ -8,7 +9,51 @@ import {
     ragRerankResponseSchema,
     repoAnalysisResponseSchema,
     repoAnalysisActionSchema,
+    changeExtractionResponseSchema,
+    investigationPlanResponseSchema,
+    investigationActionSchema,
+    semanticAnalysisResponseSchema,
+    informationSelectionResponseSchema,
+    compressionResponseSchema,
 } from '../schemas/common';
+
+const REQUEST_TYPE_LABELS: Record<RequestType, string> = {
+    commitMessage: 'build-commit-msg',
+    summary: 'summarize',
+    draft: 'draft',
+    fix: 'validate-fix',
+    ragPreparation: 'rag-prep',
+    ragRerank: 'rag-rerank',
+    repoAnalysis: 'repo-analysis',
+    repoAnalysisAction: 'repo-analysis-action',
+    compression: 'compression',
+    changeExtraction: 'change-extract',
+    investigationPlan: 'investigation-plan',
+    investigationAction: 'investigation-action',
+    semanticAnalysis: 'semantic-analysis',
+    informationSelection: 'info-selection',
+    strictFix: 'strict-fix',
+    enforceLanguage: 'lang-fix',
+};
+
+const VALIDATION_SCHEMAS: Record<RequestType, z.ZodTypeAny> = {
+    commitMessage: commitMessageSchema,
+    summary: evidenceSummaryResponseSchema,
+    draft: classifyAndDraftResponseSchema,
+    fix: validateAndFixResponseSchema,
+    ragPreparation: ragPreparationResponseSchema,
+    ragRerank: ragRerankResponseSchema,
+    repoAnalysis: repoAnalysisResponseSchema,
+    repoAnalysisAction: repoAnalysisActionSchema,
+    compression: compressionResponseSchema,
+    changeExtraction: changeExtractionResponseSchema,
+    investigationPlan: investigationPlanResponseSchema,
+    investigationAction: investigationActionSchema,
+    semanticAnalysis: semanticAnalysisResponseSchema,
+    informationSelection: informationSelectionResponseSchema,
+    strictFix: commitMessageSchema,
+    enforceLanguage: commitMessageSchema,
+};
 
 /**
  * Map a chain request type to a short, human-readable label used in logs and
@@ -16,19 +61,9 @@ import {
  * instead of being copy-pasted into each implementation.
  */
 export function getRequestTypeLabel(reqType?: string): string {
-    switch (reqType) {
-        case 'summary': return 'summarize';
-        case 'draft': return 'draft';
-        case 'fix': return 'validate-fix';
-        case 'ragPreparation': return 'rag-prep';
-        case 'ragRerank': return 'rag-rerank';
-        case 'strictFix': return 'strict-fix';
-        case 'enforceLanguage': return 'lang-fix';
-        case 'commitMessage': return 'build-commit-msg';
-        case 'repoAnalysis': return 'repo-analysis';
-        case 'repoAnalysisAction': return 'repo-analysis-action';
-        default: return 'thinking';
-    }
+    return reqType && reqType in REQUEST_TYPE_LABELS
+        ? REQUEST_TYPE_LABELS[reqType as RequestType]
+        : 'thinking';
 }
 
 /**
@@ -42,17 +77,7 @@ export function getValidationSchemaFor(reqType?: string): z.ZodTypeAny | undefin
     if (!reqType) {
         return undefined;
     }
-    const map: Record<string, z.ZodTypeAny> = {
-        summary: evidenceSummaryResponseSchema,
-        draft: classifyAndDraftResponseSchema,
-        fix: validateAndFixResponseSchema,
-        ragPreparation: ragPreparationResponseSchema,
-        ragRerank: ragRerankResponseSchema,
-        commitMessage: commitMessageSchema,
-        strictFix: commitMessageSchema,
-        enforceLanguage: commitMessageSchema,
-        repoAnalysis: repoAnalysisResponseSchema,
-        repoAnalysisAction: repoAnalysisActionSchema,
-    };
-    return map[reqType];
+    return reqType in VALIDATION_SCHEMAS
+        ? VALIDATION_SCHEMAS[reqType as RequestType]
+        : undefined;
 }

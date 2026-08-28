@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import OpenAI from 'openai';
 import { TemplateService } from '../../../template/templateService';
-import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
+import { IRepositoryAnalysisService } from '../../analysis/repository/repositoryAnalysisTypes';
 import { OpenAIChatCompletionsService } from './openaiChatCompletionsService';
 
 const LOCAL_DEFAULT_BASE_URL = 'http://127.0.0.1:11434/v1';

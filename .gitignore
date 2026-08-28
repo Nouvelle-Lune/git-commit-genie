@@ -31,11 +31,26 @@ src/test/
 **/*.spec.*
 **/__tests__/
 !src/test/
+!src/test/analysis/
+!src/test/analysis/change/
+!src/test/analysis/change/investigation/
+!src/test/analysis/change/investigation/agent.test.ts
+!src/test/analysis/change/extraction.test.ts
+!src/test/analysis/change/prompts.test.ts
+!src/test/analysis/change/semanticAnalysisAndSelection.test.ts
+!src/test/analysis/repository/
+!src/test/analysis/repository/repositoryAnalysisService.test.ts
 !src/test/chain/
-!src/test/chain/tokenBudget.test.ts
-!src/test/chain/dynamicSummary.test.ts
-!src/test/chain/chainChatPrompts.test.ts
+!src/test/chain/evidence/
+!src/test/chain/evidence/compaction.test.ts
+!src/test/chain/rag/
+!src/test/chain/rag/preparation.test.ts
+!src/test/chain/validation/
+!src/test/chain/validation/languageValidation.test.ts
+!src/test/chain/commitMessageChain.test.ts
+!src/test/chain/mixedEvidencePrompts.test.ts
 !src/test/llm/
+!src/test/llm/inputTokenBudget.test.ts
 !src/test/llm/providers/
 !src/test/llm/providers/schemas/
 !src/test/llm/providers/schemas/common.test.ts
@@ -92,3 +107,5 @@ __pycache__/
 
 .eval/
 ./sft/
+
+test/

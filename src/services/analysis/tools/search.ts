@@ -13,8 +13,8 @@ import {
     SearchFilesResult,
     FileSearchResult,
     ContentMatch
-} from './toolTypes';
-import { shouldExclude } from './utils';
+} from './types';
+import { shouldExclude } from './pathFilters';
 
 /**
  * Search for files in the repository by name or content

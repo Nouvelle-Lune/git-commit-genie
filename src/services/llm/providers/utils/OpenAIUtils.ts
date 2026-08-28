@@ -8,7 +8,7 @@ import { isOpenAIChatProvider, isOpenAIResponsesProvider } from '../config/Provi
 
 import { ChatMessage, RequestType } from "../../llmTypes";
 
-import { commitMessageSchema, evidenceSummaryResponseSchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, ragPreparationResponseSchema, ragRerankResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema, compressionResponseSchema } from "../schemas/common";
+import { commitMessageSchema, evidenceSummaryResponseSchema, validateAndFixResponseSchema, classifyAndDraftResponseSchema, ragPreparationResponseSchema, ragRerankResponseSchema, repoAnalysisResponseSchema, repoAnalysisActionSchema, compressionResponseSchema, changeExtractionResponseSchema, investigationPlanResponseSchema, investigationActionSchema, semanticAnalysisResponseSchema, informationSelectionResponseSchema } from "../schemas/common";
 import { OpenAIRepoAnalysisFunctions } from "../schemas/openaiFunctions";
 
 
@@ -337,6 +337,11 @@ export class OpenAICompatibleUtils extends BaseProviderUtils {
                 ['repoAnalysis', { schema: repoAnalysisResponseSchema, name: 'repoAnalysisResponse' }],
                 ['repoAnalysisAction', { schema: repoAnalysisActionSchema, name: 'repoAnalysisAction' }],
                 ['compression', { schema: compressionResponseSchema, name: 'compression' }],
+                ['changeExtraction', { schema: changeExtractionResponseSchema, name: 'changeExtraction' }],
+                ['investigationPlan', { schema: investigationPlanResponseSchema, name: 'investigationPlan' }],
+                ['investigationAction', { schema: investigationActionSchema, name: 'investigationAction' }],
+                ['semanticAnalysis', { schema: semanticAnalysisResponseSchema, name: 'semanticAnalysis' }],
+                ['informationSelection', { schema: informationSelectionResponseSchema, name: 'informationSelection' }],
                 // Treat strictFix and enforceLanguage like commitMessage for schema purposes
                 ['strictFix', { schema: commitMessageSchema, name: 'commitMessage' }],
                 ['enforceLanguage', { schema: commitMessageSchema, name: 'commitMessage' }],

@@ -1,5 +1,5 @@
-import { DiffData } from '../git/gitTypes';
-import { ChatFn, ChatMessage } from '../llm/llmTypes';
+import { DiffData } from '../../git/gitTypes';
+import { ChatFn, ChatMessage } from '../../llm/llmTypes';
 import {
     DraftEvidence,
     EvidenceChange,
@@ -7,9 +7,9 @@ import {
     EvidenceSummaryResponse,
     FileEvidence,
     RawDiffEvidence,
-} from './chainTypes';
-import { buildSummarizeEvidenceMessages } from './chainChatPrompts';
-import { estimateChatMessagesTokens } from './tokenBudget';
+} from '../../analysis/change/types';
+import { buildSummarizeEvidenceMessages } from './prompts';
+import { estimateChatMessagesTokens } from '../../llm/inputTokenBudget';
 
 type EvidenceUnit = {
     id: string;
@@ -19,6 +19,16 @@ type EvidenceUnit = {
 };
 
 type SummaryTaskScheduler = <T>(task: () => Promise<T>) => Promise<T>;
+
+class MissingEvidenceHunkIdsError extends Error {
+    constructor(
+        fileName: string,
+        readonly missingHunkIds: string[]
+    ) {
+        super(`Evidence summary for '${fileName}' omitted hunk ids: ${missingHunkIds.join(', ')}.`);
+        this.name = 'MissingEvidenceHunkIdsError';
+    }
+}
 
 type RawCandidate = {
     item: RawDiffEvidence;
@@ -48,6 +58,7 @@ export async function compactEvidenceToFit(params: {
     chat: ChatFn;
     maxInputTokens: number;
     maxParallel: number;
+    maxRetries?: number;
     buildTargetMessages: (evidence: DraftEvidence[]) => ChatMessage[];
     onSummarizeStart?: () => void;
     onFileSummarized?: (file: FileEvidence, summarizedCount: number) => void;
@@ -64,6 +75,8 @@ export async function compactEvidenceToFit(params: {
     if (!Number.isInteger(params.maxParallel) || params.maxParallel <= 0) {
         throw new Error(`gitCommitGenie.chain.maxParallel must be a positive integer; received ${params.maxParallel}.`);
     }
+    const maxRetries = params.maxRetries ?? 2;
+    assertNonNegativeRetries(maxRetries);
 
     const diffByFile = new Map(diffs.map(diff => [diff.fileName, diff]));
     let evidence = [...params.evidence];
@@ -120,7 +133,8 @@ export async function compactEvidenceToFit(params: {
                 diff,
                 chat,
                 maxInputTokens,
-                scheduleSummaryTask
+                scheduleSummaryTask,
+                maxRetries
             );
         }));
         const batchFailure = settledBatch.find(
@@ -153,14 +167,17 @@ export async function summarizeFileEvidence(
     diff: DiffData,
     chat: ChatFn,
     maxInputTokens: number,
-    maxParallel: number
+    maxParallel: number,
+    maxRetries = 2
 ): Promise<FileEvidence> {
     assertPositiveParallelism(maxParallel);
+    assertNonNegativeRetries(maxRetries);
     return summarizeFileEvidenceWithScheduler(
         diff,
         chat,
         maxInputTokens,
-        createSummaryTaskScheduler(maxParallel)
+        createSummaryTaskScheduler(maxParallel),
+        maxRetries
     );
 }
 
@@ -168,7 +185,8 @@ async function summarizeFileEvidenceWithScheduler(
     diff: DiffData,
     chat: ChatFn,
     maxInputTokens: number,
-    scheduleSummaryTask: SummaryTaskScheduler
+    scheduleSummaryTask: SummaryTaskScheduler,
+    maxRetries: number
 ): Promise<FileEvidence> {
     // Stable hunk ids let downstream stages trace every extracted claim back to
     // a bounded source chunk without carrying the full large diff forward.
@@ -178,15 +196,13 @@ async function summarizeFileEvidenceWithScheduler(
     // function; wait for all scheduler slots to drain before rethrowing.
     const settledResponses = await Promise.allSettled(chunks.map((chunk, index) =>
         scheduleSummaryTask(async () => {
-            const messages = buildSummaryMessages(diff, chunk);
-            const parsed = await chat(messages, { requestType: 'summary' }) as EvidenceSummaryResponse;
-            validateEvidenceReferences(
-                parsed,
-                new Set(chunk.map(unit => unit.id)),
-                new Set(chunk.filter(unit => unit.requiresCoverage).map(unit => unit.id)),
-                diff.fileName
+            const value = await summarizeEvidenceChunkWithRetry(
+                diff,
+                chunk,
+                chat,
+                maxRetries
             );
-            return { index, value: parsed };
+            return { index, value };
         })
     ));
     const responseFailure = settledResponses.find(
@@ -223,6 +239,92 @@ function assertPositiveParallelism(maxParallel: number): void {
     if (!Number.isInteger(maxParallel) || maxParallel <= 0) {
         throw new Error(`gitCommitGenie.chain.maxParallel must be a positive integer; received ${maxParallel}.`);
     }
+}
+
+function assertNonNegativeRetries(maxRetries: number): void {
+    if (!Number.isInteger(maxRetries) || maxRetries < 0) {
+        throw new Error(`gitCommitGenie.llm.maxRetries must be a non-negative integer; received ${maxRetries}.`);
+    }
+}
+
+async function summarizeEvidenceChunkWithRetry(
+    diff: DiffData,
+    chunk: EvidenceUnit[],
+    chat: ChatFn,
+    maxRetries: number
+): Promise<EvidenceSummaryResponse> {
+    const acceptedResponses: EvidenceSummaryResponse[] = [];
+    let pendingUnits = chunk;
+    let missingHunkIds: string[] | undefined;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        const messages = buildSummaryMessages(diff, pendingUnits, missingHunkIds);
+        let parsed: EvidenceSummaryResponse;
+        try {
+            parsed = await chat(messages, { requestType: 'summary' }) as EvidenceSummaryResponse;
+        } catch {
+            // Provider-level retries have already been exhausted. Preserve the
+            // unresolved ids explicitly so a Summary outage cannot abort the chain.
+            return mergeSummaryResponses([
+                ...acceptedResponses,
+                unresolvedSummaryEvidence(pendingUnits),
+            ]);
+        }
+
+        try {
+            validateEvidenceReferences(
+                parsed,
+                new Set(pendingUnits.map(unit => unit.id)),
+                new Set(pendingUnits.filter(unit => unit.requiresCoverage).map(unit => unit.id)),
+                diff.fileName
+            );
+            return mergeSummaryResponses([...acceptedResponses, parsed]);
+        } catch (error) {
+            if (!(error instanceof MissingEvidenceHunkIdsError)) {
+                return mergeSummaryResponses([
+                    ...acceptedResponses,
+                    unresolvedSummaryEvidence(pendingUnits),
+                ]);
+            }
+
+            acceptedResponses.push(parsed);
+            missingHunkIds = error.missingHunkIds;
+            pendingUnits = pendingUnits.filter(unit => error.missingHunkIds.includes(unit.id));
+
+            if (attempt === maxRetries) {
+                return mergeSummaryResponses([
+                    ...acceptedResponses,
+                    unresolvedSummaryEvidence(pendingUnits),
+                ]);
+            }
+        }
+    }
+
+    throw new Error(`Summary coverage retry loop exited unexpectedly for '${diff.fileName}'.`);
+}
+
+function unresolvedSummaryEvidence(units: EvidenceUnit[]): EvidenceSummaryResponse {
+    const unresolvedIds = units
+        .filter(unit => unit.requiresCoverage)
+        .map(unit => unit.id);
+    return {
+        changes: [],
+        tests: [],
+        breakingSignals: [],
+        uncertainties: unresolvedIds.length > 0 ? [{
+            detail: 'Summary could not ground these diff hunks after targeted repair.',
+            evidenceHunkIds: unresolvedIds,
+        }] : [],
+    };
+}
+
+function mergeSummaryResponses(responses: EvidenceSummaryResponse[]): EvidenceSummaryResponse {
+    return {
+        changes: mergeChanges(responses.flatMap(response => response.changes)),
+        tests: mergeObservations(responses.flatMap(response => response.tests)),
+        breakingSignals: mergeObservations(responses.flatMap(response => response.breakingSignals)),
+        uncertainties: mergeObservations(responses.flatMap(response => response.uncertainties)),
+    };
 }
 
 function createSummaryTaskScheduler(maxParallel: number): SummaryTaskScheduler {
@@ -328,12 +430,12 @@ function extractDiffPreamble(rawDiff: string): string {
 }
 
 function splitEvidenceUnit(diff: DiffData, unit: EvidenceUnit, maxInputTokens: number): EvidenceUnit[] {
-    if (messagesFitBudget(buildSummaryMessages(diff, [unit]), maxInputTokens)) {
+    if (messagesFitBudget(buildSummaryBudgetProbeMessages(diff, [unit]), maxInputTokens)) {
         return [unit];
     }
 
     const emptyProbe = { ...unit, content: '' };
-    if (!messagesFitBudget(buildSummaryMessages(diff, [emptyProbe]), maxInputTokens)) {
+    if (!messagesFitBudget(buildSummaryBudgetProbeMessages(diff, [emptyProbe]), maxInputTokens)) {
         throw new Error(
             `gitCommitGenie.chain.maxInputTokens (${maxInputTokens}) is too small for the Summary prompt overhead.`
         );
@@ -351,7 +453,7 @@ function splitEvidenceUnit(diff: DiffData, unit: EvidenceUnit, maxInputTokens: n
             content: candidate,
             requiresCoverage: unit.requiresCoverage,
         };
-        if (messagesFitBudget(buildSummaryMessages(diff, [probe]), maxInputTokens)) {
+        if (messagesFitBudget(buildSummaryBudgetProbeMessages(diff, [probe]), maxInputTokens)) {
             currentLines.push(line);
             continue;
         }
@@ -406,7 +508,7 @@ function splitOversizedLine(
                 content: remaining.slice(0, mid),
                 requiresCoverage: unit.requiresCoverage,
             };
-            if (messagesFitBudget(buildSummaryMessages(diff, [probe]), maxInputTokens)) {
+            if (messagesFitBudget(buildSummaryBudgetProbeMessages(diff, [probe]), maxInputTokens)) {
                 best = mid;
                 low = mid + 1;
             } else {
@@ -433,7 +535,7 @@ function groupEvidenceUnits(diff: DiffData, units: EvidenceUnit[], maxInputToken
 
     for (const unit of units) {
         const candidate = [...current, unit];
-        if (messagesFitBudget(buildSummaryMessages(diff, candidate), maxInputTokens)) {
+        if (messagesFitBudget(buildSummaryBudgetProbeMessages(diff, candidate), maxInputTokens)) {
             current = candidate;
             continue;
         }
@@ -451,15 +553,30 @@ function groupEvidenceUnits(diff: DiffData, units: EvidenceUnit[], maxInputToken
     return chunks;
 }
 
-function buildSummaryMessages(diff: DiffData, units: EvidenceUnit[]): ChatMessage[] {
+function buildSummaryMessages(
+    diff: DiffData,
+    units: EvidenceUnit[],
+    missingHunkIds?: string[]
+): ChatMessage[] {
     return buildSummarizeEvidenceMessages({
         fileName: diff.fileName,
         status: diff.status,
+        missingHunkIds,
         hunks: units.map(unit => ({
             id: unit.id,
             diff: [unit.header, unit.content].filter(Boolean).join('\n'),
         })),
     });
+}
+
+function buildSummaryBudgetProbeMessages(diff: DiffData, units: EvidenceUnit[]): ChatMessage[] {
+    // Reserve enough input budget for the largest possible correction request,
+    // where every coverage-required id from this chunk was omitted.
+    return buildSummaryMessages(
+        diff,
+        units,
+        units.filter(unit => unit.requiresCoverage).map(unit => unit.id)
+    );
 }
 
 function messagesFitBudget(messages: ChatMessage[], maxInputTokens: number): boolean {
@@ -486,7 +603,7 @@ function validateEvidenceReferences(
     const referencedIds = new Set(references);
     const missing = Array.from(requiredIds).filter(id => !referencedIds.has(id));
     if (missing.length > 0) {
-        throw new Error(`Evidence summary for '${fileName}' omitted hunk ids: ${missing.join(', ')}.`);
+        throw new MissingEvidenceHunkIdsError(fileName, missing);
     }
 }
 

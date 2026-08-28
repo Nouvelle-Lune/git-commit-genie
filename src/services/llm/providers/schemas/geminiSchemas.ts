@@ -13,12 +13,22 @@ const createStringType = (description?: string) => ({
     ...(description && { description })
 });
 
+const createNullableStringType = (description?: string) => ({
+    ...createStringType(description),
+    nullable: true
+});
+
 /**
  * Convert Zod boolean to Gemini Type.BOOLEAN
  */
 const createBooleanType = (description?: string) => ({
     type: Type.BOOLEAN,
     ...(description && { description })
+});
+
+const createNullableBooleanType = (description?: string) => ({
+    ...createBooleanType(description),
+    nullable: true
 });
 
 /**
@@ -28,6 +38,11 @@ const createNumberType = (description?: string, minimum?: number) => ({
     type: Type.NUMBER,
     ...(description && { description }),
     ...(minimum !== undefined && { minimum })
+});
+
+const createNullableNumberType = (description?: string, minimum?: number) => ({
+    ...createNumberType(description, minimum),
+    nullable: true
 });
 
 /**
@@ -194,6 +209,203 @@ export const GeminiRagRerankSchema = {
     },
     required: ['selected'],
     propertyOrdering: ['selected', 'notes']
+};
+
+// ----- Change-Conditioned Chain -----
+
+const GeminiStringArray = (description?: string) => createArrayType(createStringType(), description);
+
+export const GeminiChangeExtractionSchema = {
+    type: Type.OBJECT,
+    properties: {
+        changedSymbols: createArrayType({
+            type: Type.OBJECT,
+            properties: {
+                name: createStringType('Exact symbol identifier as written in the diff'),
+                file: createStringType('Path of the file containing the symbol'),
+                symbolType: createEnumType(
+                    ['function', 'method', 'class', 'interface', 'type', 'constant', 'variable', 'config_key', 'route', 'cli_flag', 'unknown'],
+                    'Kind of symbol'
+                ),
+                changeKind: createEnumType(
+                    ['added', 'removed', 'signature', 'function_body', 'type_shape', 'value', 'renamed', 'moved', 'unknown'],
+                    'What about the symbol changed'
+                ),
+                evidenceRefs: GeminiStringArray('Hunk ids or path:line anchors proving the symbol changed')
+            },
+            required: ['name', 'file', 'symbolType', 'changeKind', 'evidenceRefs']
+        }, 'Symbols whose definition or body changed'),
+        introducedSymbols: GeminiStringArray('Newly introduced identifiers'),
+        removedSymbols: GeminiStringArray('Removed identifiers'),
+        changedCalls: GeminiStringArray('Call expressions added or removed'),
+        changedConfigs: GeminiStringArray('Configuration keys added, removed, or re-valued'),
+        changedTypes: GeminiStringArray('Types or interfaces whose shape changed'),
+        changedDependencies: GeminiStringArray('Dependency names added, removed, or version-bumped')
+    },
+    required: ['changedSymbols', 'introducedSymbols', 'removedSymbols', 'changedCalls', 'changedConfigs', 'changedTypes', 'changedDependencies'],
+    propertyOrdering: ['changedSymbols', 'introducedSymbols', 'removedSymbols', 'changedCalls', 'changedConfigs', 'changedTypes', 'changedDependencies']
+};
+
+export const GeminiInvestigationPlanSchema = {
+    type: Type.OBJECT,
+    properties: {
+        targets: createArrayType({
+            type: Type.OBJECT,
+            properties: {
+                target: createStringType('Symbol, config key, type, or dependency to investigate'),
+                kind: createEnumType(['symbol', 'config', 'type', 'dependency', 'interface', 'cli_or_api'], 'Target category'),
+                file: createNullableStringType('File containing the target, or null when unknown'),
+                questions: GeminiStringArray('Questions the repository must answer for this target')
+            },
+            required: ['target', 'kind', 'file', 'questions']
+        }, 'Investigation targets'),
+        notes: createNullableStringType('Optional reasoning about target selection')
+    },
+    required: ['targets', 'notes'],
+    propertyOrdering: ['targets', 'notes']
+};
+
+export const GeminiInvestigationActionSchema = {
+    type: Type.OBJECT,
+    properties: {
+        action: createEnumType(['tool', 'final'], "'tool' to keep investigating, 'final' to stop"),
+        tool: {
+            ...createEnumType(
+            ['getChangedSymbols', 'findSymbolDefinition', 'findSymbolReferences', 'findCallers', 'findCallees', 'findImplementations', 'findTypeDefinition', 'searchCode', 'readFileContent', 'listDirectory'],
+            'Tool to call when action is tool'
+            ),
+            nullable: true
+        },
+        reason: createNullableStringType('What you will learn from this call'),
+        symbol: createNullableStringType('Symbol argument for symbol-oriented tools'),
+        filePath: createNullableStringType('File path for readFileContent, or a scope hint for symbol tools'),
+        dirPath: createNullableStringType('Directory path for listDirectory'),
+        query: createNullableStringType('Query for searchCode'),
+        searchType: {
+            ...createEnumType(['name', 'content'], 'Search mode for searchCode'),
+            nullable: true
+        },
+        useRegex: createNullableBooleanType('Treat the searchCode query as a regular expression'),
+        startLine: createNullableNumberType('Start line for readFileContent', 1),
+        maxLines: createNullableNumberType('Line window for readFileContent', 1),
+        maxResults: createNullableNumberType('Result cap for search-oriented tools', 1),
+        final: {
+            type: Type.OBJECT,
+            properties: {
+                findings: createArrayType({
+                    type: Type.OBJECT,
+                    properties: {
+                        target: createStringType('Investigated target'),
+                        question: createStringType('Question that was answered'),
+                        answer: createStringType('Answer grounded in retrieved evidence'),
+                        evidenceRefs: GeminiStringArray('Evidence ids or path:line citations')
+                    },
+                    required: ['target', 'question', 'answer', 'evidenceRefs']
+                }, 'Answered investigation questions'),
+                unresolvedQuestions: GeminiStringArray('Questions the repository could not answer'),
+                stopReason: createStringType('Why the investigation stopped')
+            },
+            required: ['findings', 'unresolvedQuestions', 'stopReason'],
+            description: 'Final investigation result when action is final',
+            nullable: true
+        }
+    },
+    required: ['action', 'tool', 'reason', 'symbol', 'filePath', 'dirPath', 'query', 'searchType', 'useRegex', 'startLine', 'maxLines', 'maxResults', 'final'],
+    propertyOrdering: ['action', 'tool', 'reason', 'symbol', 'filePath', 'dirPath', 'query', 'searchType', 'useRegex', 'startLine', 'maxLines', 'maxResults', 'final']
+};
+
+const GeminiEvidenceBackedClaim = {
+    type: Type.OBJECT,
+    properties: {
+        claim: createStringType('A single factual statement'),
+        evidenceRefs: GeminiStringArray('Diff hunk ids or repository path:line citations supporting the claim')
+    },
+    required: ['claim', 'evidenceRefs']
+};
+
+export const GeminiSemanticAnalysisSchema = {
+    type: Type.OBJECT,
+    properties: {
+        changeTargets: createArrayType({
+            type: Type.OBJECT,
+            properties: {
+                symbol: createStringType('Changed symbol'),
+                file: createStringType('File containing the symbol'),
+                role: createStringType('Role the symbol plays in the repository'),
+                evidenceRefs: GeminiStringArray('Citations proving the role')
+            },
+            required: ['symbol', 'file', 'role', 'evidenceRefs']
+        }, 'Changed symbols and their repository roles'),
+        dependencyContext: {
+            type: Type.OBJECT,
+            properties: {
+                callers: GeminiStringArray('Callers of the changed symbols'),
+                callees: GeminiStringArray('Downstream calls made by the changed symbols'),
+                stateDependencies: GeminiStringArray('Shared state read or mutated'),
+                relatedConfigs: GeminiStringArray('Configuration affecting the changed behavior'),
+                relatedTypes: GeminiStringArray('Types or interfaces constraining the change')
+            },
+            required: ['callers', 'callees', 'stateDependencies', 'relatedConfigs', 'relatedTypes']
+        },
+        observedChanges: createArrayType(GeminiEvidenceBackedClaim, 'Facts read directly from the diff'),
+        repositoryFacts: createArrayType(GeminiEvidenceBackedClaim, 'Facts read from repository evidence'),
+        behaviorAnalysis: {
+            type: Type.OBJECT,
+            properties: {
+                before: createNullableStringType('Behavior before the change, or null when evidence is insufficient'),
+                after: createNullableStringType('Behavior after the change, or null when evidence is insufficient'),
+                observableEffect: createNullableStringType('Externally observable effect, or null')
+            },
+            required: ['before', 'after', 'observableEffect']
+        },
+        capabilityContext: {
+            type: Type.OBJECT,
+            properties: {
+                technicalCapability: createNullableStringType('Affected technical capability, or null'),
+                productCapability: createNullableStringType('Affected product capability, or null when unproven')
+            },
+            required: ['technicalCapability', 'productCapability']
+        },
+        supportedInferences: createArrayType(GeminiEvidenceBackedClaim, 'Inferences fully supported by evidence'),
+        uncertainInferences: createArrayType(GeminiEvidenceBackedClaim, 'Plausible but unproven inferences'),
+        intentAnalysis: {
+            type: Type.OBJECT,
+            properties: {
+                primaryIntent: createNullableStringType('Primary intent of the change, or null when ambiguous'),
+                supportedBy: GeminiStringArray('Citations supporting the intent'),
+                confidence: createEnumType(['low', 'medium', 'high'], 'Confidence in the primary intent')
+            },
+            required: ['primaryIntent', 'supportedBy', 'confidence']
+        },
+        changeClassification: {
+            type: Type.OBJECT,
+            properties: {
+                existingBehaviorCorrected: createBooleanType('An existing incorrect behavior was corrected'),
+                newCapabilityAdded: createBooleanType('A new externally meaningful capability was added'),
+                externalBehaviorChanged: createBooleanType('Externally observable behavior changed'),
+                structuralOnly: createBooleanType('Only internal structure changed'),
+                recommendedType: createNullableStringType('Recommended Conventional Commit type, or null'),
+                reason: createNullableStringType('Why this type follows from the evidence')
+            },
+            required: ['existingBehaviorCorrected', 'newCapabilityAdded', 'externalBehaviorChanged', 'structuralOnly', 'recommendedType', 'reason']
+        },
+        uncertainties: GeminiStringArray('Anything the evidence could not settle')
+    },
+    required: ['changeTargets', 'dependencyContext', 'observedChanges', 'repositoryFacts', 'behaviorAnalysis', 'capabilityContext', 'supportedInferences', 'uncertainInferences', 'intentAnalysis', 'changeClassification', 'uncertainties'],
+    propertyOrdering: ['changeTargets', 'dependencyContext', 'observedChanges', 'repositoryFacts', 'behaviorAnalysis', 'capabilityContext', 'supportedInferences', 'uncertainInferences', 'intentAnalysis', 'changeClassification', 'uncertainties']
+};
+
+export const GeminiInformationSelectionSchema = {
+    type: Type.OBJECT,
+    properties: {
+        mustExpress: GeminiStringArray('Statements the commit message must convey'),
+        optional: GeminiStringArray('Statements that help but are not required'),
+        omit: GeminiStringArray('Statements that must stay out of the commit message'),
+        suggestedScope: createNullableStringType('Scope grounded in the investigated code paths, or null'),
+        notes: createNullableStringType('Optional notes about the selection')
+    },
+    required: ['mustExpress', 'optional', 'omit', 'suggestedScope', 'notes'],
+    propertyOrdering: ['mustExpress', 'optional', 'omit', 'suggestedScope', 'notes']
 };
 
 /**

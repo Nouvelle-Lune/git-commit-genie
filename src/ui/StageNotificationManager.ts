@@ -8,6 +8,18 @@ export type StageEventType =
   | 'summarizeStart'
   | 'summarizeProgress'
   | 'summarizeFailed'
+  | 'changeExtractionStart'
+  | 'changeExtracted'
+  | 'investigationPlanStart'
+  | 'investigationPlanned'
+  | 'investigationStart'
+  | 'investigationStep'
+  | 'investigationComplete'
+  | 'investigationSkipped'
+  | 'semanticAnalysisStart'
+  | 'semanticAnalysisComplete'
+  | 'informationSelectionStart'
+  | 'informationSelected'
   | 'ragDisabled'
   | 'ragPreparationStart'
   | 'ragPrepared'
@@ -37,7 +49,7 @@ export interface StageEventData {
   message?: string;
   finalMessage?: string;
   error?: string;
-  target?: 'ragPreparation' | 'draft';
+  target?: 'changeExtraction' | 'semanticAnalysis' | 'ragPreparation' | 'draft';
   maxInputTokens?: number;
   initialEstimatedInputTokens?: number;
   estimatedInputTokens?: number;
@@ -55,6 +67,20 @@ export interface StageEventData {
 export interface StageEvent {
   type: StageEventType;
   data?: StageEventData;
+}
+
+/** Names the request an evidence handoff was compacted for. */
+function targetLabel(target: StageEventData['target']): string {
+  switch (target) {
+    case 'changeExtraction':
+      return I18N.pipeline.extractInput;
+    case 'semanticAnalysis':
+      return I18N.pipeline.analyzeInput;
+    case 'ragPreparation':
+      return I18N.pipeline.ragInput;
+    default:
+      return I18N.pipeline.draftInput;
+  }
 }
 
 class ProgressSession {
@@ -132,12 +158,7 @@ export class StageNotificationManager {
         this.active.updateMessage(t(I18N.stages.evidenceReady));
         break;
       case 'evidenceRouted':
-        this.active.updateMessage(t(
-          I18N.stages.evidenceRouted,
-          event.data?.target === 'ragPreparation'
-            ? t(I18N.pipeline.ragInput)
-            : t(I18N.pipeline.draftInput)
-        ));
+        this.active.updateMessage(t(I18N.stages.evidenceRouted, t(targetLabel(event.data?.target))));
         break;
       case 'summarizeStart':
         this.active.updateMessage(t(I18N.stages.summarizingStart));
@@ -150,6 +171,37 @@ export class StageNotificationManager {
       }
       case 'summarizeFailed':
         this.active.updateMessage(t(I18N.stages.summarizingFailed));
+        break;
+      case 'changeExtractionStart':
+      case 'changeExtracted':
+        this.active.updateMessage(t(I18N.stages.changeExtraction));
+        break;
+      case 'investigationPlanStart':
+      case 'investigationPlanned':
+        this.active.updateMessage(t(I18N.stages.investigationPlan));
+        break;
+      case 'investigationStart':
+        this.active.updateMessage(t(I18N.stages.investigationStart));
+        break;
+      case 'investigationStep': {
+        const current = Number(event.data?.current ?? 0);
+        const total = Number(event.data?.total ?? 0);
+        this.active.updateMessage(t(I18N.stages.investigationStep, current, total));
+        break;
+      }
+      case 'investigationComplete':
+        this.active.updateMessage(t(I18N.stages.investigationComplete));
+        break;
+      case 'investigationSkipped':
+        this.active.updateMessage(t(I18N.stages.investigationSkipped));
+        break;
+      case 'semanticAnalysisStart':
+      case 'semanticAnalysisComplete':
+        this.active.updateMessage(t(I18N.stages.semanticAnalysis));
+        break;
+      case 'informationSelectionStart':
+      case 'informationSelected':
+        this.active.updateMessage(t(I18N.stages.informationSelection));
         break;
       case 'ragDisabled':
         this.active.updateMessage(t(I18N.stages.ragDisabled));

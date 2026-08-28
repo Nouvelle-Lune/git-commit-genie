@@ -3,8 +3,8 @@ import * as vscode from 'vscode';
 
 import { z } from 'zod';
 import { TemplateService } from '../../../template/templateService';
-import { IRepositoryAnalysisService } from '../../analysis/analysisTypes';
-import { generateCommitMessageChain } from '../../chain/chainThinking';
+import { IRepositoryAnalysisService } from '../../analysis/repository/repositoryAnalysisTypes';
+import { generateCommitMessageChain } from '../../chain/commitMessageChain';
 import { DiffData } from '../../git/gitTypes';
 import { logger } from '../../logger';
 import { stageNotifications } from '../../../ui/StageNotificationManager';
@@ -12,7 +12,7 @@ import { AnthropicUtils } from './utils/AnthropicUtils';
 import { safeRun } from '../../../utils/safeRun';
 import { getRequestTypeLabel, getValidationSchemaFor } from './utils/requestTypeMaps';
 import { ProviderRuntimeConfig, ProviderRules } from './utils/BaseProviderUtils';
-import { assertChatMessagesWithinTokenBudget } from '../../chain/tokenBudget';
+import { assertChatMessagesWithinTokenBudget } from '../inputTokenBudget';
 import { ChatFn, ChatMessage, GenerateCommitMessageOptions, LLMError, LLMResponse } from '../llmTypes';
 import { BaseLLMService } from '../baseLLMService';
 import { ProviderError } from './errors/providerError';
@@ -24,7 +24,12 @@ import {
     AnthropicRagPreparationTool,
     AnthropicRagRerankTool,
     AnthropicRepoAnalysisTool,
-    AnthropicRepoAnalysisActionTool
+    AnthropicRepoAnalysisActionTool,
+    AnthropicChangeExtractionTool,
+    AnthropicInvestigationPlanTool,
+    AnthropicInvestigationActionTool,
+    AnthropicSemanticAnalysisTool,
+    AnthropicInformationSelectionTool
 } from './schemas/anthropicSchemas';
 import { commitMessageSchema } from './schemas/common';
 
@@ -200,6 +205,11 @@ export class AnthropicService extends BaseLLMService {
             enforceLanguage: AnthropicCommitMessageTool,
             repoAnalysis: AnthropicRepoAnalysisTool,
             repoAnalysisAction: AnthropicRepoAnalysisActionTool,
+            changeExtraction: AnthropicChangeExtractionTool,
+            investigationPlan: AnthropicInvestigationPlanTool,
+            investigationAction: AnthropicInvestigationActionTool,
+            semanticAnalysis: AnthropicSemanticAnalysisTool,
+            informationSelection: AnthropicInformationSelectionTool,
         };
 
         const chat: ChatFn = async (messages, chainOptions) => {
@@ -256,8 +266,10 @@ export class AnthropicService extends BaseLLMService {
                 chat,
                 {
                     maxParallel: config.chainMaxParallel,
+                    maxRetries: config.maxRetries,
                     maxInputTokens: config.chainMaxInputTokens,
                     model: config.model,
+                    repositoryAnalysisService: this.analysisService,
                     retrieveRagExamples: async (context) => {
                         if (!options?.ragRetrievalService || !options?.targetRepo) {
                             return [];

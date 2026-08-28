@@ -5,7 +5,9 @@ import {
     deriveLatestPipelineSnapshot,
     isLocalizedPipelineLanguage,
     parseCommitStageLog,
+    PIPELINE_STAGE_BADGES,
     PipelineLogLike,
+    pipelineStageBadge,
     presentPipelineEvent,
 } from '../../ui/pipelineDisplay';
 import { isCurrentPersistedLogEntry } from '../../ui/persistedLogSchema';
@@ -281,6 +283,39 @@ describe('pipeline display model', () => {
         assert.strictEqual(snapshot.steps.find(step => step.id === 'summary')?.state, 'warning');
         assert.strictEqual(snapshot.steps.find(step => step.id === 'rag')?.state, 'skipped');
         assert.strictEqual(snapshot.state, 'degraded');
+    });
+
+    it('gives every presentable stage a badge, so a new stage cannot break the log list', () => {
+        for (const stage of Object.keys(PIPELINE_STAGE_BADGES)) {
+            const payload = parseCommitStageLog(stageLog(stage));
+            assert.ok(payload, `stage '${stage}' did not parse`);
+            // Throws for a stage the presenter does not know, which is the
+            // failure this pairing is meant to prevent.
+            presentPipelineEvent(payload);
+
+            const badge = pipelineStageBadge(stage);
+            assert.ok(badge.label.length > 0 && badge.label.length <= 4, `badge label for '${stage}' is not compact`);
+            assert.ok(badge.className.startsWith('stage-badge-'), `badge class for '${stage}' is not a stage badge`);
+        }
+    });
+
+    it('distinguishes stages whose names overlap', () => {
+        // Substring matching mislabels these: `investigationPlanStart` contains
+        // "investigation", so exact matching is required.
+        assert.strictEqual(pipelineStageBadge('investigationPlanStart').label, 'PLAN');
+        assert.strictEqual(pipelineStageBadge('investigationPlanned').label, 'PLAN');
+        assert.strictEqual(pipelineStageBadge('investigationStep').label, 'INVG');
+        assert.strictEqual(pipelineStageBadge('investigationSkipped').label, 'SKIP');
+        assert.strictEqual(pipelineStageBadge('changeExtracted').label, 'EXTR');
+        assert.strictEqual(pipelineStageBadge('semanticAnalysisComplete').label, 'SEM');
+        assert.strictEqual(pipelineStageBadge('informationSelectionStart').label, 'SEL');
+        assert.strictEqual(pipelineStageBadge('informationSelected').label, 'SEL');
+    });
+
+    it('falls back to a generic badge instead of throwing on an unknown stage', () => {
+        const badge = pipelineStageBadge('someStageFromANewerBuild');
+        assert.strictEqual(badge.label, 'STG');
+        assert.strictEqual(badge.className, 'stage-badge-tool');
     });
 
     it('uses the localized catalog for the visible flow labels', () => {

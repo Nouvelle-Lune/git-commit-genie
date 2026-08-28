@@ -11,7 +11,7 @@ import {
     ToolResult,
     CompressContextOptions,
     CompressContextResult
-} from './toolTypes';
+} from './types';
 import { ChatMessage } from '../../llm/llmTypes';
 import { compressionResponseSchema } from '../../llm/providers/schemas/common';
 

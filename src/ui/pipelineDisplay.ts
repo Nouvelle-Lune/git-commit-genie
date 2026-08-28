@@ -1,4 +1,24 @@
-export type PipelineStepId = 'evidence' | 'summary' | 'rag' | 'draft' | 'verify';
+export type PipelineStepId =
+    | 'evidence'
+    | 'summary'
+    | 'extract'
+    | 'investigate'
+    | 'analyze'
+    | 'select'
+    | 'rag'
+    | 'draft'
+    | 'verify';
+
+/**
+ * Steps that only exist in the change-conditioned chain. They are rendered only
+ * when the run actually produced them, so default single-prompt generation
+ * does not display permanently pending chain steps.
+ */
+const CHANGE_CONDITIONED_STEPS: PipelineStepId[] = ['extract', 'investigate', 'analyze', 'select'];
+
+const PIPELINE_STEP_ORDER: PipelineStepId[] = [
+    'evidence', 'summary', 'extract', 'investigate', 'analyze', 'select', 'rag', 'draft', 'verify',
+];
 export type PipelineStepState = 'pending' | 'active' | 'complete' | 'skipped' | 'warning';
 export type PipelineRunState = 'running' | 'ready' | 'degraded';
 
@@ -26,11 +46,17 @@ export interface PipelineTextCatalog {
     stagesLabel: string;
     stepEvidence: string;
     stepSummary: string;
+    stepExtract: string;
+    stepInvestigate: string;
+    stepAnalyze: string;
+    stepSelect: string;
     stepRag: string;
     stepDraft: string;
     stepVerify: string;
     draftInput: string;
     ragInput: string;
+    extractInput: string;
+    analyzeInput: string;
     tokenUsage: string;
     payloadEvidence: string;
     payloadRaw: string;
@@ -40,6 +66,10 @@ export interface PipelineTextCatalog {
     phaseInput: string;
     phaseTransform: string;
     phaseHandoff: string;
+    phaseExtract: string;
+    phaseInvestigate: string;
+    phaseAnalyze: string;
+    phaseSelect: string;
     phaseRetrieval: string;
     phaseGenerate: string;
     phaseVerify: string;
@@ -55,6 +85,18 @@ export interface PipelineTextCatalog {
     metricType: string;
     metricScope: string;
     metricReferences: string;
+    metricSymbols: string;
+    metricTargets: string;
+    metricQuestions: string;
+    metricSteps: string;
+    metricEvidence: string;
+    metricFindings: string;
+    metricUnresolved: string;
+    metricIntent: string;
+    metricConfidence: string;
+    metricTool: string;
+    metricMustExpress: string;
+    metricOmitted: string;
     schemaValidationRetryTitle: string;
     schemaValidationFailedTitle: string;
     structuredOutputRetryTitle: string;
@@ -70,6 +112,32 @@ export interface PipelineTextCatalog {
     evidenceRoutedTitle: string;
     evidenceRoutedSummarized: string;
     evidenceRoutedRaw: string;
+    changeExtractionStartTitle: string;
+    changeExtractionStartDescription: string;
+    changeExtractedTitle: string;
+    changeExtractedDescription: string;
+    changeExtractedEmptyDescription: string;
+    investigationPlanStartTitle: string;
+    investigationPlanStartDescription: string;
+    investigationPlannedTitle: string;
+    investigationPlannedDescription: string;
+    investigationStartTitle: string;
+    investigationStartDescription: string;
+    investigationStepTitle: string;
+    investigationStepDefault: string;
+    investigationCompleteTitle: string;
+    investigationCompleteDescription: string;
+    investigationSkippedTitle: string;
+    investigationSkippedDefault: string;
+    semanticAnalysisStartTitle: string;
+    semanticAnalysisStartDescription: string;
+    semanticAnalysisCompleteTitle: string;
+    semanticAnalysisCompleteDescription: string;
+    semanticAnalysisNoIntentDescription: string;
+    informationSelectionStartTitle: string;
+    informationSelectionStartDescription: string;
+    informationSelectedTitle: string;
+    informationSelectedDescription: string;
     ragDisabledTitle: string;
     ragDisabledDescription: string;
     ragPreparationStartTitle: string;
@@ -115,11 +183,17 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     stagesLabel: 'Commit generation stages',
     stepEvidence: 'Evidence',
     stepSummary: 'Summary',
+    stepExtract: 'Extract',
+    stepInvestigate: 'Investigate',
+    stepAnalyze: 'Analyze',
+    stepSelect: 'Select',
     stepRag: 'RAG',
     stepDraft: 'Draft',
     stepVerify: 'Verify',
     draftInput: 'Draft input',
     ragInput: 'RAG input',
+    extractInput: 'Change extraction input',
+    analyzeInput: 'Semantic analysis input',
     tokenUsage: 'Input token usage {0}%',
     payloadEvidence: 'Evidence',
     payloadRaw: 'raw',
@@ -129,6 +203,10 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     phaseInput: 'Input',
     phaseTransform: 'Transform',
     phaseHandoff: 'Handoff',
+    phaseExtract: 'Extract',
+    phaseInvestigate: 'Investigate',
+    phaseAnalyze: 'Analyze',
+    phaseSelect: 'Select',
     phaseRetrieval: 'Retrieval',
     phaseGenerate: 'Generate',
     phaseVerify: 'Verify',
@@ -144,6 +222,18 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     metricType: 'Type',
     metricScope: 'Scope',
     metricReferences: 'References',
+    metricSymbols: 'Symbols',
+    metricTargets: 'Targets',
+    metricQuestions: 'Questions',
+    metricSteps: 'Steps',
+    metricEvidence: 'Evidence',
+    metricFindings: 'Findings',
+    metricUnresolved: 'Unresolved',
+    metricIntent: 'Intent',
+    metricConfidence: 'Confidence',
+    metricTool: 'Tool',
+    metricMustExpress: 'Must express',
+    metricOmitted: 'Omitted',
     schemaValidationRetryTitle: 'Schema validation retry: {0}',
     schemaValidationFailedTitle: 'Schema validation failed: {0}',
     structuredOutputRetryTitle: 'Empty structured output, retrying: {0}',
@@ -159,6 +249,32 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     evidenceRoutedTitle: 'Evidence ready for {0}',
     evidenceRoutedSummarized: 'The largest raw diffs were replaced until the complete request fit the configured budget.',
     evidenceRoutedRaw: 'The complete request fits the configured budget; raw diffs remain intact.',
+    changeExtractionStartTitle: 'Extracting what changed',
+    changeExtractionStartDescription: 'The diff is being reduced to changed symbols, calls, configuration keys, types, and dependencies.',
+    changeExtractedTitle: 'Change surface extracted',
+    changeExtractedDescription: 'Changed symbols: {0}.',
+    changeExtractedEmptyDescription: 'No changed code symbol was found; the diff alone will carry the meaning of this change.',
+    investigationPlanStartTitle: 'Planning the investigation',
+    investigationPlanStartDescription: 'Deciding what still has to be known about the repository to explain this change.',
+    investigationPlannedTitle: 'Investigation plan ready',
+    investigationPlannedDescription: 'Investigating: {0}.',
+    investigationStartTitle: 'Investigating the repository',
+    investigationStartDescription: 'Definitions, callers, callees, types, configuration, and tests are being looked up for the changed symbols.',
+    investigationStepTitle: 'Investigation step {0}: {1}',
+    investigationStepDefault: 'Repository lookup completed.',
+    investigationCompleteTitle: 'Repository evidence collected',
+    investigationCompleteDescription: '{0}',
+    investigationSkippedTitle: 'Repository investigation skipped',
+    investigationSkippedDefault: 'The change was analyzed from the diff alone.',
+    semanticAnalysisStartTitle: 'Analyzing what the change means',
+    semanticAnalysisStartDescription: 'Observed facts, repository facts, before/after behavior, and intent are being separated.',
+    semanticAnalysisCompleteTitle: 'Semantic analysis ready',
+    semanticAnalysisCompleteDescription: '{0}',
+    semanticAnalysisNoIntentDescription: 'The evidence did not establish a single intent; the observable change will be described instead.',
+    informationSelectionStartTitle: 'Selecting what to express',
+    informationSelectionStartDescription: 'Deciding which conclusions belong in the commit message and which stay out.',
+    informationSelectedTitle: 'Message content selected',
+    informationSelectedDescription: '{0}',
     ragDisabledTitle: 'RAG skipped',
     ragDisabledDescription: 'Historical style retrieval is disabled for this generation.',
     ragPreparationStartTitle: 'Building retrieval query',
@@ -232,7 +348,7 @@ export interface PipelineSnapshot {
     predictedScope?: string;
     referenceCount?: number;
     latestHandoff?: {
-        target: 'ragPreparation' | 'draft';
+        target: 'changeExtraction' | 'semanticAnalysis' | 'ragPreparation' | 'draft';
         rawFiles: number;
         summarizedFiles: number;
         estimatedInputTokens: number;
@@ -244,6 +360,105 @@ type CommitStagePayload = {
     stage: string;
     data: Record<string, unknown>;
 };
+
+/**
+ * Every stage `presentPipelineEvent` can render. Kept as a union so the badge
+ * table below is exhaustive by construction: a new stage cannot be presented
+ * without also being given a badge.
+ */
+export type PipelineStageName =
+    | 'evidenceReady'
+    | 'summarizeStart'
+    | 'summarizeProgress'
+    | 'summarizeFailed'
+    | 'evidenceRouted'
+    | 'changeExtractionStart'
+    | 'changeExtracted'
+    | 'investigationPlanStart'
+    | 'investigationPlanned'
+    | 'investigationStart'
+    | 'investigationStep'
+    | 'investigationComplete'
+    | 'investigationSkipped'
+    | 'semanticAnalysisStart'
+    | 'semanticAnalysisComplete'
+    | 'informationSelectionStart'
+    | 'informationSelected'
+    | 'ragDisabled'
+    | 'ragPreparationStart'
+    | 'ragPrepared'
+    | 'ragRetrievalStart'
+    | 'ragRetrieved'
+    | 'ragPreparationSkipped'
+    | 'ragRetrievalSkipped'
+    | 'draftStart'
+    | 'classifyDraft'
+    | 'validationStart'
+    | 'validateFix'
+    | 'strictFixStart'
+    | 'strictFix'
+    | 'enforceLanguageStart'
+    | 'enforceLanguage'
+    | 'done';
+
+export interface PipelineStageBadge {
+    label: string;
+    className: string;
+}
+
+/**
+ * Short badge shown beside each commit-stage log row.
+ *
+ * Keyed by exact stage name rather than matched by substring: stage names
+ * overlap (`investigationPlanStart` contains both "investigation" and "plan"),
+ * so substring matching silently mislabels rows and, worse, leaves newly added
+ * stages unmatched.
+ */
+export const PIPELINE_STAGE_BADGES: Record<PipelineStageName, PipelineStageBadge> = {
+    evidenceReady: { label: 'EVD', className: 'stage-badge-data' },
+    evidenceRouted: { label: 'EVD', className: 'stage-badge-data' },
+    summarizeStart: { label: 'SUM', className: 'stage-badge-summarize' },
+    summarizeProgress: { label: 'SUM', className: 'stage-badge-summarize' },
+    summarizeFailed: { label: 'SUM', className: 'stage-badge-summarize' },
+    changeExtractionStart: { label: 'EXTR', className: 'stage-badge-extract' },
+    changeExtracted: { label: 'EXTR', className: 'stage-badge-extract' },
+    investigationPlanStart: { label: 'PLAN', className: 'stage-badge-plan' },
+    investigationPlanned: { label: 'PLAN', className: 'stage-badge-plan' },
+    investigationStart: { label: 'INVG', className: 'stage-badge-investigate' },
+    investigationStep: { label: 'INVG', className: 'stage-badge-investigate' },
+    investigationComplete: { label: 'INVG', className: 'stage-badge-investigate' },
+    investigationSkipped: { label: 'SKIP', className: 'stage-badge-skipped' },
+    semanticAnalysisStart: { label: 'SEM', className: 'stage-badge-semantic' },
+    semanticAnalysisComplete: { label: 'SEM', className: 'stage-badge-semantic' },
+    informationSelectionStart: { label: 'SEL', className: 'stage-badge-select' },
+    informationSelected: { label: 'SEL', className: 'stage-badge-select' },
+    ragDisabled: { label: 'RAG', className: 'stage-badge-rag' },
+    ragPreparationStart: { label: 'RAG', className: 'stage-badge-rag' },
+    ragPrepared: { label: 'RAG', className: 'stage-badge-rag' },
+    ragRetrievalStart: { label: 'RAG', className: 'stage-badge-rag' },
+    ragRetrieved: { label: 'RAG', className: 'stage-badge-rag' },
+    ragPreparationSkipped: { label: 'RAG', className: 'stage-badge-rag' },
+    ragRetrievalSkipped: { label: 'RAG', className: 'stage-badge-rag' },
+    draftStart: { label: 'DRFT', className: 'stage-badge-classify' },
+    classifyDraft: { label: 'DRFT', className: 'stage-badge-classify' },
+    validationStart: { label: 'CHK', className: 'stage-badge-verify' },
+    validateFix: { label: 'CHK', className: 'stage-badge-verify' },
+    strictFixStart: { label: 'CHK', className: 'stage-badge-verify' },
+    strictFix: { label: 'CHK', className: 'stage-badge-verify' },
+    enforceLanguageStart: { label: 'CHK', className: 'stage-badge-verify' },
+    enforceLanguage: { label: 'CHK', className: 'stage-badge-verify' },
+    done: { label: 'DONE', className: 'stage-badge-done' },
+};
+
+/**
+ * Badge for a stage read off a log payload. Returns a generic badge for stages
+ * this build does not know: the badge is decorative, and a persisted log from a
+ * newer build must not be able to break the log list.
+ */
+export function pipelineStageBadge(stage: string): PipelineStageBadge {
+    return PIPELINE_STAGE_BADGES[stage as PipelineStageName]
+        ?? { label: 'STG', className: 'stage-badge-tool' };
+}
 
 function asNumber(value: unknown): number | undefined {
     return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
@@ -291,6 +506,25 @@ export function parseCommitStageLog(log: PipelineLogLike): CommitStagePayload | 
     };
 }
 
+function handoffTargetLabel(target: unknown, text: PipelineTextCatalog): string {
+    switch (target) {
+        case 'changeExtraction':
+            return text.extractInput;
+        case 'semanticAnalysis':
+            return text.analyzeInput;
+        case 'ragPreparation':
+            return text.ragInput;
+        default:
+            return text.draftInput;
+    }
+}
+
+function asStringList(value: unknown, limit: number): string[] {
+    return Array.isArray(value)
+        ? value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0).slice(0, limit)
+        : [];
+}
+
 export function presentPipelineEvent(
     payload: CommitStagePayload,
     text: PipelineTextCatalog = DEFAULT_PIPELINE_TEXT
@@ -301,7 +535,7 @@ export function presentPipelineEvent(
     const summarizedFiles = asNumber(data.summarizedFiles);
     const estimatedTokens = asNumber(data.estimatedInputTokens);
     const maxInputTokens = asNumber(data.maxInputTokens);
-    const target = data.target === 'ragPreparation' ? text.ragInput : text.draftInput;
+    const target = handoffTargetLabel(data.target, text);
 
     switch (stage) {
         case 'evidenceReady':
@@ -369,6 +603,186 @@ export function presentPipelineEvent(
                     { label: text.metricSummary, value: String(summarizedFiles ?? 0), tone: 'summary' },
                     ...(estimatedTokens !== undefined && maxInputTokens !== undefined
                         ? [{ label: text.metricInput, value: `${formatInteger(estimatedTokens)} / ${formatInteger(maxInputTokens)}`, tone: 'budget' as const }]
+                        : []),
+                ],
+                tone: 'success',
+                data,
+            };
+        }
+        case 'changeExtractionStart':
+            return {
+                stage,
+                phase: text.phaseExtract,
+                title: text.changeExtractionStartTitle,
+                description: text.changeExtractionStartDescription,
+                metrics: [],
+                tone: 'active',
+                data,
+            };
+        case 'changeExtracted': {
+            const symbols = asStringList(data.symbols, 4);
+            const symbolCount = asNumber(data.symbolCount) ?? symbols.length;
+            return {
+                stage,
+                phase: text.phaseExtract,
+                title: text.changeExtractedTitle,
+                description: symbols.length
+                    ? formatPipelineText(text.changeExtractedDescription, symbols.join(', '))
+                    : text.changeExtractedEmptyDescription,
+                metrics: [
+                    { label: text.metricSymbols, value: String(symbolCount) },
+                    ...(asNumber(data.configCount) ? [{ label: text.metricScope, value: String(asNumber(data.configCount)) }] : []),
+                ],
+                tone: 'success',
+                data,
+            };
+        }
+        case 'investigationPlanStart':
+            return {
+                stage,
+                phase: text.phaseInvestigate,
+                title: text.investigationPlanStartTitle,
+                description: text.investigationPlanStartDescription,
+                metrics: [],
+                tone: 'active',
+                data,
+            };
+        case 'investigationPlanned': {
+            const targets = asStringList(data.targets, 4);
+            return {
+                stage,
+                phase: text.phaseInvestigate,
+                title: text.investigationPlannedTitle,
+                description: formatPipelineText(text.investigationPlannedDescription, targets.join(', ')),
+                metrics: [
+                    { label: text.metricTargets, value: String(asNumber(data.targetCount) ?? targets.length) },
+                    ...(asNumber(data.questionCount) !== undefined
+                        ? [{ label: text.metricQuestions, value: String(asNumber(data.questionCount)) }]
+                        : []),
+                ],
+                tone: 'success',
+                data,
+            };
+        }
+        case 'investigationStart':
+            return {
+                stage,
+                phase: text.phaseInvestigate,
+                title: text.investigationStartTitle,
+                description: text.investigationStartDescription,
+                metrics: asNumber(data.maxSteps) !== undefined
+                    ? [{ label: text.metricBudget, value: String(asNumber(data.maxSteps)), tone: 'budget' }]
+                    : [],
+                tone: 'active',
+                data,
+            };
+        case 'investigationStep': {
+            const current = asNumber(data.current) ?? 0;
+            const tool = asString(data.tool) || 'search';
+            return {
+                stage,
+                phase: text.phaseInvestigate,
+                title: formatPipelineText(text.investigationStepTitle, current, tool),
+                description: asString(data.summary) || asString(data.reason) || text.investigationStepDefault,
+                metrics: [
+                    { label: text.metricProgress, value: `${current}/${asNumber(data.total) ?? 0}` },
+                    ...(asNumber(data.evidenceCount)
+                        ? [{ label: text.metricEvidence, value: String(asNumber(data.evidenceCount)), tone: 'summary' as const }]
+                        : []),
+                ],
+                tone: data.ok === false ? 'warning' : 'success',
+                data,
+            };
+        }
+        case 'investigationComplete':
+            return {
+                stage,
+                phase: text.phaseInvestigate,
+                title: text.investigationCompleteTitle,
+                description: formatPipelineText(
+                    text.investigationCompleteDescription,
+                    asString(data.reason) || text.investigationStepDefault
+                ),
+                metrics: [
+                    { label: text.metricSteps, value: String(asNumber(data.steps) ?? 0) },
+                    { label: text.metricEvidence, value: String(asNumber(data.evidenceCount) ?? 0), tone: 'summary' },
+                    { label: text.metricFindings, value: String(asNumber(data.findingCount) ?? 0) },
+                    ...(asNumber(data.unresolvedCount)
+                        ? [{ label: text.metricUnresolved, value: String(asNumber(data.unresolvedCount)) }]
+                        : []),
+                ],
+                tone: 'success',
+                data,
+            };
+        case 'investigationSkipped':
+            return {
+                stage,
+                phase: text.phaseInvestigate,
+                title: text.investigationSkippedTitle,
+                description: asString(data.reason) || text.investigationSkippedDefault,
+                metrics: [],
+                tone: 'neutral',
+                data,
+            };
+        case 'semanticAnalysisStart':
+            return {
+                stage,
+                phase: text.phaseAnalyze,
+                title: text.semanticAnalysisStartTitle,
+                description: text.semanticAnalysisStartDescription,
+                metrics: [],
+                tone: 'active',
+                data,
+            };
+        case 'semanticAnalysisComplete': {
+            const intent = asString(data.primaryIntent);
+            const effect = asString(data.observableEffect);
+            return {
+                stage,
+                phase: text.phaseAnalyze,
+                title: text.semanticAnalysisCompleteTitle,
+                description: intent || effect
+                    ? formatPipelineText(text.semanticAnalysisCompleteDescription, intent || effect!)
+                    : text.semanticAnalysisNoIntentDescription,
+                metrics: [
+                    ...(asString(data.recommendedType)
+                        ? [{ label: text.metricType, value: asString(data.recommendedType)!, tone: 'rag' as const }]
+                        : []),
+                    ...(asString(data.confidence)
+                        ? [{ label: text.metricConfidence, value: asString(data.confidence)! }]
+                        : []),
+                    { label: text.metricEvidence, value: String(asNumber(data.factCount) ?? 0), tone: 'summary' },
+                ],
+                tone: 'success',
+                data,
+            };
+        }
+        case 'informationSelectionStart':
+            return {
+                stage,
+                phase: text.phaseSelect,
+                title: text.informationSelectionStartTitle,
+                description: text.informationSelectionStartDescription,
+                metrics: [],
+                tone: 'active',
+                data,
+            };
+        case 'informationSelected': {
+            const mustExpress = asStringList(data.mustExpress, 3);
+            return {
+                stage,
+                phase: text.phaseSelect,
+                title: text.informationSelectedTitle,
+                description: mustExpress.length
+                    ? formatPipelineText(text.informationSelectedDescription, mustExpress.join(' / '))
+                    : text.informationSelectionStartDescription,
+                metrics: [
+                    { label: text.metricMustExpress, value: String(mustExpress.length) },
+                    ...(asNumber(data.omitCount)
+                        ? [{ label: text.metricOmitted, value: String(asNumber(data.omitCount)) }]
+                        : []),
+                    ...(asString(data.suggestedScope)
+                        ? [{ label: text.metricScope, value: asString(data.suggestedScope)!, tone: 'rag' as const }]
                         : []),
                 ],
                 tone: 'success',
@@ -590,10 +1004,15 @@ export function deriveLatestPipelineSnapshot(
     const stepStates: Record<PipelineStepId, PipelineStepState> = {
         evidence: 'pending',
         summary: 'pending',
+        extract: 'pending',
+        investigate: 'pending',
+        analyze: 'pending',
+        select: 'pending',
         rag: 'pending',
         draft: 'pending',
         verify: 'pending',
     };
+    let changeConditioned = false;
     let degraded = false;
     let queryText: string | undefined;
     let predictedType: string | undefined;
@@ -625,7 +1044,8 @@ export function deriveLatestPipelineSnapshot(
                     stepStates.summary = 'skipped';
                 }
                 if (
-                    (data.target === 'ragPreparation' || data.target === 'draft')
+                    (data.target === 'ragPreparation' || data.target === 'draft'
+                        || data.target === 'changeExtraction' || data.target === 'semanticAnalysis')
                     && asNumber(data.rawFiles) !== undefined
                     && asNumber(data.summarizedFiles) !== undefined
                     && asNumber(data.estimatedInputTokens) !== undefined
@@ -639,6 +1059,45 @@ export function deriveLatestPipelineSnapshot(
                         maxInputTokens: asNumber(data.maxInputTokens)!,
                     };
                 }
+                break;
+            case 'changeExtractionStart':
+                changeConditioned = true;
+                stepStates.extract = 'active';
+                break;
+            case 'changeExtracted':
+                changeConditioned = true;
+                stepStates.extract = 'complete';
+                break;
+            case 'investigationPlanStart':
+            case 'investigationPlanned':
+            case 'investigationStart':
+            case 'investigationStep':
+                changeConditioned = true;
+                stepStates.investigate = 'active';
+                break;
+            case 'investigationComplete':
+                changeConditioned = true;
+                stepStates.investigate = 'complete';
+                break;
+            case 'investigationSkipped':
+                changeConditioned = true;
+                stepStates.investigate = 'skipped';
+                break;
+            case 'semanticAnalysisStart':
+                changeConditioned = true;
+                stepStates.analyze = 'active';
+                break;
+            case 'semanticAnalysisComplete':
+                changeConditioned = true;
+                stepStates.analyze = 'complete';
+                break;
+            case 'informationSelectionStart':
+                changeConditioned = true;
+                stepStates.select = 'active';
+                break;
+            case 'informationSelected':
+                changeConditioned = true;
+                stepStates.select = 'complete';
                 break;
             case 'ragPreparationStart':
             case 'ragRetrievalStart':
@@ -694,17 +1153,23 @@ export function deriveLatestPipelineSnapshot(
         repoPath: generationStart.repoPath,
         startedAt: generationStart.timestamp,
         state: completed ? (degraded ? 'degraded' : 'ready') : (degraded ? 'degraded' : 'running'),
-        steps: (['evidence', 'summary', 'rag', 'draft', 'verify'] as PipelineStepId[]).map(id => ({
-            id,
-            label: {
-                evidence: text.stepEvidence,
-                summary: text.stepSummary,
-                rag: text.stepRag,
-                draft: text.stepDraft,
-                verify: text.stepVerify,
-            }[id],
-            state: stepStates[id],
-        })),
+        steps: PIPELINE_STEP_ORDER
+            .filter(id => changeConditioned || !CHANGE_CONDITIONED_STEPS.includes(id))
+            .map(id => ({
+                id,
+                label: {
+                    evidence: text.stepEvidence,
+                    summary: text.stepSummary,
+                    extract: text.stepExtract,
+                    investigate: text.stepInvestigate,
+                    analyze: text.stepAnalyze,
+                    select: text.stepSelect,
+                    rag: text.stepRag,
+                    draft: text.stepDraft,
+                    verify: text.stepVerify,
+                }[id],
+                state: stepStates[id],
+            })),
         latest: presentPipelineEvent(latestPayload, text),
         queryText,
         predictedType,

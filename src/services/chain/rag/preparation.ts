@@ -1,8 +1,9 @@
 import * as vscode from "vscode";
-import { ChatFn } from "../llm/llmTypes";
-import { ChangeSetSummary, DraftEvidence, RetrievalFeatures } from "./chainTypes";
-import { DiffData } from "../git/gitTypes";
-import { buildRagPreparationMessages } from "./chainChatPrompts";
+import { ChatFn } from "../../llm/llmTypes";
+import { ChangeSetSummary, RetrievalFeatures } from "../types";
+import { DraftEvidence } from "../../analysis/change/types";
+import { DiffData } from "../../git/gitTypes";
+import { buildRagPreparationMessages } from "./prompts";
 
 type RagPreparationContext = {
     changeSetSummary: ChangeSetSummary;

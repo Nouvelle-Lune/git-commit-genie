@@ -10,7 +10,7 @@ import { KimiService } from '../services/llm/providers/kimi';
 import { OpenRouterService } from '../services/llm/providers/openrouter';
 import { LocalService } from '../services/llm/providers/local';
 import { TemplateService } from '../template/templateService';
-import { RepositoryAnalysisService } from '../services/analysis';
+import { RepositoryAnalysisService } from '../services/analysis/repository/repositoryAnalysisService';
 import { LLMService } from '../services/llm/llmTypes';
 import { RepoService } from "../services/repo/repo";
 import { CostTrackingService } from "../services/cost/costTrackingService";

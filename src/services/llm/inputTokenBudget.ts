@@ -1,5 +1,5 @@
 import { MODEL_MAX_CONTEXT_TOKENS, estimateTokens } from '../analysis/tools/modelContext';
-import { ChatMessage, RequestType } from '../llm/llmTypes';
+import { ChatMessage, RequestType } from './llmTypes';
 
 export const DEFAULT_CHAIN_MAX_INPUT_TOKENS = 32_000;
 

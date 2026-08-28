@@ -4,7 +4,7 @@ import { LogEntry, LogType } from '../types/messages';
 import { vscodeApi } from '../utils/vscode';
 import './LogSection.css';
 import { GenieCheckIcon, GenieCloudIcon, GenieReadIcon, GenieReasonIcon, GenieToolIcon, GenieWarningIcon } from './icons';
-import { formatPipelineText, parseCommitStageLog, presentPipelineEvent } from '../../../src/ui/pipelineDisplay';
+import { formatPipelineText, parseCommitStageLog, pipelineStageBadge, presentPipelineEvent } from '../../../src/ui/pipelineDisplay';
 // @ts-ignore - react-markdown types
 import ReactMarkdown from 'react-markdown';
 
@@ -24,7 +24,6 @@ export const LogSection: React.FC = () => {
     const userHasManuallyScrolledRef = useRef<boolean>(false);
     const hasMountedRef = useRef<boolean>(false);
     const lastScrollHeightRef = useRef<number>(0);
-
     const BOTTOM_THRESHOLD = 24; // px tolerance for bottom detection
 
     const startSmoothGuardUntilBottom = (el: HTMLDivElement) => {
@@ -318,18 +317,7 @@ export const LogSection: React.FC = () => {
 
             // Commit generation stages
             if (title.includes('Commit stage:')) {
-                const stage = parseCommitStageLog(log)!.stage.toLowerCase();
-                if (stage.includes('evidence')) return { label: 'EVD', className: 'stage-badge-data' };
-                if (stage.includes('summarize')) return { label: 'SUM', className: 'stage-badge-summarize' };
-                if (stage.includes('rag')) return { label: 'RAG', className: 'stage-badge-rag' };
-                if (stage.includes('draft') || stage.includes('classify')) {
-                    return { label: 'DRFT', className: 'stage-badge-classify' };
-                }
-                if (stage.includes('validate') || stage.includes('validation') || stage.includes('strict') || stage.includes('language')) {
-                    return { label: 'CHK', className: 'stage-badge-verify' };
-                }
-                if (stage.includes('done')) return { label: 'DONE', className: 'stage-badge-done' };
-                throw new Error(`Unknown commit pipeline stage '${stage}'.`);
+                return pipelineStageBadge(parseCommitStageLog(log)!.stage);
             }
 
             // Structured-output validation and provider-empty retries

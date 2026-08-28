@@ -1,7 +1,7 @@
 import { DiffData, DiffStatus } from '../git/gitTypes';
 import { RepoService } from '../repo/repo';
 import { Commit, Repository } from '../git/git';
-import { ChangeSetSummary, FileSummary, RetrievalFeatures } from '../chain/chainTypes';
+import { ChangeSetSummary, FileSummary, RetrievalFeatures } from '../chain/types';
 import { RagRuntimeService } from './ragRuntimeService';
 import { logger } from '../logger';
 import * as vscode from 'vscode';

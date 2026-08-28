@@ -1,7 +1,9 @@
 /**
- * Repository analysis data structure
+ * Repository-level analysis contracts.
  */
-import { ChatMessage } from "../llm/llmTypes";
+import { ChatMessage } from "../../llm/llmTypes";
+import type { ChangeAnalysisAgentParams } from '../change/investigation/agent';
+import type { RepositoryEvidence } from '../change/types';
 
 export interface AnalysisPromptParts {
     system: ChatMessage;
@@ -81,6 +83,11 @@ export interface AnalysisConfig {
  * Repository analysis service interface
  */
 export interface IRepositoryAnalysisService {
+    /**
+     * Runs the repository agent in change-conditioned mode for one diff.
+     */
+    runChangeAnalysis(params: ChangeAnalysisAgentParams): Promise<RepositoryEvidence>;
+
     /**
      * Initialize analysis for a repository
      */

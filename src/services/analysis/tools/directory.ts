@@ -12,8 +12,8 @@ import {
     DirectoryEntry,
     ListDirectoryOptions,
     ListDirectoryResult
-} from './toolTypes';
-import { shouldExclude } from './utils';
+} from './types';
+import { shouldExclude } from './pathFilters';
 
 /**
  * List contents of a directory with configurable depth

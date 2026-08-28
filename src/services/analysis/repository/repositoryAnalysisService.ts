@@ -12,27 +12,29 @@ import {
     AnalysisConfig,
     LLMAnalysisResponse,
     RepoAnalysisRunResult
-} from './analysisTypes';
+} from './repositoryAnalysisTypes';
 
-import { LLMService, LLMError, ChatMessage } from '../llm/llmTypes';
+import { LLMService, LLMError, ChatMessage } from '../../llm/llmTypes';
 import { z } from 'zod';
-import { RepoService } from '../repo/repo';
-import { logger } from '../logger';
-import { L10N_KEYS as I18N } from '../../i18n/keys';
-import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../llm/providers/config/ProviderConfig';
-import { AnthropicRepoAnalysisActionTool, AnthropicCompressionTool } from '../llm/providers/schemas/anthropicSchemas';
-import { GeminiRepoAnalysisFunctionDeclarations } from '../llm/providers/schemas/geminiFunctions';
-import { repoAnalysisActionSchema, compressionResponseSchema } from '../llm/providers/schemas/common';
+import { RepoService } from '../../repo/repo';
+import { logger } from '../../logger';
+import { L10N_KEYS as I18N } from '../../../i18n/keys';
+import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../../llm/providers/config/ProviderConfig';
+import { AnthropicRepoAnalysisActionTool, AnthropicCompressionTool } from '../../llm/providers/schemas/anthropicSchemas';
+import { GeminiRepoAnalysisFunctionDeclarations } from '../../llm/providers/schemas/geminiFunctions';
+import { repoAnalysisActionSchema, compressionResponseSchema } from '../../llm/providers/schemas/common';
 
 // Tools
-import { listDirectory } from './tools/directoryTools';
-import { searchFiles } from './tools/searchTools';
-import { readFileContent } from './tools/fileTools';
-import { compressContext } from './tools/compressionTools';
-import { compactToolResultForConversation } from './tools/formattingTools';
-import { DirectoryEntry, SearchFilesResult, ToolResult } from './tools/toolTypes';
-import { getMaxContextByFunction } from './tools/modelContext';
-import { buildGitGenieIgnoreAppend } from '../../utils/gitignore';
+import { listDirectory } from '../tools/directory';
+import { searchFiles } from '../tools/search';
+import { readFileContent } from '../tools/file';
+import { compressContext } from '../tools/compression';
+import { compactToolResultForConversation } from '../tools/formatting';
+import { DirectoryEntry, SearchFilesResult, ToolResult } from '../tools/types';
+import { getMaxContextByFunction } from '../tools/modelContext';
+import { buildGitGenieIgnoreAppend } from '../../../utils/gitignore';
+import { ChangeAnalysisAgentParams, runChangeAnalysisAgent } from '../change/investigation/agent';
+import { RepositoryEvidence } from '../change/types';
 
 const REPOSITORY_ANALYSIS_MARKDOWN_TITLE = '# Repository Analysis Summary';
 
@@ -98,6 +100,15 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         this.context = context;
         this.llmService = llmService;
         this.repoService = repoService;
+    }
+
+    /**
+     * Runs the same repository-analysis subsystem in a change-conditioned mode.
+     * The commit pipeline owns the diff-specific prompt and Zod-validated chat
+     * function; this service owns repository-agent execution and tools.
+     */
+    public async runChangeAnalysis(params: ChangeAnalysisAgentParams): Promise<RepositoryEvidence> {
+        return runChangeAnalysisAgent(params);
     }
 
     /**
@@ -1142,7 +1153,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         } catch { /* ignore logging failures */ }
     }
 
-    // Compacting helpers moved to tools/formattingTools.ts
+    // Compacting helpers live in tools/formatting.ts.
 
     /**
      * Resolve a candidate path relative to repo root and ensure it stays inside.
