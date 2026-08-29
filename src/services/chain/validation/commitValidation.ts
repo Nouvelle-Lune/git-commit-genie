@@ -1,4 +1,4 @@
-import { ChatFn } from '../../llm/llmTypes';
+import { LLMExecution } from '../../llm/llmTypes';
 import {
     buildEnforceStrictFixMessages,
     buildValidateAndFixMessages,
@@ -13,11 +13,12 @@ export interface CommitValidationResult {
 export async function validateAndFixCommit(
     commitMessage: string,
     checklistText: string,
-    chat: ChatFn,
+    execution: LLMExecution,
     userTemplate?: string
 ): Promise<CommitValidationResult> {
     const messages = buildValidateAndFixMessages(commitMessage, checklistText, userTemplate);
-    const parsed = await chat(messages, { requestType: 'fix' });
+    const session = execution.createSession(messages);
+    const parsed = await execution.run<any>(session, messages, { requestType: 'fix' });
 
     return {
         validMessage: parsed.commitMessage,
@@ -49,10 +50,11 @@ export function checkConventionalCommitHeader(message: string): { ok: boolean; p
 export async function enforceStrictCommitFormat(
     current: string,
     problems: string[],
-    chat: ChatFn,
+    execution: LLMExecution,
     userTemplate?: string
 ): Promise<string> {
     const messages = buildEnforceStrictFixMessages(current, problems, userTemplate);
-    const parsed = await chat(messages, { requestType: 'strictFix' });
+    const session = execution.createSession(messages);
+    const parsed = await execution.run<any>(session, messages, { requestType: 'strictFix' });
     return parsed.commitMessage;
 }

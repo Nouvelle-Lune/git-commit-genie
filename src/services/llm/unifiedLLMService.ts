@@ -19,11 +19,11 @@ import { safeRun } from '../../utils/safeRun';
 import { stageNotifications } from '../../ui/StageNotificationManager';
 import { BaseLLMService } from './baseLLMService';
 import {
-    ChatFn,
-    ChatMessage,
     GenerateCommitMessageOptions,
+    LLMExecution,
     LLMError,
     LLMResponse,
+    LLMRunOptions,
     RequestType,
 } from './llmTypes';
 import { assertChatMessagesWithinTokenBudget } from './inputTokenBudget';
@@ -37,23 +37,13 @@ import {
 } from './chatWebviewLogging';
 import type { StageEvent } from '../../ui/StageNotificationManager';
 
-interface SessionRecord {
-    session: AISession;
-    submittedMessages: ChatMessage[];
-    systemInstruction: string;
-}
-
 export interface UnifiedLLMServiceOptions {
     model: AIModelConfig;
 }
 
-/**
- * Bridges the existing commit pipeline to the provider-neutral AI package.
- * Provider SDK objects and continuation identifiers never cross this boundary.
- */
+/** Coordinates provider-neutral sessions for commit and repository workflows. */
 export class UnifiedLLMService extends BaseLLMService {
     private provider: AIProvider | null = null;
-    private readonly sessions = new Map<string, SessionRecord>();
 
     constructor(
         context: vscode.ExtensionContext,
@@ -72,7 +62,6 @@ export class UnifiedLLMService extends BaseLLMService {
             apiKey,
             baseUrl: this.options.model.baseUrl,
         }) : null;
-        this.sessions.clear();
     }
 
     async validateApiKeyAndListModels(apiKey: string): Promise<string[]> {
@@ -98,108 +87,140 @@ export class UnifiedLLMService extends BaseLLMService {
         const key = modelSecretKey(this.options.model);
         await this.context.secrets.delete(key);
         this.provider = null;
-        this.sessions.clear();
     }
 
-    public createChat(repoPath = '', options?: GenerateCommitMessageOptions): ChatFn {
-        return async (messages, chatOptions) => {
-            const requestType = chatOptions?.requestType;
-            const schema = getValidationSchemaFor(requestType);
-            const maxRetries = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.maxRetries', 2);
-            const maxInputTokens = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('chain.maxInputTokens', 32_000);
-            const temperature = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.temperature', 1);
-            assertChatMessagesWithinTokenBudget(messages, maxInputTokens, requestType);
+    public createExecution(repoPath = '', options?: GenerateCommitMessageOptions): LLMExecution {
+        if (!this.provider) {
+            throw new Error(`${this.getProviderName()} API key is not configured.`);
+        }
+        const provider = this.provider;
+        const signal = this.toAbortSignal(options?.token);
+        const configuration = vscode.workspace.getConfiguration('gitCommitGenie');
+        const temperature = configuration.get<number>('llm.temperature', 1);
+        const maxOutputTokens = configuration.get<number>('llm.maxOutputTokens', 4096);
+        return {
+            signal,
+            temperature,
+            maxOutputTokens,
+            createSession: (messages, id) => provider.createSession({
+                id,
+                model: this.getCurrentModel(),
+                systemInstruction: this.systemInstruction(messages),
+            }),
+            run: <T>(session: AISession, messages: AIMessage[], runOptions: LLMRunOptions) => (
+                this.runSession<T>(session, messages, runOptions, repoPath, signal)
+            ),
+        };
+    }
 
-            const record = this.resolveSession(messages, chatOptions?.sessionId);
-            let delta = this.messageDelta(record, messages);
-            const totalAttempts = maxRetries + 1;
-            const provider = this.options.model.provider;
-            const model = this.getCurrentModel();
+    private async runSession<T>(
+        session: AISession,
+        messages: AIMessage[],
+        runOptions: LLMRunOptions,
+        repoPath: string,
+        signal?: AbortSignal,
+    ): Promise<T> {
+        const requestType = runOptions.requestType;
+        const schema = getValidationSchemaFor(requestType);
+        const maxRetries = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.maxRetries', 2);
+        const maxInputTokens = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('chain.maxInputTokens', 32_000);
+        const temperature = runOptions.temperature
+            ?? vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.temperature', 1);
+        const maxOutputTokens = runOptions.maxOutputTokens
+            ?? vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.maxOutputTokens', 4096);
+        if (!Number.isInteger(maxOutputTokens) || maxOutputTokens <= 0) {
+            throw new Error(`gitCommitGenie.llm.maxOutputTokens must be a positive integer; received ${maxOutputTokens}.`);
+        }
+        assertChatMessagesWithinTokenBudget(messages, maxInputTokens, requestType);
 
-            for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
-                let logId: string | undefined;
-                try {
-                    logId = logger.logApiRequest(repoPath || undefined);
-                    const response = await record.session.run({
-                        messages: delta.map(message => ({ role: message.role, content: message.content } as AIMessage)),
-                        responseFormat: schema ? {
-                            name: requestType ?? 'structuredResponse',
-                            schema: z.toJSONSchema(schema) as Record<string, unknown>,
-                        } : undefined,
-                        temperature,
-                        signal: this.toAbortSignal(options?.token),
-                    });
-                    this.logUsage(repoPath, requestType, response.usage?.raw);
-                    record.submittedMessages = [...messages];
+        let delta = messages.filter(message => message.role !== 'system' && message.role !== 'developer');
+        const totalAttempts = maxRetries + 1;
+        const provider = this.options.model.provider;
+        const model = this.getCurrentModel();
 
-                    if (!schema) {
-                        const result = response.structured ?? response.text;
-                        completeApiRequestLog(logId, provider, model, result, response, requestType, repoPath);
-                        return result;
-                    }
+        for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
+            let logId: string | undefined;
+            try {
+                logId = logger.logApiRequest(repoPath || undefined);
+                const response = await session.run({
+                    messages: delta,
+                    responseFormat: schema ? {
+                        name: requestType ?? 'structuredResponse',
+                        schema: z.toJSONSchema(schema) as Record<string, unknown>,
+                    } : undefined,
+                    temperature,
+                    maxOutputTokens,
+                    signal,
+                });
+                this.logUsage(repoPath, requestType, response.usage?.raw);
 
-                    const structured = response.structured;
-                    if (structured === undefined) {
-                        const retryPayload = {
-                            stage: requestType,
-                            attempt: attempt + 1,
-                            totalAttempts,
-                            missingResponse: true,
-                            finalFailure: attempt === totalAttempts - 1,
-                        };
-                        if (attempt < totalAttempts - 1) {
-                            logger.warn(`[Genie][${this.getProviderName()}] Provider returned no structured output for ${requestType || 'unknown'} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
-                            logSchemaValidationToWebview(repoPath, retryPayload, 'Structured output missing');
-                            completeApiRequestLog(logId, provider, model, undefined, response, requestType, repoPath);
-                            delta = [{
-                                role: 'user',
-                                content: `The previous response contained no final JSON object. Return exactly one complete JSON object matching the requested schema. Do not include markdown or explanation.`,
-                            }];
-                            continue;
-                        }
+                if (!schema) {
+                    const result = response.structured ?? response.text;
+                    completeApiRequestLog(logId, provider, model, result, response, requestType, repoPath);
+                    return result as T;
+                }
+
+                const structured = response.structured;
+                if (structured === undefined) {
+                    const retryPayload = {
+                        stage: requestType,
+                        attempt: attempt + 1,
+                        totalAttempts,
+                        missingResponse: true,
+                        finalFailure: attempt === totalAttempts - 1,
+                    };
+                    if (attempt < totalAttempts - 1) {
+                        logger.warn(`[Genie][${this.getProviderName()}] Provider returned no structured output for ${requestType || 'unknown'} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
                         logSchemaValidationToWebview(repoPath, retryPayload, 'Structured output missing');
                         completeApiRequestLog(logId, provider, model, undefined, response, requestType, repoPath);
-                        throw new Error(`${this.getProviderName()} returned no structured output for ${requestType ?? 'unknown'} after ${totalAttempts} attempts`);
-                    }
-
-                    const parsed = schema.safeParse(structured);
-                    if (parsed.success) {
-                        completeApiRequestLog(logId, provider, model, structured, response, requestType, repoPath);
-                        return parsed.data;
-                    }
-
-                    if (attempt < totalAttempts - 1) {
-                        logger.warn(`[Genie][${this.getProviderName()}] Schema validation failed for ${requestType || 'unknown'} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
-                        logSchemaValidationToWebview(repoPath, {
-                            stage: requestType,
-                            attempt: attempt + 1,
-                            totalAttempts,
-                            error: String(parsed.error),
-                        }, 'Schema validation failed');
-                        completeApiRequestLog(logId, provider, model, structured, response, requestType, repoPath);
                         delta = [{
                             role: 'user',
-                            content: `The previous response failed schema validation: ${parsed.error}. Return one corrected JSON object matching the requested schema.`,
+                            content: `The previous response contained no final JSON object. Return exactly one complete JSON object matching the requested schema. Do not include markdown or explanation.`,
                         }];
                         continue;
                     }
+                    logSchemaValidationToWebview(repoPath, retryPayload, 'Structured output missing');
+                    completeApiRequestLog(logId, provider, model, undefined, response, requestType, repoPath);
+                    throw new Error(`${this.getProviderName()} returned no structured output for ${requestType ?? 'unknown'} after ${totalAttempts} attempts`);
+                }
 
+                const parsed = schema.safeParse(structured);
+                if (parsed.success) {
+                    completeApiRequestLog(logId, provider, model, structured, response, requestType, repoPath);
+                    return parsed.data as T;
+                }
+
+                if (attempt < totalAttempts - 1) {
+                    logger.warn(`[Genie][${this.getProviderName()}] Schema validation failed for ${requestType || 'unknown'} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
                     logSchemaValidationToWebview(repoPath, {
                         stage: requestType,
-                        finalFailure: true,
+                        attempt: attempt + 1,
+                        totalAttempts,
                         error: String(parsed.error),
                     }, 'Schema validation failed');
                     completeApiRequestLog(logId, provider, model, structured, response, requestType, repoPath);
-                    throw new Error(`${this.getProviderName()} structured result failed local validation for ${requestType} after ${totalAttempts} attempts: ${parsed.error}`);
-                } catch (error) {
-                    if (logId) {
-                        failApiRequestLog(logId, provider, model, error, repoPath);
-                    }
-                    throw error;
+                    delta = [{
+                        role: 'user',
+                        content: `The previous response failed schema validation: ${parsed.error}. Return one corrected JSON object matching the requested schema.`,
+                    }];
+                    continue;
                 }
+
+                logSchemaValidationToWebview(repoPath, {
+                    stage: requestType,
+                    finalFailure: true,
+                    error: String(parsed.error),
+                }, 'Schema validation failed');
+                completeApiRequestLog(logId, provider, model, structured, response, requestType, repoPath);
+                throw new Error(`${this.getProviderName()} structured result failed local validation for ${requestType} after ${totalAttempts} attempts: ${parsed.error}`);
+            } catch (error) {
+                if (logId) {
+                    failApiRequestLog(logId, provider, model, error, repoPath);
+                }
+                throw error;
             }
-            throw new Error(`${this.getProviderName()} structured request exited retry loop unexpectedly.`);
-        };
+        }
+        throw new Error(`${this.getProviderName()} structured request exited retry loop unexpectedly.`);
     }
 
     async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {
@@ -217,13 +238,20 @@ export class UnifiedLLMService extends BaseLLMService {
             const repoPath = this.getRepoPathForLogging(options?.targetRepo);
             safeRun('UnifiedLLM.logGenerationStart', () => logger.logGenerationStart(repoPath, useChain ? 'thinking' : 'default'));
             const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
-            const chat = this.createChat(repoPath, options);
+            const execution = this.createExecution(repoPath, options);
             if (!useChain) {
                 const rules = this.readRules();
-                const result = await chat([
+                const messages: AIMessage[] = [
                     { role: 'system', content: rules.baseRule },
                     { role: 'user', content: jsonMessage },
-                ], { requestType: 'commitMessage' }) as z.infer<typeof commitMessageSchema>;
+                ];
+                const session = execution.createSession(messages);
+
+                const result = await execution.run<z.infer<typeof commitMessageSchema>>(
+                    session,
+                    messages,
+                    { requestType: 'commitMessage' },
+                );
                 safeRun('UnifiedLLM.logCommitStageDone', () => logCommitStageToWebview(repoPath, {
                     type: 'done',
                     data: { finalMessage: result.commitMessage },
@@ -243,7 +271,7 @@ export class UnifiedLLMService extends BaseLLMService {
                     repositoryPath: repoPath,
                     targetRepo: options?.targetRepo,
                     repositoryAnalysis: parsedInput?.['repository-analysis'],
-                }, chat, {
+                }, execution, {
                     maxParallel: cfg.get<number>('chain.maxParallel', 2),
                     maxInputTokens: cfg.get<number>('chain.maxInputTokens', 32_000),
                     model,
@@ -256,7 +284,7 @@ export class UnifiedLLMService extends BaseLLMService {
                             repo: options.targetRepo,
                             changeSetSummary: context.changeSetSummary,
                             retrievalFeatures: context.retrievalFeatures,
-                            chat,
+                            execution,
                         });
                     },
                     onStage: (event: StageEvent) => {
@@ -275,7 +303,6 @@ export class UnifiedLLMService extends BaseLLMService {
                 };
             } finally {
                 stageNotifications.end();
-                this.sessions.clear();
             }
         } catch (error: any) {
             return this.convertToLLMError(error);
@@ -292,44 +319,11 @@ export class UnifiedLLMService extends BaseLLMService {
         return this.options.model.model;
     }
 
-    private resolveSession(messages: ChatMessage[], sessionId?: string): SessionRecord {
-        if (!this.provider) {
-            throw new Error(`${this.getProviderName()} API key is not configured.`);
-        }
-        const systemInstruction = messages
+    private systemInstruction(messages: AIMessage[]): string {
+        return messages
             .filter(message => message.role === 'system' || message.role === 'developer')
             .map(message => message.content)
             .join('\n\n');
-        if (sessionId) {
-            const existing = this.sessions.get(sessionId);
-            if (existing && existing.systemInstruction === systemInstruction && this.hasPrefix(messages, existing.submittedMessages)) {
-                return existing;
-            }
-        }
-        const record: SessionRecord = {
-            session: this.provider.createSession({ id: sessionId, model: this.getCurrentModel(), systemInstruction }),
-            submittedMessages: [],
-            systemInstruction,
-        };
-        if (sessionId) {
-            this.sessions.set(sessionId, record);
-        }
-        return record;
-    }
-
-    private messageDelta(record: SessionRecord, messages: ChatMessage[]): ChatMessage[] {
-        if (!this.hasPrefix(messages, record.submittedMessages)) {
-            return messages.filter(message => message.role !== 'system' && message.role !== 'developer');
-        }
-        return messages
-            .slice(record.submittedMessages.length)
-            .filter(message => message.role !== 'system' && message.role !== 'developer');
-    }
-
-    private hasPrefix(messages: ChatMessage[], prefix: ChatMessage[]): boolean {
-        return prefix.length <= messages.length && prefix.every((message, index) => (
-            message.role === messages[index].role && message.content === messages[index].content
-        ));
     }
 
     private toAbortSignal(token?: vscode.CancellationToken): AbortSignal | undefined {

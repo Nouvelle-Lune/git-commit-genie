@@ -2,13 +2,7 @@ import * as vscode from 'vscode';
 import { DiffData } from '../git/gitTypes';
 import { Repository } from '../git/git';
 import { ChangeSetSummary, FileSummary, RagStyleReference, RetrievalFeatures } from '../chain/types';
-
-export type ChatRole = 'system' | 'user' | 'assistant' | 'developer';
-
-export interface ChatMessage {
-    role: ChatRole;
-    content: string;
-}
+import { AIMessage, AISession } from './providers';
 
 export type RequestType =
     | 'commitMessage'
@@ -17,36 +11,36 @@ export type RequestType =
     | 'fix'
     | 'ragPreparation'
     | 'ragRerank'
-    | 'repoAnalysis'
-    | 'repoAnalysisAction'
-    | 'compression'
     // Change-conditioned chain stages
     | 'changeExtraction'
     | 'investigationPlan'
-    | 'investigationAction'
     | 'semanticAnalysis'
     | 'informationSelection'
     // More granular chain stages for clearer logging
     | 'strictFix'
     | 'enforceLanguage';
 
-export type ChatFn = (
-    messages: ChatMessage[],
-    options?: {
-        model?: string
-        temperature?: number
-        requestType: RequestType
-        /** Reuses one provider session across an agent loop. */
-        sessionId?: string
-    }
-) => Promise<any>;
+export interface LLMRunOptions {
+    requestType: RequestType;
+    temperature?: number;
+    maxOutputTokens?: number;
+}
+
+/** Request-scoped access to provider-neutral sessions. */
+export interface LLMExecution {
+    readonly signal?: AbortSignal;
+    readonly temperature: number;
+    readonly maxOutputTokens: number;
+    createSession(messages: AIMessage[], id?: string): AISession;
+    run<T>(session: AISession, messages: AIMessage[], options: LLMRunOptions): Promise<T>;
+}
 
 export interface RagRetrievalAdapter {
     retrieveStyleReferences(params: {
         repo: Repository;
         changeSetSummary: ChangeSetSummary;
         retrievalFeatures: RetrievalFeatures;
-        chat: (messages: ChatMessage[], options?: { requestType: 'ragRerank'; model?: string; temperature?: number; }) => Promise<any>;
+        execution: LLMExecution;
         maxResults?: number;
     }): Promise<RagStyleReference[]>;
 }
@@ -94,8 +88,7 @@ export interface LLMService {
 
     clearApiKey(): Promise<void>;
 
-    generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError>;
+    createExecution(repoPath?: string, options?: GenerateCommitMessageOptions): LLMExecution;
 
-    /** Creates a provider-neutral chat function with optional session support. */
-    createChat?(repoPath?: string, options?: GenerateCommitMessageOptions): ChatFn;
+    generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError>;
 }

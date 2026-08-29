@@ -7,7 +7,7 @@
 // the change-conditioned chain is meant to remove.
 
 import { DiffData, DiffHunk } from '../../git/gitTypes';
-import { ChatFn } from '../../llm/llmTypes';
+import { LLMExecution } from '../../llm/llmTypes';
 import {
     ChangeExtraction,
     ChangeKind,
@@ -379,7 +379,7 @@ function mergeSymbols(
 export async function extractChanges(
     diffs: DiffData[],
     evidencePayload: unknown,
-    chat: ChatFn,
+    execution: LLMExecution,
     precomputed?: DeterministicChangeExtraction
 ): Promise<ChangeExtraction> {
     const deterministic = precomputed ?? extractChangesDeterministically(diffs);
@@ -389,7 +389,8 @@ export async function extractChanges(
         deterministic,
         evidencePayload,
     });
-    const modelExtraction = await chat(messages, { requestType: 'changeExtraction' }) as ChangeExtraction;
+    const session = execution.createSession(messages);
+    const modelExtraction = await execution.run<ChangeExtraction>(session, messages, { requestType: 'changeExtraction' });
 
     return {
         changedFiles: deterministic.changedFiles,

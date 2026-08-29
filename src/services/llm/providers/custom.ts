@@ -40,9 +40,19 @@ class CustomSession implements AISession {
         for (const result of request.toolResults ?? []) {
             this.messages.push({ role: 'tool', content: result.output, tool_call_id: result.callId });
         }
+        const requestMessages: CustomMessage[] = this.messages.map(message => ({ ...message }));
+        if (request.responseFormat) {
+            const formatInstruction = `Return exactly one JSON object matching this JSON Schema: ${JSON.stringify(request.responseFormat.schema)}`;
+            const systemMessage = requestMessages.find(message => message.role === 'system');
+            if (systemMessage) {
+                systemMessage.content = `${systemMessage.content ?? ''}\n\n${formatInstruction}`;
+            } else {
+                requestMessages.unshift({ role: 'system', content: formatInstruction });
+            }
+        }
         const body: Record<string, unknown> = {
             model: this.model,
-            messages: this.messages,
+            messages: requestMessages,
             temperature: request.temperature,
             max_tokens: request.maxOutputTokens,
             response_format: request.responseFormat ? { type: 'json_object' } : undefined,

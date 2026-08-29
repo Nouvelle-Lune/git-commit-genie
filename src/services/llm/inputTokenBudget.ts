@@ -1,5 +1,6 @@
 import { MODEL_MAX_CONTEXT_TOKENS, estimateTokens } from '../analysis/tools/modelContext';
-import { ChatMessage, RequestType } from './llmTypes';
+import { RequestType } from './llmTypes';
+import { AIMessage } from './providers';
 
 export const DEFAULT_CHAIN_MAX_INPUT_TOKENS = 32_000;
 
@@ -22,12 +23,12 @@ export function resolveChainInputTokenBudget(model: string, configuredBudget: nu
     return configuredBudget;
 }
 
-export function estimateChatMessagesTokens(messages: ChatMessage[]): number {
+export function estimateChatMessagesTokens(messages: AIMessage[]): number {
     return Math.ceil(estimateTokens(JSON.stringify(messages)));
 }
 
 export function assertChatMessagesWithinTokenBudget(
-    messages: ChatMessage[],
+    messages: AIMessage[],
     maxInputTokens: number,
     requestType?: RequestType
 ): void {

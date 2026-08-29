@@ -14,6 +14,8 @@ export interface AgentTool extends AIFunctionTool {
 export interface AgentLoopOptions {
     maxSteps: number;
     responseFormat?: AIResponseFormat;
+    temperature?: number;
+    maxOutputTokens?: number;
     signal?: AbortSignal;
 }
 
@@ -46,6 +48,8 @@ export async function runAgentLoop(
             tools,
             responseFormat: options.responseFormat,
             toolChoice: tools.length ? 'auto' : 'none',
+            temperature: options.temperature,
+            maxOutputTokens: options.maxOutputTokens,
             signal: options.signal,
         });
         messages = [];

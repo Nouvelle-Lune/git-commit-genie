@@ -1,13 +1,13 @@
 /**
  * Repository-level analysis contracts.
  */
-import { ChatMessage } from "../../llm/llmTypes";
+import { AIMessage } from "../../llm/providers";
 import type { ChangeAnalysisAgentParams } from '../change/investigation/agent';
 import type { RepositoryEvidence } from '../change/types';
 
 export interface AnalysisPromptParts {
-    system: ChatMessage;
-    user: ChatMessage;
+    system: AIMessage;
+    user: AIMessage;
 }
 
 export type RepoAnalysisRunResult = 'success' | 'skipped';

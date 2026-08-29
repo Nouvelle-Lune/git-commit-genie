@@ -1,5 +1,6 @@
 import { DiffData } from '../../git/gitTypes';
-import { ChatFn, ChatMessage } from '../../llm/llmTypes';
+import { LLMExecution } from '../../llm/llmTypes';
+import { AIMessage } from '../../llm/providers';
 import {
     DraftEvidence,
     EvidenceChange,
@@ -55,17 +56,17 @@ export function createRawDraftEvidence(diffs: DiffData[]): DraftEvidence[] {
 export async function compactEvidenceToFit(params: {
     diffs: DiffData[];
     evidence: DraftEvidence[];
-    chat: ChatFn;
+    execution: LLMExecution;
     maxInputTokens: number;
     maxParallel: number;
     maxRetries?: number;
-    buildTargetMessages: (evidence: DraftEvidence[]) => ChatMessage[];
+    buildTargetMessages: (evidence: DraftEvidence[]) => AIMessage[];
     onSummarizeStart?: () => void;
     onFileSummarized?: (file: FileEvidence, summarizedCount: number) => void;
 }): Promise<EvidenceCompactionResult> {
     const {
         diffs,
-        chat,
+        execution,
         maxInputTokens,
         buildTargetMessages,
         onSummarizeStart,
@@ -131,7 +132,7 @@ export async function compactEvidenceToFit(params: {
             }
             return summarizeFileEvidenceWithScheduler(
                 diff,
-                chat,
+                execution,
                 maxInputTokens,
                 scheduleSummaryTask,
                 maxRetries
@@ -165,7 +166,7 @@ export async function compactEvidenceToFit(params: {
 
 export async function summarizeFileEvidence(
     diff: DiffData,
-    chat: ChatFn,
+    execution: LLMExecution,
     maxInputTokens: number,
     maxParallel: number,
     maxRetries = 2
@@ -174,7 +175,7 @@ export async function summarizeFileEvidence(
     assertNonNegativeRetries(maxRetries);
     return summarizeFileEvidenceWithScheduler(
         diff,
-        chat,
+        execution,
         maxInputTokens,
         createSummaryTaskScheduler(maxParallel),
         maxRetries
@@ -183,7 +184,7 @@ export async function summarizeFileEvidence(
 
 async function summarizeFileEvidenceWithScheduler(
     diff: DiffData,
-    chat: ChatFn,
+    execution: LLMExecution,
     maxInputTokens: number,
     scheduleSummaryTask: SummaryTaskScheduler,
     maxRetries: number
@@ -199,7 +200,7 @@ async function summarizeFileEvidenceWithScheduler(
             const value = await summarizeEvidenceChunkWithRetry(
                 diff,
                 chunk,
-                chat,
+                execution,
                 maxRetries
             );
             return { index, value };
@@ -250,7 +251,7 @@ function assertNonNegativeRetries(maxRetries: number): void {
 async function summarizeEvidenceChunkWithRetry(
     diff: DiffData,
     chunk: EvidenceUnit[],
-    chat: ChatFn,
+    execution: LLMExecution,
     maxRetries: number
 ): Promise<EvidenceSummaryResponse> {
     const acceptedResponses: EvidenceSummaryResponse[] = [];
@@ -261,7 +262,8 @@ async function summarizeEvidenceChunkWithRetry(
         const messages = buildSummaryMessages(diff, pendingUnits, missingHunkIds);
         let parsed: EvidenceSummaryResponse;
         try {
-            parsed = await chat(messages, { requestType: 'summary' }) as EvidenceSummaryResponse;
+            const session = execution.createSession(messages);
+            parsed = await execution.run<EvidenceSummaryResponse>(session, messages, { requestType: 'summary' });
         } catch {
             // Provider-level retries have already been exhausted. Preserve the
             // unresolved ids explicitly so a Summary outage cannot abort the chain.
@@ -366,7 +368,7 @@ function selectCompactionBatch(params: {
     evidence: DraftEvidence[];
     maxParallel: number;
     maxInputTokens: number;
-    buildTargetMessages: (evidence: DraftEvidence[]) => ChatMessage[];
+    buildTargetMessages: (evidence: DraftEvidence[]) => AIMessage[];
 }): RawCandidate[] {
     const optimisticEvidence = [...params.evidence];
     const batch: RawCandidate[] = [];
@@ -557,7 +559,7 @@ function buildSummaryMessages(
     diff: DiffData,
     units: EvidenceUnit[],
     missingHunkIds?: string[]
-): ChatMessage[] {
+): AIMessage[] {
     return buildSummarizeEvidenceMessages({
         fileName: diff.fileName,
         status: diff.status,
@@ -569,7 +571,7 @@ function buildSummaryMessages(
     });
 }
 
-function buildSummaryBudgetProbeMessages(diff: DiffData, units: EvidenceUnit[]): ChatMessage[] {
+function buildSummaryBudgetProbeMessages(diff: DiffData, units: EvidenceUnit[]): AIMessage[] {
     // Reserve enough input budget for the largest possible correction request,
     // where every coverage-required id from this chunk was omitted.
     return buildSummaryMessages(
@@ -579,7 +581,7 @@ function buildSummaryBudgetProbeMessages(diff: DiffData, units: EvidenceUnit[]):
     );
 }
 
-function messagesFitBudget(messages: ChatMessage[], maxInputTokens: number): boolean {
+function messagesFitBudget(messages: AIMessage[], maxInputTokens: number): boolean {
     return estimateChatMessagesTokens(messages) <= maxInputTokens;
 }
 

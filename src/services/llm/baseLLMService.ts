@@ -10,7 +10,8 @@ import {
     LLMService,
     LLMResponse,
     LLMError,
-    GenerateCommitMessageOptions
+    GenerateCommitMessageOptions,
+    LLMExecution,
 } from './llmTypes';
 
 /**
@@ -35,6 +36,7 @@ export abstract class BaseLLMService implements LLMService {
     abstract listSupportedModels(): string[];
     abstract setApiKey(apiKey: string): Promise<void>;
     abstract clearApiKey(): Promise<void>;
+    abstract createExecution(repoPath?: string, options?: GenerateCommitMessageOptions): LLMExecution;
     abstract generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError>;
 
     /**

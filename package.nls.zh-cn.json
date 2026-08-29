@@ -30,6 +30,7 @@
   "config.chain.investigation.maxSteps.desc": "调查 Agent 为单次提交最多执行的仓库查找次数。数值越小延迟与 Token 消耗越低，数值越大越能深入追踪调用关系与依赖。",
   "config.chain.investigation.excludePatterns.desc": "仓库调查额外排除的文件与目录模式。构建产物、依赖目录与 lock 文件已默认排除。",
   "config.llm.maxRetries.desc": "API请求失败最大重试次数",
+  "config.llm.maxOutputTokens.desc": "每次请求发送给所选模型的最大输出令牌数",
   "config.llm.temperature.desc": "Temperature（0-2），默认为 1。部分服务商/模型组合只接受 1；修改该值可能导致 400 错误（invalid temperature）或输出稳定性下降。",
   "config.repositoryAnalysis.enabled.desc": "启用仓库分析以提供更好的提交信息生成上下文。",
   "config.rag.enabled.desc": "启用 RAG 来保持 commit message 生成的风格一致性（需要仓库中存在一定数量的历史 commit message 来构建本地风格索引）。启用前请通过 [Git Commit Genie: 配置 RAG Embedding API Key](command:git-commit-genie.configureRagEmbeddingApiKey) 命令配置 Embedding API Key。",

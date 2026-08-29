@@ -1,11 +1,11 @@
 import { NormalizedLang } from "../types";
-import { ChatFn } from '../../llm/llmTypes';
+import { LLMExecution } from '../../llm/llmTypes';
 import { buildEnforceLanguageMessages } from './prompts';
 
 export async function enforceCommitLanguage(
     commitMessage: string,
     targetLanguage: string | undefined,
-    chat: ChatFn,
+    execution: LLMExecution,
     userTemplate?: string
 ): Promise<string> {
     const language = (targetLanguage || '').trim();
@@ -35,7 +35,8 @@ export async function enforceCommitLanguage(
     }
 
     const messages = buildEnforceLanguageMessages(commitMessage, language, userTemplate);
-    const parsed = await chat(messages, { requestType: 'enforceLanguage' });
+    const session = execution.createSession(messages);
+    const parsed = await execution.run<any>(session, messages, { requestType: 'enforceLanguage' });
     return parsed.commitMessage.trim();
 }
 

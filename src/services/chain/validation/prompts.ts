@@ -1,7 +1,7 @@
-import { ChatMessage } from '../../llm/llmTypes';
+import { AIMessage } from '../../llm/providers';
 
-export function buildValidateAndFixMessages(commitMessage: string, checklistText?: string, userTemplate?: string): ChatMessage[] {
-    const system: ChatMessage = {
+export function buildValidateAndFixMessages(commitMessage: string, checklistText?: string, userTemplate?: string): AIMessage[] {
+    const system: AIMessage = {
         role: 'system',
         content: [
             '<role>',
@@ -55,7 +55,7 @@ export function buildValidateAndFixMessages(commitMessage: string, checklistText
         ].join('\n');
     }
 
-    const user: ChatMessage = {
+    const user: AIMessage = {
         role: 'user',
         content: [
             '<instructions>',
@@ -89,8 +89,8 @@ export function buildValidateAndFixMessages(commitMessage: string, checklistText
     return [system, user];
 }
 
-export function buildEnforceStrictFixMessages(current: string, problems: string[], userTemplate?: string): ChatMessage[] {
-    const system: ChatMessage = {
+export function buildEnforceStrictFixMessages(current: string, problems: string[], userTemplate?: string): AIMessage[] {
+    const system: AIMessage = {
         role: 'system',
         content: [
             '<critical>',
@@ -116,7 +116,7 @@ export function buildEnforceStrictFixMessages(current: string, problems: string[
         ].join('\n');
     }
 
-    const user: ChatMessage = {
+    const user: AIMessage = {
         role: 'user',
         content: [
             '<instructions>',
@@ -143,8 +143,8 @@ export function buildEnforceStrictFixMessages(current: string, problems: string[
     return [system, user];
 }
 
-export function buildEnforceLanguageMessages(commitMessage: string, lang: string, userTemplate?: string): ChatMessage[] {
-    const system: ChatMessage = {
+export function buildEnforceLanguageMessages(commitMessage: string, lang: string, userTemplate?: string): AIMessage[] {
+    const system: AIMessage = {
         role: 'system',
         content: [
             '<role>',
@@ -173,7 +173,7 @@ export function buildEnforceLanguageMessages(commitMessage: string, lang: string
         ].join('\n');
     }
 
-    const user: ChatMessage = {
+    const user: AIMessage = {
         role: 'user',
         content: [
             '<instructions>',

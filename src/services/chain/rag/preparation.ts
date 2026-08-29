@@ -1,5 +1,5 @@
 import * as vscode from "vscode";
-import { ChatFn } from "../../llm/llmTypes";
+import { LLMExecution } from "../../llm/llmTypes";
 import { ChangeSetSummary, RetrievalFeatures } from "../types";
 import { DraftEvidence } from "../../analysis/change/types";
 import { DiffData } from "../../git/gitTypes";
@@ -47,10 +47,11 @@ export function isRagPreparationEnabled(): boolean {
 export async function prepareRagContext(
     diffs: DiffData[],
     evidence: DraftEvidence[],
-    chat: ChatFn
+    execution: LLMExecution
 ): Promise<RagPreparationContext> {
     const messages = buildRagPreparationMessages(evidence);
-    const parsed = await chat(messages, { requestType: "ragPreparation" }) as RagPreparationResponse;
+    const session = execution.createSession(messages);
+    const parsed = await execution.run<RagPreparationResponse>(session, messages, { requestType: "ragPreparation" });
     const deterministic = deriveDeterministicRetrievalFeatures(diffs);
 
     return {

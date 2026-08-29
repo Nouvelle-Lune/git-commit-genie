@@ -8,6 +8,7 @@ import { buildRagRerankMessages } from '../chain/rag/prompts';
 import { ChangeSetSummary, RagStyleReference, RetrievalFeatures } from '../chain/types';
 import { logger } from '../logger';
 import { RAG_DOCUMENTS_FILE, RAG_STATE_FILE, RagEmbeddingConfig, normalizeVector, readEmbeddingConfig } from './ragShared';
+import { LLMExecution } from '../llm/llmTypes';
 
 // Recency boost half-life. 90 days matches typical commit-style relevance decay.
 const RECENCY_HALF_LIFE_DAYS = 90;
@@ -76,10 +77,10 @@ export class RagRetrievalService {
         repo: Repository;
         changeSetSummary: ChangeSetSummary;
         retrievalFeatures: RetrievalFeatures;
-        chat: (messages: any[], options?: { requestType: 'ragRerank'; model?: string; temperature?: number; }) => Promise<any>;
+        execution: LLMExecution;
         maxResults?: number;
     }): Promise<RagStyleReference[]> {
-        const { repo, changeSetSummary, retrievalFeatures, chat } = params;
+        const { repo, changeSetSummary, retrievalFeatures, execution } = params;
         const maxResults = Math.max(1, params.maxResults ?? DEFAULT_RERANK_TOP_K);
         const loaded = await this.loadIndexedRows(repo);
 
@@ -112,7 +113,7 @@ export class RagRetrievalService {
         }
 
         try {
-            const reranked = await this.rerankCandidates(chat, changeSetSummary, retrievalFeatures, merged, maxResults);
+            const reranked = await this.rerankCandidates(execution, changeSetSummary, retrievalFeatures, merged, maxResults);
             if (reranked.length) {
                 logger.info(`[Genie][RAG] Reranked ${merged.length} candidates down to ${reranked.length} style references for ${repo.rootUri.fsPath}.`);
                 return reranked;
@@ -216,7 +217,7 @@ export class RagRetrievalService {
     }
 
     private async rerankCandidates(
-        chat: (messages: any[], options?: { requestType: 'ragRerank'; model?: string; temperature?: number; }) => Promise<any>,
+        execution: LLMExecution,
         changeSetSummary: ChangeSetSummary,
         retrievalFeatures: RetrievalFeatures,
         candidates: RecallCandidate[],
@@ -240,7 +241,8 @@ export class RagRetrievalService {
         });
 
         const messages = buildRagRerankMessages(changeSetSummary, retrievalFeatures, promptCandidates, maxResults);
-        const parsed = await chat(messages, { requestType: 'ragRerank' }) as RagRerankResponse;
+        const session = execution.createSession(messages);
+        const parsed = await execution.run<RagRerankResponse>(session, messages, { requestType: 'ragRerank' });
         const selected = Array.isArray(parsed?.selected) ? parsed.selected : [];
         const candidateMap = new Map(candidates.map(candidate => [candidate.commitHash, candidate]));
         const out: RagStyleReference[] = [];

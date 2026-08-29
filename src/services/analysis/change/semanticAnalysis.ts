@@ -4,7 +4,7 @@
 // evidence contract in code. Prompt instructions alone do not guarantee
 // traceability, so unsupported conclusions are demoted here rather than trusted.
 
-import { ChatFn } from '../../llm/llmTypes';
+import { LLMExecution } from '../../llm/llmTypes';
 import { buildSemanticAnalysisMessages } from './prompts';
 import {
     ChangeExtraction,
@@ -189,7 +189,7 @@ export async function analyzeSemantics(params: {
     repositoryEvidence: RepositoryEvidence;
     evidencePayload: unknown;
     repositoryTerminology?: RepositoryAnalysisContext;
-    chat: ChatFn;
+    execution: LLMExecution;
 }): Promise<SemanticChangeAnalysis> {
     const messages = buildSemanticAnalysisMessages({
         changeExtraction: params.changeExtraction,
@@ -197,6 +197,7 @@ export async function analyzeSemantics(params: {
         evidencePayload: params.evidencePayload,
         repositoryTerminology: params.repositoryTerminology,
     });
-    const raw = await params.chat(messages, { requestType: 'semanticAnalysis' }) as SemanticChangeAnalysis;
+    const session = params.execution.createSession(messages);
+    const raw = await params.execution.run<SemanticChangeAnalysis>(session, messages, { requestType: 'semanticAnalysis' });
     return normalizeSemanticAnalysis(raw, params.repositoryEvidence);
 }

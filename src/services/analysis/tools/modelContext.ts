@@ -1,9 +1,8 @@
 /**
- * Centralized model context limits and helpers
+ * Centralized model context limits and token estimation.
  *
- * Provides a single place to maintain model max context sizes and a helper
- * to query limits by function name. This allows analysis and compression
- * logic to make budget decisions consistently.
+ * Provides a single place to maintain model max context sizes and the shared
+ * CJK-aware token estimator used by prompt budgeting.
  */
 
 /**
@@ -124,48 +123,6 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'moonshotai/kimi-k2.7-code': 256_000,
   'moonshotai/kimi-k2.6': 256_000,
 };
-
-/**
- * Default token budgets by function when model is unknown.
- * These are conservative budgets for building prompts.
- */
-export const FUNCTION_DEFAULT_BUDGET: Record<string, number> = {
-  // Repo-level analysis usually benefits from larger context windows
-  repoAnalysis: 120_000,
-  // Commit message generation typically uses a smaller budget
-  commitMessage: 32_000,
-};
-
-/**
- * Get max context tokens for a given function. If a model name is provided
- * and known, returns that model's max context. Otherwise falls back to the
- * function default budget, or a safe global default.
- *
- * @param functionName Logical function name, e.g. 'repoAnalysis', 'commitMessage'
- * @param modelName Optional model name to resolve specific context limits
- */
-export function getMaxContextByFunction(functionName: string, modelName?: string): number {
-  if (modelName) {
-    const byModel = MODEL_MAX_CONTEXT_TOKENS[modelName];
-    if (typeof byModel === 'number' && byModel > 0) {
-      return byModel;
-    }
-  }
-
-  const fallback = FUNCTION_DEFAULT_BUDGET[functionName];
-  if (typeof fallback === 'number' && fallback > 0) {
-    return fallback;
-  }
-
-  // Safe global default
-  return 64_000;
-}
-
-/** Rough character budget estimate for a given token limit. */
-export function estimateCharBudget(tokens: number, fraction = 0.6): number {
-  // Rough heuristic: ~4 chars per token; keep headroom via fraction
-  return Math.floor((tokens * 4) * Math.max(0.1, Math.min(1, fraction)));
-}
 
 /**
  * Estimate token count using a CJK-aware heuristic.

@@ -5,12 +5,11 @@
 //   2. Evidence before inference — a claim without a citation is not a claim.
 //   3. Explicit uncertainty — unprovable information stays null, never inferred.
 
-import { ChatMessage } from '../../llm/llmTypes';
+import { AIMessage } from '../../llm/providers';
 import { z } from 'zod';
 import {
     changeExtractionResponseSchema,
     informationSelectionResponseSchema,
-    investigationActionSchema,
     investigationPlanResponseSchema,
     semanticAnalysisResponseSchema,
 } from '../../llm/providers/schemas/common';
@@ -90,8 +89,8 @@ function structuredSchemaBlock(schema: z.ZodTypeAny): string {
 export function buildChangeExtractionMessages(input: {
     deterministic: DeterministicChangeExtraction;
     evidencePayload: unknown;
-}): ChatMessage[] {
-    const system: ChatMessage = {
+}): AIMessage[] {
+    const system: AIMessage = {
         role: 'system',
         content: [
             '<role>',
@@ -111,7 +110,7 @@ export function buildChangeExtractionMessages(input: {
         ].join('\n'),
     };
 
-    const user: ChatMessage = {
+    const user: AIMessage = {
         role: 'user',
         content: [
             '<instructions>',
@@ -166,8 +165,8 @@ export function buildChangeExtractionMessages(input: {
 export function buildInvestigationPlanMessages(input: {
     changeExtraction: ChangeExtraction;
     repositoryTerminology?: RepositoryAnalysisContext;
-}): ChatMessage[] {
-    const system: ChatMessage = {
+}): AIMessage[] {
+    const system: AIMessage = {
         role: 'system',
         content: [
             '<role>',
@@ -182,7 +181,7 @@ export function buildInvestigationPlanMessages(input: {
         ].join('\n'),
     };
 
-    const user: ChatMessage = {
+    const user: AIMessage = {
         role: 'user',
         content: [
             '<instructions>',
@@ -255,7 +254,7 @@ export function buildInvestigationPlanMessages(input: {
 // Repository Investigation
 // ---------------------------------------------------------------------------
 
-export function buildInvestigationSystemMessage(): ChatMessage {
+export function buildInvestigationSystemMessage(): AIMessage {
     return {
         role: 'system',
         content: [
@@ -264,11 +263,9 @@ export function buildInvestigationSystemMessage(): ChatMessage {
             '</role>',
             '',
             '<critical>',
-            'Return STRICT JSON only, one action per turn.',
-            'Set action="tool" with a tool and its arguments to retrieve evidence.',
-            'Set action="final" with findings when the primary behavioral change can be',
-            'explained. Leave tool arguments null when action="final", and leave "final"',
-            'null when action="tool".',
+            'Call the provided functions directly whenever repository evidence is needed.',
+            'When the primary behavioral change is explainable, stop calling tools and',
+            'return the requested final JSON object.',
             '</critical>',
             '',
             '<search_order>',
@@ -301,8 +298,6 @@ export function buildInvestigationSystemMessage(): ChatMessage {
             'Put questions the repository could not answer in unresolvedQuestions instead of',
             'answering them from assumption.',
             '</finalize>',
-            '',
-            structuredSchemaBlock(investigationActionSchema),
         ].join('\n'),
     };
 }
@@ -311,7 +306,7 @@ export function buildInvestigationOpeningMessage(input: {
     changeExtraction: ChangeExtraction;
     plan: InvestigationPlan;
     stepBudget: number;
-}): ChatMessage {
+}): AIMessage {
     return {
         role: 'user',
         content: [
@@ -333,7 +328,7 @@ export function buildInvestigationToolResultMessage(input: {
     evidence: RepositoryEvidenceItem[];
     remainingSteps: number;
     openQuestions: string[];
-}): ChatMessage {
+}): AIMessage {
     const lines: string[] = [
         '<tool_result>',
         `tool: ${input.tool}`,
@@ -375,8 +370,8 @@ export function buildSemanticAnalysisMessages(input: {
     repositoryEvidence: RepositoryEvidence;
     evidencePayload: unknown;
     repositoryTerminology?: RepositoryAnalysisContext;
-}): ChatMessage[] {
-    const system: ChatMessage = {
+}): AIMessage[] {
+    const system: AIMessage = {
         role: 'system',
         content: [
             '<role>',
@@ -395,7 +390,7 @@ export function buildSemanticAnalysisMessages(input: {
         ].join('\n'),
     };
 
-    const user: ChatMessage = {
+    const user: AIMessage = {
         role: 'user',
         content: [
             '<instructions>',
@@ -500,8 +495,8 @@ export function buildInformationSelectionMessages(input: {
     changeExtraction: ChangeExtraction;
     semanticAnalysis: SemanticChangeAnalysis;
     userTemplate?: string;
-}): ChatMessage[] {
-    const system: ChatMessage = {
+}): AIMessage[] {
+    const system: AIMessage = {
         role: 'system',
         content: [
             '<role>',
@@ -516,7 +511,7 @@ export function buildInformationSelectionMessages(input: {
         ].join('\n'),
     };
 
-    const user: ChatMessage = {
+    const user: AIMessage = {
         role: 'user',
         content: [
             '<instructions>',

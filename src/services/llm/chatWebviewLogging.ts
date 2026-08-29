@@ -39,7 +39,7 @@ export function completeApiRequestLog(
     requestType: RequestType | undefined,
     repoPath: string,
 ): void {
-    const { result, isFinal } = formatWebviewApiResult(data, requestType);
+    const { result, isFinal } = formatWebviewApiResult(data);
     logger.logApiRequestWithResult(
         logId,
         provider,

@@ -1,5 +1,6 @@
 import { DiffData } from '../../git/gitTypes';
-import { ChatFn, ChatMessage } from '../../llm/llmTypes';
+import { LLMExecution } from '../../llm/llmTypes';
+import { AIMessage } from '../../llm/providers';
 import { IRepositoryAnalysisService } from '../repository/repositoryAnalysisTypes';
 import { safeRun } from '../../../utils/safeRun';
 import { StageEvent } from '../../../ui/StageNotificationManager';
@@ -30,11 +31,11 @@ export type EvidenceRouteTarget = 'changeExtraction' | 'semanticAnalysis' | 'rag
 export interface ChangeAnalysisPipelineParams {
     diffs: DiffData[];
     inputs: ChangeAnalysisInputs;
-    chat: ChatFn;
+    execution: LLMExecution;
     getEvidence: () => DraftEvidence[];
     compactFor: (
         target: EvidenceRouteTarget,
-        buildTargetMessages: (current: DraftEvidence[]) => ChatMessage[]
+        buildTargetMessages: (current: DraftEvidence[]) => AIMessage[]
     ) => Promise<void>;
     investigationOverrides?: Partial<InvestigationSettings>;
     repositoryAnalysisService?: Pick<IRepositoryAnalysisService, 'runChangeAnalysis'>;
@@ -52,7 +53,7 @@ export interface ChangeAnalysisPipelineParams {
 export async function runChangeAnalysisPipeline(
     params: ChangeAnalysisPipelineParams
 ): Promise<ChangeAnalysisTrace> {
-    const { diffs, inputs, chat, getEvidence, compactFor, maxInputTokens, onStage } = params;
+    const { diffs, inputs, execution, getEvidence, compactFor, maxInputTokens, onStage } = params;
 
     const deterministic: DeterministicChangeExtraction = extractChangesDeterministically(diffs);
     safeRun('Chain.onStage.changeExtractionStart', () => onStage?.({ type: 'changeExtractionStart' }));
@@ -60,7 +61,7 @@ export async function runChangeAnalysisPipeline(
         deterministic,
         evidencePayload: current,
     }));
-    const changeExtraction = await extractChanges(diffs, getEvidence(), chat, deterministic);
+    const changeExtraction = await extractChanges(diffs, getEvidence(), execution, deterministic);
     safeRun('Chain.onStage.changeExtracted', () => onStage?.({
         type: 'changeExtracted',
         data: {
@@ -87,7 +88,7 @@ export async function runChangeAnalysisPipeline(
         repositoryEvidence = emptyRepositoryEvidence('The diff alone determines the meaning of this change.');
     } else {
         safeRun('Chain.onStage.investigationPlanStart', () => onStage?.({ type: 'investigationPlanStart' }));
-        const plan = await planInvestigation(changeExtraction, chat, inputs.repositoryAnalysis);
+        const plan = await planInvestigation(changeExtraction, execution, inputs.repositoryAnalysis);
         investigationPlan = plan;
         safeRun('Chain.onStage.investigationPlanned', () => onStage?.({
             type: 'investigationPlanned',
@@ -113,7 +114,7 @@ export async function runChangeAnalysisPipeline(
                 plan,
                 repositoryPath: inputs.repositoryPath,
                 excludePatterns: settings.excludePatterns,
-                chat,
+                execution,
                 maxSteps: settings.maxSteps,
                 maxInputTokens,
                 onStep: event => safeRun('Chain.onStage.investigationStep', () => onStage?.({
@@ -162,7 +163,7 @@ export async function runChangeAnalysisPipeline(
         repositoryEvidence,
         evidencePayload: getEvidence(),
         repositoryTerminology: inputs.repositoryAnalysis,
-        chat,
+        execution,
     });
     safeRun('Chain.onStage.semanticAnalysisComplete', () => onStage?.({
         type: 'semanticAnalysisComplete',
@@ -181,7 +182,7 @@ export async function runChangeAnalysisPipeline(
         changeExtraction,
         semanticAnalysis,
         userTemplate: inputs.userTemplate,
-        chat,
+        execution,
     });
     const selectedInformation = buildSelectedInformation({
         semanticAnalysis,

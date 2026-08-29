@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ChatMessage } from '../../llm/llmTypes';
+import { AIMessage } from '../../llm/providers';
 import { classifyAndDraftResponseSchema } from '../../llm/providers/schemas/common';
 import { SelectedSemanticInformation } from '../../analysis/change/types';
 import { ChainInputs, RagStyleReference } from '../types';
@@ -27,11 +27,11 @@ export function buildChangeConditionedDraftMessages(input: {
     evidencePayload: unknown;
     inputs: ChainInputs;
     ragStyleReferences?: RagStyleReference[];
-}): ChatMessage[] {
+}): AIMessage[] {
     const { userTemplate, currentTime, targetLanguage } = input.inputs;
     const ragStyleReferences = input.ragStyleReferences ?? [];
 
-    const system: ChatMessage = {
+    const system: AIMessage = {
         role: 'system',
         content: [
             '<role>',

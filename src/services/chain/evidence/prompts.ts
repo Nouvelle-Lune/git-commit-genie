@@ -1,13 +1,13 @@
 import { DiffData } from '../../git/gitTypes';
-import { ChatMessage } from '../../llm/llmTypes';
+import { AIMessage } from '../../llm/providers';
 
 export function buildSummarizeEvidenceMessages(input: {
     fileName: string;
     status: DiffData['status'];
     hunks: Array<{ id: string; diff: string }>;
     missingHunkIds?: string[];
-}): ChatMessage[] {
-    const system: ChatMessage = {
+}): AIMessage[] {
+    const system: AIMessage = {
         role: 'system',
         content: [
             '<role>',
@@ -23,7 +23,7 @@ export function buildSummarizeEvidenceMessages(input: {
         ].join('\n')
     };
 
-    const user: ChatMessage = {
+    const user: AIMessage = {
         role: 'user',
         content: [
             '<instructions>',

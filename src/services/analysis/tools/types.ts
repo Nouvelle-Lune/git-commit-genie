@@ -148,31 +148,3 @@ export interface ReadFileResult {
     /** Whether there is more content after the returned portion */
     hasMore: boolean;
 }
-
-/**
- * Options for compressing context
- */
-export interface CompressContextOptions {
-    /** Target token count (optional, for guidance) */
-    targetTokens?: number;
-    /** Whether to preserve structural information */
-    preserveStructure?: boolean;
-    /** Programming language of the content (helps with better compression) */
-    language?: string;
-}
-
-/**
- * Result of context compression operation
- */
-export interface CompressContextResult {
-    /** Compressed content */
-    compressed: string;
-    /** Original content size in characters */
-    originalSize: number;
-    /** Compressed content size in characters */
-    compressedSize: number;
-    /** Compression ratio (0-1, where 0.5 means 50% reduction) */
-    compressionRatio: number;
-    /** Summary of what was compressed */
-    summary?: string;
-}

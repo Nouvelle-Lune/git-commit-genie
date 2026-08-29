@@ -1,4 +1,5 @@
-import { ChatFn, ChatMessage } from "../llm/llmTypes";
+import { LLMExecution } from "../llm/llmTypes";
+import { AIMessage } from "../llm/providers";
 import { IRepositoryAnalysisService } from "../analysis/repository/repositoryAnalysisTypes";
 import { ChainInputs, ChangeSetSummary, ChainOutputs, RagStyleReference, RetrievalFeatures } from "./types";
 import { DraftEvidence } from "../analysis/change/types";
@@ -24,7 +25,7 @@ import { buildFileSummaries, summarizeFileEvidenceForDisplay } from "./evidence/
 
 export async function generateCommitMessageChain(
 	inputs: ChainInputs,
-	chat: ChatFn,
+	execution: LLMExecution,
 	options?: {
 		maxParallel?: number;
 		maxRetries?: number;
@@ -64,13 +65,13 @@ export async function generateCommitMessageChain(
 
 	const compactFor = async (
 		target: EvidenceRouteTarget,
-		buildTargetMessages: (current: DraftEvidence[]) => ChatMessage[]
+		buildTargetMessages: (current: DraftEvidence[]) => AIMessage[]
 	) => {
 		try {
 			const result = await compactEvidenceToFit({
 				diffs,
 				evidence,
-				chat,
+				execution,
 				maxInputTokens,
 				maxParallel,
 				maxRetries,
@@ -126,7 +127,7 @@ export async function generateCommitMessageChain(
 	const trace = await runChangeAnalysisPipeline({
 		diffs,
 		inputs,
-		chat,
+		execution,
 		getEvidence: () => evidence,
 		compactFor,
 		investigationOverrides: options?.investigation,
@@ -152,7 +153,7 @@ export async function generateCommitMessageChain(
 		if (ragEvidenceReady) {
 			try {
 				safeRun('Chain.onStage.ragPreparationStart', () => options?.onStage?.({ type: 'ragPreparationStart' }));
-				const ragContext = await prepareRagContext(diffs, evidence, chat);
+				const ragContext = await prepareRagContext(diffs, evidence, execution);
 				changeSetSummary = ragContext.changeSetSummary;
 				retrievalFeatures = ragContext.retrievalFeatures;
 				safeRun('Chain.onStage.ragPrepared', () => options?.onStage?.({
@@ -206,7 +207,7 @@ export async function generateCommitMessageChain(
 		}
 	}
 
-	const buildDraftMessages = (current: DraftEvidence[]): ChatMessage[] =>
+	const buildDraftMessages = (current: DraftEvidence[]): AIMessage[] =>
 		buildChangeConditionedDraftMessages({
 			selected: trace.selectedInformation,
 			evidencePayload: current,
@@ -216,12 +217,12 @@ export async function generateCommitMessageChain(
 
 	await compactFor('draft', buildDraftMessages);
 	safeRun('Chain.onStage.draftStart', () => options?.onStage?.({ type: 'draftStart' }));
-	const { draft, notes: classificationNotes } = await generateDraft(buildDraftMessages(evidence), chat);
+	const { draft, notes: classificationNotes } = await generateDraft(buildDraftMessages(evidence), execution);
 
 	safeRun('Chain.onStage.classifyDraft', () => options?.onStage?.({ type: 'classifyDraft', data: { draft } }));
 
 	safeRun('Chain.onStage.validationStart', () => options?.onStage?.({ type: 'validationStart' }));
-	const { validMessage, notes: validationNotes } = await validateAndFixCommit(draft, inputs.validationChecklist ?? '', chat, inputs.userTemplate);
+	const { validMessage, notes: validationNotes } = await validateAndFixCommit(draft, inputs.validationChecklist ?? '', execution, inputs.userTemplate);
 	safeRun('Chain.onStage.validateFix', () => options?.onStage?.({ type: 'validateFix', data: { validMessage } }));
 
 	// Local strict check; if still not conforming, ask LLM for a minimal strict fix
@@ -232,7 +233,7 @@ export async function generateCommitMessageChain(
 			type: 'strictFixStart',
 			data: { problems: check.problems }
 		}));
-		finalMessage = await enforceStrictCommitFormat(finalMessage, check.problems, chat, inputs.userTemplate);
+		finalMessage = await enforceStrictCommitFormat(finalMessage, check.problems, execution, inputs.userTemplate);
 		safeRun('Chain.onStage.strictFix', () => options?.onStage?.({ type: 'strictFix', data: { message: finalMessage } }));
 	}
 
@@ -242,7 +243,7 @@ export async function generateCommitMessageChain(
 			type: 'enforceLanguageStart',
 			data: { targetLanguage: inputs.targetLanguage }
 		}));
-		finalMessage = await enforceCommitLanguage(finalMessage, inputs.targetLanguage, chat, inputs.userTemplate);
+		finalMessage = await enforceCommitLanguage(finalMessage, inputs.targetLanguage, execution, inputs.userTemplate);
 		safeRun('Chain.onStage.enforceLanguage', () => options?.onStage?.({ type: 'enforceLanguage', data: { message: finalMessage } }));
 	}
 

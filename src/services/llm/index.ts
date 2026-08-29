@@ -6,10 +6,9 @@
 
 // Type definitions and interfaces
 export {
-    ChatRole,
-    ChatMessage,
     RequestType,
-    ChatFn,
+    LLMExecution,
+    LLMRunOptions,
     LLMResponse,
     LLMError,
     GenerateCommitMessageOptions,

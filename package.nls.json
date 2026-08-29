@@ -30,6 +30,7 @@
   "config.chain.investigation.maxSteps.desc": "Maximum repository lookups the investigation agent may perform for one commit. Lower values reduce latency and token consumption; higher values allow deeper tracing of callers and dependencies.",
   "config.chain.investigation.excludePatterns.desc": "Additional file and directory patterns to exclude from repository investigation. Build outputs, dependency directories, and lockfiles are already excluded.",
   "config.llm.maxRetries.desc": "Max retry attempts for API request failures.",
+  "config.llm.maxOutputTokens.desc": "Maximum output tokens sent to the selected model for each request.",
   "config.llm.temperature.desc": "Temperature (0–2). Default 1. Some provider/model combinations only accept 1; changing this value may cause 400 errors (invalid temperature) or less stable outputs.",
   "config.repositoryAnalysis.enabled.desc": "Enable repository analysis to provide better context for commit message generation.",
   "config.rag.enabled.desc": "Enable RAG to keep commit message generation style consistent (requires a sufficient number of historical commit messages in the repository to build a local style index). Before enabling, configure the embedding API key via the [Git Commit Genie: Configure RAG Embedding API Key](command:git-commit-genie.configureRagEmbeddingApiKey) command.",

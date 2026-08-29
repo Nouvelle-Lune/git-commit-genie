@@ -1,11 +1,11 @@
-import { ChatMessage } from '../../llm/llmTypes';
+import { AIMessage } from '../../llm/providers';
 import { ChangeSetSummary, RetrievalFeatures } from '../types';
 import { DraftEvidence } from '../../analysis/change/types';
 
 export function buildRagPreparationMessages(
     evidence: DraftEvidence[]
-): ChatMessage[] {
-    const system: ChatMessage = {
+): AIMessage[] {
+    const system: AIMessage = {
         role: 'system',
         content: [
             '<role>',
@@ -23,7 +23,7 @@ export function buildRagPreparationMessages(
 
     const payload = evidence;
 
-    const user: ChatMessage = {
+    const user: AIMessage = {
         role: 'user',
         content: [
             '<instructions>',
@@ -100,8 +100,8 @@ export function buildRagRerankMessages(
         featureScore: number;
     }>,
     maxResults: number
-): ChatMessage[] {
-    const system: ChatMessage = {
+): AIMessage[] {
+    const system: AIMessage = {
         role: 'system',
         content: [
             '<role>',
@@ -116,7 +116,7 @@ export function buildRagRerankMessages(
         ].join('\n')
     };
 
-    const user: ChatMessage = {
+    const user: AIMessage = {
         role: 'user',
         content: [
             '<instructions>',

@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as util from 'util';
 import { exec } from 'child_process';
+import { z } from 'zod';
 
 import {
     IRepositoryAnalysisService,
@@ -14,7 +15,7 @@ import {
     RepoAnalysisRunResult
 } from './repositoryAnalysisTypes';
 
-import { LLMService, LLMError, ChatMessage } from '../../llm/llmTypes';
+import { LLMError, LLMService } from '../../llm/llmTypes';
 import { RepoService } from '../../repo/repo';
 import { logger } from '../../logger';
 import { L10N_KEYS as I18N } from '../../../i18n/keys';
@@ -23,21 +24,50 @@ import {
     REPOSITORY_ANALYSIS_MODEL_ID_KEY,
     AIModelConfig,
     PROVIDER_LABELS,
+    AIMessage,
 } from '../../llm/providers';
+import { repoAnalysisResponseSchema } from '../../llm/providers/schemas/common';
+import { AgentTool, runAgentLoop } from '../../../agent';
 
 // Tools
 import { listDirectory } from '../tools/directory';
 import { searchFiles } from '../tools/search';
 import { readFileContent } from '../tools/file';
-import { compressContext } from '../tools/compression';
 import { compactToolResultForConversation } from '../tools/formatting';
 import { DirectoryEntry, SearchFilesResult, ToolResult } from '../tools/types';
-import { getMaxContextByFunction } from '../tools/modelContext';
 import { buildGitGenieIgnoreAppend } from '../../../utils/gitignore';
 import { ChangeAnalysisAgentParams, runChangeAnalysisAgent } from '../change/investigation/agent';
 import { RepositoryEvidence } from '../change/types';
 
 const REPOSITORY_ANALYSIS_MARKDOWN_TITLE = '# Repository Analysis Summary';
+
+const REPOSITORY_TOOL_PARAMETERS: Record<string, unknown> = {
+    type: 'object',
+    properties: {
+        reason: { type: 'string' },
+        dirPath: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        depth: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+        excludePatterns: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
+        query: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        searchType: { anyOf: [{ enum: ['name', 'content'] }, { type: 'null' }] },
+        useRegex: { anyOf: [{ type: 'boolean' }, { type: 'null' }] },
+        searchPath: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        maxResults: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+        caseSensitive: { anyOf: [{ type: 'boolean' }, { type: 'null' }] },
+        maxMatchesPerFile: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+        contextLines: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
+        filePath: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+        startLine: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+        maxLines: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
+        encoding: { anyOf: [{ type: 'string' }, { type: 'null' }] },
+    },
+    required: [
+        'reason', 'dirPath', 'depth', 'excludePatterns', 'query', 'searchType', 'useRegex',
+        'searchPath', 'maxResults', 'caseSensitive', 'maxMatchesPerFile', 'contextLines',
+        'filePath', 'startLine', 'maxLines', 'encoding',
+    ],
+    additionalProperties: false,
+};
 
 /**
  * Removes the file-level title from the beginning of an analysis summary.
@@ -70,7 +100,7 @@ function stripRepositoryAnalysisMarkdownTitle(summary: string): string {
  * 
  * This module provides an LLM-driven repository analysis flow
  * where the model decides how to explore the repository by calling tools
- * (listDirectory, searchFiles, readFileContent, compressContext).
+ * (listDirectory, searchFiles, readFileContent).
  */
 export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private static readonly ANALYSIS_MD_FILE_NAME = 'repository-analysis.md';
@@ -103,8 +133,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
     /**
      * Runs the same repository-analysis subsystem in a change-conditioned mode.
-     * The commit pipeline owns the diff-specific prompt and Zod-validated chat
-     * function; this service owns repository-agent execution and tools.
+     * The commit pipeline owns the diff-specific prompt and execution context;
+     * this service owns repository-agent execution and tools.
      */
     public async runChangeAnalysis(params: ChangeAnalysisAgentParams): Promise<RepositoryEvidence> {
         return runChangeAnalysisAgent(params);
@@ -494,11 +524,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 name: 'readFileContent',
                 args: '{ filePath: string; startLine?: number; maxLines?: number; encoding?: string }',
                 desc: 'Read a file segment; use startLine to jump near lines returned by content search; filePath must be inside repository.'
-            },
-            {
-                name: 'compressContext',
-                args: '{ content: string; targetTokens?: number; preserveStructure?: boolean; language?: string }',
-                desc: 'Use LLM summarization to compress long context before continuing exploration.'
             }
         ];
 
@@ -507,9 +532,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         const commitWindowSize = Array.isArray(input.recentCommits) ? input.recentCommits.length : 0;
         const system = [
             'You are an autonomous repository analysis agent. You can call tools to explore the repository and then produce a final structured analysis.',
-            'Respond with STRICT JSON only, no markdown code fences.',
-            'For every tool action, include a concise English "reason" describing what you will do next (e.g., "I will use searchFiles to look for framework imports").',
-            'If your provider supports function calling, always prefer calling the provided tools directly and do not output free-form plans. To finish, call the finalize tool with the final analysis object.',
+            'Call the provided functions directly when repository evidence is needed.',
+            'For every tool call, include a concise English reason describing what you will do next.',
+            'When exploration is complete, stop calling tools and return the requested final JSON object.',
             'Efficiency tip: When using searchFiles with searchType="content", results include 1-based line numbers for each match. If you then read the file, prefer calling readFileContent with startLine set near that match (e.g., max(1, line-40)) and a modest maxLines window (e.g., 100–150) to inspect local context instead of reading from the file start.',
             '',
             (isIncremental
@@ -529,27 +554,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     'Mode: INITIAL ANALYSIS. Explore efficiently and focus on high-signal files (e.g., README, package/config files, entry points).',
                 ].join('\n')
             ),
-            '',
-            'Action schema (discriminated union):',
-            '{',
-            '  // Tool branch:',
-            '  "action": "tool",',
-            '  "toolName": "listDirectory" | "searchFiles" | "readFileContent" | "compressContext",',
-            '  "args": object,',
-            '  "reason": string',
-            '}',
-            'OR',
-            '{',
-            '  // Final branch:',
-            '  "action": "final",',
-            '  "final": {',
-            '     "summary": string,',
-            '     "projectType": string,',
-            '     "technologies": string[],',
-            '     "insights": string[]',
-            '  }',
-            '}',
-            'Note: Always include all top-level keys required by the schema. When action is "tool", set "final" to null. When action is "final", set "toolName", "args", and "reason" to null.',
             '',
             'Tool catalog:'
         ].concat(toolsSpec.map(t => `- ${t.name} ${t.args}: ${t.desc}`)).join('\n');
@@ -577,8 +581,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
         // Build recent commit change details for incremental mode
         let recentChangesContext = '';
-        // Preserve changed file paths separately so they survive conversation compression
-        let preservedChangedFiles = '';
         // Keep structured recent commit summaries (hash, subject, changed files)
         let recentCommitFiles: Array<{ hash: string; shortHash: string; subject: string; files: string[] }> = [];
         if (isIncremental && commitWindowSize > 0) {
@@ -599,13 +601,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                         'Use commit messages together with the changed file names below to hypothesize impact. Raw diffs are intentionally omitted; prefer searchFiles and selective readFileContent when needed.'
                     ];
                     recentChangesContext = ['', ...header, ...sections].join('\n');
-
-                    // Build preserved filenames block (no diffs) to keep across compression cycles
-                    const preserved = recentCommitFiles.map(c => {
-                        const filesLine = c.files.length ? c.files.join(', ') : '(none)';
-                        return `- [${c.shortHash}] ${c.subject}\n  Files (${c.files.length}): ${filesLine}`;
-                    }).join('\n');
-                    preservedChangedFiles = ['## Changed Files (preserved; do not compress)', preserved].join('\n');
                 }
             } catch (err) {
                 logger.warn('[Genie][RepoAnalysis] Failed to gather recent commit diffs', err as any);
@@ -630,7 +625,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         // the separate Recent Commit Changes section to avoid duplication.
         const includeRecentChangesSection = !(Array.isArray(recentCommitFiles) && recentCommitFiles.length > 0);
 
-        let msgs: ChatMessage[] = [
+        let msgs: AIMessage[] = [
             { role: 'system', content: system },
             {
                 role: 'user', content: [
@@ -645,190 +640,45 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     rootDirContext, // Include pre-fetched root directory structure
                     includeRecentChangesSection ? recentChangesContext : undefined, // Avoid duplication
                     '',
-                    'Goal: Provide global context strictly for commit message generation. In incremental mode, focus on whether the latest commits change repository functionality or architecture, and finalize early if not. Include an insights line starting with "Incremental:" that states whether a repo-level update is needed and why. When done, return action="final".'
+                    'Goal: Provide global context strictly for commit message generation. In incremental mode, focus on whether the latest commits change repository functionality or architecture, and finalize early if not. Include an insights line starting with "Incremental:" that states whether a repo-level update is needed and why.'
                 ].filter(Boolean).join('\n')
             }
         ];
 
-        // Track usage for all tool calls
-        const usages: Array<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }> = [];
-        const { provider } = this.pickRepoAnalysisService();
-        const model = this.getActiveModelForProvider(provider) || '';
+        const { service } = this.pickRepoAnalysisService();
         const sessionId = `repository-analysis:${repoPath}`;
-
-
-        // Limit total thinking/acting steps to prevent runaway loops
+        const execution = service.createExecution(repoPath, { token: this.activeCancelSources.get(repoPath)?.token });
         let maxSteps = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('repositoryAnalysis.MaxCount', 99999);
         if (maxSteps === -1) {
             maxSteps = 99999;
         }
-        const maxContextTokens = getMaxContextByFunction('repoAnalysis', model);
-        // Compress earlier to avoid runaway growth
-        const contextThreshold = maxContextTokens * 0.65;
+        const tools: AgentTool[] = toolsSpec.map(spec => ({
+            name: spec.name,
+            description: `${spec.desc} Set unused arguments to null.`,
+            parameters: REPOSITORY_TOOL_PARAMETERS,
+            execute: async argumentsValue => {
+                const reason = String(argumentsValue.reason || '').trim();
+                logger.info(`[Genie][RepoAnalysis] Model chose tool '${spec.name}'. Reason: ${reason.slice(0, 500)}`);
+                const toolResult = await this.runTool(repoPath, spec.name, argumentsValue, userExcludes);
+                this.logToolOutcome(spec.name, toolResult);
+                return compactToolResultForConversation(repoPath, spec.name, toolResult).compactText;
+            },
+        }));
+        const session = execution.createSession(msgs, sessionId);
+        const result = await runAgentLoop(session, msgs, tools, {
+            maxSteps,
+            responseFormat: {
+                name: 'repositoryAnalysisFinal',
+                schema: z.toJSONSchema(repoAnalysisResponseSchema) as Record<string, unknown>,
+            },
+            temperature: execution.temperature,
+            maxOutputTokens: execution.maxOutputTokens,
+            signal: execution.signal,
+        });
+        const final = repoAnalysisResponseSchema.parse(result.structured);
+        logger.info(`[Genie][RepoAnalysis] Final: projectType=${final.projectType}; technologies=${final.technologies.slice(0, 5).join(', ')}; insights=${final.insights.length}`);
+        return final;
 
-        for (let step = 0; step <= maxSteps; step++) {
-
-            if (step === maxSteps) {
-                let choice = await this.isResetStep();
-                if (choice) {
-                    step = 0;
-                } else {
-                    logger.warn('[Genie][RepoAnalysis] Reached maximum analysis steps; aborting.');
-                    return null;
-                }
-            }
-
-            // Check context size and force compression if needed
-            const totalContextLength = msgs.map(m => m.content.length).reduce((a, b) => a + b, 0);
-            const estimatedTokens = totalContextLength / 4; // Rough estimate: 1 token ≈ 4 chars
-
-            if (estimatedTokens > contextThreshold) {
-                logger.warn(`[Genie][RepoAnalysis] Context at ${Math.round((estimatedTokens / maxContextTokens) * 100)}% (${Math.round(estimatedTokens)}/${maxContextTokens} tokens), forcing compression...`);
-
-                try {
-                    // Preserve system message (contains tool specs and instructions)
-                    // Only compress user/assistant conversation history
-                    const conversationHistory = msgs.slice(1).map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n');
-
-                    const compressResult = await this.runTool(repoPath, 'compressContext', {
-                        content: conversationHistory,
-                        targetTokens: Math.floor(maxContextTokens * 0.5),
-                        preserveStructure: true
-                    }, userExcludes);
-
-                    // Track compression usage
-                    if (compressResult.usage) {
-                        if (Array.isArray(compressResult.usage)) {
-                            let tryIdx = 0;
-                            for (const u of compressResult.usage) {
-                                tryIdx += 1;
-                                usages.push(u);
-                                logger.usage(repoPath, provider, u, model, `compression-step-${step + 1}-try-${tryIdx}` as any, step + 1);
-                            }
-                        } else {
-                            usages.push(compressResult.usage);
-                            logger.usage(repoPath, provider, compressResult.usage, model, `compression-step-${step + 1}`, step + 1);
-                        }
-                    }
-
-                    if (compressResult.success && compressResult.data) {
-                        // Keep original system message, re-attach preserved changed files, then replace conversation with compressed version
-                        const newMsgs: ChatMessage[] = [msgs[0]]; // Preserve original system message with tool specs
-                        if (preservedChangedFiles && preservedChangedFiles.trim().length > 0) {
-                            newMsgs.push({ role: 'user', content: preservedChangedFiles });
-                        }
-                        newMsgs.push({ role: 'user', content: `Here is the compressed Exploration History for last conversation, Continue exploring: \n\n${compressResult.data.compressed}` });
-                        msgs = newMsgs;
-                        const newSize = msgs.map(m => m.content.length).reduce((a, b) => a + b, 0);
-                        logger.info(`[Genie][RepoAnalysis] Compression successful: ${Math.round(totalContextLength / 4)} → ${Math.round(newSize / 4)} tokens (${(compressResult.data.compressionRatio * 100).toFixed(1)}% reduction)`);
-                    } else {
-                        logger.warn(`[Genie][RepoAnalysis] Compression failed: ${compressResult.error || 'Unknown error'}`);
-                    }
-                } catch (err: any) {
-                    logger.warn(`[Genie][RepoAnalysis] Compression exception: ${err?.message || 'unknown'}`);
-                }
-            }
-
-            const result = await this.safeJsonCall(msgs, repoPath, sessionId);
-            if (!result) { return null; }
-
-            const action = result.action;
-
-            // Track usage
-            if (result.usage) {
-                if (Array.isArray(result.usage)) {
-                    let tryIdx = 0;
-                    for (const u of result.usage) {
-                        tryIdx += 1;
-                        usages.push(u);
-                        logger.usage(repoPath, provider, u, model, `tool-step-${step + 1}-try-${tryIdx}`, step + 1);
-                    }
-                } else {
-                    usages.push(result.usage);
-                    logger.usage(repoPath, provider, result.usage, model, `tool-step-${step + 1}`, step + 1);
-                }
-            }
-
-            if (action.action === 'final') {
-                logger.info('[Genie][RepoAnalysis] Model produced final analysis.');
-                const f = action.final || {};
-                if (typeof f.summary === 'string' && Array.isArray(f.technologies) && Array.isArray(f.insights) && typeof f.projectType === 'string') {
-                    logger.info(`[Genie][RepoAnalysis] Final: projectType=${f.projectType}; technologies=${(f.technologies || []).slice(0, 5).join(', ')}; insights=${(f.insights || []).length}`);
-
-                    // Log usage summary
-                    if (usages.length) {
-                        logger.usageSummary(repoPath, provider, usages, model, 'RepoAnalysis', undefined, false);
-                    }
-
-                    return {
-                        summary: f.summary,
-                        technologies: f.technologies,
-                        insights: f.insights,
-                        projectType: f.projectType
-                    };
-                }
-                // invalid final -> nudge model to return required fields instead of aborting
-                logger.warn('[Genie][RepoAnalysis] Final action missing required fields; requesting correction.');
-                msgs.push({ role: 'user', content: 'The final object is missing required fields. Please return strictly valid JSON with fields: { "final": { "summary": string, "projectType": string, "technologies": string[], "insights": string[] } } and no extra text.' });
-                continue;
-            }
-
-            if (action.action === 'tool') {
-                const toolName = String(action.toolName || '');
-                const args = (action.args || {}) as any;
-                const reason = String(action.reason || '');
-
-                logger.info(`[Genie][RepoAnalysis] Step ${step + 1}: Model chose tool '${toolName}'. Reason: ${reason.slice(0, 500)}`);
-
-                const toolResult = await this.runTool(repoPath, toolName, args, userExcludes);
-                this.logToolOutcome(toolName, toolResult);
-
-                const { compactText } = compactToolResultForConversation(repoPath, toolName, toolResult);
-                msgs.push({ role: 'user', content: compactText });
-                continue;
-            }
-
-            // Unknown action -> continue a bit, or abort
-            msgs.push({ role: 'assistant', content: JSON.stringify({ error: 'Unknown action; please correct' }) });
-        }
-
-        // Log usage summary even if we didn't get final result
-        if (usages.length) {
-            logger.usageSummary(repoPath, provider, usages, model, 'RepoAnalysis', undefined, false);
-        }
-
-
-        return null;
-    }
-
-    /**
-     * Make a JSON-only LLM call via the provider service.
-     * Ensures temperature and token limits come from settings.
-     * Returns both the parsed action and usage statistics.
-     */
-    private async safeJsonCall(history: ChatMessage[], repoPath: string, sessionId: string): Promise<{ action: any; usage?: any } | null> {
-        try {
-            const { provider, service } = this.pickRepoAnalysisService();
-            if (!service) {
-                throw Object.assign(new Error(`${provider} service is not available`), { statusCode: 400 });
-            }
-
-            if (!service.createChat) {
-                throw new Error(`${provider} service does not implement the unified chat API.`);
-            }
-            const chat = service.createChat(repoPath, { token: this.activeCancelSources.get(repoPath)?.token });
-            const action = await chat(history, { requestType: 'repoAnalysisAction', sessionId });
-            return { action };
-        } catch (err: any) {
-            const provider = this.pickRepoAnalysisService().provider;
-            if (err?.statusCode) {
-                await this.handleLLMError({ message: err.message, statusCode: err.statusCode }, provider, repoPath);
-                return null;
-            }
-            // For non-status errors, bubble up a generic failure so the caller can handle gracefully
-            logger.error('[Genie][RepoAnalysis] LLM analysis failed', err?.message || err);
-            throw new Error(err?.message || 'Failed to produce a valid repo analysis action');
-        }
     }
 
     /**
@@ -882,31 +732,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     logger.info(`[Genie][RepoAnalysis] Running readFileContent: filePath='${filePath}', start=${startLine}, maxLines=${maxLines}`);
                     return await readFileContent(filePath, { startLine, maxLines, encoding }, reason);
                 }
-                case 'compressContext': {
-                    const content = String(args.content || '');
-                    const targetTokens = typeof args.targetTokens === 'number' ? args.targetTokens : Math.floor(getMaxContextByFunction('repoAnalysis') * 0.4);
-                    const preserveStructure = !!args.preserveStructure;
-                    const language = typeof args.language === 'string' ? args.language : undefined;
-
-                    const chatFn = async (messages: ChatMessage[]): Promise<{ parsedResponse?: any; usage?: any; parsedAssistantResponse?: ChatMessage }> => {
-                        const { provider, service } = this.pickRepoAnalysisService();
-                        if (!service) {
-                            throw new Error(`${provider} service is not available`);
-                        }
-
-                        if (!service.createChat) {
-                            throw new Error(`${provider} service does not implement the unified chat API.`);
-                        }
-                        const chat = service.createChat(repoPath, { token: this.activeCancelSources.get(repoPath)?.token });
-                        const parsedResponse = await chat(messages, { requestType: 'compression' });
-                        return { parsedResponse };
-                    };
-
-                    const maxRetries = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.maxRetries', 2);
-                    const compressionResult = await compressContext(content, chatFn, { targetTokens, preserveStructure, language, maxRetries });
-
-                    return compressionResult;
-                }
                 default:
                     return { success: false, error: `Unknown tool: ${toolName}` };
             }
@@ -943,16 +768,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     logger.info(`[Genie][RepoAnalysis] readFileContent -> ${fp} [${start}-${end}], more=${hasMore}.`);
                     break;
                 }
-                case 'compressContext': {
-                    const origSize = typeof data?.originalSize === 'number' ? data.originalSize : 0;
-                    const compSize = typeof data?.compressedSize === 'number' ? data.compressedSize : 0;
-                    const delta = compSize - origSize;
-                    const pct = origSize > 0 ? Math.abs((delta / origSize) * 100).toFixed(1) + '%' : '0%';
-                    const direction = delta < 0 ? 'reduction' : (delta > 0 ? 'increase' : 'no change');
-                    const summary = data?.summary || 'No summary';
-                    logger.info(`[Genie][RepoAnalysis] compressContext -> ${origSize} → ${compSize} chars (${pct} ${direction}). ${summary}`);
-                    break;
-                }
                 default:
                     logger.info(`[Genie][RepoAnalysis] ${toolName} -> success.`);
             }
@@ -978,7 +793,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * 
      * @returns Object containing the provider name and service instance
      */
-    private pickRepoAnalysisService(): { provider: string, service: LLMService | null } {
+    private pickRepoAnalysisService(): { provider: string, service: LLMService } {
         const modelId = this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '');
         const model = this.getConfiguredModel(modelId);
         const service = this.resolveLLMService?.(model.id);
@@ -1376,22 +1191,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         } catch (error) {
             logger.warn('[Genie][RepoAnalysis] Failed to clear analysis data', error as any);
             throw error;
-        }
-    }
-
-    private async isResetStep(): Promise<boolean> {
-        const choice = await vscode.window.showInformationMessage(
-            vscode.l10n.t(I18N.repoAnalysis.resetStepNotification),
-            vscode.l10n.t(I18N.repoAnalysis.resetAndContinue),
-            vscode.l10n.t(I18N.repoAnalysis.cancel)
-        );
-
-        if (choice === vscode.l10n.t(I18N.repoAnalysis.resetAndContinue)) {
-            logger.info('[Genie][RepoAnalysis] User chose to reset step count and continue');
-            return true;
-        } else {
-            logger.info('[Genie][RepoAnalysis] User cancelled step reset');
-            return false;
         }
     }
 

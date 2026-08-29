@@ -4,7 +4,7 @@
 // chain's actual differentiator: it compresses the analysis into the few claims
 // worth stating and produces the only semantic payload the generator sees.
 
-import { ChatFn } from '../../llm/llmTypes';
+import { LLMExecution } from '../../llm/llmTypes';
 import { buildInformationSelectionMessages } from './prompts';
 import {
     ChangeExtraction,
@@ -38,14 +38,15 @@ export async function selectInformation(params: {
     changeExtraction: ChangeExtraction;
     semanticAnalysis: SemanticChangeAnalysis;
     userTemplate?: string;
-    chat: ChatFn;
+    execution: LLMExecution;
 }): Promise<InformationSelection> {
     const messages = buildInformationSelectionMessages({
         changeExtraction: params.changeExtraction,
         semanticAnalysis: params.semanticAnalysis,
         userTemplate: params.userTemplate,
     });
-    const raw = await params.chat(messages, { requestType: 'informationSelection' }) as InformationSelection;
+    const session = params.execution.createSession(messages);
+    const raw = await params.execution.run<InformationSelection>(session, messages, { requestType: 'informationSelection' });
 
     const mustExpress = cleanStrings(raw?.mustExpress, MAX_MUST_EXPRESS);
     if (!mustExpress.length) {

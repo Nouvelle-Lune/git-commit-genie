@@ -84,7 +84,7 @@ export class ProviderError extends Error {
     }
 
     /**
-     * Create error for generic chat failure
+     * Create error for a generic provider request failure
      */
     static chatFailed(provider: string, originalError?: Error): ProviderError {
         const message = vscode.l10n.t(I18N.provider.chatFailed, provider);
