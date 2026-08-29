@@ -9,7 +9,7 @@ import {
     AISessionSnapshot,
     CustomProviderConfig,
 } from './types';
-import { assertHttpBaseUrl, parseStructuredText } from './json';
+import { assertHttpBaseUrl, parseJsonObject, parseStructuredText } from './json';
 
 /** OpenAI-compatible message shape used by custom endpoints. */
 type CustomMessage = {
@@ -35,36 +35,16 @@ class CustomSession implements AISession {
     async run(request: AIRunRequest): Promise<AIRunResponse> {
         for (const message of request.messages ?? []) {
             this.transcript.push(message);
+            if (message.role === 'system' || message.role === 'developer') {
+                continue;
+            }
             this.messages.push(message);
         }
         for (const result of request.toolResults ?? []) {
             this.messages.push({ role: 'tool', content: result.output, tool_call_id: result.callId });
         }
         const requestMessages: CustomMessage[] = this.messages.map(message => ({ ...message }));
-        if (request.responseFormat) {
-            const formatInstruction = `Return exactly one JSON object matching this JSON Schema: ${JSON.stringify(request.responseFormat.schema)}`;
-            const systemMessage = requestMessages.find(message => message.role === 'system');
-            if (systemMessage) {
-                systemMessage.content = `${systemMessage.content ?? ''}\n\n${formatInstruction}`;
-            } else {
-                requestMessages.unshift({ role: 'system', content: formatInstruction });
-            }
-        }
-        const body: Record<string, unknown> = {
-            model: this.model,
-            messages: requestMessages,
-            temperature: request.temperature,
-            max_tokens: request.maxOutputTokens,
-            response_format: request.responseFormat ? { type: 'json_object' } : undefined,
-            tools: request.tools?.map(tool => ({
-                type: 'function',
-                function: { name: tool.name, description: tool.description, parameters: tool.parameters },
-            })),
-            tool_choice: request.toolChoice,
-        };
-        const response: any = await (this.client.chat.completions.create as any)(body, {
-            signal: request.signal,
-        });
+        const response: any = await this.createCompletion(request, requestMessages);
         const choice = response.choices?.[0]?.message;
         if (!choice) {
             throw new Error('Custom provider returned no assistant message.');
@@ -78,7 +58,7 @@ class CustomSession implements AISession {
         const toolCalls = (choice.tool_calls ?? []).map((call: any) => ({
             id: String(call.id),
             name: String(call.function?.name),
-            arguments: JSON.parse(String(call.function?.arguments ?? '{}')),
+            arguments: parseJsonObject(String(call.function?.arguments ?? '{}')),
         }));
         return {
             text,
@@ -96,6 +76,66 @@ class CustomSession implements AISession {
         };
     }
 
+    private async createCompletion(request: AIRunRequest, requestMessages: CustomMessage[]): Promise<unknown> {
+        if (!request.responseFormat) {
+            return this.requestCompletion(request, requestMessages, undefined);
+        }
+
+        try {
+            return await this.requestCompletion(request, requestMessages, {
+                type: 'json_schema',
+                json_schema: {
+                    name: request.responseFormat.name,
+                    schema: request.responseFormat.schema,
+                    strict: true,
+                },
+            });
+        } catch (error) {
+            if (!isUnsupportedStructuredOutputError(error)) {
+                throw error;
+            }
+            const fallbackMessages = this.withPromptSchemaInstruction(requestMessages, request.responseFormat);
+            return this.requestCompletion(request, fallbackMessages, { type: 'json_object' });
+        }
+    }
+
+    private withPromptSchemaInstruction(
+        requestMessages: CustomMessage[],
+        responseFormat: NonNullable<AIRunRequest['responseFormat']>,
+    ): CustomMessage[] {
+        const messages = requestMessages.map(message => ({ ...message }));
+        const formatInstruction = `Return exactly one JSON object matching this JSON Schema: ${JSON.stringify(responseFormat.schema)}`;
+        const systemMessage = messages.find(message => message.role === 'system');
+        if (systemMessage) {
+            systemMessage.content = `${systemMessage.content ?? ''}\n\n${formatInstruction}`;
+        } else {
+            messages.unshift({ role: 'system', content: formatInstruction });
+        }
+        return messages;
+    }
+
+    private requestCompletion(
+        request: AIRunRequest,
+        requestMessages: CustomMessage[],
+        responseFormat: Record<string, unknown> | undefined,
+    ): Promise<unknown> {
+        const body: Record<string, unknown> = {
+            model: this.model,
+            messages: requestMessages,
+            temperature: request.temperature,
+            max_tokens: request.maxOutputTokens,
+            response_format: responseFormat,
+            tools: request.tools?.map(tool => ({
+                type: 'function',
+                function: { name: tool.name, description: tool.description, parameters: tool.parameters },
+            })),
+            tool_choice: request.toolChoice,
+        };
+        return (this.client.chat.completions.create as any)(body, {
+            signal: request.signal,
+        });
+    }
+
     snapshot(): AISessionSnapshot {
         return {
             provider: this.provider,
@@ -104,6 +144,23 @@ class CustomSession implements AISession {
             transcript: [...this.transcript],
         };
     }
+}
+
+function isUnsupportedStructuredOutputError(error: unknown): boolean {
+    const status = (error as { status?: number })?.status;
+    if (status !== undefined && status !== 400 && status !== 404 && status !== 422) {
+        return false;
+    }
+    const code = String(
+        (error as { code?: string })?.code
+        ?? (error as { error?: { code?: string } })?.error?.code
+        ?? '',
+    );
+    const message = String((error as { message?: string })?.message ?? error ?? '');
+    if (/unsupported.*(?:response_format|json_schema)|(?:response_format|json_schema).*(?:not\s+(?:supported|available)|unknown)|unknown.*response_format/i.test(message)) {
+        return true;
+    }
+    return code === 'invalid_request_error' && /response_format|json_schema/i.test(message);
 }
 
 export class CustomProvider implements AIProvider {

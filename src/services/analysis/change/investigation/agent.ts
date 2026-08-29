@@ -243,6 +243,8 @@ export async function runChangeAnalysisAgent(params: ChangeAnalysisAgentParams):
             name: 'investigationFinal',
             schema: z.toJSONSchema(investigationFinalResponseSchema) as Record<string, unknown>,
         },
+        schema: investigationFinalResponseSchema,
+        maxRetries: execution.maxRetries,
         temperature: execution.temperature,
         maxOutputTokens: execution.maxOutputTokens,
         signal: execution.signal,

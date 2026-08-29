@@ -29,7 +29,9 @@ import {
 import { assertChatMessagesWithinTokenBudget } from './inputTokenBudget';
 import { commitMessageSchema } from './providers/schemas/common';
 import { getRequestTypeLabel, getValidationSchemaFor } from './providers/utils/requestTypeMaps';
+import { runStructuredCompletion } from './structuredCompletion';
 import {
+    ApiRequestLogFailedError,
     completeApiRequestLog,
     failApiRequestLog,
     logCommitStageToWebview,
@@ -98,10 +100,12 @@ export class UnifiedLLMService extends BaseLLMService {
         const configuration = vscode.workspace.getConfiguration('gitCommitGenie');
         const temperature = configuration.get<number>('llm.temperature', 1);
         const maxOutputTokens = configuration.get<number>('llm.maxOutputTokens', 4096);
+        const maxRetries = configuration.get<number>('llm.maxRetries', 2);
         return {
             signal,
             temperature,
             maxOutputTokens,
+            maxRetries,
             createSession: (messages, id) => provider.createSession({
                 id,
                 model: this.getCurrentModel(),
@@ -133,17 +137,16 @@ export class UnifiedLLMService extends BaseLLMService {
         }
         assertChatMessagesWithinTokenBudget(messages, maxInputTokens, requestType);
 
-        let delta = messages.filter(message => message.role !== 'system' && message.role !== 'developer');
-        const totalAttempts = maxRetries + 1;
+        const delta = messages.filter(message => message.role !== 'system' && message.role !== 'developer');
         const provider = this.options.model.provider;
         const model = this.getCurrentModel();
+        let currentLogId: string | undefined;
 
-        for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
-            let logId: string | undefined;
+        const runMessages = async (runDelta: AIMessage[]) => {
+            currentLogId = logger.logApiRequest(repoPath || undefined);
             try {
-                logId = logger.logApiRequest(repoPath || undefined);
                 const response = await session.run({
-                    messages: delta,
+                    messages: runDelta,
                     responseFormat: schema ? {
                         name: requestType ?? 'structuredResponse',
                         schema: z.toJSONSchema(schema) as Record<string, unknown>,
@@ -153,74 +156,75 @@ export class UnifiedLLMService extends BaseLLMService {
                     signal,
                 });
                 this.logUsage(repoPath, requestType, response.usage?.raw);
-
-                if (!schema) {
-                    const result = response.structured ?? response.text;
-                    completeApiRequestLog(logId, provider, model, result, response, requestType, repoPath);
-                    return result as T;
-                }
-
-                const structured = response.structured;
-                if (structured === undefined) {
-                    const retryPayload = {
-                        stage: requestType,
-                        attempt: attempt + 1,
-                        totalAttempts,
-                        missingResponse: true,
-                        finalFailure: attempt === totalAttempts - 1,
-                    };
-                    if (attempt < totalAttempts - 1) {
-                        logger.warn(`[Genie][${this.getProviderName()}] Provider returned no structured output for ${requestType || 'unknown'} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
-                        logSchemaValidationToWebview(repoPath, retryPayload, 'Structured output missing');
-                        completeApiRequestLog(logId, provider, model, undefined, response, requestType, repoPath);
-                        delta = [{
-                            role: 'user',
-                            content: `The previous response contained no final JSON object. Return exactly one complete JSON object matching the requested schema. Do not include markdown or explanation.`,
-                        }];
-                        continue;
-                    }
-                    logSchemaValidationToWebview(repoPath, retryPayload, 'Structured output missing');
-                    completeApiRequestLog(logId, provider, model, undefined, response, requestType, repoPath);
-                    throw new Error(`${this.getProviderName()} returned no structured output for ${requestType ?? 'unknown'} after ${totalAttempts} attempts`);
-                }
-
-                const parsed = schema.safeParse(structured);
-                if (parsed.success) {
-                    completeApiRequestLog(logId, provider, model, structured, response, requestType, repoPath);
-                    return parsed.data as T;
-                }
-
-                if (attempt < totalAttempts - 1) {
-                    logger.warn(`[Genie][${this.getProviderName()}] Schema validation failed for ${requestType || 'unknown'} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
-                    logSchemaValidationToWebview(repoPath, {
-                        stage: requestType,
-                        attempt: attempt + 1,
-                        totalAttempts,
-                        error: String(parsed.error),
-                    }, 'Schema validation failed');
-                    completeApiRequestLog(logId, provider, model, structured, response, requestType, repoPath);
-                    delta = [{
-                        role: 'user',
-                        content: `The previous response failed schema validation: ${parsed.error}. Return one corrected JSON object matching the requested schema.`,
-                    }];
-                    continue;
-                }
-
-                logSchemaValidationToWebview(repoPath, {
-                    stage: requestType,
-                    finalFailure: true,
-                    error: String(parsed.error),
-                }, 'Schema validation failed');
-                completeApiRequestLog(logId, provider, model, structured, response, requestType, repoPath);
-                throw new Error(`${this.getProviderName()} structured result failed local validation for ${requestType} after ${totalAttempts} attempts: ${parsed.error}`);
+                return response;
             } catch (error) {
-                if (logId) {
-                    failApiRequestLog(logId, provider, model, error, repoPath);
+                if (currentLogId) {
+                    failApiRequestLog(currentLogId, provider, model, error, repoPath);
                 }
-                throw error;
+                throw new ApiRequestLogFailedError(error);
             }
+        };
+
+        if (!schema) {
+            const response = await runMessages(delta);
+            const result = response.structured ?? response.text;
+            completeApiRequestLog(currentLogId!, provider, model, result, response, requestType, repoPath);
+            return result as T;
         }
-        throw new Error(`${this.getProviderName()} structured request exited retry loop unexpectedly.`);
+
+        const totalAttempts = maxRetries + 1;
+        try {
+            const { data, response } = await runStructuredCompletion<T>({
+                run: runMessages,
+                schema: schema as z.ZodType<T>,
+                initialMessages: delta,
+                maxRetries,
+                label: requestType ?? 'unknown',
+                callbacks: {
+                    onMissingStructured: (attempt, attempts, response) => {
+                        const retryPayload = {
+                            stage: requestType,
+                            attempt,
+                            totalAttempts: attempts,
+                            missingResponse: true,
+                            finalFailure: attempt === attempts,
+                        };
+                        if (attempt < attempts) {
+                            logger.warn(`[Genie][${this.getProviderName()}] Provider returned no structured output for ${requestType || 'unknown'} (attempt ${attempt}/${attempts}). Retrying...`);
+                            logSchemaValidationToWebview(repoPath, retryPayload, 'Structured output missing');
+                        } else {
+                            logSchemaValidationToWebview(repoPath, retryPayload, 'Structured output missing');
+                        }
+                        completeApiRequestLog(currentLogId!, provider, model, undefined, response, requestType, repoPath);
+                    },
+                    onValidationFailed: (attempt, attempts, response, error) => {
+                        if (attempt < attempts) {
+                            logger.warn(`[Genie][${this.getProviderName()}] Schema validation failed for ${requestType || 'unknown'} (attempt ${attempt}/${attempts}). Retrying...`);
+                            logSchemaValidationToWebview(repoPath, {
+                                stage: requestType,
+                                attempt,
+                                totalAttempts: attempts,
+                                error: String(error),
+                            }, 'Schema validation failed');
+                        } else {
+                            logSchemaValidationToWebview(repoPath, {
+                                stage: requestType,
+                                finalFailure: true,
+                                error: String(error),
+                            }, 'Schema validation failed');
+                        }
+                        completeApiRequestLog(currentLogId!, provider, model, response.structured, response, requestType, repoPath);
+                    },
+                },
+            });
+            completeApiRequestLog(currentLogId!, provider, model, data, response, requestType, repoPath);
+            return data;
+        } catch (error) {
+            if (currentLogId && !(error instanceof ApiRequestLogFailedError)) {
+                failApiRequestLog(currentLogId, provider, model, error, repoPath);
+            }
+            throw error instanceof ApiRequestLogFailedError ? error.cause : error;
+        }
     }
 
     async generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError> {

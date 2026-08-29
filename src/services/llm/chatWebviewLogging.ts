@@ -51,6 +51,14 @@ export function completeApiRequestLog(
     );
 }
 
+/** Thrown after an API request failure has already been written to the request log. */
+export class ApiRequestLogFailedError extends Error {
+    constructor(readonly cause: unknown) {
+        super(String((cause as Error)?.message ?? cause));
+        this.name = 'ApiRequestLogFailedError';
+    }
+}
+
 export function failApiRequestLog(
     logId: string,
     provider: string,

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import {
     AIFunctionTool,
     AIMessage,
@@ -6,6 +7,7 @@ import {
     AIToolCall,
     AIToolResult,
 } from '../services/llm/providers';
+import { runStructuredCompletion } from '../services/llm/structuredCompletion';
 
 export interface AgentTool extends AIFunctionTool {
     execute(argumentsValue: Record<string, unknown>, signal?: AbortSignal): Promise<string>;
@@ -14,6 +16,8 @@ export interface AgentTool extends AIFunctionTool {
 export interface AgentLoopOptions {
     maxSteps: number;
     responseFormat?: AIResponseFormat;
+    schema?: z.ZodTypeAny;
+    maxRetries?: number;
     temperature?: number;
     maxOutputTokens?: number;
     signal?: AbortSignal;
@@ -24,6 +28,10 @@ export interface AgentLoopResult {
     structured?: unknown;
     steps: number;
     session: ReturnType<AISession['snapshot']>;
+}
+
+function toSessionDelta(messages: AIMessage[]): AIMessage[] {
+    return messages.filter(message => message.role !== 'system' && message.role !== 'developer');
 }
 
 /**
@@ -43,7 +51,7 @@ export async function runAgentLoop(
 
     for (let step = 0; step <= options.maxSteps; step += 1) {
         const response = await session.run({
-            messages,
+            messages: toSessionDelta(messages),
             toolResults,
             tools,
             responseFormat: options.responseFormat,
@@ -55,9 +63,58 @@ export async function runAgentLoop(
         messages = [];
         toolResults = undefined;
         if (!response.toolCalls.length) {
+            if (!options.schema) {
+                return {
+                    text: response.text,
+                    structured: response.structured,
+                    steps: step,
+                    session: session.snapshot(),
+                };
+            }
+            if (!options.responseFormat) {
+                throw new Error('runAgentLoop requires responseFormat when schema is provided.');
+            }
+            if (options.maxRetries === undefined) {
+                throw new Error('runAgentLoop requires maxRetries when schema is provided.');
+            }
+
+            const firstParsed = options.schema.safeParse(response.structured);
+            if (firstParsed.success) {
+                return {
+                    text: response.text,
+                    structured: firstParsed.data,
+                    steps: step,
+                    session: session.snapshot(),
+                };
+            }
+
+            const maxRetries = options.maxRetries;
+            const initialMessages: AIMessage[] = response.structured === undefined
+                ? [{
+                    role: 'user',
+                    content: 'The previous response contained no final JSON object. Return exactly one complete JSON object matching the requested schema. Do not include markdown or explanation.',
+                }]
+                : [{
+                    role: 'user',
+                    content: `The previous response failed schema validation: ${firstParsed.error}. Return one corrected JSON object matching the requested schema.`,
+                }];
+            const { data, response: validatedResponse } = await runStructuredCompletion({
+                run: async retryMessages => session.run({
+                    messages: retryMessages,
+                    responseFormat: options.responseFormat,
+                    toolChoice: 'none',
+                    temperature: options.temperature,
+                    maxOutputTokens: options.maxOutputTokens,
+                    signal: options.signal,
+                }),
+                schema: options.schema,
+                initialMessages,
+                maxRetries: Math.max(0, maxRetries - 1),
+                label: options.responseFormat?.name ?? 'agentFinal',
+            });
             return {
-                text: response.text,
-                structured: response.structured,
+                text: validatedResponse.text,
+                structured: data,
                 steps: step,
                 session: session.snapshot(),
             };

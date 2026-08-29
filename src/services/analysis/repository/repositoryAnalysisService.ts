@@ -671,6 +671,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 name: 'repositoryAnalysisFinal',
                 schema: z.toJSONSchema(repoAnalysisResponseSchema) as Record<string, unknown>,
             },
+            schema: repoAnalysisResponseSchema,
+            maxRetries: execution.maxRetries,
             temperature: execution.temperature,
             maxOutputTokens: execution.maxOutputTokens,
             signal: execution.signal,

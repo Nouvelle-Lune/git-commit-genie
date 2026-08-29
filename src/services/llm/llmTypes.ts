@@ -31,6 +31,7 @@ export interface LLMExecution {
     readonly signal?: AbortSignal;
     readonly temperature: number;
     readonly maxOutputTokens: number;
+    readonly maxRetries: number;
     createSession(messages: AIMessage[], id?: string): AISession;
     run<T>(session: AISession, messages: AIMessage[], options: LLMRunOptions): Promise<T>;
 }

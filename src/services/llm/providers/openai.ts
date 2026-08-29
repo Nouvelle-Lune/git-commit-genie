@@ -9,7 +9,7 @@ import {
     AISessionSnapshot,
     OpenAIProviderConfig,
 } from './types';
-import { parseStructuredText } from './json';
+import { parseJsonObject, parseStructuredText } from './json';
 
 /** Converts unified messages into Responses API input items. */
 function toInputMessages(messages: AIMessage[]): Array<Record<string, unknown>> {
@@ -84,7 +84,7 @@ class OpenAISession implements AISession {
             .map((item: any) => ({
                 id: String(item.call_id ?? item.id),
                 name: String(item.name),
-                arguments: typeof item.arguments === 'string' ? JSON.parse(item.arguments) : item.arguments,
+                arguments: typeof item.arguments === 'string' ? parseJsonObject(item.arguments) : item.arguments,
             }));
         const details = response.usage?.input_tokens_details;
         return {
