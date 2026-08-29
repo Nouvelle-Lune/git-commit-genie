@@ -7,15 +7,17 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
 import { GitExtension } from '../services/git/git';
 import { RepoService } from '../services/repo/repo';
 import { CostTrackingService } from '../services/cost/costTrackingService';
-import { getAllProviderKeys, getProviderSecretKey } from '../services/llm/providers/config/ProviderConfig';
+import { logger } from '../services/logger';
+import {
+    REPOSITORY_ANALYSIS_MODEL_ID_KEY,
+    modelSecretKey,
+} from '../services/llm/providers';
 import {
     ProviderState,
     AnalysisState,
     GitState,
     AnalysisIcon,
-    LLMProvider,
-    PROVIDER_LABELS,
-    PROVIDER_SECRET_KEYS
+    PROVIDER_LABELS
 } from './StatusBarTypes';
 
 /**
@@ -28,7 +30,9 @@ export class StatusBarManager {
 
     // State management
     private providerState: ProviderState = {
-        provider: '',
+        modelId: '',
+        label: '',
+        provider: null,
         model: '',
         hasApiKey: false
     };
@@ -37,6 +41,8 @@ export class StatusBarManager {
         enabled: false,
         running: false,
         missing: false,
+        modelId: '',
+        label: '',
         provider: null,
         model: null,
         hasApiKey: false,
@@ -72,16 +78,15 @@ export class StatusBarManager {
         await this.refreshAllStates();
         await this.validateAnalysisModelApiKey(true);
 
-        this.updateStatusBar();
+        await this.updateStatusBar();
     }
 
     async dispose(): Promise<void> {
         this.statusBarItem?.dispose();
     }
 
-    onProviderModelChanged(provider?: string): void {
-        void this.refreshProviderState(provider);
-        void this.refreshAnalysisState();
+    async refreshModelStates(): Promise<void> {
+        await this.updateStatusBar();
     }
 
     setRepoAnalysisRunning(running: boolean, repoPath?: string): void {
@@ -171,9 +176,9 @@ export class StatusBarManager {
 
     private registerConfigListeners(): void {
         const disposable = vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('gitCommitGenie.repositoryAnalysis.model')) {
+            if (e.affectsConfiguration('gitCommitGenie.repositoryAnalysis.enabled')) {
                 void this.validateAnalysisModelApiKey(true);
-                void this.refreshAnalysisState();
+                void this.updateStatusBar();
             }
         });
         this.context.subscriptions.push(disposable);
@@ -225,32 +230,17 @@ export class StatusBarManager {
         await this.refreshAnalysisState();
     }
 
-    private async refreshProviderState(provider?: string): Promise<void> {
-        const p = (provider || this.serviceRegistry.getProvider() || 'openai').toLowerCase();
-        const model = this.serviceRegistry.getModel(p);
-        const secretName = this.getSecretNameForProvider(p);
-        let key = await this.context.secrets.get(secretName);
-
-        // For Qwen, if current region's key doesn't exist, check the other region
-        if (!key && p === 'qwen') {
-            const currentRegion = this.context.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
-            const otherRegion = currentRegion === 'china' ? 'intl' : 'china';
-            const otherSecretKey = getProviderSecretKey('qwen', otherRegion);
-            const otherKey = await this.context.secrets.get(otherSecretKey);
-
-            if (otherKey) {
-                // Use key from the other region
-                key = otherKey;
-            }
-        }
+    private async refreshProviderState(): Promise<void> {
+        const selected = this.serviceRegistry.getGenerationModel();
+        const key = selected ? await this.context.secrets.get(modelSecretKey(selected)) : undefined;
 
         this.providerState = {
-            provider: p,
-            model: model || '',
+            modelId: selected?.id ?? '',
+            label: selected?.label ?? '',
+            provider: selected?.provider ?? null,
+            model: selected?.model ?? '',
             hasApiKey: !!(key && key.trim())
         };
-
-        this.updateStatusBar();
     }
 
     private async refreshGitState(): Promise<void> {
@@ -268,41 +258,13 @@ export class StatusBarManager {
     }
 
     private async refreshAnalysisState(): Promise<void> {
-        const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-        const selected = (cfg.get<string>('model', 'general') || 'general').trim();
+        const selectedId = this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '');
+        const selected = this.serviceRegistry.getModel(selectedId);
         const enabled = this.configManager.isRepoAnalysisEnabled();
-
-        let provider = this.providerState.provider;
-        let model = this.providerState.model;
-
-        // If a specific model is selected, find its provider
-        if (selected && selected !== 'general') {
-            const candidates = getAllProviderKeys();
-            for (const p of candidates) {
-                const svc = this.serviceRegistry.getLLMService(p);
-                if (svc?.listSupportedModels().includes(selected)) {
-                    provider = p;
-                    model = selected;
-                    break;
-                }
-            }
+        if (selectedId && !selected) {
+            logger.warn(`Repository analysis model '${selectedId}' is not configured.`);
         }
-
-        // Get API key for the analysis provider
-        let key = await this.context.secrets.get(this.getSecretNameForProvider(provider));
-
-        // For Qwen, if current region's key doesn't exist, check the other region
-        if (!key && provider === 'qwen') {
-            const currentRegion = this.context.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
-            const otherRegion = currentRegion === 'china' ? 'intl' : 'china';
-            const otherSecretKey = getProviderSecretKey('qwen', otherRegion);
-            const otherKey = await this.context.secrets.get(otherSecretKey);
-
-            if (otherKey) {
-                // Use key from the other region
-                key = otherKey;
-            }
-        }
+        const key = selected ? await this.context.secrets.get(modelSecretKey(selected)) : undefined;
 
         const hasKey = !!(key && key.trim());
 
@@ -313,8 +275,10 @@ export class StatusBarManager {
             enabled,
             running: this.analysisState.running,
             missing,
-            provider,
-            model,
+            modelId: selected?.id ?? '',
+            label: selected?.label ?? '',
+            provider: selected?.provider ?? null,
+            model: selected?.model ?? null,
             hasApiKey: hasKey,
             runningRepoPath: this.analysisState.runningRepoPath,
             runningRepoLabel: this.analysisState.runningRepoLabel
@@ -348,6 +312,7 @@ export class StatusBarManager {
     // ========================================
 
     async updateStatusBar(): Promise<void> {
+        await this.refreshProviderState();
         await this.refreshGitState();
         await this.refreshAnalysisState();
 
@@ -373,17 +338,13 @@ export class StatusBarManager {
     }
 
     private getModelLabel(): string {
-        const { provider, hasApiKey, model } = this.providerState;
+        const { hasApiKey, label, model } = this.providerState;
 
         if (!hasApiKey || !model.trim()) {
             return vscode.l10n.t(I18N.statusBar.selectModel);
         }
 
-        if (provider.toLowerCase() === 'local') {
-            return this.getProviderLabel(provider);
-        }
-
-        return this.shortenModelName(model.trim());
+        return this.shortenModelName(label.trim());
     }
 
     private buildStatusBarTooltip(): string {
@@ -414,13 +375,13 @@ export class StatusBarManager {
     }
 
     private getProviderTooltip(): string {
-        const { provider, model, hasApiKey } = this.providerState;
-        const providerLabel = this.getProviderLabel(provider);
+        const { provider, label, model, hasApiKey } = this.providerState;
+        if (!provider) {
+            return vscode.l10n.t(I18N.statusBar.selectModel);
+        }
+        const providerLabel = `${PROVIDER_LABELS[provider]} · ${label}`;
 
         if (hasApiKey && model.trim()) {
-            if (provider.toLowerCase() === 'local') {
-                return `Git Commit Genie: ${providerLabel}`;
-            }
             return vscode.l10n.t(I18N.statusBar.tooltipConfigured, providerLabel, model);
         }
 
@@ -428,15 +389,12 @@ export class StatusBarManager {
     }
 
     private getAnalysisTooltip(): string {
-        const { provider, model } = this.analysisState;
+        const { provider, label, model } = this.analysisState;
         if (!provider || !model) {
             return '';
         }
 
-        const providerLabel = this.getProviderLabel(provider);
-        if (provider.toLowerCase() === 'local') {
-            return vscode.l10n.t(I18N.statusBar.analysisModel, providerLabel, '').replace(/\s*\/\s*$/, '');
-        }
+        const providerLabel = `${PROVIDER_LABELS[provider]} · ${label}`;
         const modelLabel = this.shortenModelName(model);
 
         return vscode.l10n.t(I18N.statusBar.analysisModel, providerLabel, modelLabel || '');
@@ -451,9 +409,7 @@ export class StatusBarManager {
             return vscode.l10n.t(I18N.repoAnalysis.initGitToEnable);
         }
 
-        const usingGeneral = !this.analysisState.provider ||
-            this.analysisState.provider === this.providerState.provider;
-        const okKey = usingGeneral ? this.providerState.hasApiKey : this.analysisState.hasApiKey;
+        const okKey = this.analysisState.hasApiKey;
         const okModel = !!(this.analysisState.model && this.analysisState.model.trim());
 
         if (!okKey) {
@@ -493,9 +449,7 @@ export class StatusBarManager {
             return AnalysisIcon.NoRepo;
         }
 
-        const usingGeneral = !this.analysisState.provider ||
-            this.analysisState.provider === this.providerState.provider;
-        const okKey = usingGeneral ? this.providerState.hasApiKey : this.analysisState.hasApiKey;
+        const okKey = this.analysisState.hasApiKey;
         const okModel = !!(this.analysisState.model && this.analysisState.model.trim());
 
         if (!okKey || !okModel) {
@@ -545,87 +499,44 @@ export class StatusBarManager {
     // ========================================
 
     private async validateAnalysisModelApiKey(showPrompt: boolean): Promise<void> {
-        try {
-            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-            const selected = (cfg.get<string>('model', 'general') || 'general').trim();
-
-            let provider: string | null = null;
-
-            if (!selected || selected === 'general') {
-                provider = this.providerState.provider;
-            } else {
-                const candidates = getAllProviderKeys();
-                for (const p of candidates) {
-                    const svc = this.serviceRegistry.getLLMService(p);
-                    if (svc?.listSupportedModels().includes(selected)) {
-                        provider = p;
-                        break;
-                    }
-                }
-            }
-
-            if (!provider) {
-                return;
-            }
-
-            const key = await this.context.secrets.get(this.getSecretNameForProvider(provider));
-            if (key && key.trim()) {
-                return;
-            }
-
-            if (!showPrompt) {
-                return;
-            }
-
-            const providerLabel = this.getProviderLabel(provider);
-            const choice = await vscode.window.showWarningMessage(
-                vscode.l10n.t(I18N.repoAnalysis.missingApiKey),
-                vscode.l10n.t(I18N.actions.enterKey),
-                vscode.l10n.t(I18N.actions.manageModels),
-                vscode.l10n.t(I18N.actions.dismiss)
-            );
-
-            if (choice === vscode.l10n.t(I18N.actions.enterKey)) {
-                const newKey = await vscode.window.showInputBox({
-                    title: vscode.l10n.t(I18N.manageModels.enterKeyTitle, providerLabel),
-                    prompt: `${providerLabel} API Key`,
-                    placeHolder: `${providerLabel} API Key`,
-                    password: true,
-                    ignoreFocusOut: true,
-                });
-
-                if (newKey && newKey.trim()) {
-                    await this.serviceRegistry.getLLMService(provider)?.setApiKey(newKey.trim());
-                    await this.refreshProviderState(provider);
-                    await this.refreshAnalysisState();
-                    this.updateStatusBar();
-                }
-            } else if (choice === vscode.l10n.t(I18N.actions.manageModels)) {
-                await vscode.commands.executeCommand('git-commit-genie.manageModels');
-            }
-        } catch {
-            // Ignore validation errors
+        const modelId = this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '');
+        const model = this.serviceRegistry.getModel(modelId);
+        if (!model) {
+            return;
         }
-    }
-
-    // ========================================
-    // Utility Methods
-    // ========================================
-
-    private getSecretNameForProvider(provider: string): string {
-        const normalizedProvider = provider.toLowerCase();
-
-        // For Qwen, get the region-specific secret key
-        // The actual region switching logic is handled in QwenService.refreshFromSettings()
-        if (normalizedProvider === 'qwen') {
-            const region = this.context.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
-            return getProviderSecretKey('qwen', region);
+        const key = await this.context.secrets.get(modelSecretKey(model));
+        if (key?.trim() || !showPrompt) {
+            return;
         }
 
-        return PROVIDER_SECRET_KEYS[normalizedProvider as LLMProvider] || PROVIDER_SECRET_KEYS.openai;
-    } private getProviderLabel(provider: string): string {
-        const normalizedProvider = provider.toLowerCase() as LLMProvider;
-        return PROVIDER_LABELS[normalizedProvider] || PROVIDER_LABELS.openai;
+        const providerLabel = PROVIDER_LABELS[model.provider];
+        const choice = await vscode.window.showWarningMessage(
+            vscode.l10n.t(I18N.repoAnalysis.missingApiKey),
+            vscode.l10n.t(I18N.actions.enterKey),
+            vscode.l10n.t(I18N.actions.manageModels),
+            vscode.l10n.t(I18N.actions.dismiss)
+        );
+
+        if (choice === vscode.l10n.t(I18N.actions.enterKey)) {
+            const newKey = await vscode.window.showInputBox({
+                title: vscode.l10n.t(I18N.manageModels.enterKeyTitle, providerLabel),
+                prompt: `${providerLabel} API Key`,
+                placeHolder: `${providerLabel} API Key`,
+                password: true,
+                ignoreFocusOut: true,
+            });
+
+            if (newKey?.trim()) {
+                const service = this.serviceRegistry.getLLMService(model.id);
+                if (!service) {
+                    throw new Error(`AI model service '${model.id}' is not configured.`);
+                }
+                await service.setApiKey(newKey.trim());
+                await this.updateStatusBar();
+            }
+        } else if (choice === vscode.l10n.t(I18N.actions.manageModels)) {
+            await vscode.commands.executeCommand('git-commit-genie.manageModels');
+        }
     }
 
     private shortenModelName(modelName: string): string {

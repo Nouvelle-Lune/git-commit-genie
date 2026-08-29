@@ -1,20 +1,16 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import { z } from 'zod';
 import { DiffData } from '../git/gitTypes';
 import { TemplateService } from '../../template/templateService';
 import { IRepositoryAnalysisService } from '../analysis/repository/repositoryAnalysisTypes';
 import { Repository } from '../git/git';
 import { RepoService } from '../repo/repo';
 import { ProviderError } from './providers/errors/providerError';
-import { logger } from '../logger';
-import { safeRun } from '../../utils/safeRun';
 import {
     LLMService,
     LLMResponse,
     LLMError,
-    GenerateCommitMessageOptions,
-    ChatMessage
+    GenerateCommitMessageOptions
 } from './llmTypes';
 
 /**
@@ -40,18 +36,6 @@ export abstract class BaseLLMService implements LLMService {
     abstract setApiKey(apiKey: string): Promise<void>;
     abstract clearApiKey(): Promise<void>;
     abstract generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError>;
-
-    /**
-     * Get the LLM client instance for raw chat operations
-     * @returns Client instance or null if not initialized
-     */
-    public abstract getClient(): unknown | null;
-
-    /**
-     * Get the provider utils instance for chat operations
-     * @returns Utils instance with callChatCompletion method
-     */
-    public abstract getUtils(): unknown;
 
     /**
      * Get the provider name for error messages
@@ -101,171 +85,6 @@ export abstract class BaseLLMService implements LLMService {
             message: error?.message || `An unknown error occurred with the ${this.getProviderName()} API.`,
             statusCode: error?.status || error?.statusCode || 500
         };
-    }
-
-    /**
-     * Build retry messages when schema validation fails
-     * This method creates a conversation continuation with error feedback
-     * 
-     * @param originalMessages Original conversation messages
-     * @param lastResponse The failed response from the LLM
-     * @param validationError The Zod validation error
-     * @param schema The Zod schema that failed validation
-     * @param requestType Optional request type for logging context
-     * @returns Updated messages array with error feedback
-     */
-    protected buildSchemaValidationRetryMessages(
-        originalMessages: ChatMessage[],
-        lastResponse: { parsedAssistantResponse?: ChatMessage; parsedResponse?: any },
-        validationError: z.ZodError,
-        schema: z.ZodSchema,
-        requestType?: string
-    ): ChatMessage[] {
-        const jsonSchemaString = JSON.stringify(z.toJSONSchema(schema), null, 2);
-
-        return [
-            ...originalMessages,
-            lastResponse.parsedAssistantResponse || {
-                role: 'assistant',
-                content: lastResponse.parsedResponse ? JSON.stringify(lastResponse.parsedResponse) : ''
-            },
-            {
-                role: 'user',
-                content: `The previous response did not conform to the required format, the zod error is ${validationError}. Please try again and ensure the response matches the specified JSON format: ${jsonSchemaString}.`
-            }
-        ];
-    }
-
-    /**
-     * Build a clean retry turn when the provider returned no final structured
-     * content. An empty assistant message is intentionally excluded because it
-     * does not give the model a response to repair and some chat-compatible
-     * providers reject empty assistant content on the next request.
-     */
-    protected buildMissingStructuredResponseRetryMessages(
-        originalMessages: ChatMessage[],
-        schema: z.ZodSchema
-    ): ChatMessage[] {
-        const jsonSchemaString = JSON.stringify(z.toJSONSchema(schema), null, 2);
-        return [
-            ...originalMessages,
-            {
-                role: 'user',
-                content: `The previous response contained no final JSON object. Return exactly one complete JSON object matching this schema: ${jsonSchemaString}. Do not include markdown or explanation.`
-            }
-        ];
-    }
-
-    /**
-     * Log schema validation retry warning
-     * 
-     * @param requestType The type of request being retried
-     * @param attempt Current attempt number (0-indexed)
-     * @param totalAttempts Total number of attempts allowed
-     */
-    protected logSchemaValidationRetry(requestType: string, attempt: number, totalAttempts: number): void {
-        logger.warn(`[Genie][${this.getProviderName()}] Schema validation failed for ${requestType} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
-    }
-
-    /**
-     * Run a single chain step with retry-on-validation-failure semantics.
-     *
-     * The provider supplies a `callOnce` adapter that performs one provider-specific
-     * LLM call and returns the parsed response. This base method handles:
-     *   - looping up to `totalAttempts` times
-     *   - delegating usage telemetry via `onUsage`
-     *   - validating the parsed response against `validationSchema` if provided
-     *   - rebuilding messages with retry feedback when validation fails
-     *   - logging schema-validation retries and final failures via the logger
-     *
-     * Returns the validated data when validation succeeds, the raw parsed response
-     * when no schema is provided, or throws after the final retry attempt.
-     */
-    protected async runValidatedChatCall(params: {
-        reqType: string | undefined;
-        totalAttempts: number;
-        initialMessages: ChatMessage[];
-        repoPath: string;
-        validationSchema: z.ZodTypeAny | undefined;
-        callOnce: (messages: ChatMessage[]) => Promise<{ parsedResponse?: any; parsedAssistantResponse?: ChatMessage; usage?: any }>;
-        onUsage?: (usage: any | undefined) => void;
-    }): Promise<any> {
-        const { reqType, totalAttempts, repoPath, validationSchema, callOnce, onUsage } = params;
-        let messages = params.initialMessages;
-        const providerName = this.getProviderName();
-
-        for (let attempt = 0; attempt < totalAttempts; attempt++) {
-            const result = await callOnce(messages);
-            onUsage?.(result.usage);
-
-            if (!validationSchema) {
-                return result.parsedResponse;
-            }
-
-            if (result.parsedResponse === undefined) {
-                const retryPayload = {
-                    stage: reqType,
-                    attempt: attempt + 1,
-                    totalAttempts,
-                    missingResponse: true,
-                    finalFailure: attempt === totalAttempts - 1,
-                };
-                if (attempt < totalAttempts - 1) {
-                    logger.warn(`[Genie][${providerName}] Provider returned no structured output for ${reqType || 'unknown'} (attempt ${attempt + 1}/${totalAttempts}). Retrying...`);
-                    safeRun(`${providerName}.logStructuredOutputRetry`, () => logger.logToolCall(
-                        'schemaValidation',
-                        JSON.stringify(retryPayload),
-                        'Structured output missing',
-                        repoPath,
-                    ));
-                    messages = this.buildMissingStructuredResponseRetryMessages(messages, validationSchema);
-                    continue;
-                }
-
-                safeRun(`${providerName}.logStructuredOutputFinal`, () => logger.logToolCall(
-                    'schemaValidation',
-                    JSON.stringify(retryPayload),
-                    'Structured output missing',
-                    repoPath,
-                ));
-                throw new Error(`${providerName} returned no structured output for ${reqType ?? 'unknown'} after ${totalAttempts} attempts`);
-            }
-
-            const safe = validationSchema.safeParse(result.parsedResponse);
-            if (safe.success) {
-                return safe.data;
-            }
-
-            if (attempt < totalAttempts - 1) {
-                this.logSchemaValidationRetry(reqType || 'unknown', attempt, totalAttempts);
-                safeRun(`${providerName}.logSchemaValidationRetry`, () => logger.logToolCall(
-                    'schemaValidation',
-                    JSON.stringify({ stage: reqType, attempt: attempt + 1, totalAttempts, error: String(safe.error) }),
-                    'Schema validation failed',
-                    repoPath,
-                ));
-                messages = this.buildSchemaValidationRetryMessages(
-                    messages,
-                    result,
-                    safe.error,
-                    validationSchema,
-                    reqType,
-                );
-                continue;
-            }
-
-            safeRun(`${providerName}.logSchemaValidationFinal`, () => logger.logToolCall(
-                'schemaValidation',
-                JSON.stringify({ stage: reqType, finalFailure: true, error: String(safe.error) }),
-                'Schema validation failed',
-                repoPath,
-            ));
-            throw new Error(`${providerName} structured result failed local validation for ${reqType ?? 'unknown'} after ${totalAttempts} attempts`);
-        }
-
-        // Should be unreachable: the loop above either returns or throws on the
-        // final attempt. Throw a clear error here to fail loudly if reached.
-        throw new Error(`${providerName} runValidatedChatCall exited loop unexpectedly`);
     }
 
     protected getRepositoryPath(repo?: Repository | null): string | null {

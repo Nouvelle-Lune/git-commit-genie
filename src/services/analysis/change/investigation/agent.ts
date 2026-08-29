@@ -207,10 +207,11 @@ export async function runChangeAnalysisAgent(params: ChangeAnalysisAgentParams):
     // Repeated identical calls indicate the agent is stuck rather than
     // converging; the loop stops instead of burning the remaining budget.
     const seenCalls = new Set<string>();
+    const sessionId = `change-investigation:${repositoryPath}:${Date.now()}`;
 
     while (steps < maxSteps) {
         messages = trimConversation(messages, maxInputTokens);
-        const action = await chat(messages, { requestType: 'investigationAction' }) as InvestigationAction;
+        const action = await chat(messages, { requestType: 'investigationAction', sessionId }) as InvestigationAction;
 
         if (action.action === 'final') {
             if (!action.final) {

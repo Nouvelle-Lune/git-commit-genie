@@ -34,18 +34,6 @@ export const L10N_KEYS = {
     currentLabel: 'Current',
     useDefaultModel: 'Use default model',
     useDefaultModelDesc: 'Follow the general commit message model',
-    qwenRegionSelect: 'Select Qwen API Region',
-    qwenRegionIntl: 'International',
-    qwenRegionIntlDesc: 'For international API keys',
-    qwenRegionChina: 'China',
-    qwenRegionChinaDesc: 'For mainland China API keys',
-    localBaseUrlTitle: 'Configure Local Provider Base URL',
-    localBaseUrlPrompt: 'Enter the base URL for your local LLM provider',
-    localBaseUrlPlaceholder: 'http://localhost:1234/v1',
-    localBaseUrlSaved: 'Local provider base URL saved.',
-    localBaseUrlMustBeHttp: 'URL must start with http:// or https://',
-    localBaseUrlMustEndWithV1: 'URL path must end with /v1',
-    localBaseUrlInvalid: 'Invalid URL format'
   },
   chain: {
     toggled: 'Chain prompting {0}.',

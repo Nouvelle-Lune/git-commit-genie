@@ -2,15 +2,16 @@
  * Types for StatusBarManager
  */
 
-import { PROVIDER_CONFIGS, ProviderKey } from '../services/llm/providers/config/ProviderConfig';
+import { PROVIDER_LABELS as AI_PROVIDER_LABELS, ProviderKind } from '../services/llm/providers';
 
 /**
  * Provider configuration state
  * Represents the current LLM provider and model selection for commit message generation
  */
 export interface ProviderState {
-    /** The current provider (e.g., 'openai', 'deepseek', 'anthropic', 'gemini', 'qwen') */
-    provider: string;
+    modelId: string;
+    label: string;
+    provider: ProviderKind | null;
     /** The selected model name */
     model: string;
     /** Whether the API key for this provider is configured */
@@ -29,7 +30,9 @@ export interface AnalysisState {
     /** Whether analysis markdown file is missing */
     missing: boolean;
     /** The provider used for analysis (may differ from generation provider) */
-    provider: string | null;
+    modelId: string;
+    label: string;
+    provider: ProviderKind | null;
     /** The model used for analysis (may differ from generation model) */
     model: string | null;
     /** Whether the API key for analysis provider is configured */
@@ -74,18 +77,13 @@ export enum AnalysisIcon {
 /**
  * LLM Provider types supported by the extension
  */
-export type LLMProvider = ProviderKey;
+export type LLMProvider = ProviderKind;
 
 /**
  * Provider display labels
  */
-export const PROVIDER_LABELS: Record<LLMProvider, string> = Object.fromEntries(
-    Object.entries(PROVIDER_CONFIGS).map(([key, config]) => [key, config.label])
-) as Record<LLMProvider, string>;
+export const PROVIDER_LABELS: Record<LLMProvider, string> = { ...AI_PROVIDER_LABELS };
 
 /**
  * Secret storage keys for each provider
  */
-export const PROVIDER_SECRET_KEYS: Record<LLMProvider, string> = Object.fromEntries(
-    Object.entries(PROVIDER_CONFIGS).map(([key, config]) => [key, config.secretKey])
-) as Record<LLMProvider, string>;

@@ -109,3 +109,7 @@ __pycache__/
 ./sft/
 
 test/
+!src/test/
+src/test/*
+!src/test/ai/
+!src/test/ai/*.test.ts

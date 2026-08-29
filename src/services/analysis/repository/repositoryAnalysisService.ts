@@ -15,14 +15,15 @@ import {
 } from './repositoryAnalysisTypes';
 
 import { LLMService, LLMError, ChatMessage } from '../../llm/llmTypes';
-import { z } from 'zod';
 import { RepoService } from '../../repo/repo';
 import { logger } from '../../logger';
 import { L10N_KEYS as I18N } from '../../../i18n/keys';
-import { getProviderLabel, getProviderModelStateKey, getAllProviderKeys } from '../../llm/providers/config/ProviderConfig';
-import { AnthropicRepoAnalysisActionTool, AnthropicCompressionTool } from '../../llm/providers/schemas/anthropicSchemas';
-import { GeminiRepoAnalysisFunctionDeclarations } from '../../llm/providers/schemas/geminiFunctions';
-import { repoAnalysisActionSchema, compressionResponseSchema } from '../../llm/providers/schemas/common';
+import {
+    AI_MODELS_KEY,
+    REPOSITORY_ANALYSIS_MODEL_ID_KEY,
+    AIModelConfig,
+    PROVIDER_LABELS,
+} from '../../llm/providers';
 
 // Tools
 import { listDirectory } from '../tools/directory';
@@ -75,8 +76,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private static readonly ANALYSIS_MD_FILE_NAME = 'repository-analysis.md';
     private static readonly ANALYSIS_STATE_KEY_PREFIX = 'gitCommitGenie.analysis.';
 
-    private llmService: LLMService | null;
-    private resolveLLMService?: (provider: string) => (LLMService | undefined);
+    private resolveLLMService?: (modelId: string) => (LLMService | undefined);
 
     private repoService: RepoService;
     private context: vscode.ExtensionContext;
@@ -96,9 +96,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private readonly _onAnalysisChanged = new vscode.EventEmitter<string>();
     public readonly onAnalysisChanged = this._onAnalysisChanged.event;
 
-    constructor(context: vscode.ExtensionContext, llmService: LLMService | null, repoService: RepoService) {
+    constructor(context: vscode.ExtensionContext, repoService: RepoService) {
         this.context = context;
-        this.llmService = llmService;
         this.repoService = repoService;
     }
 
@@ -112,20 +111,11 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     }
 
     /**
-     * Sets the LLM service instance for repository analysis
+     * Sets a resolver function to dynamically obtain LLM services by model id.
      * 
-     * @param service The LLM service instance to use for analysis
+     * @param resolver Function that resolves model ids to LLM service instances.
      */
-    public setLLMService(service: LLMService) {
-        this.llmService = service;
-    }
-
-    /**
-     * Sets a resolver function to dynamically obtain LLM services by provider name
-     * 
-     * @param resolver Function that resolves provider names to LLM service instances
-     */
-    public setLLMResolver(resolver: (provider: string) => (LLMService | undefined)) {
+    public setLLMResolver(resolver: (modelId: string) => (LLMService | undefined)) {
         this.resolveLLMService = resolver;
     }
 
@@ -662,19 +652,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
         // Track usage for all tool calls
         const usages: Array<{ prompt_tokens?: number; completion_tokens?: number; total_tokens?: number }> = [];
-        // Track OpenAI Responses API previous_response_id to chain state
-        let previousResponseId: string | undefined;
-        // Track OpenAI function calling pending tool output
-        let openaiPendingCallId: string | undefined;
-        let openaiPendingToolOutput: string | undefined;
         const { provider } = this.pickRepoAnalysisService();
         const model = this.getActiveModelForProvider(provider) || '';
-        const normalizedProvider = (provider || '').toLowerCase();
-
-        // For Qwen models, track region for usage logging
-        const qwenRegion = normalizedProvider === 'qwen'
-            ? (this.context.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl') as 'china' | 'intl')
-            : undefined;
+        const sessionId = `repository-analysis:${repoPath}`;
 
 
         // Limit total thinking/acting steps to prevent runaway loops
@@ -723,11 +703,11 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                             for (const u of compressResult.usage) {
                                 tryIdx += 1;
                                 usages.push(u);
-                                logger.usage(repoPath, provider, u, model, `compression-step-${step + 1}-try-${tryIdx}` as any, step + 1, qwenRegion);
+                                logger.usage(repoPath, provider, u, model, `compression-step-${step + 1}-try-${tryIdx}` as any, step + 1);
                             }
                         } else {
                             usages.push(compressResult.usage);
-                            logger.usage(repoPath, provider, compressResult.usage, model, `compression-step-${step + 1}`, step + 1, qwenRegion);
+                            logger.usage(repoPath, provider, compressResult.usage, model, `compression-step-${step + 1}`, step + 1);
                         }
                     }
 
@@ -749,17 +729,10 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 }
             }
 
-            const toolOutputToSend = openaiPendingCallId && openaiPendingToolOutput ? { call_id: openaiPendingCallId, output: openaiPendingToolOutput } : undefined;
-            const isFirstRequest = step === 0; // Mark first iteration as first request
-            const result = await this.safeJsonCall(msgs, repoPath, previousResponseId, toolOutputToSend, isFirstRequest);
+            const result = await this.safeJsonCall(msgs, repoPath, sessionId);
             if (!result) { return null; }
 
             const action = result.action;
-
-            // For OpenAI Responses API, remember response id to improve multi-turn fidelity
-            if ((result as any).responseId) {
-                previousResponseId = (result as any).responseId;
-            }
 
             // Track usage
             if (result.usage) {
@@ -768,16 +741,13 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                     for (const u of result.usage) {
                         tryIdx += 1;
                         usages.push(u);
-                        logger.usage(repoPath, provider, u, model, `tool-step-${step + 1}-try-${tryIdx}`, step + 1, qwenRegion);
+                        logger.usage(repoPath, provider, u, model, `tool-step-${step + 1}-try-${tryIdx}`, step + 1);
                     }
                 } else {
                     usages.push(result.usage);
-                    logger.usage(repoPath, provider, result.usage, model, `tool-step-${step + 1}`, step + 1, qwenRegion);
+                    logger.usage(repoPath, provider, result.usage, model, `tool-step-${step + 1}`, step + 1);
                 }
             }
-
-            // Clear sent tool output after successful call
-            if (toolOutputToSend) { openaiPendingCallId = undefined; openaiPendingToolOutput = undefined; }
 
             if (action.action === 'final') {
                 logger.info('[Genie][RepoAnalysis] Model produced final analysis.');
@@ -787,7 +757,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
                     // Log usage summary
                     if (usages.length) {
-                        logger.usageSummary(repoPath, provider, usages, model, 'RepoAnalysis', undefined, false, qwenRegion);
+                        logger.usageSummary(repoPath, provider, usages, model, 'RepoAnalysis', undefined, false);
                     }
 
                     return {
@@ -799,7 +769,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 }
                 // invalid final -> nudge model to return required fields instead of aborting
                 logger.warn('[Genie][RepoAnalysis] Final action missing required fields; requesting correction.');
-                msgs.push({ role: 'assistant', content: JSON.stringify(action) });
                 msgs.push({ role: 'user', content: 'The final object is missing required fields. Please return strictly valid JSON with fields: { "final": { "summary": string, "projectType": string, "technologies": string[], "insights": string[] } } and no extra text.' });
                 continue;
             }
@@ -814,18 +783,8 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 const toolResult = await this.runTool(repoPath, toolName, args, userExcludes);
                 this.logToolOutcome(toolName, toolResult);
 
-                // Build compact representations to minimize token usage
-                const { compactJson, compactText } = compactToolResultForConversation(repoPath, toolName, toolResult);
-
-                // For OpenAI function calling, queue function_call_output with compact JSON
-                if (provider.toLowerCase() === 'openai' && (result as any).functionCallId) {
-                    openaiPendingCallId = String((result as any).functionCallId || '');
-                    openaiPendingToolOutput = compactText;
-                } else {
-                    // Other providers: send a concise action echo and compact text output
-                    msgs.push({ role: 'assistant', content: JSON.stringify(action) });
-                    msgs.push({ role: 'user', content: compactText });
-                }
+                const { compactText } = compactToolResultForConversation(repoPath, toolName, toolResult);
+                msgs.push({ role: 'user', content: compactText });
                 continue;
             }
 
@@ -835,7 +794,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
 
         // Log usage summary even if we didn't get final result
         if (usages.length) {
-            logger.usageSummary(repoPath, provider, usages, model, 'RepoAnalysis', undefined, false, qwenRegion);
+            logger.usageSummary(repoPath, provider, usages, model, 'RepoAnalysis', undefined, false);
         }
 
 
@@ -847,153 +806,19 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * Ensures temperature and token limits come from settings.
      * Returns both the parsed action and usage statistics.
      */
-    private async safeJsonCall(history: ChatMessage[], repoPath: string, previousResponseId?: string, openaiToolOutput?: { call_id: string; output: string }, isFirstRequest: boolean = false): Promise<{ action: any; usage?: any; responseId?: string; functionCallId?: string } | null> {
+    private async safeJsonCall(history: ChatMessage[], repoPath: string, sessionId: string): Promise<{ action: any; usage?: any } | null> {
         try {
             const { provider, service } = this.pickRepoAnalysisService();
             if (!service) {
                 throw Object.assign(new Error(`${provider} service is not available`), { statusCode: 400 });
             }
 
-            const model = this.getActiveModelForProvider(provider) || '';
-
-            const client = (service as any).getClient();
-            const utils = (service as any).getUtils();
-
-            if (!client) {
-                throw Object.assign(new Error(`${provider} client is not initialized`), { statusCode: 401 });
+            if (!service.createChat) {
+                throw new Error(`${provider} service does not implement the unified chat API.`);
             }
-
-            // Local mutable copy of messages to allow validation retry guidance
-            let messages: ChatMessage[] = [...history];
-
-            // For OpenAI Responses API
-            let currentResponseId = previousResponseId;
-
-            const validationSchema = repoAnalysisActionSchema;
-            const maxRetries = typeof utils?.getMaxRetries === 'function' ? utils.getMaxRetries() : 2;
-            const totalAttempts = Math.max(1, maxRetries + 1);
-
-            // Track cumulative usage across attempts
-            const attemptUsages: any[] = [];
-
-            for (let attempt = 0; attempt < totalAttempts; attempt++) {
-                // Build provider-specific call options per attempt to include chaining/tool outputs
-                let callOptions: any = {
-                    model,
-                    provider,
-                    token: this.activeCancelSources.get(repoPath)?.token,
-                    trackUsage: true,
-                    isFirstRequest: isFirstRequest && attempt === 0 // Only mark first attempt of first call as first request
-                };
-
-                switch (provider.toLowerCase()) {
-                    case 'openai': {
-                        callOptions.requestType = 'repoAnalysisAction';
-                        if (currentResponseId) {
-                            callOptions.previousResponseId = currentResponseId;
-                            callOptions.store = true;
-                        }
-                        break;
-                    }
-                    case 'anthropic': {
-                        callOptions.tools = [AnthropicRepoAnalysisActionTool];
-                        callOptions.toolChoice = { type: 'tool', name: AnthropicRepoAnalysisActionTool.name };
-                        break;
-                    }
-                    case 'gemini': {
-                        callOptions.requestType = 'repoAnalysisAction';
-                        callOptions.functionDeclarations = [...GeminiRepoAnalysisFunctionDeclarations];
-                        break;
-                    }
-                    case 'qwen':
-                    case 'deepseek':
-                    case 'glm':
-                    case 'kimi':
-                    case 'openrouter': {
-                        callOptions.requestType = 'repoAnalysisAction';
-                        break;
-                    }
-                    default: {
-                        callOptions.requestType = 'repoAnalysisAction';
-                        break;
-                    }
-                }
-
-                if (provider.toLowerCase() === 'openai' && openaiToolOutput) {
-                    callOptions.toolOutputs = [openaiToolOutput];
-                }
-
-                let result: any;
-                try {
-                    result = await utils.callChatCompletion(client, messages, { ...callOptions, repoPath: repoPath });
-                } catch (e: any) {
-                    const em = String(e?.message || '').toLowerCase();
-                    const looksLikeJsonParseErr = em.includes('json') || em.includes('parse') || em.includes('unexpected token') || em.includes('after json');
-                    if (looksLikeJsonParseErr && attempt < totalAttempts - 1) {
-                        // Nudge the model to return strict JSON matching the schema
-                        const jsonSchemaString = JSON.stringify(z.toJSONSchema(validationSchema), null, 2);
-                        try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'repoAnalysisAction', attempt: attempt + 1, totalAttempts, error: String(e?.message || e) }), 'Schema validation failed (JSON parse)', repoPath); } catch { /* ignore */ }
-                        messages = [
-                            ...messages,
-                            {
-                                role: 'user',
-                                content: `Your previous response was not valid JSON. Respond with STRICT JSON only matching this schema: ${jsonSchemaString}. Do not include any markdown or explanation.`
-                            }
-                        ];
-                        continue;
-                    }
-                    throw e;
-                }
-
-                // Track response id for OpenAI Responses chaining on next attempt
-                currentResponseId = (result as any).responseId || currentResponseId;
-                // Collect usage for this attempt if present
-                if (Array.isArray(result?.usage)) {
-                    for (const u of result.usage) { attemptUsages.push(u); }
-                } else if (result?.usage) {
-                    attemptUsages.push(result.usage);
-                }
-
-                // Validate structured action with zod
-                const safe = validationSchema.safeParse(result.parsedResponse);
-                if (safe.success) {
-                    return {
-                        action: safe.data,
-                        usage: attemptUsages,
-                        responseId: (result as any).responseId,
-                        functionCallId: (result as any).functionCallId
-                    };
-                }
-
-                // If not valid and attempts remain, append feedback and retry
-                if (attempt < totalAttempts - 1) {
-                    try {
-                        const jsonSchemaString = JSON.stringify(z.toJSONSchema(validationSchema), null, 2);
-                        const assistantEcho: ChatMessage = (result as any).parsedAssistantResponse || {
-                            role: 'assistant',
-                            content: result.parsedResponse ? JSON.stringify(result.parsedResponse) : ''
-                        };
-                        try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'repoAnalysisAction', attempt: attempt + 1, totalAttempts, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
-                        messages = [
-                            ...messages,
-                            assistantEcho,
-                            {
-                                role: 'user',
-                                content: `The previous response did not conform to the required format, the zod error is ${safe.error}. Please try again and ensure the response matches the specified JSON format: ${jsonSchemaString}.`
-                            }
-                        ];
-                        continue;
-                    } catch {
-                        // If building feedback fails, fall through and throw
-                    }
-                }
-
-                try { logger.logToolCall('schemaValidation', JSON.stringify({ stage: 'repoAnalysisAction', finalFailure: true, error: String(safe.error) }), 'Schema validation failed', repoPath); } catch { /* ignore */ }
-                throw new Error(`${provider} structured result failed local validation for repoAnalysisAction after ${totalAttempts} attempts`);
-            }
-
-            // Should be unreachable
-            throw new Error('Validation loop terminated unexpectedly');
+            const chat = service.createChat(repoPath, { token: this.activeCancelSources.get(repoPath)?.token });
+            const action = await chat(history, { requestType: 'repoAnalysisAction', sessionId });
+            return { action };
         } catch (err: any) {
             const provider = this.pickRepoAnalysisService().provider;
             if (err?.statusCode) {
@@ -1069,34 +894,15 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                             throw new Error(`${provider} service is not available`);
                         }
 
-                        const model = this.getActiveModelForProvider(provider) || '';
-                        const client = (service as any).getClient();
-                        const utils = (service as any).getUtils();
-
-                        if (!client) {
-                            throw new Error(`${provider} client is not initialized`);
+                        if (!service.createChat) {
+                            throw new Error(`${provider} service does not implement the unified chat API.`);
                         }
-
-                        const callOpts: any = {
-                            model,
-                            provider,
-                            token: this.activeCancelSources.get(repoPath)?.token,
-                            trackUsage: true,
-                            requestType: 'compression'
-                        };
-                        if (provider.toLowerCase() === 'gemini') {
-                            callOpts.responseSchema = compressionResponseSchema;
-                        } else if (provider.toLowerCase() === 'anthropic') {
-                            callOpts.tools = [AnthropicCompressionTool];
-                            callOpts.toolChoice = { type: 'tool', name: AnthropicCompressionTool.name };
-                        }
-                        const result = await utils.callChatCompletion(client, messages, callOpts);
-                        return result;
+                        const chat = service.createChat(repoPath, { token: this.activeCancelSources.get(repoPath)?.token });
+                        const parsedResponse = await chat(messages, { requestType: 'compression' });
+                        return { parsedResponse };
                     };
 
-                    const maxRetries = typeof (this.pickRepoAnalysisService().service as any)?.getUtils?.()?.getMaxRetries === 'function'
-                        ? (this.pickRepoAnalysisService().service as any).getUtils().getMaxRetries()
-                        : 2;
+                    const maxRetries = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.maxRetries', 2);
                     const compressionResult = await compressContext(content, chatFn, { targetTokens, preserveStructure, language, maxRetries });
 
                     return compressionResult;
@@ -1173,28 +979,13 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * @returns Object containing the provider name and service instance
      */
     private pickRepoAnalysisService(): { provider: string, service: LLMService | null } {
-        try {
-            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-            const selectedModel = (cfg.get<string>('model', 'general') || 'general').trim();
-            if (!selectedModel || selectedModel === 'general') {
-                const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
-                return { provider: p, service: this.llmService };
-            }
-            const candidates = getAllProviderKeys();
-            for (const p of candidates) {
-                const svc = this.resolveLLMService?.(p);
-                try {
-                    if (svc && svc.listSupportedModels().includes(selectedModel)) {
-                        return { provider: p, service: svc };
-                    }
-                } catch { /* ignore */ }
-            }
-            const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
-            return { provider: p, service: this.llmService };
-        } catch {
-            const p = (this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai').toLowerCase();
-            return { provider: p, service: this.llmService };
+        const modelId = this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '');
+        const model = this.getConfiguredModel(modelId);
+        const service = this.resolveLLMService?.(model.id);
+        if (!service) {
+            throw new Error(`Repository analysis model '${model.label}' has no service.`);
         }
+        return { provider: model.provider, service };
     }
 
     /**
@@ -1207,22 +998,33 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * @returns The model identifier or undefined if not found
      */
     private getActiveModelForProvider(provider: string): string | undefined {
-        try {
-            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-            const selected = (cfg.get<string>('model', 'general') || 'general').trim();
-            if (selected && selected !== 'general') {
-                const svc = this.resolveLLMService?.(provider) || this.llmService;
-                try {
-                    if (svc?.listSupportedModels().includes(selected)) {
-                        return selected;
-                    }
-                } catch {
-                    // Ignore and fallback to provider's configured model below.
-                }
-            }
-            const modelKey = getProviderModelStateKey(provider);
-            return this.context.globalState.get<string>(modelKey, '');
-        } catch { return undefined; }
+        const modelId = this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '');
+        const model = this.getConfiguredModel(modelId);
+        if (model.provider !== provider) {
+            throw new Error(`Repository analysis provider '${provider}' does not match '${model.provider}'.`);
+        }
+        return model.model;
+    }
+
+    private getProviderDisplayLabel(provider: string): string {
+        const modelId = this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '');
+        const model = this.getConfiguredModel(modelId);
+        if (model.provider !== provider) {
+            throw new Error(`Repository analysis provider '${provider}' does not match '${model.provider}'.`);
+        }
+        return `${PROVIDER_LABELS[model.provider]} · ${model.label}`;
+    }
+
+    private getConfiguredModel(modelId: string): AIModelConfig {
+        const models = this.context.globalState.get<AIModelConfig[]>(AI_MODELS_KEY, []);
+        if (!Array.isArray(models)) {
+            throw new Error('AI model configuration is not an array.');
+        }
+        const model = models.find(candidate => candidate.id === modelId);
+        if (!model) {
+            throw new Error(`Repository analysis model '${modelId}' is not configured.`);
+        }
+        return model;
     }
 
     /**
@@ -1246,7 +1048,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     ): Promise<null> {
         if (err?.statusCode === 401) {
             this.setupApiKeyWatcher(repositoryPath, provider);
-            const providerLabel = getProviderLabel(provider);
+            const providerLabel = this.getProviderDisplayLabel(provider);
             this.promptReplaceKeyOrManage(provider, providerLabel).catch(() => { });
             return null;
         }
@@ -1261,7 +1063,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         }
         if (err?.statusCode === 403) {
             try {
-                const providerLabel = getProviderLabel(provider);
+                const providerLabel = this.getProviderDisplayLabel(provider);
                 const choice = await vscode.window.showWarningMessage(
                     `${providerLabel} access denied. Check your API key permissions or plan.`,
                     vscode.l10n.t(I18N.actions.manageModels),
@@ -1279,7 +1081,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
                 await vscode.window.showWarningMessage(
                     vscode.l10n.t(
                         I18N.rateLimit.hit,
-                        getProviderLabel(provider),
+                        this.getProviderDisplayLabel(provider),
                         model || 'model',
                         vscode.l10n.t(I18N.settings.chainMaxParallelLabel)
                     ),

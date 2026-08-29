@@ -1,21 +1,19 @@
 import * as vscode from 'vscode';
+import {
+    AI_MODELS_KEY,
+    GENERATION_MODEL_ID_KEY,
+    AIModelConfig,
+    modelSecretKey,
+} from '../services/llm/providers';
 import { DiffService } from '../services/git/diff';
-import { OpenAIService } from '../services/llm/providers/openai';
-import { DeepSeekService } from '../services/llm/providers/deepseek';
-import { AnthropicService, ANTHROPIC_DATED_TO_UNDATED_MAP } from '../services/llm/providers/anthropic';
-import { GeminiService } from '../services/llm/providers/gemini';
-import { QwenService } from '../services/llm/providers/qwen';
-import { GLMService } from '../services/llm/providers/glm';
-import { KimiService } from '../services/llm/providers/kimi';
-import { OpenRouterService } from '../services/llm/providers/openrouter';
-import { LocalService } from '../services/llm/providers/local';
 import { TemplateService } from '../template/templateService';
 import { RepositoryAnalysisService } from '../services/analysis/repository/repositoryAnalysisService';
 import { LLMService } from '../services/llm/llmTypes';
-import { RepoService } from "../services/repo/repo";
-import { CostTrackingService } from "../services/cost/costTrackingService";
+import { UnifiedLLMService } from '../services/llm/unifiedLLMService';
+import { migrateAIConfiguration } from '../services/llm/configMigration';
+import { RepoService } from '../services/repo/repo';
+import { CostTrackingService } from '../services/cost/costTrackingService';
 import { logger } from '../services/logger';
-import { getProviderModelStateKey, getProviderFromSecretKey, QWEN_REGIONS } from '../services/llm/providers/config/ProviderConfig';
 import { RagRuntimeService } from '../services/rag/ragRuntimeService';
 import { RagHistoricalIndexService } from '../services/rag/ragHistoricalIndexService';
 import { RagRetrievalService } from '../services/rag/ragRetrievalService';
@@ -24,300 +22,140 @@ export class ServiceRegistry {
     private diffService!: DiffService;
     private templateService!: TemplateService;
     private analysisService!: RepositoryAnalysisService;
-    private openAIService!: OpenAIService;
-    private deepseekService!: DeepSeekService;
-    private anthropicService!: AnthropicService;
-    private geminiService!: GeminiService;
-    private qwenService!: QwenService;
-    private glmService!: GLMService;
-    private kimiService!: KimiService;
-    private openrouterService!: OpenRouterService;
-    private localService!: LocalService;
-    private llmServices: Map<string, LLMService>;
-    private currentLLMService!: LLMService;
+    private readonly llmServices = new Map<string, UnifiedLLMService>();
+    private currentLLMService?: UnifiedLLMService;
     private repoService!: RepoService;
     private costTrackingService!: CostTrackingService;
     private ragRuntimeService!: RagRuntimeService;
     private ragHistoricalIndexService!: RagHistoricalIndexService;
     private ragRetrievalService!: RagRetrievalService;
 
-    constructor(private context: vscode.ExtensionContext) {
-        this.llmServices = new Map();
-    }
+    constructor(private readonly context: vscode.ExtensionContext) {}
 
     async initialize(): Promise<void> {
-        try {
-            logger.info('Initializing services...');
+        logger.info('Initializing services...');
+        await migrateAIConfiguration(this.context);
 
-            // Initialize basic services
-            this.repoService = new RepoService();
-            this.diffService = new DiffService(this.repoService);
-            this.templateService = new TemplateService(this.context);
-            this.costTrackingService = new CostTrackingService(this.context);
-            this.ragRuntimeService = new RagRuntimeService(this.context, this.repoService);
-            this.ragHistoricalIndexService = new RagHistoricalIndexService(
-                this.repoService,
-                this.ragRuntimeService,
+        this.repoService = new RepoService();
+        this.diffService = new DiffService(this.repoService);
+        this.templateService = new TemplateService(this.context);
+        this.costTrackingService = new CostTrackingService(this.context);
+        this.ragRuntimeService = new RagRuntimeService(this.context, this.repoService);
+        this.ragHistoricalIndexService = new RagHistoricalIndexService(this.repoService, this.ragRuntimeService);
+        this.ragRetrievalService = new RagRetrievalService(this.context, this.repoService);
+        this.ragRuntimeService.setBackgroundEnsureCallback(reason => this.ragHistoricalIndexService.ensureAllRepositoriesIndexed(reason));
+        logger.setCostTracker(this.costTrackingService);
+
+        this.analysisService = new RepositoryAnalysisService(this.context, this.repoService);
+        await this.reloadProviderServices();
+        this.analysisService.setLLMResolver(provider => this.getLLMService(provider));
+        this.updateCurrentLLMService();
+        if (!this.currentLLMService) {
+            logger.warn('No active AI model is configured. Model management remains available.');
+        }
+
+        await this.ragRuntimeService.initialize();
+        await this.ragRuntimeService.refreshFromSettings();
+        const secretDisposable = this.context.secrets.onDidChange(async event => {
+            if (!event.key.startsWith('gitCommitGenie.secret.ai.')) {
+                return;
+            }
+            const services = this.servicesForSecret(event.key);
+            if (!services.length) {
+                throw new Error(`No AI service owns changed secret '${event.key}'.`);
+            }
+            await Promise.all(services.map(service => service.refreshFromSettings()));
+            this.updateCurrentLLMService();
+            await vscode.commands.executeCommand('git-commit-genie.updateStatusBar');
+        });
+        this.context.subscriptions.push(secretDisposable);
+        logger.info('Services initialized successfully');
+    }
+
+    async reloadProviderServices(): Promise<void> {
+        this.llmServices.clear();
+        for (const model of this.getModels()) {
+            const service = new UnifiedLLMService(
+                this.context,
+                this.templateService,
+                this.analysisService,
+                { model },
             );
-            this.ragRetrievalService = new RagRetrievalService(this.context, this.repoService);
-            this.ragRuntimeService.setBackgroundEnsureCallback((reason: string) =>
-                this.ragHistoricalIndexService.ensureAllRepositoriesIndexed(reason)
-            );
-
-            logger.setCostTracker(this.costTrackingService);
-
-            // Initialize repository analysis service. The LLM service is wired
-            // in below once provider services have been constructed; analysis
-            // calls before then are guarded by an internal null-check.
-            this.analysisService = new RepositoryAnalysisService(this.context, null, this.repoService);
-
-            // Initialize LLM services
-            this.openAIService = new OpenAIService(this.context, this.templateService, this.analysisService);
-            this.deepseekService = new DeepSeekService(this.context, this.templateService, this.analysisService);
-            this.anthropicService = new AnthropicService(this.context, this.templateService, this.analysisService);
-            this.geminiService = new GeminiService(this.context, this.templateService, this.analysisService);
-            this.qwenService = new QwenService(this.context, this.templateService, this.analysisService);
-            this.glmService = new GLMService(this.context, this.templateService, this.analysisService);
-            this.kimiService = new KimiService(this.context, this.templateService, this.analysisService);
-            this.openrouterService = new OpenRouterService(this.context, this.templateService, this.analysisService);
-            this.localService = new LocalService(this.context, this.templateService, this.analysisService);
-            // Setup LLM services map
-            this.llmServices.set('openai', this.openAIService);
-            this.llmServices.set('deepseek', this.deepseekService);
-            this.llmServices.set('anthropic', this.anthropicService);
-            this.llmServices.set('gemini', this.geminiService);
-            this.llmServices.set('qwen', this.qwenService);
-            this.llmServices.set('glm', this.glmService);
-            this.llmServices.set('kimi', this.kimiService);
-            this.llmServices.set('openrouter', this.openrouterService);
-            this.llmServices.set('local', this.localService);
-
-            // Migrate stale model selections (e.g., removed/unsupported models after extension updates)
-            await this.migrateUnsupportedModelSelections();
-
-            // Set initial LLM service
-            this.currentLLMService = this.pickService();
-            this.analysisService.setLLMService(this.currentLLMService);
-            // Provide resolver so analysis can pick provider based on setting
-            this.analysisService.setLLMResolver((provider: string) => this.llmServices.get(provider));
-            await this.ragRuntimeService.initialize();
-            await this.ragRuntimeService.refreshFromSettings();
-
-            // Keep in-memory provider clients in sync with SecretStorage changes
-            const secretDisp = this.context.secrets.onDidChange(async (e) => {
-                try {
-                    const key = e?.key || '';
-                    if (!key.startsWith('gitCommitGenie.secret.')) { return; }
-                    const provider = this.secretKeyToProvider(key);
-                    if (!provider) { return; }
-                    const svc = this.llmServices.get(provider);
-                    await svc?.refreshFromSettings();
-                    // Update current service mapping (no provider switch here)
-                    this.updateCurrentLLMService();
-                    // Refresh status bar
-                    await (vscode.commands.executeCommand('git-commit-genie.updateStatusBar'));
-                } catch { /* ignore */ }
-            });
-            try {
-                (this.context.subscriptions || []).push(secretDisp);
-            } catch { /* ignore */ }
-
-            logger.info('Services initialized successfully');
-        } catch (error) {
-            logger.error('Error initializing services:', error);
-            throw error;
+            await service.refreshFromSettings();
+            this.llmServices.set(model.id, service);
         }
     }
 
     async dispose(): Promise<void> {
-        try {
-            await this.ragRuntimeService?.dispose();
-        } catch (error) {
-            logger.warn('[Genie][RAG] Failed to dispose runtime service', error as any);
-        }
+        await this.ragRuntimeService?.dispose();
     }
 
-    // Service getters
-    getDiffService(): DiffService {
-        return this.diffService;
-    }
-
-    getTemplateService(): TemplateService {
-        return this.templateService;
-    }
-
-    getAnalysisService(): RepositoryAnalysisService {
-        return this.analysisService;
-    }
-
+    getDiffService(): DiffService { return this.diffService; }
+    getTemplateService(): TemplateService { return this.templateService; }
+    getAnalysisService(): RepositoryAnalysisService { return this.analysisService; }
     getCurrentLLMService(): LLMService {
+        if (!this.currentLLMService) {
+            throw new Error('No active AI model is configured. Select a model with Git Commit Genie: Manage Models.');
+        }
         return this.currentLLMService;
     }
+    getRepoService(): RepoService { return this.repoService; }
+    getCostTrackingService(): CostTrackingService { return this.costTrackingService; }
+    getRagRuntimeService(): RagRuntimeService { return this.ragRuntimeService; }
+    getRagHistoricalIndexService(): RagHistoricalIndexService { return this.ragHistoricalIndexService; }
+    getRagRetrievalService(): RagRetrievalService { return this.ragRetrievalService; }
 
-    getLLMService(provider: string): LLMService | undefined {
-        return this.llmServices.get(provider);
+    getModels(): AIModelConfig[] {
+        const models = this.context.globalState.get<AIModelConfig[]>(AI_MODELS_KEY, []);
+        if (!Array.isArray(models)) {
+            throw new Error('AI model configuration is not an array.');
+        }
+        return models;
     }
 
-    getRepoService(): RepoService {
-        return this.repoService;
+    getModel(modelId: string): AIModelConfig | undefined {
+        return this.getModels().find(model => model.id === modelId);
     }
 
-    getCostTrackingService(): CostTrackingService {
-        return this.costTrackingService;
+    getGenerationModelId(): string {
+        return this.context.globalState.get<string>(GENERATION_MODEL_ID_KEY, '');
     }
 
-    getRagRuntimeService(): RagRuntimeService {
-        return this.ragRuntimeService;
+    getGenerationModel(): AIModelConfig | undefined {
+        return this.getModel(this.getGenerationModelId());
     }
 
-    getRagHistoricalIndexService(): RagHistoricalIndexService {
-        return this.ragHistoricalIndexService;
+    requireGenerationModel(): AIModelConfig {
+        const id = this.getGenerationModelId();
+        const model = this.getModel(id);
+        if (!model) {
+            throw new Error(`Commit message model '${id}' is not configured.`);
+        }
+        return model;
     }
 
-    getRagRetrievalService(): RagRetrievalService {
-        return this.ragRetrievalService;
+    getLLMService(modelId: string): UnifiedLLMService | undefined {
+        return this.llmServices.get(modelId);
     }
 
-    // Provider and model management
-    getProvider(): string {
-        return this.context.globalState.get<string>('gitCommitGenie.provider', 'openai');
-    }
-
-    getModel(provider: string): string {
-        const modelKey = getProviderModelStateKey(provider);
-        return this.context.globalState.get<string>(modelKey, '');
-    }
-
-    pickService(): LLMService {
-        const provider = this.getProvider();
-        const service = this.llmServices.get(provider || 'openai') || this.openAIService;
+    pickService(): UnifiedLLMService {
+        const modelId = this.getGenerationModelId();
+        const service = this.getLLMService(modelId);
+        if (!service) {
+            throw new Error(`AI model service '${modelId}' is not configured.`);
+        }
         return service;
     }
 
     updateCurrentLLMService(): void {
-        this.currentLLMService = this.pickService();
-        this.analysisService.setLLMService(this.currentLLMService);
+        const service = this.getLLMService(this.getGenerationModelId());
+        this.currentLLMService = service;
     }
 
-    private secretKeyToProvider(secretKey: string): string | null {
-        // Check Qwen regional keys first
-        for (const regionConfig of Object.values(QWEN_REGIONS)) {
-            if (secretKey === regionConfig.secretKey) {
-                return 'qwen';
-            }
-        }
-        return getProviderFromSecretKey(secretKey);
-    }
-
-    private getPreferredFallbackModel(provider: string, supportedModels: string[]): string {
-        if (!supportedModels.length) {
-            return '';
-        }
-
-        const preferredByProvider: Record<string, string[]> = {
-            openai: ['gpt-5.4-mini', 'gpt-5.6-luna', 'gpt-5.6-terra', 'gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'gpt-5.4-nano', 'gpt-5-mini', 'gpt-5', 'gpt-5.2', 'gpt-5-nano'],
-            deepseek: ['deepseek-v4-flash', 'deepseek-v4-pro'],
-            anthropic: ['claude-sonnet-4-6', 'claude-sonnet-5', 'claude-opus-5', 'claude-fable-5'],
-            gemini: ['gemini-3-flash-preview', 'gemini-3.6-flash', 'gemini-3.5-flash', 'gemini-2.5-flash', 'gemini-3.1-pro-preview', 'gemini-2.5-pro'],
-            qwen: ['qwen3.5-plus', 'qwen3.7-plus', 'qwen3.7-flash', 'qwen3.6-flash', 'qwen3.5-flash', 'qwen-plus-latest', 'qwen-plus', 'qwen3.7-max'],
-            glm: ['glm-5-turbo', 'glm-5.2', 'glm-5.1', 'glm-5', 'glm-4.7', 'glm-4.7-flashx', 'glm-4.5-air', 'glm-4.7-flash'],
-            kimi: ['kimi-k3', 'kimi-k2.7-code', 'kimi-k2.6'],
-            openrouter: ['openai/gpt-5.4-mini', 'openai/gpt-5.4', 'openai/gpt-5-mini', 'anthropic/claude-sonnet-4.6', 'deepseek/deepseek-v4-flash'],
-            local: []
-        };
-
-        const preferred = preferredByProvider[provider.toLowerCase()] || [];
-        for (const candidate of preferred) {
-            if (supportedModels.includes(candidate)) {
-                return candidate;
-            }
-        }
-
-        return supportedModels[0];
-    }
-
-    private async migrateUnsupportedModelSelections(): Promise<void> {
-        const migrated: string[] = [];
-
-        for (const [provider, service] of this.llmServices.entries()) {
-            const modelKey = getProviderModelStateKey(provider);
-            let selected = (this.context.globalState.get<string>(modelKey, '') || '').trim();
-            if (!selected) {
-                continue;
-            }
-
-            // Normalize dated Anthropic model names to undated aliases
-            const normalized = ANTHROPIC_DATED_TO_UNDATED_MAP[selected];
-            if (normalized) {
-                await this.context.globalState.update(modelKey, normalized);
-                selected = normalized;
-            }
-
-            const supported = service.listSupportedModels();
-            if (!supported.length || supported.includes(selected)) {
-                continue;
-            }
-
-            const fallback = this.getPreferredFallbackModel(provider, supported);
-            if (!fallback) {
-                continue;
-            }
-
-            await this.context.globalState.update(modelKey, fallback);
-            migrated.push(`${provider}: ${selected} -> ${fallback}`);
-            logger.warn(`[Genie][ModelMigration] Migrated unsupported ${provider} model '${selected}' to '${fallback}'.`);
-        }
-
-        // Also migrate repository analysis model override if it points to an unsupported model.
-        try {
-            const cfg = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-            let selected = (cfg.get<string>('model', 'general') || 'general').trim();
-
-            // Normalize dated Anthropic model names to undated aliases
-            const repoAnalysisNormalized = ANTHROPIC_DATED_TO_UNDATED_MAP[selected];
-            if (repoAnalysisNormalized) {
-                await cfg.update('model', repoAnalysisNormalized, vscode.ConfigurationTarget.Global);
-                selected = repoAnalysisNormalized;
-            }
-
-            if (selected && selected !== 'general') {
-                let supportedByAny = false;
-                for (const service of this.llmServices.values()) {
-                    if (service.listSupportedModels().includes(selected)) {
-                        supportedByAny = true;
-                        break;
-                    }
-                }
-
-                if (!supportedByAny) {
-                    await cfg.update('model', 'general', vscode.ConfigurationTarget.Global);
-                    migrated.push(`repositoryAnalysis: ${selected} -> general`);
-                    logger.warn(`[Genie][ModelMigration] Migrated unsupported repository analysis model '${selected}' to 'general'.`);
-                }
-            }
-        } catch (error) {
-            logger.warn(`[Genie][ModelMigration] Failed to migrate repository analysis model: ${error}`);
-        }
-
-        if (!migrated.length) {
-            return;
-        }
-
-        const details = migrated.join(', ');
-        const actionManage = 'Manage Models';
-        const actionDismiss = 'Dismiss';
-        void vscode.window.showWarningMessage(
-            `Git Commit Genie migrated unsupported model selections after update: ${details}.`,
-            actionManage,
-            actionDismiss
-        ).then(async (choice) => {
-            if (choice === actionManage) {
-                try {
-                    await vscode.commands.executeCommand('git-commit-genie.manageModels');
-                } catch {
-                    // Ignore command execution failures during startup race conditions.
-                }
-            }
-        });
+    private servicesForSecret(secretKey: string): UnifiedLLMService[] {
+        return this.getModels()
+            .filter(model => modelSecretKey(model) === secretKey)
+            .map(model => this.llmServices.get(model.id))
+            .filter((service): service is UnifiedLLMService => service !== undefined);
     }
 }

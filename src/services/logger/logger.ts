@@ -3,7 +3,6 @@ import { CostTrackingService } from "../cost/costTrackingService";
 import { PRICING_TABLE } from '../cost/pricing';
 import { WebviewProvider } from '../../ui/WebviewProvider';
 import { LogType, LogEntry } from '../../ui/types/messages';
-import { normalizeOpenRouterPricingAlias } from '../llm/providers/config/openrouterModels';
 import { isCurrentPersistedLogEntry } from '../../ui/persistedLogSchema';
 
 export enum LogLevel {
@@ -377,12 +376,11 @@ export class Logger {
                     outputTokens = usage.output_tokens || 0;
                     cachedTokens = usage.input_tokens_details?.cached_tokens || 0;
                     cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
-                } else if (providerLower === 'deepseek' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter' || providerLower === 'local') {
+                } else if (providerLower === 'custom') {
                     inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
                     outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
                     cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
-                    const pricingModel = this.normalizePricingModelForProvider(providerLower, model);
-                    cost = this.calculateCost(pricingModel, inputTokens, outputTokens, cachedTokens);
+                    cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
                 } else if (providerLower === 'anthropic') {
                     const rawInput = usage.input_tokens || 0;
                     outputTokens = usage.output_tokens || 0;
@@ -392,18 +390,11 @@ export class Logger {
                     inputTokens = rawInput + cacheReadTokens + cacheCreationTokens;
                     cachedTokens = cacheReadTokens;
                     cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
-                } else if (providerLower === 'gemini') {
-                    inputTokens = usage.prompt_tokens || 0;
-                    outputTokens = usage.completion_tokens || 0;
-                    cachedTokens = usage.cached_content_tokens || 0;
+                } else if (providerLower === 'google') {
+                    inputTokens = usage.total_input_tokens ?? 0;
+                    outputTokens = usage.total_output_tokens ?? 0;
+                    cachedTokens = usage.total_cached_tokens ?? 0;
                     cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens);
-                } else if (providerLower === 'qwen') {
-                    // Qwen OpenAI-compatible chat completions expose prompt/completion token fields.
-                    inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
-                    outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
-                    cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
-                    const qwenRegion = this.context?.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
-                    cost = this.calculateCost(model, inputTokens, outputTokens, cachedTokens, qwenRegion);
                 }
             } catch (err) {
                 // ignore cost calculation errors
@@ -554,26 +545,21 @@ export class Logger {
                 cachePercentage = inputTokens > 0 ? (cacheReadTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
-            if (providerLower === 'gemini') {
-                inputTokens = usage.prompt_tokens || 0;
-                outputTokens = usage.completion_tokens || 0;
-                cachedTokens = usage.cached_content_tokens || 0;
+            if (providerLower === 'google') {
+                inputTokens = usage.total_input_tokens ?? 0;
+                outputTokens = usage.total_output_tokens ?? 0;
+                cachedTokens = usage.total_cached_tokens ?? 0;
                 totalTokens = usage.total_tokens ?? (inputTokens + outputTokens);
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
                 cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
-            if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter' || providerLower === 'local') {
+            if (providerLower === 'custom') {
                 inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
                 outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
                 cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
                 totalTokens = inputTokens + outputTokens;
                 cachePercentage = inputTokens > 0 ? (cachedTokens / inputTokens) * 100 : 0;
-                const pricingModel = this.normalizePricingModelForProvider(providerLower, modelName || 'unknown');
-                if (providerLower === 'qwen') {
-                    cost = this.calculateCost(pricingModel, inputTokens, outputTokens, cachedTokens, region, thinkingMode);
-                } else {
-                    cost = this.calculateCost(pricingModel, inputTokens, outputTokens, cachedTokens);
-                }
+                cost = this.calculateCost(modelName || 'unknown', inputTokens, outputTokens, cachedTokens);
             }
         } catch (e) {
             this.warn(`Failed to parse token usage for ${modelName}: ${e}`);
@@ -609,52 +595,22 @@ export class Logger {
 
     /**
      * Calculate API call cost
-     * @param modelName - Model name, can include region suffix for Qwen (e.g., 'qwen3.7-max:china')
+     * @param modelName - Model name used to resolve pricing
      * @param inputTokens - Number of input tokens
      * @param outputTokens - Number of output tokens
      * @param cachedTokens - Number of cached tokens (optional)
-     * @param region - Region for Qwen models ('china' or 'intl'), will be appended to modelName
-     * @param thinkingMode - Whether Qwen Plus is using thinking/reasoning mode (higher output cost)
      */
     private calculateCost(
         modelName: string,
         inputTokens: number,
         outputTokens: number,
         cachedTokens?: number,
-        region?: string,
-        thinkingMode?: boolean
+        _region?: string,
+        _thinkingMode?: boolean
     ): number {
-        // For Qwen models, append region to model name if provided
-        let pricingKey = modelName;
-        if (region && modelName.startsWith('qwen')) {
-            pricingKey = `${modelName}:${region}`;
-            // Append thinking mode suffix if enabled for qwen-plus models
-            if (thinkingMode && modelName.includes('qwen-plus')) {
-                pricingKey = `${pricingKey}:thinking`;
-            }
-        }
-
-        // Fallback for Qwen paths that did not pass region explicitly.
-        // Use current configured region first, then try intl/china aliases.
-        if (!region && modelName.startsWith('qwen') && !PRICING_TABLE[pricingKey]) {
-            const configuredRegion = this.context?.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
-            const candidates = [
-                configuredRegion ? `${modelName}:${configuredRegion}` : '',
-                `${modelName}:intl`,
-                `${modelName}:china`
-            ].filter(Boolean);
-            const matched = candidates.find((key) => !!PRICING_TABLE[key]);
-            if (matched) {
-                pricingKey = matched;
-                if (thinkingMode && modelName.includes('qwen-plus') && PRICING_TABLE[`${pricingKey}:thinking`]) {
-                    pricingKey = `${pricingKey}:thinking`;
-                }
-            }
-        }
-
-        const pricing = PRICING_TABLE[pricingKey];
+        const pricing = PRICING_TABLE[modelName];
         if (!pricing) {
-            this.warn(`Unknown model pricing for: ${pricingKey}`);
+            this.warn(`Unknown model pricing for: ${modelName}`);
             return 0;
         }
 
@@ -663,7 +619,7 @@ export class Logger {
             // Find the appropriate tier based on input tokens
             const tier = pricing.tiers.find((t) => inputTokens <= t.maxInputTokens);
             if (!tier) {
-                this.warn(`No pricing tier found for ${pricingKey} with ${inputTokens} input tokens`);
+                this.warn(`No pricing tier found for ${modelName} with ${inputTokens} input tokens`);
                 return 0;
             }
             const nonCachedInputTokens = cachedTokens ? inputTokens - cachedTokens : inputTokens;
@@ -680,23 +636,6 @@ export class Logger {
 
             return inputCost + outputCost + cachedCost;
         }
-    }
-
-    /**
-     * Normalize pricing model names for provider-specific aliases.
-     */
-    private normalizePricingModelForProvider(providerLower: string, modelName: string): string {
-        if (providerLower === 'local') {
-            return 'local';
-        }
-        if (providerLower !== 'openrouter') {
-            return modelName;
-        }
-        const canonical = normalizeOpenRouterPricingAlias(modelName);
-        if (canonical.startsWith('qwen') && !canonical.includes(':')) {
-            return `${canonical}:intl`;
-        }
-        return canonical;
     }
 
     /**
@@ -749,11 +688,11 @@ export class Logger {
                     const cacheCreationTokens = usage.cache_creation_input_tokens || 0;
                     inputTokens = rawInput + cacheReadTokens + cacheCreationTokens;
                     cachedTokens = cacheReadTokens;
-                } else if (providerLower === 'gemini') {
-                    inputTokens = usage.prompt_tokens || 0;
-                    outputTokens = usage.completion_tokens || 0;
-                    cachedTokens = usage.cached_content_tokens || 0;
-                } else if (providerLower === 'deepseek' || providerLower === 'qwen' || providerLower === 'glm' || providerLower === 'kimi' || providerLower === 'openrouter' || providerLower === 'local') {
+                } else if (providerLower === 'google') {
+                    inputTokens = usage.total_input_tokens ?? 0;
+                    outputTokens = usage.total_output_tokens ?? 0;
+                    cachedTokens = usage.total_cached_tokens ?? 0;
+                } else if (providerLower === 'custom') {
                     inputTokens = usage.prompt_tokens ?? usage.input_tokens ?? 0;
                     outputTokens = usage.completion_tokens ?? usage.output_tokens ?? 0;
                     cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0;
@@ -770,12 +709,7 @@ export class Logger {
                 totalTokens += usage.total_tokens || (inputTokens + outputTokens);
 
                 // Calculate cost for this usage
-                const pricingModel = this.normalizePricingModelForProvider(providerLower, modelName);
-                if (providerLower === 'qwen') {
-                    totalCost += this.calculateCost(pricingModel, inputTokens, outputTokens, cachedTokens, region, thinkingMode);
-                } else {
-                    totalCost += this.calculateCost(pricingModel, inputTokens, outputTokens, cachedTokens);
-                }
+                totalCost += this.calculateCost(modelName, inputTokens, outputTokens, cachedTokens);
             } catch (e) {
                 this.warn(`Failed to parse token usage in summary for ${modelName}: ${e}`);
                 continue;

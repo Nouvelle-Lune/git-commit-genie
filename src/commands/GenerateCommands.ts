@@ -4,7 +4,7 @@ import { logger } from '../services/logger';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { Repository } from "../services/git/git";
 import { DiffData } from '../services/git/gitTypes';
-import { getProviderSecretKey, getProviderLabel } from '../services/llm/providers/config/ProviderConfig';
+import { PROVIDER_LABELS, modelSecretKey } from '../services/llm/providers';
 import { StatusBarManager } from '../ui/StatusBarManager';
 
 /**
@@ -50,17 +50,14 @@ export class GenerateCommands {
 
     private async generateCommitMessage(arg?: any): Promise<void> {
         // First-time UX: if provider or model not configured, jump to Manage Models instead of erroring
-        const provider = this.serviceRegistry.getProvider().toLowerCase();
-        const secretKeyName = this.getSecretKeyName(provider);
-        const existingKey = await this.context.secrets.get(secretKeyName);
-
-        if (!existingKey) {
+        const selectedModel = this.serviceRegistry.getGenerationModel();
+        if (!selectedModel) {
             await vscode.commands.executeCommand('git-commit-genie.manageModels');
             return;
         }
+        const existingKey = await this.context.secrets.get(modelSecretKey(selectedModel));
 
-        const selectedModel = this.serviceRegistry.getModel(provider);
-        if (!selectedModel || !selectedModel.trim()) {
+        if (!existingKey) {
             await vscode.commands.executeCommand('git-commit-genie.manageModels');
             return;
         }
@@ -143,14 +140,6 @@ export class GenerateCommands {
         });
     }
 
-    private getSecretKeyName(provider: string): string {
-        if (provider === 'qwen') {
-            const region = this.context.globalState.get<string>('gitCommitGenie.qwenRegion', 'intl');
-            return getProviderSecretKey(provider, region);
-        }
-        return getProviderSecretKey(provider);
-    }
-
     /**
      * Initializes repository analysis only after the extension has generated a
      * commit message, so opening a repository never mutates or scans it.
@@ -226,8 +215,8 @@ export class GenerateCommands {
 
     private async handleError(result: any): Promise<void> {
         if (result.statusCode === 401) {
-            const provider = this.serviceRegistry.getProvider().toLowerCase();
-            const providerLabel = this.getProviderLabel(provider);
+            const model = this.serviceRegistry.requireGenerationModel();
+            const providerLabel = PROVIDER_LABELS[model.provider];
 
             // Detach UI prompts so the withProgress can end immediately
             void (async () => {
@@ -246,9 +235,11 @@ export class GenerateCommands {
                         ignoreFocusOut: true,
                     });
                     if (newKey && newKey.trim()) {
-                        const service = this.serviceRegistry.getLLMService(provider);
-                        await service?.setApiKey(newKey.trim());
-                        try { await service?.refreshFromSettings(); } catch { }
+                        const service = this.serviceRegistry.getLLMService(model.id);
+                        if (!service) {
+                            throw new Error(`AI model service '${model.id}' is not configured.`);
+                        }
+                        await service.setApiKey(newKey.trim());
                         await vscode.commands.executeCommand('git-commit-genie.updateStatusBar');
                     }
                 } else if (choice === vscode.l10n.t(I18N.actions.manageModels)) {
@@ -265,7 +256,4 @@ export class GenerateCommands {
         }
     }
 
-    private getProviderLabel(provider: string): string {
-        return getProviderLabel(provider);
-    }
 }

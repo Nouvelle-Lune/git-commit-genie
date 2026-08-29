@@ -1,409 +1,273 @@
+import { randomUUID } from 'crypto';
 import * as vscode from 'vscode';
+import {
+    AI_MODELS_KEY,
+    GENERATION_MODEL_ID_KEY,
+    REPOSITORY_ANALYSIS_MODEL_ID_KEY,
+    AIModelConfig,
+    NATIVE_SECRET_KEYS,
+    PROVIDER_LABELS,
+    ProviderKind,
+    createAIProvider,
+    customSecretKey,
+    modelSecretKey,
+} from '../services/llm/providers';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
-import { L10N_KEYS as I18N } from '../i18n/keys';
-import {
-    getProviderModelStateKey,
-    getProviderSecretKey,
-    getProviderLabel,
-    getAllProviderKeys,
-    QWEN_REGIONS
-} from '../services/llm/providers/config/ProviderConfig';
+
+type ModelPurpose = 'generation' | 'repositoryAnalysis';
 
 export class ModelCommands {
     constructor(
-        private context: vscode.ExtensionContext,
-        private serviceRegistry: ServiceRegistry,
-        private statusBarManager: StatusBarManager
-    ) { }
+        private readonly context: vscode.ExtensionContext,
+        private readonly serviceRegistry: ServiceRegistry,
+        private readonly statusBarManager: StatusBarManager,
+    ) {}
 
     async register(): Promise<void> {
-        // Manage Models: provider -> API key -> model selection
         this.context.subscriptions.push(
-            vscode.commands.registerCommand('git-commit-genie.manageModels', this.manageModels.bind(this))
+            vscode.commands.registerCommand('git-commit-genie.manageModels', () => this.manageModels())
         );
     }
 
     private async manageModels(): Promise<void> {
-        // Get current repo analysis model for display
-        const config = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-        const currentRepoModel = config.get<string>('model', 'general') || 'general';
-        const repoModelDesc = currentRepoModel === 'general'
+        const generation = this.modelDescription(this.context.globalState.get<string>(GENERATION_MODEL_ID_KEY, ''));
+        const analysis = this.modelDescription(this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, ''));
+        const items: Array<vscode.QuickPickItem & { value: ModelPurpose | ProviderKind }> = [
+            { label: '$(sparkle) Commit message model', description: generation, value: 'generation' },
+            { label: '$(repo) Repository analysis model', description: analysis, value: 'repositoryAnalysis' },
+            { label: '', kind: vscode.QuickPickItemKind.Separator, value: 'generation' },
+            ...(['openai', 'anthropic', 'google', 'custom'] as const).map(value => ({
+                label: PROVIDER_LABELS[value],
+                description: `${this.serviceRegistry.getModels().filter(model => model.provider === value).length} configured`,
+                value,
+            })),
+        ];
+        const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Manage models or select a workflow model' });
+        if (!picked) { return; }
+        if (picked.value === 'generation' || picked.value === 'repositoryAnalysis') {
+            await this.selectWorkflowModel(picked.value);
+            return;
+        }
+        await this.manageProvider(picked.value);
+    }
+
+    private async manageProvider(provider: ProviderKind): Promise<void> {
+        const models = this.serviceRegistry.getModels().filter(model => model.provider === provider);
+        const picked = await vscode.window.showQuickPick([
+            { label: '$(add) Add model', value: '__add__' },
+            ...models.map(model => ({
+                label: model.label,
+                description: this.usageDescription(model.id),
+                detail: provider === 'custom' ? `${model.model} · ${model.baseUrl}` : model.model,
+                value: model.id,
+            })),
+        ], { placeHolder: `${PROVIDER_LABELS[provider]} models` });
+        if (!picked) { return; }
+        if (picked.value === '__add__') {
+            await this.addModel(provider);
+            return;
+        }
+        const model = this.requireModel(picked.value);
+        await this.manageConfiguredModel(model);
+    }
+
+    private async manageConfiguredModel(model: AIModelConfig): Promise<void> {
+        const picked = await vscode.window.showQuickPick([
+            { label: 'Use for commit messages', value: 'generation' },
+            { label: 'Use for repository analysis', value: 'repositoryAnalysis' },
+            { label: 'Edit model', value: 'edit' },
+            { label: 'Replace API key', value: 'key' },
+            { label: 'Delete model', value: 'delete' },
+        ], { placeHolder: model.label });
+        if (!picked) { return; }
+        if (picked.value === 'generation' || picked.value === 'repositoryAnalysis') {
+            await this.assignModel(picked.value, model.id);
+        } else if (picked.value === 'edit') {
+            await this.editModel(model);
+        } else if (picked.value === 'key') {
+            await this.replaceApiKey(model);
+        } else {
+            await this.deleteModel(model);
+        }
+    }
+
+    private async addModel(provider: ProviderKind): Promise<void> {
+        const nativeApiKey = provider === 'custom'
             ? undefined
-            : `${vscode.l10n.t(I18N.manageModels.currentLabel)}: ${currentRepoModel}`;
+            : await this.resolveNativeApiKey(provider);
+        if (provider !== 'custom' && !nativeApiKey) { return; }
+        const model = provider === 'custom'
+            ? await this.promptCustomModel({ id: randomUUID(), label: '', provider, model: '', baseUrl: '' })
+            : await this.promptNativeModel(provider, nativeApiKey!);
+        if (!model) { return; }
+        const apiKey = nativeApiKey ?? await this.resolveApiKeyForNewModel(model);
+        if (!apiKey) { return; }
+        await this.validateModel(model, apiKey);
+        await this.context.globalState.update(AI_MODELS_KEY, [...this.serviceRegistry.getModels(), model]);
+        await this.serviceRegistry.reloadProviderServices();
+        const service = this.serviceRegistry.getLLMService(model.id);
+        if (!service) {
+            throw new Error(`AI model service '${model.id}' was not created.`);
+        }
+        await service.setApiKey(apiKey);
+        await this.statusBarManager.refreshModelStates();
+        await this.manageConfiguredModel(model);
+    }
 
-        // Build provider list from ProviderConfig
-        const items: Array<vscode.QuickPickItem & { value: string }> = getAllProviderKeys().map(key => ({
-            label: getProviderLabel(key),
-            value: key
-        }));
+    private async promptNativeModel(
+        provider: Exclude<ProviderKind, 'custom'>,
+        apiKey: string,
+    ): Promise<AIModelConfig | undefined> {
+        const available = await createAIProvider({ kind: provider, apiKey }).listModels();
+        if (!available.length) {
+            throw new Error(`${PROVIDER_LABELS[provider]} returned no available models.`);
+        }
+        const model = await vscode.window.showQuickPick(available, { placeHolder: `Select a ${PROVIDER_LABELS[provider]} model` });
+        if (!model) { return undefined; }
+        const label = await vscode.window.showInputBox({ title: 'Model display name', value: model, ignoreFocusOut: true });
+        if (!label?.trim()) { return undefined; }
+        return { id: randomUUID(), label: label.trim(), provider, model };
+    }
 
-        // Add separator and repo analysis config option
-        items.push(
-            { label: '', kind: vscode.QuickPickItemKind.Separator, value: '' },
-            {
-                label: vscode.l10n.t(I18N.manageModels.configureRepoAnalysisModel),
-                description: repoModelDesc,
-                value: 'repoAnalysis'
-            }
+    private async editModel(current: AIModelConfig): Promise<void> {
+        const apiKey = await this.context.secrets.get(modelSecretKey(current));
+        if (!apiKey) {
+            throw new Error(`${current.label} has no API key.`);
+        }
+        const updated = current.provider === 'custom'
+            ? await this.promptCustomModel(current)
+            : await this.promptNativeModel(current.provider, apiKey);
+        if (!updated) { return; }
+        const model = { ...updated, id: current.id };
+        await this.validateModel(model, apiKey);
+        await this.context.globalState.update(
+            AI_MODELS_KEY,
+            this.serviceRegistry.getModels().map(candidate => candidate.id === current.id ? model : candidate),
         );
+        await this.serviceRegistry.reloadProviderServices();
+        this.serviceRegistry.updateCurrentLLMService();
+        await this.statusBarManager.refreshModelStates();
+    }
 
-        const providerPick = await vscode.window.showQuickPick(items, {
-            placeHolder: vscode.l10n.t(I18N.manageModels.selectProvider)
-        });
-
-        if (!providerPick) {
-            return;
+    private async replaceApiKey(model: AIModelConfig): Promise<void> {
+        const apiKey = await this.promptApiKey(PROVIDER_LABELS[model.provider]);
+        if (!apiKey) { return; }
+        await this.validateModel(model, apiKey);
+        const service = this.serviceRegistry.getLLMService(model.id);
+        if (!service) {
+            throw new Error(`AI model service '${model.id}' does not exist.`);
         }
+        await service.setApiKey(apiKey);
+        await this.statusBarManager.refreshModelStates();
+    }
 
-        // Handle repository analysis model configuration
-        if (providerPick.value === 'repoAnalysis') {
-            await this.manageRepoAnalysisModel();
-            return;
+    private async deleteModel(model: AIModelConfig): Promise<void> {
+        if (this.context.globalState.get<string>(GENERATION_MODEL_ID_KEY, '') === model.id) {
+            throw new Error('Select another commit message model before deleting this model.');
         }
-
-        // Handle Qwen region selection
-        let qwenRegion: string | undefined;
-        if (providerPick.value === 'qwen') {
-            const regionPick = await vscode.window.showQuickPick([
-                {
-                    label: vscode.l10n.t(I18N.manageModels.qwenRegionIntl),
-                    value: 'intl',
-                    detail: vscode.l10n.t(I18N.manageModels.qwenRegionIntlDesc)
-                },
-                {
-                    label: vscode.l10n.t(I18N.manageModels.qwenRegionChina),
-                    value: 'china',
-                    detail: vscode.l10n.t(I18N.manageModels.qwenRegionChinaDesc)
-                }
-            ], {
-                placeHolder: vscode.l10n.t(I18N.manageModels.qwenRegionSelect)
-            });
-
-            if (!regionPick) {
-                return;
-            }
-            qwenRegion = regionPick.value;
-            // Save region selection
-            await this.context.globalState.update('gitCommitGenie.qwenRegion', qwenRegion);
+        if (this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '') === model.id) {
+            throw new Error('Select another repository analysis model before deleting this model.');
         }
-
-        if (providerPick.value === 'local') {
-            const localCfg = vscode.workspace.getConfiguration('gitCommitGenie');
-            const currentBaseUrl = (localCfg.get<string>('local.baseUrl', 'http://127.0.0.1:11434/v1') || '').trim();
-            const enteredBaseUrl = await this.promptForLocalBaseUrl(currentBaseUrl || 'http://127.0.0.1:11434/v1');
-            if (!enteredBaseUrl) {
-                return;
-            }
-            await localCfg.update('local.baseUrl', enteredBaseUrl, vscode.ConfigurationTarget.Global);
-        }
-
-        const secretName = this.getSecretName(providerPick.value, qwenRegion);
-        const modelStateKey = this.getModelStateKey(providerPick.value);
-        const isLocalProvider = providerPick.value === 'local';
-
-        let existingKey = await this.context.secrets.get(secretName);
-        let apiKeyToUse: string | undefined = existingKey || undefined;
-        let keyWasCleared = false;
-
-        if (existingKey && !isLocalProvider) {
-            apiKeyToUse = await this.handleExistingApiKey(existingKey, providerPick.label, secretName);
-            if (!apiKeyToUse) {
-                return;
-            }
-            // Check if the key was cleared and re-entered
-            // In this case, existingKey should be refreshed
-            const currentKey = await this.context.secrets.get(secretName);
-            if (!currentKey && apiKeyToUse) {
-                // Key was cleared in handleExistingApiKey
-                keyWasCleared = true;
-                existingKey = undefined;
-            }
-        }
-
-        if (!apiKeyToUse) {
-            if (isLocalProvider) {
-                // Local OpenAI-compatible endpoints often do not require a real key.
-                apiKeyToUse = 'local';
-            } else {
-                // First time input
-                const entered = await this.promptForApiKey(providerPick.label);
-                if (!entered) {
-                    return;
-                }
-                apiKeyToUse = entered;
-            }
-        }
-
-        let models: string[] = [];
-        const sameKey = !!existingKey && apiKeyToUse === existingKey;
-        try {
-            await vscode.window.withProgress({
-                location: vscode.ProgressLocation.Notification,
-                title: sameKey
-                    ? vscode.l10n.t(I18N.manageModels.listingModels, providerPick.label)
-                    : vscode.l10n.t(I18N.manageModels.validatingKey, providerPick.label),
-            }, async () => {
-                const service = this.serviceRegistry.getLLMService(providerPick.value);
-                if (!service) { return; }
-
-                // Always fetch remote models so provider-side model updates are reflected immediately.
-                // Pass region for Qwen provider only.
-                if (providerPick.value === 'qwen' && qwenRegion) {
-                    // TypeScript knows QwenService accepts region parameter
-                    models = await (service as any).validateApiKeyAndListModels(apiKeyToUse!, qwenRegion);
-                } else {
-                    models = await service.validateApiKeyAndListModels(apiKeyToUse!);
-                }
-            });
-        } catch (err: any) {
-            vscode.window.showErrorMessage(err?.message || vscode.l10n.t(I18N.manageModels.validatingKey, providerPick.label));
-            return;
-        }
-
-        if (!models.length) {
-            vscode.window.showErrorMessage(vscode.l10n.t(I18N.manageModels.noModels));
-            return;
-        }
-
-        const modelPick = await this.selectModel(models, providerPick, modelStateKey);
-        if (!modelPick) {
-            return;
-        }
-
-        // Update provider and model
-        await this.updateProviderAndModel(providerPick, modelPick, modelStateKey, apiKeyToUse!, existingKey);
-
-        // If key was cleared and re-entered, give secret change listener time to process
-        // This ensures status bar reflects the new key state
-        if (keyWasCleared) {
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-
-        // Notify status bar that general provider/model changed so 'general' analysis selection follows
-        this.statusBarManager.onProviderModelChanged(providerPick.value);
-        this.statusBarManager.updateStatusBar();
-        vscode.window.showInformationMessage(
-            vscode.l10n.t(I18N.manageModels.configured, providerPick.label, modelPick.value)
+        const confirmation = await vscode.window.showWarningMessage(
+            `Delete model '${model.label}'?`,
+            { modal: true },
+            'Delete',
         );
+        if (confirmation !== 'Delete') { return; }
+        const remaining = this.serviceRegistry.getModels().filter(candidate => candidate.id !== model.id);
+        await this.context.globalState.update(AI_MODELS_KEY, remaining);
+        if (model.provider === 'custom') {
+            await this.context.secrets.delete(customSecretKey(model.id));
+        }
+        await this.serviceRegistry.reloadProviderServices();
+        await this.statusBarManager.refreshModelStates();
     }
 
-    private getSecretName(provider: string, qwenRegion?: string): string {
-        // Special handling for Qwen's region-specific keys
-        if (provider === 'qwen' && qwenRegion) {
-            return QWEN_REGIONS[qwenRegion]?.secretKey || getProviderSecretKey(provider);
-        }
-        return getProviderSecretKey(provider);
+    private async selectWorkflowModel(purpose: ModelPurpose): Promise<void> {
+        const models = this.serviceRegistry.getModels();
+        const picked = await vscode.window.showQuickPick(models.map(model => ({
+            label: model.label,
+            description: PROVIDER_LABELS[model.provider],
+            detail: model.provider === 'custom' ? `${model.model} · ${model.baseUrl}` : model.model,
+            value: model.id,
+        })), { placeHolder: purpose === 'generation' ? 'Select commit message model' : 'Select repository analysis model' });
+        if (!picked) { return; }
+        await this.assignModel(purpose, picked.value);
     }
 
-    private getModelStateKey(provider: string): string {
-        return getProviderModelStateKey(provider);
+    private async assignModel(purpose: ModelPurpose, modelId: string): Promise<void> {
+        this.requireModel(modelId);
+        const key = purpose === 'generation' ? GENERATION_MODEL_ID_KEY : REPOSITORY_ANALYSIS_MODEL_ID_KEY;
+        await this.context.globalState.update(key, modelId);
+        if (purpose === 'generation') {
+            this.serviceRegistry.updateCurrentLLMService();
+        }
+        await this.statusBarManager.refreshModelStates();
     }
 
-    private async handleExistingApiKey(existingKey: string, providerLabel: string, secretName: string): Promise<string | undefined> {
-        const masked = existingKey.length > 8
-            ? existingKey.slice(0, 4) + '…' + existingKey.slice(-4)
-            : 'hidden';
-
-        const action = await vscode.window.showQuickPick([
-            { label: vscode.l10n.t(I18N.manageModels.reuseSavedKey, masked), value: 'reuse' },
-            { label: vscode.l10n.t(I18N.manageModels.replaceKey), value: 'replace' },
-            { label: vscode.l10n.t(I18N.manageModels.clearReenter), value: 'clear' },
-            { label: vscode.l10n.t(I18N.manageModels.cancel), value: 'cancel' }
-        ], { placeHolder: vscode.l10n.t(I18N.manageModels.savedKeyDetected, providerLabel) });
-
-        if (!action || action.value === 'cancel') {
-            return undefined;
-        }
-
-        if (action.value === 'clear') {
-            await this.context.secrets.delete(secretName);
-            // Give the secret change listener time to update the status bar
-            // This ensures the UI reflects the cleared state before prompting for new key
-            await new Promise(resolve => setTimeout(resolve, 100));
-            const newKey = await this.promptForApiKey(providerLabel);
-            return newKey;
-        }
-
-        if (action.value === 'replace') {
-            const newKey = await vscode.window.showInputBox({
-                title: vscode.l10n.t(I18N.manageModels.enterNewKeyTitle, providerLabel),
-                prompt: `${providerLabel} API Key`,
-                placeHolder: `${providerLabel} API Key`,
-                password: true,
-                ignoreFocusOut: true,
-            });
-            return newKey;
-        }
-
-        return existingKey; // reuse
+    private async resolveApiKeyForNewModel(model: AIModelConfig): Promise<string | undefined> {
+        const existing = await this.context.secrets.get(modelSecretKey(model));
+        return existing ?? this.promptApiKey(PROVIDER_LABELS[model.provider]);
     }
 
-    private async promptForApiKey(providerLabel: string): Promise<string | undefined> {
-        return await vscode.window.showInputBox({
-            title: vscode.l10n.t(I18N.manageModels.enterKeyTitle, providerLabel),
-            prompt: `${providerLabel} API Key`,
-            placeHolder: `${providerLabel} API Key`,
+    private async resolveNativeApiKey(provider: Exclude<ProviderKind, 'custom'>): Promise<string | undefined> {
+        return await this.context.secrets.get(NATIVE_SECRET_KEYS[provider])
+            ?? this.promptApiKey(PROVIDER_LABELS[provider]);
+    }
+
+    private async validateModel(model: AIModelConfig, apiKey: string): Promise<void> {
+        const provider = createAIProvider({ kind: model.provider, apiKey, baseUrl: model.baseUrl });
+        const available = await provider.listModels();
+        if (!available.includes(model.model)) {
+            throw new Error(`Model '${model.model}' was not returned by ${PROVIDER_LABELS[model.provider]}.`);
+        }
+    }
+
+    private async promptCustomModel(initial: AIModelConfig): Promise<AIModelConfig | undefined> {
+        const label = await vscode.window.showInputBox({ title: 'Custom model name', value: initial.label, ignoreFocusOut: true });
+        if (!label?.trim()) { return undefined; }
+        const baseUrl = await vscode.window.showInputBox({ title: 'OpenAI-compatible base URL', value: initial.baseUrl, ignoreFocusOut: true });
+        if (!baseUrl?.trim()) { return undefined; }
+        const parsed = new URL(baseUrl.trim());
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            throw new Error('Custom model base URL must use HTTP or HTTPS.');
+        }
+        const model = await vscode.window.showInputBox({ title: 'Model name', value: initial.model, ignoreFocusOut: true });
+        if (!model?.trim()) { return undefined; }
+        return { id: initial.id, label: label.trim(), provider: 'custom', baseUrl: baseUrl.trim(), model: model.trim() };
+    }
+
+    private promptApiKey(label: string): Thenable<string | undefined> {
+        return vscode.window.showInputBox({
+            title: `${label} API key`,
             password: true,
             ignoreFocusOut: true,
+            validateInput: value => value.trim() ? undefined : 'API key is required.',
         });
     }
 
-    private async promptForLocalBaseUrl(defaultValue: string): Promise<string | undefined> {
-        const value = await vscode.window.showInputBox({
-            title: vscode.l10n.t(I18N.manageModels.localBaseUrlTitle),
-            prompt: vscode.l10n.t(I18N.manageModels.localBaseUrlPrompt),
-            placeHolder: vscode.l10n.t(I18N.manageModels.localBaseUrlPlaceholder),
-            value: defaultValue,
-            ignoreFocusOut: true,
-            validateInput: (input) => {
-                const candidate = (input || '').trim();
-                if (!candidate) {
-                    return vscode.l10n.t(I18N.manageModels.localBaseUrlPrompt);
-                }
-                try {
-                    const parsed = new URL(candidate);
-                    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-                        return vscode.l10n.t(I18N.manageModels.localBaseUrlMustBeHttp);
-                    }
-                    if (!parsed.pathname.endsWith('/v1')) {
-                        return vscode.l10n.t(I18N.manageModels.localBaseUrlMustEndWithV1);
-                    }
-                    return undefined;
-                } catch {
-                    return vscode.l10n.t(I18N.manageModels.localBaseUrlInvalid);
-                }
-            }
-        });
-
-        return value?.trim();
+    private requireModel(id: string): AIModelConfig {
+        const model = this.serviceRegistry.getModel(id);
+        if (!model) {
+            throw new Error(`AI model '${id}' is not configured.`);
+        }
+        return model;
     }
 
-    private async selectModel(models: string[], providerPick: any, modelStateKey: string): Promise<any> {
-        const currentModel = this.context.globalState.get<string>(modelStateKey, '');
-        const activeProvider = this.serviceRegistry.getProvider().toLowerCase();
-        const isActiveProvider = providerPick.value.toLowerCase() === activeProvider;
-
-        const secretName = this.getSecretName(providerPick.value);
-        const hasKey = !!(await this.context.secrets.get(secretName));
-        const showCurrent = isActiveProvider && hasKey;
-
-        const modelItems: Array<vscode.QuickPickItem & { value: string }> = models.map(m => ({
-            label: m,
-            value: m,
-            description: showCurrent && m === currentModel ? vscode.l10n.t(I18N.manageModels.currentLabel) : undefined,
-            picked: showCurrent && m === currentModel
-        }));
-
-        return await vscode.window.showQuickPick(
-            modelItems,
-            { placeHolder: vscode.l10n.t(I18N.manageModels.selectModel, providerPick.label) }
-        );
+    private modelDescription(id: string): string {
+        const model = this.serviceRegistry.getModel(id);
+        return model ? `${model.label} · ${PROVIDER_LABELS[model.provider]}` : 'Not selected';
     }
 
-    private async updateProviderAndModel(providerPick: any, modelPick: any, modelStateKey: string, apiKey: string, existingKey: string | undefined): Promise<void> {
-        await this.context.globalState.update('gitCommitGenie.provider', providerPick.value);
-        const service = this.serviceRegistry.getLLMService(providerPick.value);
-
-        // Only store the key if it actually changed (avoid unnecessary SecretStorage writes)
-        if (!existingKey || apiKey !== existingKey) {
-            if (service) {
-                await service.setApiKey(apiKey);
-            }
-        } else if (providerPick.value === 'local') {
-            // Local provider base URL can change without API key changes.
-            await service?.refreshFromSettings();
+    private usageDescription(id: string): string | undefined {
+        const purposes: string[] = [];
+        if (this.context.globalState.get<string>(GENERATION_MODEL_ID_KEY, '') === id) {
+            purposes.push('Commit messages');
         }
-
-        // Update current LLM service
-        this.serviceRegistry.updateCurrentLLMService();
-
-        await this.context.globalState.update(modelStateKey, modelPick.value);
+        if (this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '') === id) {
+            purposes.push('Repository analysis');
+        }
+        return purposes.length ? purposes.join(' · ') : undefined;
     }
-
-    /**
-     * Manage repository analysis model configuration
-     */
-    private async manageRepoAnalysisModel(): Promise<void> {
-        const config = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis');
-        const currentRepoModel = config.get<string>('model', 'general') || 'general';
-
-        // Collect all available models from all providers
-        const allModels: Array<{ label: string, value: string, provider: string, description?: string }> = [];
-
-        // Add "Use default model" option at the top
-        const generalProvider = this.context.globalState.get<string>('gitCommitGenie.provider', 'openai') || 'openai';
-        const generalModelKey = this.getModelStateKey(generalProvider);
-        const generalModel = this.context.globalState.get<string>(generalModelKey, '');
-        const useDefaultDesc = currentRepoModel === 'general' && generalModel
-            ? `${vscode.l10n.t(I18N.manageModels.currentLabel)}: ${generalModel}`
-            : vscode.l10n.t(I18N.manageModels.useDefaultModelDesc);
-
-        allModels.push({
-            label: vscode.l10n.t(I18N.manageModels.useDefaultModel),
-            value: 'general',
-            provider: 'general',
-            description: useDefaultDesc
-        });
-
-        // Collect models from all providers
-        // Note: Qwen is excluded because it has region-specific configuration (china/intl)
-        // Users should use 'general' mode to use Qwen for repository analysis
-        const providers = getAllProviderKeys()
-            .filter(key => key !== 'qwen') // Exclude Qwen due to regional variants
-            .map(key => ({
-                name: getProviderLabel(key),
-                value: key
-            }));
-
-        for (const provider of providers) {
-            try {
-                const service = this.serviceRegistry.getLLMService(provider.value);
-                if (service) {
-                    const models = service.listSupportedModels();
-                    for (const model of models) {
-                        allModels.push({
-                            label: model,
-                            value: model,
-                            provider: provider.name,
-                            description: currentRepoModel === model ? vscode.l10n.t(I18N.manageModels.currentLabel) : provider.name
-                        });
-                    }
-                }
-            } catch {
-                // Ignore provider errors
-            }
-        }
-
-        // Show model picker
-        const modelPick = await vscode.window.showQuickPick(allModels, {
-            placeHolder: vscode.l10n.t(I18N.manageModels.selectRepoAnalysisModel),
-            matchOnDescription: true
-        });
-
-        if (!modelPick) {
-            return;
-        }
-
-        // Update the setting
-        await config.update('model', modelPick.value, vscode.ConfigurationTarget.Global);
-
-        // Show confirmation
-        if (modelPick.value === 'general') {
-            vscode.window.showInformationMessage(
-                vscode.l10n.t(I18N.manageModels.configured,
-                    vscode.l10n.t(I18N.manageModels.useDefaultModel),
-                    vscode.l10n.t(I18N.manageModels.useDefaultModelDesc))
-            );
-        } else {
-            vscode.window.showInformationMessage(
-                vscode.l10n.t(I18N.manageModels.repoAnalysisConfigured, modelPick.provider, modelPick.value)
-            );
-        }
-
-        // Update status bar
-        this.statusBarManager.updateStatusBar();
-    }
-
-
 }

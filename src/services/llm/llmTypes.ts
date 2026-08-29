@@ -36,6 +36,8 @@ export type ChatFn = (
         model?: string
         temperature?: number
         requestType: RequestType
+        /** Reuses one provider session across an agent loop. */
+        sessionId?: string
     }
 ) => Promise<any>;
 
@@ -94,10 +96,6 @@ export interface LLMService {
 
     generateCommitMessage(diffs: DiffData[], options?: GenerateCommitMessageOptions): Promise<LLMResponse | LLMError>;
 
-    // Provider-specific raw client (e.g., OpenAI, Anthropic, GoogleGenAI). Typed as unknown
-    // because each provider's SDK exposes a different shape; callers must narrow.
-    getClient(): unknown | null;
-
-    // Provider-specific utils with chat-completion helpers. Typed as unknown for the same reason.
-    getUtils(): unknown;
+    /** Creates a provider-neutral chat function with optional session support. */
+    createChat?(repoPath?: string, options?: GenerateCommitMessageOptions): ChatFn;
 }
