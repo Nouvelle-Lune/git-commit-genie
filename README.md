@@ -8,7 +8,7 @@ Chinese version: [中文说明](./docs/README.zh-CN.md)
 
 ## Overview
 
-Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using mainstream LLM providers (OpenAI / DeepSeek / Anthropic / Gemini / Qwen / GLM / Kimi / OpenRouter). Features intelligent repository analysis that understands your project structure and tech stack to provide better context for commit generation. Supports optional multi‑step Thinking mode and user template strategy to improve structural consistency and style alignment.
+Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using supported LLM adapters (OpenAI, Anthropic, Google Gemini, and custom endpoints implementing OpenAI Chat Completions). Features intelligent repository analysis that understands your project structure and tech stack to provide better context for commit generation. Supports optional multi‑step Thinking mode and user template strategy to improve structural consistency and style alignment.
 
 <table style="width: 100%; border-spacing: 10px;">
   <tr>
@@ -53,7 +53,7 @@ Basic format:
 
 | Feature                         | Description                                                                                                                                                                                                                                                                                                            |
 | ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Multi‑provider LLM support      | Supports OpenAI, DeepSeek, Anthropic, Gemini, Qwen, GLM, Kimi, OpenRouter.                                                                                                                                                                                                                                             |
+| Multi‑provider LLM support      | Supports OpenAI, Anthropic, Google Gemini, and custom providers that implement OpenAI Chat Completions.                                                                                                                                                                                                               |
 | Repository Intelligence         | AI-powered repository analysis agent that autonomously explores your codebase using intelligent tools; automatically understands project structure, tech stack, and architecture to provide contextual insights for better commit messages; supports manual refresh, real-time updates, and editable analysis reports. |
 | RAG (Retrieval-Augmented Generation) | Builds a local index of historical commit messages and retrieves style references via hybrid search (dense embeddings + BM25 keyword) to keep generated commit message style consistent with the repository. Requires an OpenAI-compatible embedding API. Supports incremental indexing and background repair. |
 | Thinking Mode                   | Optional multi‑step pipeline: per‑file summaries → structured synthesis → validation & minimal fix‑ups (improves accuracy & template adherence).                                                                                                                                                                       |
@@ -83,6 +83,9 @@ All settings are under: `Git Commit Genie`.
 | `gitCommitGenie.chain.enabled`                      | boolean | false     | Enable multi-step Thinking mode for commit generation (more detailed and accurate, better template adherence, but higher latency and token usage).                                                                                                                  |
 | `gitCommitGenie.chain.maxParallel`                  | number  | 2         | Maximum parallel LLM calls used by Thinking mode across all providers. Increase carefully to avoid provider rate limits.                                                                                                                                            |
 | `gitCommitGenie.chain.maxInputTokens`               | integer | 32000     | Maximum estimated input tokens for each Thinking request. Raw diffs are kept while they fit; oversized inputs are dynamically summarized by hunk.                                                                                                                   |
+| `gitCommitGenie.defaultThinkingLevel`               | enum    | `off`     | Global thinking level for supported models. Models without configurable thinking stay off. Custom OpenAI-compatible models inherit it automatically; only non-standard endpoints need Manage Models → Advanced thinking compatibility. |
+| `gitCommitGenie.modelThinkingLevels`                | object  | `{}`      | Optional per-model overrides. Keys use `provider/model`; values use a thinking level. Example: `{ "openai/gpt-5.4": "high", "custom/Qwen3.5-9B": "low" }`. Missing keys inherit the global level. Custom models may also use a provider-native non-empty value such as `VERY_HIGH`. |
+| `gitCommitGenie.thinkingBudgets`                    | object  | see below | Numeric token budgets used by Anthropic/Google and custom endpoints explicitly configured with an advanced local-engine budget field. Ordinary OpenAI-compatible provider models do not need this setting. Defaults: `1024/4096/10240/32768/65536/131072`. |
 | `gitCommitGenie.llm.maxRetries`                     | number  | 2         | Max retry attempts for API request failures.                                                                                                                                                                                                                        |
 | `gitCommitGenie.llm.temperature`                    | number  | 1         | Temperature (0–2). Default 1. Some provider/model combinations only accept 1; changing this value may trigger invalid-temperature errors or less stable outputs.                                                                                                  |
 | `gitCommitGenie.rag.enabled`                        | boolean | false     | Enable RAG to keep commit message generation style consistent (requires sufficient historical commits to build a local style index). Configure the embedding API key first via the "Configure RAG Embedding API Key" command.                                   |
@@ -99,6 +102,10 @@ All settings are under: `Git Commit Genie`.
 | `gitCommitGenie.typingAnimationSpeed`               | number  | 15        | Speed of the commit message box typing animation in milliseconds per character. Set to -1 to disable the animation.                                                                                                                                                 |
 | `gitCommitGenie.showUsageCost`                      | boolean | true      | When enabled, a brief notification displays the estimated total cost for the current generation.                                                                                                                                                                    |
 | `gitCommitGenie.ui.stageNotifications.enabled`      | boolean | true      | Show Thinking stage progress in the VS Code status bar.                                                                                                                                                                                                            |
+
+Native model reasoning and the extension's `gitCommitGenie.chain.enabled` multi-step commit-generation pipeline are independent settings. The model level controls provider request parameters; the chain setting controls how many plugin stages run.
+
+Custom OpenAI Chat Completions endpoints use one adapter with a Pi-style thinking format. Select `Off / unsupported` for a model without thinking support; it sends no native thinking parameter. The default `openai` format sends `reasoning_effort`; local Qwen/vLLM endpoints can use `qwen` (`enable_thinking`) or `qwen-chat-template` (`chat_template_kwargs.enable_thinking`); generic local templates can use `chat-template`. DeepSeek, OpenRouter, Together, z.ai, Baseten, string-thinking, and AntLing formats are also available when editing a custom model. Thinking levels remain global or per-model settings; the format is only the endpoint's serialization rule.
 
 
 ## Commands
@@ -155,7 +162,7 @@ MIT
 ## Acknowledgements
 
 - [Conventional Commits](https://conventionalcommits.org/) - https://github.com/conventional-commits/conventionalcommits.org
-- OpenAI / DeepSeek / Anthropic / Gemini / Qwen / GLM / Kimi / OpenRouter model ecosystems.
+- OpenAI / Anthropic / Google Gemini / OpenAI Chat Completions-compatible model ecosystems.
 
 ---
 

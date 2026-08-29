@@ -7,9 +7,11 @@ import {
     AISession,
     AISessionOptions,
     AISessionSnapshot,
+    AIThinkingConfig,
     AnthropicProviderConfig,
 } from './types';
 import { parseStructuredText } from './json';
+import { applyAnthropicThinking } from './thinking';
 
 /** Anthropic Messages API adapter. */
 type AnthropicMessage = { role: 'user' | 'assistant'; content: any };
@@ -20,6 +22,7 @@ class AnthropicSession implements AISession {
     private readonly transcript: AIMessage[] = [];
     private readonly messages: AnthropicMessage[] = [];
     private lastResponseId?: string;
+    private readonly thinking?: AIThinkingConfig;
 
     constructor(
         private readonly client: Anthropic,
@@ -27,6 +30,7 @@ class AnthropicSession implements AISession {
         private readonly systemInstruction?: string,
     ) {
         this.model = options.model;
+        this.thinking = options.thinking;
     }
 
     async run(request: AIRunRequest): Promise<AIRunResponse> {
@@ -61,6 +65,7 @@ class AnthropicSession implements AISession {
             temperature: request.temperature,
             cache_control: { type: 'ephemeral' },
         };
+        applyAnthropicThinking(body, request.thinking ?? this.thinking);
         if (request.tools?.length) {
             body.tool_choice = request.toolChoice === 'required' ? { type: 'any' }
                 : request.toolChoice === 'none' ? { type: 'none' }

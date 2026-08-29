@@ -5,17 +5,54 @@ import {
     GENERATION_MODEL_ID_KEY,
     REPOSITORY_ANALYSIS_MODEL_ID_KEY,
     AIModelConfig,
+    AIChatTemplateValue,
+    AIThinkingFormat,
+    AIThinkingTokenBudgetField,
     NATIVE_SECRET_KEYS,
     PROVIDER_LABELS,
     ProviderKind,
+    ThinkingLevel,
+    THINKING_LEVELS,
     createAIProvider,
     customSecretKey,
+    getModelThinkingMetadata,
+    getSupportedThinkingLevels,
     modelSecretKey,
 } from '../services/llm/providers';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
 
 type ModelPurpose = 'generation' | 'repositoryAnalysis';
+
+const THINKING_FORMAT_OPTIONS: ReadonlyArray<{
+    label: string;
+    description: string;
+    value: AIThinkingFormat;
+}> = [
+    { label: 'No thinking control', description: 'Do not send native thinking parameters', value: 'off' },
+    { label: 'Standard OpenAI-compatible', description: 'reasoning_effort · Default', value: 'openai' },
+    { label: 'OpenRouter extension', description: 'reasoning.effort', value: 'openrouter' },
+    { label: 'DeepSeek extension', description: 'thinking: { type: enabled | disabled }', value: 'deepseek' },
+    { label: 'Together extension', description: 'reasoning.enabled', value: 'together' },
+    { label: 'z.ai extension', description: 'thinking: { type: enabled | disabled }', value: 'zai' },
+    { label: 'Qwen extension', description: 'enable_thinking', value: 'qwen' },
+    { label: 'Qwen local chat template', description: 'chat_template_kwargs.enable_thinking', value: 'qwen-chat-template' },
+    { label: 'Chat template', description: 'custom chat_template_kwargs', value: 'chat-template' },
+    { label: 'Baseten', description: 'custom chat_template_args', value: 'baseten' },
+    { label: 'String thinking', description: 'thinking: string', value: 'string-thinking' },
+    { label: 'AntLing', description: 'reasoning.effort', value: 'ant-ling' },
+];
+
+const THINKING_BUDGET_OPTIONS: ReadonlyArray<{
+    label: string;
+    description: string;
+    value: AIThinkingTokenBudgetField | undefined;
+}> = [
+    { label: 'None', description: 'Do not send a thinking budget field', value: undefined },
+    { label: 'Local vLLM extension', description: 'thinking_token_budget', value: 'thinking_token_budget' },
+    { label: 'Local Qwen / SGLang extension', description: 'thinking_budget', value: 'thinking_budget' },
+    { label: 'Local llama.cpp extension', description: 'thinking_budget_tokens', value: 'thinking_budget_tokens' },
+];
 
 export class ModelCommands {
     constructor(
@@ -73,16 +110,27 @@ export class ModelCommands {
     }
 
     private async manageConfiguredModel(model: AIModelConfig): Promise<void> {
-        const picked = await vscode.window.showQuickPick([
+        const items: Array<vscode.QuickPickItem & { value: string }> = [
             { label: 'Use for commit messages', value: 'generation' },
             { label: 'Use for repository analysis', value: 'repositoryAnalysis' },
+            { label: 'Set thinking level override', value: 'thinking' },
+            ...(model.provider === 'custom' ? [{
+                label: 'Advanced thinking compatibility',
+                description: 'Only for endpoints with non-standard Chat Completions parameters',
+                value: 'thinkingCompatibility',
+            }] : []),
             { label: 'Edit model', value: 'edit' },
             { label: 'Replace API key', value: 'key' },
             { label: 'Delete model', value: 'delete' },
-        ], { placeHolder: model.label });
+        ];
+        const picked = await vscode.window.showQuickPick(items, { placeHolder: model.label });
         if (!picked) { return; }
         if (picked.value === 'generation' || picked.value === 'repositoryAnalysis') {
-            await this.assignModel(picked.value, model.id);
+            await this.assignModel(picked.value as ModelPurpose, model.id);
+        } else if (picked.value === 'thinking') {
+            await this.configureThinkingLevel(model);
+        } else if (picked.value === 'thinkingCompatibility') {
+            await this.configureCustomThinkingCompatibility(model);
         } else if (picked.value === 'edit') {
             await this.editModel(model);
         } else if (picked.value === 'key') {
@@ -206,6 +254,136 @@ export class ModelCommands {
         await this.statusBarManager.refreshModelStates();
     }
 
+    private async configureThinkingLevel(model: AIModelConfig): Promise<void> {
+        const configuration = vscode.workspace.getConfiguration('gitCommitGenie');
+        const metadata = getModelThinkingMetadata(model);
+        const supported = getSupportedThinkingLevels(metadata);
+        const defaultLevel = configuration.get<unknown>('defaultThinkingLevel', 'off');
+        if (typeof defaultLevel !== 'string' || !THINKING_LEVELS.includes(defaultLevel as ThinkingLevel)) {
+            throw new Error(`Invalid default thinking level '${String(defaultLevel)}'.`);
+        }
+        const configured = configuration.get<unknown>('modelThinkingLevels', {});
+        if (configured === null || typeof configured !== 'object' || Array.isArray(configured)) {
+            throw new Error('gitCommitGenie.modelThinkingLevels must be an object.');
+        }
+        const modelLevels = { ...(configured as Record<string, unknown>) };
+        const modelKey = `${model.provider}/${model.model}`;
+        const hasOverride = Object.prototype.hasOwnProperty.call(modelLevels, modelKey);
+        const currentOverride = hasOverride ? modelLevels[modelKey] : undefined;
+        const picked = await vscode.window.showQuickPick([
+            {
+                label: 'Inherit global setting',
+                description: `${defaultLevel}${hasOverride ? '' : ' · Current'}`,
+                value: '__inherit__',
+            },
+            ...supported.map(level => ({
+                label: level,
+                description: currentOverride === level ? 'Current override' : undefined,
+                value: level,
+            })),
+            ...(model.provider === 'custom' ? [{
+                label: 'Custom native value…',
+                description: typeof currentOverride === 'string'
+                    && !THINKING_LEVELS.includes(currentOverride as ThinkingLevel)
+                    ? `${currentOverride} · Current override`
+                    : 'Send a provider-specific effort value verbatim',
+                value: '__custom__',
+            }] : []),
+        ],
+            { placeHolder: `Thinking level for ${model.label}` },
+        );
+        if (!picked) { return; }
+
+        if (picked.value === '__inherit__') {
+            delete modelLevels[modelKey];
+        } else if (picked.value === '__custom__') {
+            const nativeValue = await vscode.window.showInputBox({
+                title: `Native thinking value for ${model.label}`,
+                value: typeof currentOverride === 'string'
+                    && !THINKING_LEVELS.includes(currentOverride as ThinkingLevel)
+                    ? currentOverride
+                    : '',
+                prompt: 'This value is sent verbatim by the configured endpoint thinking profile.',
+                ignoreFocusOut: true,
+                validateInput: value => value.trim() ? undefined : 'A native thinking value is required.',
+            });
+            if (nativeValue === undefined) { return; }
+            modelLevels[modelKey] = nativeValue.trim();
+        } else {
+            modelLevels[modelKey] = picked.value;
+        }
+        await configuration.update(
+            'modelThinkingLevels',
+            modelLevels,
+            vscode.ConfigurationTarget.Global,
+        );
+    }
+
+    private async configureCustomThinkingCompatibility(model: AIModelConfig): Promise<void> {
+        if (model.provider !== 'custom') {
+            throw new Error('Thinking compatibility profiles are only available for custom OpenAI-compatible models.');
+        }
+
+        const currentFormat = model.thinkingFormat ?? 'openai';
+        const formatChoice = await vscode.window.showQuickPick(
+            THINKING_FORMAT_OPTIONS.map(option => ({
+                ...option,
+                description: option.value === currentFormat
+                    ? `${option.description} · Current`
+                    : option.description,
+            })),
+            { placeHolder: 'Advanced: select the endpoint thinking request profile' },
+        );
+        if (!formatChoice) { return; }
+
+        const budgetChoice = await vscode.window.showQuickPick(
+            THINKING_BUDGET_OPTIONS.map(option => ({
+                ...option,
+                description: option.value === model.thinkingTokenBudgetField
+                    ? `${option.description} · Current`
+                    : option.description,
+            })),
+            { placeHolder: 'Advanced: select an optional local-engine budget field' },
+        );
+        if (!budgetChoice) { return; }
+
+        const chatTemplateKwargs = formatChoice.value === 'chat-template'
+            ? await this.promptChatTemplateValues(
+                'chat_template_kwargs JSON',
+                model.chatTemplateKwargs,
+                '{\n  "enable_thinking": { "$var": "thinking.enabled" },\n  "thinking_budget": { "$var": "thinking.budget", "omitWhenOff": true }\n}',
+            )
+            : undefined;
+        if (chatTemplateKwargs === null) { return; }
+        const chatTemplateArgs = formatChoice.value === 'baseten'
+            ? await this.promptChatTemplateValues(
+                'chat_template_args JSON',
+                model.chatTemplateArgs,
+                '{\n  "enable_thinking": { "$var": "thinking.enabled" },\n  "thinking_budget": { "$var": "thinking.budget", "omitWhenOff": true }\n}',
+            )
+            : undefined;
+        if (chatTemplateArgs === null) { return; }
+
+        const updated: AIModelConfig = { ...model };
+        delete updated.thinkingFormat;
+        delete updated.thinkingTokenBudgetField;
+        delete updated.chatTemplateKwargs;
+        delete updated.chatTemplateArgs;
+        if (formatChoice.value !== 'openai') {
+            updated.thinkingFormat = formatChoice.value;
+        }
+        if (budgetChoice.value !== undefined) {
+            updated.thinkingTokenBudgetField = budgetChoice.value;
+        }
+        if (chatTemplateKwargs !== undefined) {
+            updated.chatTemplateKwargs = chatTemplateKwargs;
+        }
+        if (chatTemplateArgs !== undefined) {
+            updated.chatTemplateArgs = chatTemplateArgs;
+        }
+        await this.updateConfiguredModel(updated);
+    }
+
     private async resolveApiKeyForNewModel(model: AIModelConfig): Promise<string | undefined> {
         const existing = await this.context.secrets.get(modelSecretKey(model));
         return existing ?? this.promptApiKey(PROVIDER_LABELS[model.provider]);
@@ -235,7 +413,38 @@ export class ModelCommands {
         }
         const model = await vscode.window.showInputBox({ title: 'Model name', value: initial.model, ignoreFocusOut: true });
         if (!model?.trim()) { return undefined; }
-        return { id: initial.id, label: label.trim(), provider: 'custom', baseUrl: baseUrl.trim(), model: model.trim() };
+        return {
+            ...initial,
+            label: label.trim(),
+            provider: 'custom',
+            baseUrl: baseUrl.trim(),
+            model: model.trim(),
+        };
+    }
+
+    private async updateConfiguredModel(model: AIModelConfig): Promise<void> {
+        await this.context.globalState.update(
+            AI_MODELS_KEY,
+            this.serviceRegistry.getModels().map(candidate => candidate.id === model.id ? model : candidate),
+        );
+        await this.serviceRegistry.reloadProviderServices();
+        this.serviceRegistry.updateCurrentLLMService();
+        await this.statusBarManager.refreshModelStates();
+    }
+
+    private async promptChatTemplateValues(
+        title: string,
+        initial: Record<string, AIChatTemplateValue> | undefined,
+        placeholder: string,
+    ): Promise<Record<string, AIChatTemplateValue> | null> {
+        const value = await vscode.window.showInputBox({
+            title,
+            value: JSON.stringify(initial ?? JSON.parse(placeholder), null, 2),
+            prompt: 'Use scalar values or {$var: thinking.enabled|thinking.effort|thinking.budget}.',
+            ignoreFocusOut: true,
+        });
+        if (value === undefined) { return null; }
+        return parseChatTemplateValues(JSON.parse(value), title);
     }
 
     private promptApiKey(label: string): Thenable<string | undefined> {
@@ -270,4 +479,40 @@ export class ModelCommands {
         }
         return purposes.length ? purposes.join(' · ') : undefined;
     }
+}
+
+function parseChatTemplateValues(value: unknown, title: string): Record<string, AIChatTemplateValue> {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+        throw new Error(`${title} must be a JSON object.`);
+    }
+
+    const result: Record<string, AIChatTemplateValue> = {};
+    for (const [key, entry] of Object.entries(value)) {
+        if (entry === null || typeof entry === 'string' || typeof entry === 'boolean'
+            || (typeof entry === 'number' && Number.isFinite(entry))) {
+            result[key] = entry;
+            continue;
+        }
+        if (typeof entry !== 'object' || Array.isArray(entry)) {
+            throw new Error(`${title}.${key} must be a scalar or a thinking variable.`);
+        }
+
+        const variable = (entry as { $var?: unknown }).$var;
+        if (variable !== 'thinking.enabled' && variable !== 'thinking.effort' && variable !== 'thinking.budget') {
+            throw new Error(`${title}.${key} has an unsupported $var.`);
+        }
+        const entryKeys = Object.keys(entry);
+        if (entryKeys.some(entryKey => entryKey !== '$var' && entryKey !== 'omitWhenOff')) {
+            throw new Error(`${title}.${key} contains an unsupported property.`);
+        }
+        const omitWhenOff = (entry as { omitWhenOff?: unknown }).omitWhenOff;
+        if (omitWhenOff !== undefined && typeof omitWhenOff !== 'boolean') {
+            throw new Error(`${title}.${key}.omitWhenOff must be a boolean.`);
+        }
+        result[key] = {
+            $var: variable,
+            ...(omitWhenOff !== undefined ? { omitWhenOff } : {}),
+        };
+    }
+    return result;
 }

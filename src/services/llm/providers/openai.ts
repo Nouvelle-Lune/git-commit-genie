@@ -7,9 +7,11 @@ import {
     AISession,
     AISessionOptions,
     AISessionSnapshot,
+    AIThinkingConfig,
     OpenAIProviderConfig,
 } from './types';
 import { parseJsonObject, parseStructuredText } from './json';
+import { applyOpenAIResponsesThinking } from './thinking';
 
 /** Converts unified messages into Responses API input items. */
 function toInputMessages(messages: AIMessage[]): Array<Record<string, unknown>> {
@@ -23,6 +25,7 @@ class OpenAISession implements AISession {
     readonly model: string;
     private previousResponseId?: string;
     private readonly transcript: AIMessage[] = [];
+    private readonly thinking?: AIThinkingConfig;
 
     constructor(
         private readonly client: OpenAI,
@@ -31,6 +34,7 @@ class OpenAISession implements AISession {
     ) {
         this.model = options.model;
         this.promptCacheKey = options.id;
+        this.thinking = options.thinking;
     }
     private readonly promptCacheKey?: string;
 
@@ -60,6 +64,8 @@ class OpenAISession implements AISession {
             tool_choice: request.toolChoice,
             parallel_tool_calls: false,
         };
+        const thinking = request.thinking ?? this.thinking;
+        applyOpenAIResponsesThinking(body, thinking);
         if (request.responseFormat) {
             body.text = {
                 format: {
@@ -70,7 +76,8 @@ class OpenAISession implements AISession {
                 },
             };
         }
-        if (request.temperature !== undefined && !this.model.startsWith('gpt-5')) {
+        const thinkingEnabled = thinking?.reasoning === true && thinking.level !== 'off';
+        if (request.temperature !== undefined && !this.model.startsWith('gpt-5') && !thinkingEnabled) {
             body.temperature = request.temperature;
         }
 

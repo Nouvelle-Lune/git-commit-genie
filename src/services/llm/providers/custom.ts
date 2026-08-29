@@ -7,9 +7,11 @@ import {
     AISession,
     AISessionOptions,
     AISessionSnapshot,
+    AIThinkingConfig,
     CustomProviderConfig,
 } from './types';
 import { assertHttpBaseUrl, parseJsonObject, parseStructuredText } from './json';
+import { applyOpenAICompatibleThinking } from './thinking';
 
 /** OpenAI-compatible message shape used by custom endpoints. */
 type CustomMessage = {
@@ -17,6 +19,9 @@ type CustomMessage = {
     content: string | null;
     tool_call_id?: string;
     tool_calls?: unknown[];
+    reasoning?: string;
+    reasoning_content?: string;
+    reasoning_text?: string;
 };
 
 class CustomSession implements AISession {
@@ -24,9 +29,11 @@ class CustomSession implements AISession {
     readonly model: string;
     private readonly transcript: AIMessage[] = [];
     private readonly messages: CustomMessage[] = [];
+    private readonly thinking?: AIThinkingConfig;
 
     constructor(private readonly client: OpenAI, options: AISessionOptions) {
         this.model = options.model;
+        this.thinking = options.thinking;
         if (options.systemInstruction) {
             this.messages.push({ role: 'system', content: options.systemInstruction });
         }
@@ -49,10 +56,18 @@ class CustomSession implements AISession {
         if (!choice) {
             throw new Error('Custom provider returned no assistant message.');
         }
-        this.messages.push({
+        const reasoning = readReasoning(choice);
+        const thinking = request.thinking ?? this.thinking;
+        const assistantMessage: CustomMessage = {
             role: 'assistant',
             content: choice.content ?? null,
             tool_calls: choice.tool_calls,
+        };
+        if (thinking?.requiresReasoningContentOnAssistantMessages && thinking.reasoning && thinking.level !== 'off') {
+            assistantMessage.reasoning_content = reasoning ?? '';
+        }
+        this.messages.push({
+            ...assistantMessage,
         });
         const text = String(choice.content ?? '');
         const toolCalls = (choice.tool_calls ?? []).map((call: any) => ({
@@ -62,6 +77,7 @@ class CustomSession implements AISession {
         }));
         return {
             text,
+            reasoning,
             structured: request.responseFormat ? parseStructuredText(text) : undefined,
             toolCalls,
             usage: response.usage ? {
@@ -131,6 +147,7 @@ class CustomSession implements AISession {
             })),
             tool_choice: request.toolChoice,
         };
+        applyOpenAICompatibleThinking(body, request.thinking ?? this.thinking);
         return (this.client.chat.completions.create as any)(body, {
             signal: request.signal,
         });
@@ -144,6 +161,17 @@ class CustomSession implements AISession {
             transcript: [...this.transcript],
         };
     }
+}
+
+/** Reads the first non-empty reasoning field exposed by OpenAI-compatible APIs. */
+function readReasoning(message: Record<string, unknown>): string | undefined {
+    for (const field of ['reasoning_content', 'reasoning', 'reasoning_text']) {
+        const value = message[field];
+        if (typeof value === 'string' && value.length > 0) {
+            return value;
+        }
+    }
+    return undefined;
 }
 
 function isUnsupportedStructuredOutputError(error: unknown): boolean {

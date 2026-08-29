@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { DiffData } from '../git/gitTypes';
 import { Repository } from '../git/git';
 import { ChangeSetSummary, FileSummary, RagStyleReference, RetrievalFeatures } from '../chain/types';
-import { AIMessage, AISession } from './providers';
+import { AIMessage, AISession, ThinkingLevel } from './providers';
 
 export type RequestType =
     | 'commitMessage'
@@ -32,6 +32,8 @@ export interface LLMExecution {
     readonly temperature: number;
     readonly maxOutputTokens: number;
     readonly maxRetries: number;
+    readonly thinkingLevel: ThinkingLevel;
+    readonly thinkingBudget?: number;
     createSession(messages: AIMessage[], id?: string): AISession;
     run<T>(session: AISession, messages: AIMessage[], options: LLMRunOptions): Promise<T>;
 }

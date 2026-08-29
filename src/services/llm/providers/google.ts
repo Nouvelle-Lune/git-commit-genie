@@ -6,9 +6,11 @@ import {
     AISession,
     AISessionOptions,
     AISessionSnapshot,
+    AIThinkingConfig,
     GoogleProviderConfig,
 } from './types';
 import { parseStructuredText } from './json';
+import { applyGoogleThinking } from './thinking';
 
 const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
 /** Fetch implementation injected for deterministic provider testing. */
@@ -26,6 +28,7 @@ class GoogleSession implements AISession {
     readonly model: string;
     private previousInteractionId?: string;
     private readonly transcript: AIMessage[] = [];
+    private readonly thinking?: AIThinkingConfig;
 
     constructor(
         private readonly apiKey: string,
@@ -34,6 +37,7 @@ class GoogleSession implements AISession {
         private readonly fetchFn: Fetch = fetch,
     ) {
         this.model = options.model;
+        this.thinking = options.thinking;
     }
 
     async run(request: AIRunRequest): Promise<AIRunResponse> {
@@ -64,6 +68,7 @@ class GoogleSession implements AISession {
                 max_output_tokens: request.maxOutputTokens,
             },
         };
+        applyGoogleThinking(body, request.thinking ?? this.thinking, this.model);
         if (request.responseFormat) {
             body.response_format = {
                 type: 'text',

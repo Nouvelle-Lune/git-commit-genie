@@ -1,4 +1,4 @@
-import { ProviderKind } from './types';
+import { AIModelThinkingMetadata, ProviderKind } from './types';
 
 /** Current persisted model configuration schema version. */
 export const AI_CONFIG_VERSION = 2;
@@ -13,7 +13,7 @@ export const NATIVE_SECRET_KEYS: Readonly<Record<Exclude<ProviderKind, 'custom'>
     google: 'gitCommitGenie.secret.ai.google',
 });
 
-export interface AIModelConfig {
+export interface AIModelConfig extends Partial<AIModelThinkingMetadata> {
     /** Stable identity referenced independently by each product workflow. */
     id: string;
     /** User-facing name for this configured model instance. */

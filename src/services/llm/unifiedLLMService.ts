@@ -9,6 +9,7 @@ import {
     AIModelConfig,
     createAIProvider,
     modelSecretKey,
+    resolveThinkingConfig,
 } from './providers';
 import { TemplateService } from '../../template/templateService';
 import { IRepositoryAnalysisService } from '../analysis/repository/repositoryAnalysisTypes';
@@ -101,15 +102,23 @@ export class UnifiedLLMService extends BaseLLMService {
         const temperature = configuration.get<number>('llm.temperature', 1);
         const maxOutputTokens = configuration.get<number>('llm.maxOutputTokens', 4096);
         const maxRetries = configuration.get<number>('llm.maxRetries', 2);
+        const thinking = resolveThinkingConfig(this.options.model, {
+            defaultThinkingLevel: configuration.get<unknown>('defaultThinkingLevel', 'off'),
+            modelThinkingLevels: configuration.get<unknown>('modelThinkingLevels', {}),
+            thinkingBudgets: configuration.get<unknown>('thinkingBudgets', {}),
+        });
         return {
             signal,
             temperature,
             maxOutputTokens,
             maxRetries,
+            thinkingLevel: thinking.level,
+            thinkingBudget: thinking.budget,
             createSession: (messages, id) => provider.createSession({
                 id,
                 model: this.getCurrentModel(),
                 systemInstruction: this.systemInstruction(messages),
+                thinking,
             }),
             run: <T>(session: AISession, messages: AIMessage[], runOptions: LLMRunOptions) => (
                 this.runSession<T>(session, messages, runOptions, repoPath, signal)

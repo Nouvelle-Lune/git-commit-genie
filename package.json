@@ -171,6 +171,53 @@
           "default": [],
           "markdownDescription": "%config.chain.investigation.excludePatterns.desc%"
         },
+        "gitCommitGenie.defaultThinkingLevel": {
+          "order": 5.6,
+          "type": "string",
+          "enum": [
+            "off",
+            "minimal",
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+            "max"
+          ],
+          "default": "off",
+          "markdownDescription": "%config.defaultThinkingLevel.desc%"
+        },
+        "gitCommitGenie.modelThinkingLevels": {
+          "order": 5.7,
+          "type": "object",
+          "default": {},
+          "additionalProperties": {
+            "type": "string",
+            "minLength": 1
+          },
+          "markdownDescription": "%config.modelThinkingLevels.desc%"
+        },
+        "gitCommitGenie.thinkingBudgets": {
+          "order": 5.8,
+          "type": "object",
+          "default": {
+            "minimal": 1024,
+            "low": 4096,
+            "medium": 10240,
+            "high": 32768,
+            "xhigh": 65536,
+            "max": 131072
+          },
+          "properties": {
+            "minimal": { "type": "integer", "minimum": 1024 },
+            "low": { "type": "integer", "minimum": 1024 },
+            "medium": { "type": "integer", "minimum": 1024 },
+            "high": { "type": "integer", "minimum": 1024 },
+            "xhigh": { "type": "integer", "minimum": 1024 },
+            "max": { "type": "integer", "minimum": 1024 }
+          },
+          "additionalProperties": false,
+          "markdownDescription": "%config.thinkingBudgets.desc%"
+        },
         "gitCommitGenie.llm.maxRetries": {
           "order": 6,
           "type": "number",

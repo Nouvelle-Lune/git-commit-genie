@@ -5,4 +5,5 @@ export * from './custom';
 export * from './catalog';
 export * from './config';
 export * from './factory';
+export * from './thinking';
 export * from './types';

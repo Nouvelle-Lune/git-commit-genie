@@ -8,7 +8,7 @@ English version: [English README](../README.md)
 
 ## 概述
 
-Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / DeepSeek / Anthropic / Gemini / Qwen / GLM / Kimi / OpenRouter）自动生成高质量的 Conventional Commits 风格提交信息。内置仓库智能分析功能，自动理解项目结构和技术栈，为提交信息生成提供更好的上下文。支持可选"Thinking 模式"（多步推理）与"用户模板"策略，显著提升结构一致性与团队风格统一。
+Git Commit Genie 基于已暂存的 Git diff，使用支持的模型适配器（OpenAI、Anthropic、Google Gemini，以及实现 OpenAI Chat Completions 的自定义端点）自动生成高质量的 Conventional Commits 风格提交信息。内置仓库智能分析功能，自动理解项目结构和技术栈，为提交信息生成提供更好的上下文。支持可选"Thinking 模式"（多步推理）与"用户模板"策略，显著提升结构一致性与团队风格统一。
 
 <table style="width: 100%; border-spacing: 10px;">
   <tr>
@@ -53,7 +53,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 
 | 特性                     | 说明                                                                                                                                                              |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 多模型提供商             | 支持 OpenAI、DeepSeek、Anthropic、Gemini、Qwen、GLM、Kimi、OpenRouter 等。                                                                                        |
+| 多模型提供商             | 支持 OpenAI、Anthropic、Google Gemini，以及实现 OpenAI Chat Completions 的自定义提供商。                                                                           |
 | 仓库智能分析             | AI驱动的仓库分析智能Agent，自主使用智能工具探索代码库；自动理解项目结构、技术栈和架构，为更好的提交信息提供上下文洞察；支持手动刷新、实时更新和可编辑的分析报告。 |
 | RAG（检索增强生成）      | 构建本地历史提交信息索引，通过混合检索（稠密向量 + BM25 关键词）检索风格参考，使生成的提交信息与仓库风格保持一致。需要兼容 OpenAI 接口的 Embedding API。支持增量索引与后台向量修复。 |
 | Thinking 模式            | 多步：文件级摘要 → 结构化综合 → 校验修复，显著提升准确度与模板贴合度。                                                                                            |
@@ -82,6 +82,9 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `gitCommitGenie.chain.enabled`                      | boolean | false   | 启用链式多步提示生成提交信息（使得生成的提交信息更加详准确，且可以更加贴合用户模版，但将增加延迟与 Token 消耗）                                      |
 | `gitCommitGenie.chain.maxParallel`                  | number  | 2       | 链式提示并行 LLM 调用最大数量。谨慎增大以避免触发速率限制。                                                                                          |
 | `gitCommitGenie.chain.maxInputTokens`               | integer | 32000   | Thinking 每次请求允许的最大估算输入 Token 数；预算内保留原始 diff，超出预算时按 hunk 动态摘要。                                                      |
+| `gitCommitGenie.defaultThinkingLevel`               | enum    | `off`   | 所有支持 thinking 的模型使用的全局思考等级，默认关闭；不支持 thinking 的模型始终关闭。Custom OpenAI-compatible 模型自动继承，只有使用非标准参数的端点才需要“管理模型 → 高级 thinking 兼容”。 |
+| `gitCommitGenie.modelThinkingLevels`                | object  | `{}`    | 可选的单模型覆盖。键使用 `provider/model`，值使用思考等级，例如 `{ "openai/gpt-5.4": "high", "custom/Qwen3.5-9B": "low" }`；没有对应键时继承全局配置。Custom 模型还可填写 `VERY_HIGH` 等非空 provider 原生值。 |
+| `gitCommitGenie.thinkingBudgets`                    | object  | 见说明  | 仅用于 Anthropic/Google 数字思考预算，以及明确配置了高级本地引擎预算字段的 Custom 端点；普通 OpenAI-compatible 模型提供商无需配置。默认依次为 `1024/4096/10240/32768/65536/131072`。 |
 | `gitCommitGenie.llm.maxRetries`                     | number  | 2       | API请求失败最大重试次数。                                                                                                                            |
 | `gitCommitGenie.llm.temperature`                    | number  | 1       | Temperature（0–2），默认为 1。部分服务商/模型组合只接受 1；修改该值可能触发 invalid-temperature 错误或导致输出稳定性下降。                                      |
 | `gitCommitGenie.rag.enabled`                        | boolean | false   | 启用 RAG 保持 commit message 生成的风格一致性（需要仓库中存在一定数量的历史 commit message 构建本地风格索引）。启用前请先通过"配置 RAG Embedding API Key"命令配置 API Key。 |
@@ -98,6 +101,10 @@ Git Commit Genie 基于已暂存的 Git diff，使用主流大模型（OpenAI / 
 | `gitCommitGenie.typingAnimationSpeed`               | number  | 15      | 提交信息框打字动画速度，单位为每字符毫秒。设置 -1 关闭动画。                                                                                         |  |
 | `gitCommitGenie.showUsageCost`                      | boolean | true    | 启用后在生成文本时弹出通知，显示本次生成的估计总费用。                                                                                               |
 | `gitCommitGenie.ui.stageNotifications.enabled`      | boolean | true    | 在 VS Code 状态栏显示 Thinking 阶段进度。                                                                                                             |
+
+原生模型推理等级与 `gitCommitGenie.chain.enabled` 的链式多步提交信息生成流程相互独立：前者控制 provider 请求参数，后者控制插件执行的阶段数量。
+
+Custom OpenAI Chat Completions 端点统一使用一个 adapter，并采用 Pi 风格的 thinking 格式。只有完全不支持 thinking 控制的模型才选择 `Unsupported (no parameter)`；它不会发送任何原生 thinking 参数，也无法阻止服务端自行开启 thinking。默认 `openai` 格式发送 `reasoning_effort`；本地 Qwen/vLLM 可选择 `qwen`（`enable_thinking`）或 `qwen-chat-template`（`chat_template_kwargs.enable_thinking`）；通用本地模板选择 `chat-template`。编辑 Custom 模型时还可选择 DeepSeek、OpenRouter、Together、z.ai、Baseten、string-thinking 和 AntLing 格式。思考等级仍由全局配置或单模型覆盖控制，格式只决定如何序列化到端点请求。
 
 
 
@@ -154,7 +161,7 @@ MIT
 ## 致谢
 
 - [Conventional Commits](https://conventionalcommits.org/) - https://github.com/conventional-commits/conventionalcommits.org
-- OpenAI / DeepSeek / Anthropic / Gemini / Qwen / GLM / Kimi / OpenRouter 模型生态
+- OpenAI / Anthropic / Google Gemini / OpenAI Chat Completions 兼容模型生态
 
 ---
 
