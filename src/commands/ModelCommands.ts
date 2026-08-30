@@ -234,14 +234,17 @@ export class ModelCommands {
 
     private async selectWorkflowModel(purpose: ModelPurpose): Promise<void> {
         const models = this.serviceRegistry.getModels();
+        const purposeKey = purpose === 'generation' ? GENERATION_MODEL_ID_KEY : REPOSITORY_ANALYSIS_MODEL_ID_KEY;
         const picked = await vscode.window.showQuickPick(models.map(model => ({
             label: model.label,
-            description: PROVIDER_LABELS[model.provider],
+            description: this.context.globalState.get<string>(purposeKey, '') === model.id
+                ? `Current · ${PROVIDER_LABELS[model.provider]}`
+                : PROVIDER_LABELS[model.provider],
             detail: model.provider === 'custom' ? `${model.model} · ${model.baseUrl}` : model.model,
             value: model.id,
         })), { placeHolder: purpose === 'generation' ? 'Select commit message model' : 'Select repository analysis model' });
         if (!picked) { return; }
-        await this.assignModel(purpose, picked.value);
+        await this.manageConfiguredModel(this.requireModel(picked.value));
     }
 
     private async assignModel(purpose: ModelPurpose, modelId: string): Promise<void> {
