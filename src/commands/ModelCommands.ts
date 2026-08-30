@@ -23,6 +23,9 @@ import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
 
 type ModelPurpose = 'generation' | 'repositoryAnalysis';
+type MenuExit = 'back' | 'done';
+
+const BACK_VALUE = '__back__';
 
 const THINKING_FORMAT_OPTIONS: ReadonlyArray<{
     label: string;
@@ -68,89 +71,113 @@ export class ModelCommands {
     }
 
     private async manageModels(): Promise<void> {
-        const generation = this.modelDescription(this.context.globalState.get<string>(GENERATION_MODEL_ID_KEY, ''));
-        const analysis = this.modelDescription(this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, ''));
-        const items: Array<vscode.QuickPickItem & { value: ModelPurpose | ProviderKind }> = [
-            { label: '$(sparkle) Commit message model', description: generation, value: 'generation' },
-            { label: '$(repo) Repository analysis model', description: analysis, value: 'repositoryAnalysis' },
-            { label: '', kind: vscode.QuickPickItemKind.Separator, value: 'generation' },
-            ...(['openai', 'anthropic', 'google', 'custom'] as const).map(value => ({
-                label: PROVIDER_LABELS[value],
-                description: `${this.serviceRegistry.getModels().filter(model => model.provider === value).length} configured`,
-                value,
-            })),
-        ];
-        const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Manage models or select a workflow model' });
-        if (!picked) { return; }
-        if (picked.value === 'generation' || picked.value === 'repositoryAnalysis') {
-            await this.selectWorkflowModel(picked.value);
+        for (;;) {
+            const generation = this.modelDescription(this.context.globalState.get<string>(GENERATION_MODEL_ID_KEY, ''));
+            const analysis = this.modelDescription(this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, ''));
+            const items: Array<vscode.QuickPickItem & { value: ModelPurpose | ProviderKind }> = [
+                { label: '$(sparkle) Commit message model', description: generation, value: 'generation' },
+                { label: '$(repo) Repository analysis model', description: analysis, value: 'repositoryAnalysis' },
+                { label: '', kind: vscode.QuickPickItemKind.Separator, value: 'generation' },
+                ...(['openai', 'anthropic', 'google', 'custom'] as const).map(value => ({
+                    label: PROVIDER_LABELS[value],
+                    description: `${this.serviceRegistry.getModels().filter(model => model.provider === value).length} configured`,
+                    value,
+                })),
+            ];
+            const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Manage models or select a workflow model' });
+            if (!picked) { return; }
+            if (picked.value === 'generation' || picked.value === 'repositoryAnalysis') {
+                const exit = await this.selectWorkflowModel(picked.value);
+                if (exit === 'back') { continue; }
+                return;
+            }
+            const exit = await this.manageProvider(picked.value);
+            if (exit === 'back') { continue; }
             return;
         }
-        await this.manageProvider(picked.value);
     }
 
-    private async manageProvider(provider: ProviderKind): Promise<void> {
-        const models = this.serviceRegistry.getModels().filter(model => model.provider === provider);
-        const picked = await vscode.window.showQuickPick([
-            { label: '$(add) Add model', value: '__add__' },
-            ...models.map(model => ({
-                label: model.label,
-                description: this.usageDescription(model.id),
-                detail: provider === 'custom' ? `${model.model} · ${model.baseUrl}` : model.model,
-                value: model.id,
-            })),
-        ], { placeHolder: `${PROVIDER_LABELS[provider]} models` });
-        if (!picked) { return; }
-        if (picked.value === '__add__') {
-            await this.addModel(provider);
-            return;
+    private async manageProvider(provider: ProviderKind): Promise<MenuExit> {
+        for (;;) {
+            const models = this.serviceRegistry.getModels().filter(model => model.provider === provider);
+            const picked = await vscode.window.showQuickPick([
+                this.backItem(),
+                { label: '$(add) Add model', value: '__add__' },
+                ...models.map(model => ({
+                    label: model.label,
+                    description: this.usageDescription(model.id),
+                    detail: provider === 'custom' ? `${model.model} · ${model.baseUrl}` : model.model,
+                    value: model.id,
+                })),
+            ], { placeHolder: `${PROVIDER_LABELS[provider]} models` });
+            if (!picked || picked.value === BACK_VALUE) { return 'back'; }
+            if (picked.value === '__add__') {
+                const exit = await this.addModel(provider);
+                if (exit === 'back') { continue; }
+                return 'done';
+            }
+            const exit = await this.manageConfiguredModel(this.requireModel(picked.value));
+            if (exit === 'back') { continue; }
+            return 'done';
         }
-        const model = this.requireModel(picked.value);
-        await this.manageConfiguredModel(model);
     }
 
-    private async manageConfiguredModel(model: AIModelConfig): Promise<void> {
-        const items: Array<vscode.QuickPickItem & { value: string }> = [
-            { label: 'Use for commit messages', value: 'generation' },
-            { label: 'Use for repository analysis', value: 'repositoryAnalysis' },
-            { label: 'Set thinking level override', value: 'thinking' },
-            ...(model.provider === 'custom' ? [{
-                label: 'Advanced thinking compatibility',
-                description: 'Only for endpoints with non-standard Chat Completions parameters',
-                value: 'thinkingCompatibility',
-            }] : []),
-            { label: 'Edit model', value: 'edit' },
-            { label: 'Replace API key', value: 'key' },
-            { label: 'Delete model', value: 'delete' },
-        ];
-        const picked = await vscode.window.showQuickPick(items, { placeHolder: model.label });
-        if (!picked) { return; }
-        if (picked.value === 'generation' || picked.value === 'repositoryAnalysis') {
-            await this.assignModel(picked.value as ModelPurpose, model.id);
-        } else if (picked.value === 'thinking') {
-            await this.configureThinkingLevel(model);
-        } else if (picked.value === 'thinkingCompatibility') {
-            await this.configureCustomThinkingCompatibility(model);
-        } else if (picked.value === 'edit') {
-            await this.editModel(model);
-        } else if (picked.value === 'key') {
-            await this.replaceApiKey(model);
-        } else {
+    private async manageConfiguredModel(model: AIModelConfig): Promise<MenuExit> {
+        for (;;) {
+            const items: Array<vscode.QuickPickItem & { value: string }> = [
+                this.backItem(),
+                { label: 'Use for commit messages', value: 'generation' },
+                { label: 'Use for repository analysis', value: 'repositoryAnalysis' },
+                { label: 'Set thinking level override', value: 'thinking' },
+                ...(model.provider === 'custom' ? [{
+                    label: 'Advanced thinking compatibility',
+                    description: 'Only for endpoints with non-standard Chat Completions parameters',
+                    value: 'thinkingCompatibility',
+                }] : []),
+                { label: 'Edit model', value: 'edit' },
+                { label: 'Replace API key', value: 'key' },
+                { label: 'Delete model', value: 'delete' },
+            ];
+            const picked = await vscode.window.showQuickPick(items, { placeHolder: model.label });
+            if (!picked || picked.value === BACK_VALUE) { return 'back'; }
+            if (picked.value === 'generation' || picked.value === 'repositoryAnalysis') {
+                await this.assignModel(picked.value as ModelPurpose, model.id);
+                return 'done';
+            }
+            if (picked.value === 'thinking') {
+                const exit = await this.configureThinkingLevel(model);
+                if (exit === 'back') { continue; }
+                continue;
+            }
+            if (picked.value === 'thinkingCompatibility') {
+                const exit = await this.configureCustomThinkingCompatibility(model);
+                if (exit === 'back') { continue; }
+                continue;
+            }
+            if (picked.value === 'edit') {
+                await this.editModel(model);
+                continue;
+            }
+            if (picked.value === 'key') {
+                await this.replaceApiKey(model);
+                continue;
+            }
             await this.deleteModel(model);
+            return 'back';
         }
     }
 
-    private async addModel(provider: ProviderKind): Promise<void> {
+    private async addModel(provider: ProviderKind): Promise<MenuExit> {
         const nativeApiKey = provider === 'custom'
             ? undefined
             : await this.resolveNativeApiKey(provider);
-        if (provider !== 'custom' && !nativeApiKey) { return; }
+        if (provider !== 'custom' && !nativeApiKey) { return 'back'; }
         const model = provider === 'custom'
             ? await this.promptCustomModel({ id: randomUUID(), label: '', provider, model: '', baseUrl: '' })
             : await this.promptNativeModel(provider, nativeApiKey!);
-        if (!model) { return; }
+        if (!model) { return 'back'; }
         const apiKey = nativeApiKey ?? await this.resolveApiKeyForNewModel(model);
-        if (!apiKey) { return; }
+        if (!apiKey) { return 'back'; }
         await this.validateModel(model, apiKey);
         await this.context.globalState.update(AI_MODELS_KEY, [...this.serviceRegistry.getModels(), model]);
         await this.serviceRegistry.reloadProviderServices();
@@ -160,7 +187,7 @@ export class ModelCommands {
         }
         await service.setApiKey(apiKey);
         await this.statusBarManager.refreshModelStates();
-        await this.manageConfiguredModel(model);
+        return this.manageConfiguredModel(model);
     }
 
     private async promptNativeModel(
@@ -232,19 +259,26 @@ export class ModelCommands {
         await this.statusBarManager.refreshModelStates();
     }
 
-    private async selectWorkflowModel(purpose: ModelPurpose): Promise<void> {
-        const models = this.serviceRegistry.getModels();
-        const purposeKey = purpose === 'generation' ? GENERATION_MODEL_ID_KEY : REPOSITORY_ANALYSIS_MODEL_ID_KEY;
-        const picked = await vscode.window.showQuickPick(models.map(model => ({
-            label: model.label,
-            description: this.context.globalState.get<string>(purposeKey, '') === model.id
-                ? `Current · ${PROVIDER_LABELS[model.provider]}`
-                : PROVIDER_LABELS[model.provider],
-            detail: model.provider === 'custom' ? `${model.model} · ${model.baseUrl}` : model.model,
-            value: model.id,
-        })), { placeHolder: purpose === 'generation' ? 'Select commit message model' : 'Select repository analysis model' });
-        if (!picked) { return; }
-        await this.manageConfiguredModel(this.requireModel(picked.value));
+    private async selectWorkflowModel(purpose: ModelPurpose): Promise<MenuExit> {
+        for (;;) {
+            const models = this.serviceRegistry.getModels();
+            const purposeKey = purpose === 'generation' ? GENERATION_MODEL_ID_KEY : REPOSITORY_ANALYSIS_MODEL_ID_KEY;
+            const picked = await vscode.window.showQuickPick([
+                this.backItem(),
+                ...models.map(model => ({
+                    label: model.label,
+                    description: this.context.globalState.get<string>(purposeKey, '') === model.id
+                        ? `Current · ${PROVIDER_LABELS[model.provider]}`
+                        : PROVIDER_LABELS[model.provider],
+                    detail: model.provider === 'custom' ? `${model.model} · ${model.baseUrl}` : model.model,
+                    value: model.id,
+                })),
+            ], { placeHolder: purpose === 'generation' ? 'Select commit message model' : 'Select repository analysis model' });
+            if (!picked || picked.value === BACK_VALUE) { return 'back'; }
+            const exit = await this.manageConfiguredModel(this.requireModel(picked.value));
+            if (exit === 'back') { continue; }
+            return 'done';
+        }
     }
 
     private async assignModel(purpose: ModelPurpose, modelId: string): Promise<void> {
@@ -257,7 +291,7 @@ export class ModelCommands {
         await this.statusBarManager.refreshModelStates();
     }
 
-    private async configureThinkingLevel(model: AIModelConfig): Promise<void> {
+    private async configureThinkingLevel(model: AIModelConfig): Promise<MenuExit> {
         const configuration = vscode.workspace.getConfiguration('gitCommitGenie');
         const metadata = getModelThinkingMetadata(model);
         const supported = getSupportedThinkingLevels(metadata);
@@ -274,6 +308,7 @@ export class ModelCommands {
         const hasOverride = Object.prototype.hasOwnProperty.call(modelLevels, modelKey);
         const currentOverride = hasOverride ? modelLevels[modelKey] : undefined;
         const picked = await vscode.window.showQuickPick([
+            this.backItem(),
             {
                 label: 'Inherit global setting',
                 description: `${defaultLevel}${hasOverride ? '' : ' · Current'}`,
@@ -295,7 +330,7 @@ export class ModelCommands {
         ],
             { placeHolder: `Thinking level for ${model.label}` },
         );
-        if (!picked) { return; }
+        if (!picked || picked.value === BACK_VALUE) { return 'back'; }
 
         if (picked.value === '__inherit__') {
             delete modelLevels[modelKey];
@@ -310,7 +345,7 @@ export class ModelCommands {
                 ignoreFocusOut: true,
                 validateInput: value => value.trim() ? undefined : 'A native thinking value is required.',
             });
-            if (nativeValue === undefined) { return; }
+            if (nativeValue === undefined) { return 'back'; }
             modelLevels[modelKey] = nativeValue.trim();
         } else {
             modelLevels[modelKey] = picked.value;
@@ -320,63 +355,72 @@ export class ModelCommands {
             modelLevels,
             vscode.ConfigurationTarget.Global,
         );
+        return 'done';
     }
 
-    private async configureCustomThinkingCompatibility(model: AIModelConfig): Promise<void> {
+    private async configureCustomThinkingCompatibility(model: AIModelConfig): Promise<MenuExit> {
         if (model.provider !== 'custom') {
             throw new Error('Thinking compatibility profiles are only available for custom OpenAI-compatible models.');
         }
 
         const currentFormat = model.thinkingFormat ?? 'openai';
         const formatChoice = await vscode.window.showQuickPick(
-            THINKING_FORMAT_OPTIONS.map(option => ({
-                ...option,
-                description: option.value === currentFormat
-                    ? `${option.description} · Current`
-                    : option.description,
-            })),
+            [
+                this.backItem(),
+                ...THINKING_FORMAT_OPTIONS.map(option => ({
+                    ...option,
+                    description: option.value === currentFormat
+                        ? `${option.description} · Current`
+                        : option.description,
+                })),
+            ],
             { placeHolder: 'Advanced: select the endpoint thinking request profile' },
         );
-        if (!formatChoice) { return; }
+        if (!formatChoice || formatChoice.value === BACK_VALUE) { return 'back'; }
+        const selectedFormat = formatChoice as (typeof THINKING_FORMAT_OPTIONS)[number];
 
         const budgetChoice = await vscode.window.showQuickPick(
-            THINKING_BUDGET_OPTIONS.map(option => ({
-                ...option,
-                description: option.value === model.thinkingTokenBudgetField
-                    ? `${option.description} · Current`
-                    : option.description,
-            })),
+            [
+                this.backItem(),
+                ...THINKING_BUDGET_OPTIONS.map(option => ({
+                    ...option,
+                    description: option.value === model.thinkingTokenBudgetField
+                        ? `${option.description} · Current`
+                        : option.description,
+                })),
+            ],
             { placeHolder: 'Advanced: select an optional local-engine budget field' },
         );
-        if (!budgetChoice) { return; }
+        if (!budgetChoice || budgetChoice.value === BACK_VALUE) { return 'back'; }
+        const selectedBudget = budgetChoice as (typeof THINKING_BUDGET_OPTIONS)[number];
 
-        const chatTemplateKwargs = formatChoice.value === 'chat-template'
+        const chatTemplateKwargs = selectedFormat.value === 'chat-template'
             ? await this.promptChatTemplateValues(
                 'chat_template_kwargs JSON',
                 model.chatTemplateKwargs,
                 '{\n  "enable_thinking": { "$var": "thinking.enabled" },\n  "thinking_budget": { "$var": "thinking.budget", "omitWhenOff": true }\n}',
             )
             : undefined;
-        if (chatTemplateKwargs === null) { return; }
-        const chatTemplateArgs = formatChoice.value === 'baseten'
+        if (chatTemplateKwargs === null) { return 'back'; }
+        const chatTemplateArgs = selectedFormat.value === 'baseten'
             ? await this.promptChatTemplateValues(
                 'chat_template_args JSON',
                 model.chatTemplateArgs,
                 '{\n  "enable_thinking": { "$var": "thinking.enabled" },\n  "thinking_budget": { "$var": "thinking.budget", "omitWhenOff": true }\n}',
             )
             : undefined;
-        if (chatTemplateArgs === null) { return; }
+        if (chatTemplateArgs === null) { return 'back'; }
 
         const updated: AIModelConfig = { ...model };
         delete updated.thinkingFormat;
         delete updated.thinkingTokenBudgetField;
         delete updated.chatTemplateKwargs;
         delete updated.chatTemplateArgs;
-        if (formatChoice.value !== 'openai') {
-            updated.thinkingFormat = formatChoice.value;
+        if (selectedFormat.value !== 'openai') {
+            updated.thinkingFormat = selectedFormat.value;
         }
-        if (budgetChoice.value !== undefined) {
-            updated.thinkingTokenBudgetField = budgetChoice.value;
+        if (selectedBudget.value !== undefined) {
+            updated.thinkingTokenBudgetField = selectedBudget.value;
         }
         if (chatTemplateKwargs !== undefined) {
             updated.chatTemplateKwargs = chatTemplateKwargs;
@@ -385,6 +429,7 @@ export class ModelCommands {
             updated.chatTemplateArgs = chatTemplateArgs;
         }
         await this.updateConfiguredModel(updated);
+        return 'done';
     }
 
     private async resolveApiKeyForNewModel(model: AIModelConfig): Promise<string | undefined> {
@@ -465,6 +510,10 @@ export class ModelCommands {
             throw new Error(`AI model '${id}' is not configured.`);
         }
         return model;
+    }
+
+    private backItem(): vscode.QuickPickItem & { value: string } {
+        return { label: '$(chevron-left) Back', value: BACK_VALUE };
     }
 
     private modelDescription(id: string): string {
