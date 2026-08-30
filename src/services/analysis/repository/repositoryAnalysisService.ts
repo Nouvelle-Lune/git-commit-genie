@@ -675,6 +675,9 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             maxRetries: execution.maxRetries,
             temperature: execution.temperature,
             maxOutputTokens: execution.maxOutputTokens,
+            thinking: execution.thinkingFor('investigation'),
+            tokenBudget: execution.tokenBudget,
+            requestType: 'investigation',
             signal: execution.signal,
         });
         const final = repoAnalysisResponseSchema.parse(result.structured);

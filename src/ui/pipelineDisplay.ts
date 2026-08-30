@@ -77,6 +77,9 @@ export interface PipelineTextCatalog {
     metricFiles: string;
     metricRaw: string;
     metricBudget: string;
+    metricContext: string;
+    metricOutput: string;
+    metricTrigger: string;
     metricProgress: string;
     metricSignal: string;
     metricBreaking: string;
@@ -214,6 +217,9 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     metricFiles: 'Files',
     metricRaw: 'Raw',
     metricBudget: 'Budget',
+    metricContext: 'Context',
+    metricOutput: 'Output',
+    metricTrigger: 'Trigger',
     metricProgress: 'Progress',
     metricSignal: 'Signal',
     metricBreaking: 'Breaking',
@@ -535,6 +541,9 @@ export function presentPipelineEvent(
     const summarizedFiles = asNumber(data.summarizedFiles);
     const estimatedTokens = asNumber(data.estimatedInputTokens);
     const maxInputTokens = asNumber(data.maxInputTokens);
+    const contextWindowTokens = asNumber(data.contextWindowTokens);
+    const maxOutputTokens = asNumber(data.maxOutputTokens);
+    const compressionTriggerTokens = asNumber(data.compressionTriggerTokens);
     const target = handoffTargetLabel(data.target, text);
 
     switch (stage) {
@@ -547,6 +556,9 @@ export function presentPipelineEvent(
                 metrics: [
                     { label: text.metricFiles, value: String(fileCount ?? 0) },
                     { label: text.metricRaw, value: String(rawFiles ?? fileCount ?? 0), tone: 'raw' },
+                    ...(contextWindowTokens !== undefined ? [{ label: text.metricContext, value: formatInteger(contextWindowTokens), tone: 'budget' as const }] : []),
+                    ...(maxOutputTokens !== undefined ? [{ label: text.metricOutput, value: formatInteger(maxOutputTokens), tone: 'budget' as const }] : []),
+                    ...(compressionTriggerTokens !== undefined ? [{ label: text.metricTrigger, value: formatInteger(compressionTriggerTokens), tone: 'budget' as const }] : []),
                     ...(maxInputTokens !== undefined ? [{ label: text.metricBudget, value: formatInteger(maxInputTokens), tone: 'budget' as const }] : []),
                 ],
                 tone: 'success',

@@ -1,6 +1,24 @@
 import { z } from 'zod';
 import { AIMessage, AIRunResponse } from './providers';
 
+export type StructuredOutputFailureKind =
+    | 'context_exhausted'
+    | 'reasoning_exhausted'
+    | 'visible_output_exhausted'
+    | 'ambiguous_length'
+    | 'content_filtered';
+
+export class StructuredOutputTerminatedError extends Error {
+    constructor(
+        readonly kind: StructuredOutputFailureKind,
+        readonly response: AIRunResponse,
+        label: string,
+    ) {
+        super(terminationMessage(kind, label));
+        this.name = 'StructuredOutputTerminatedError';
+    }
+}
+
 export type StructuredCompletionRun = (messages: AIMessage[]) => Promise<AIRunResponse>;
 
 export interface StructuredCompletionCallbacks {
@@ -45,6 +63,10 @@ export async function runStructuredCompletion<T>(options: StructuredCompletionOp
         const structured = response.structured;
         if (structured === undefined) {
             callbacks?.onMissingStructured?.(attempt + 1, totalAttempts, response);
+            const termination = classifyTermination(response);
+            if (termination !== undefined) {
+                throw new StructuredOutputTerminatedError(termination, response, label);
+            }
             if (attempt < totalAttempts - 1) {
                 delta = [{ role: 'user', content: MISSING_STRUCTURED_RETRY }];
                 continue;
@@ -70,4 +92,49 @@ export async function runStructuredCompletion<T>(options: StructuredCompletionOp
     }
 
     throw new Error(`Structured request for ${label} exited retry loop unexpectedly.`);
+}
+
+function classifyTermination(response: AIRunResponse): StructuredOutputFailureKind | undefined {
+    if (response.stopReason === 'context_window') {
+        return 'context_exhausted';
+    }
+    if (response.stopReason === 'content_filter') {
+        return 'content_filtered';
+    }
+    if (response.stopReason === 'unknown_length') {
+        return 'ambiguous_length';
+    }
+    if (response.stopReason !== 'max_output_tokens') {
+        return undefined;
+    }
+
+    const reasoningTokens = response.usage?.reasoningTokens;
+    const outputTokens = response.usage?.outputTokens;
+    const visibleTokens = response.usage?.visibleOutputTokens;
+    const reasoningDominated = typeof reasoningTokens === 'number'
+        && typeof outputTokens === 'number'
+        && reasoningTokens >= outputTokens * 0.8
+        && (visibleTokens ?? 0) <= 128;
+    if (reasoningDominated || (!response.text.trim() && Boolean(response.reasoning))) {
+        return 'reasoning_exhausted';
+    }
+    return 'visible_output_exhausted';
+}
+
+function terminationMessage(kind: StructuredOutputFailureKind, label: string): string {
+    switch (kind) {
+        case 'context_exhausted':
+            return `The ${label} request exhausted the model context window before producing complete JSON.`;
+        case 'reasoning_exhausted':
+            return `The ${label} request used its output budget on reasoning before producing final JSON. ` +
+                'Reasoning tokens count toward the output limit for this provider. Raise gitCommitGenie.chain.contextWindowTokens or lower the thinking level.';
+        case 'visible_output_exhausted':
+            return `The ${label} response reached the derived output budget before its JSON was complete. ` +
+                'Raise gitCommitGenie.chain.contextWindowTokens or reduce the requested result size.';
+        case 'ambiguous_length':
+            return `The ${label} response ended because of a provider length limit, but the Custom provider did not report whether input context, reasoning, or visible output was exhausted. ` +
+                'The request was not retried to avoid duplicate cost. Check the endpoint context window, output limit, and thinking setting.';
+        case 'content_filtered':
+            return `The ${label} response was stopped by the provider content filter before complete JSON was produced.`;
+    }
 }

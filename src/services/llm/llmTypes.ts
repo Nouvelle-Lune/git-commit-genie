@@ -2,7 +2,8 @@ import * as vscode from 'vscode';
 import { DiffData } from '../git/gitTypes';
 import { Repository } from '../git/git';
 import { ChangeSetSummary, FileSummary, RagStyleReference, RetrievalFeatures } from '../chain/types';
-import { AIMessage, AISession, ThinkingLevel } from './providers';
+import { AIMessage, AISession, AIThinkingConfig, ThinkingLevel } from './providers';
+import type { ChainTokenBudget } from './inputTokenBudget';
 
 export type RequestType =
     | 'commitMessage'
@@ -16,6 +17,7 @@ export type RequestType =
     | 'investigationPlan'
     | 'semanticAnalysis'
     | 'informationSelection'
+    | 'investigation'
     // More granular chain stages for clearer logging
     | 'strictFix'
     | 'enforceLanguage';
@@ -34,6 +36,8 @@ export interface LLMExecution {
     readonly maxRetries: number;
     readonly thinkingLevel: ThinkingLevel;
     readonly thinkingBudget?: number;
+    readonly tokenBudget: ChainTokenBudget;
+    thinkingFor(requestType: RequestType): AIThinkingConfig;
     createSession(messages: AIMessage[], id?: string): AISession;
     run<T>(session: AISession, messages: AIMessage[], options: LLMRunOptions): Promise<T>;
 }

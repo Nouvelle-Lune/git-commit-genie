@@ -8,6 +8,7 @@ import {
     applyOpenAICompatibleThinking,
     applyOpenAIResponsesThinking,
     CustomProvider,
+    capThinkingConfig,
     getModelThinkingMetadata,
     getSupportedThinkingLevels,
     resolveThinkingConfig,
@@ -127,13 +128,34 @@ describe('unified native thinking configuration', () => {
     it('serializes Anthropic budgets and removes incompatible sampling controls', () => {
         const configured = model('anthropic', 'claude-opus-4-5');
         const thinking = resolveThinkingConfig(configured, settings('medium'));
-        const body: Record<string, unknown> = { max_tokens: 4096, temperature: 0.2 };
+        const body: Record<string, unknown> = { max_tokens: 12000, temperature: 0.2 };
 
         applyAnthropicThinking(body, thinking);
         assert.deepEqual(body, {
-            max_tokens: 14336,
+            max_tokens: 12000,
             thinking: { type: 'enabled', budget_tokens: 10240 },
         });
+        assert.throws(
+            () => applyAnthropicThinking({ max_tokens: 4096 }, thinking),
+            /must be smaller than the derived output budget/,
+        );
+    });
+
+    it('caps thinking per stage without increasing the user setting', () => {
+        const configured = model('openai', 'gpt-5.4');
+        const high = resolveThinkingConfig(configured, settings('high'));
+        const capped = capThinkingConfig(configured, settings('high'), high, 'low');
+        const alreadyLow = resolveThinkingConfig(configured, settings('minimal'));
+
+        assert.equal(capped.level, 'low');
+        assert.equal(capped.mappedValue, 'low');
+        assert.equal(capThinkingConfig(configured, settings('minimal'), alreadyLow, 'medium'), alreadyLow);
+
+        const alwaysThinking = model('google', 'gemini-3.1-pro-preview');
+        const googleHigh = resolveThinkingConfig(alwaysThinking, settings('high'));
+        const minimum = capThinkingConfig(alwaysThinking, settings('high'), googleHigh, 'off');
+        assert.equal(minimum.level, 'minimal');
+        assert.equal(minimum.mappedValue, 'minimal');
     });
 
     it('serializes explicit off values for supported native adapters', () => {

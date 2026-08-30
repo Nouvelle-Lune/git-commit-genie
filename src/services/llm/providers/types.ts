@@ -122,11 +122,25 @@ export interface AIResponseFormat {
 export interface AIUsage {
     inputTokens?: number;
     outputTokens?: number;
+    /** Provider-reported reasoning/thinking tokens contained in outputTokens when available. */
+    reasoningTokens?: number;
+    /** Visible response tokens excluding reasoning when the provider reports the split. */
+    visibleOutputTokens?: number;
     totalTokens?: number;
     cachedInputTokens?: number;
     cacheWriteInputTokens?: number;
     raw?: unknown;
 }
+
+/** Provider-neutral termination reason used by retry and compaction policy. */
+export type AIStopReason =
+    | 'completed'
+    | 'max_output_tokens'
+    | 'context_window'
+    | 'content_filter'
+    | 'tool_call'
+    | 'unknown_length'
+    | 'unknown';
 
 export interface AIContinuation {
     /** Provider-owned response/interaction identifier when the API supports it. */
@@ -154,6 +168,9 @@ export interface AIRunResponse {
     structured?: unknown;
     toolCalls: AIToolCall[];
     usage?: AIUsage;
+    stopReason: AIStopReason;
+    /** Original provider reason retained for diagnostics. */
+    stopReasonRaw?: string;
     continuation: AIContinuation;
     raw: unknown;
 }

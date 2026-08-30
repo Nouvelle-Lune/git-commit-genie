@@ -54,7 +54,7 @@ class AnthropicSession implements AISession {
 
         const body: Record<string, unknown> = {
             model: this.model,
-            max_tokens: request.maxOutputTokens ?? 4096,
+            max_tokens: request.maxOutputTokens ?? 8192,
             system: this.systemInstruction,
             messages: this.messages,
             tools: request.tools?.map(tool => ({
@@ -92,18 +92,46 @@ class AnthropicSession implements AISession {
         const toolCalls = (response.content ?? [])
             .filter((block: any) => block?.type === 'tool_use')
             .map((block: any) => ({ id: String(block.id), name: String(block.name), arguments: block.input }));
+        const reasoning = (response.content ?? [])
+            .filter((block: any) => block?.type === 'thinking')
+            .map((block: any) => String(block.thinking ?? ''))
+            .join('');
+        if (text) {
+            this.transcript.push({ role: 'assistant', content: text });
+        }
+        const stopReasonRaw = String(response.stop_reason ?? '');
+        const stopReason = stopReasonRaw === 'end_turn' || stopReasonRaw === 'stop_sequence'
+            ? 'completed' as const
+            : stopReasonRaw === 'max_tokens'
+                ? 'max_output_tokens' as const
+                : stopReasonRaw === 'model_context_window_exceeded'
+                    ? 'context_window' as const
+                : stopReasonRaw === 'tool_use'
+                    ? 'tool_call' as const
+                    : stopReasonRaw
+                        ? 'unknown' as const
+                        : 'unknown_length' as const;
+        const reasoningTokens = response.usage?.output_tokens_details?.thinking_tokens;
+        const outputTokens = response.usage?.output_tokens;
         return {
             text,
+            reasoning: reasoning || undefined,
             structured: request.responseFormat ? parseStructuredText(text) : undefined,
             toolCalls,
             usage: response.usage ? {
                 inputTokens: response.usage.input_tokens,
                 outputTokens: response.usage.output_tokens,
+                reasoningTokens,
+                visibleOutputTokens: typeof outputTokens === 'number' && typeof reasoningTokens === 'number'
+                    ? Math.max(0, outputTokens - reasoningTokens)
+                    : undefined,
                 totalTokens: (response.usage.input_tokens ?? 0) + (response.usage.output_tokens ?? 0),
                 cachedInputTokens: response.usage.cache_read_input_tokens,
                 cacheWriteInputTokens: response.usage.cache_creation_input_tokens,
                 raw: response.usage,
             } : undefined,
+            stopReason,
+            stopReasonRaw,
             continuation: { nativeId: response.id, serverManaged: false },
             raw: response,
         };

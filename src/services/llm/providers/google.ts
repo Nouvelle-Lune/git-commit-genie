@@ -102,6 +102,27 @@ class GoogleSession implements AISession {
                 arguments: step.arguments ?? {},
             }));
         const usage = interaction.usage;
+        const stopReasonRaw = String(
+            interaction.finish_reason
+            ?? modelOutputs.at(-1)?.finish_reason
+            ?? interaction.status
+            ?? '',
+        );
+        const normalizedStop = stopReasonRaw.toLowerCase();
+        const stopReason = ['completed', 'complete', 'stop', 'stop_sequence'].includes(normalizedStop)
+            ? 'completed' as const
+            : ['max_tokens', 'max_output_tokens', 'max_output_length'].includes(normalizedStop)
+                ? 'max_output_tokens' as const
+                : ['context_length', 'context_window', 'input_too_long'].includes(normalizedStop)
+                    ? 'context_window' as const
+                    : normalizedStop.includes('safety') || normalizedStop.includes('filter')
+                        ? 'content_filter' as const
+                        : normalizedStop
+                            ? 'unknown' as const
+                            : 'unknown_length' as const;
+        if (text) {
+            this.transcript.push({ role: 'assistant', content: text });
+        }
         return {
             text,
             structured: request.responseFormat ? parseStructuredText(text) : undefined,
@@ -109,10 +130,14 @@ class GoogleSession implements AISession {
             usage: usage ? {
                 inputTokens: usage.total_input_tokens,
                 outputTokens: usage.total_output_tokens,
+                reasoningTokens: usage.total_thought_tokens,
+                visibleOutputTokens: usage.total_output_tokens,
                 totalTokens: usage.total_tokens,
                 cachedInputTokens: usage.total_cached_tokens,
                 raw: usage,
             } : undefined,
+            stopReason,
+            stopReasonRaw,
             continuation: { nativeId: interaction.id, serverManaged: true },
             raw: interaction,
         };

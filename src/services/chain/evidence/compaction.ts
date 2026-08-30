@@ -10,7 +10,8 @@ import {
     RawDiffEvidence,
 } from '../../analysis/change/types';
 import { buildSummarizeEvidenceMessages } from './prompts';
-import { estimateChatMessagesTokens } from '../../llm/inputTokenBudget';
+import { estimateChatMessagesTokens, isContextWindowFailure } from '../../llm/inputTokenBudget';
+import { StructuredOutputTerminatedError } from '../../llm/structuredCompletion';
 
 type EvidenceUnit = {
     id: string;
@@ -20,6 +21,8 @@ type EvidenceUnit = {
 };
 
 type SummaryTaskScheduler = <T>(task: () => Promise<T>) => Promise<T>;
+const SUMMARY_TIGHTENING_LIMITS = [512, 256, 128, 64] as const;
+const MAX_CAPACITY_SPLIT_DEPTH = 3;
 
 class MissingEvidenceHunkIdsError extends Error {
     constructor(
@@ -57,7 +60,9 @@ export async function compactEvidenceToFit(params: {
     diffs: DiffData[];
     evidence: DraftEvidence[];
     execution: LLMExecution;
-    maxInputTokens: number;
+    triggerInputTokens: number;
+    targetInputTokens: number;
+    hardInputTokens: number;
     maxParallel: number;
     maxRetries?: number;
     buildTargetMessages: (evidence: DraftEvidence[]) => AIMessage[];
@@ -67,7 +72,9 @@ export async function compactEvidenceToFit(params: {
     const {
         diffs,
         execution,
-        maxInputTokens,
+        triggerInputTokens,
+        targetInputTokens,
+        hardInputTokens,
         buildTargetMessages,
         onSummarizeStart,
         onFileSummarized,
@@ -85,6 +92,7 @@ export async function compactEvidenceToFit(params: {
     let summarizedCount = 0;
     const initialEstimatedInputTokens = estimateChatMessagesTokens(buildTargetMessages(evidence));
     let estimatedInputTokens = initialEstimatedInputTokens;
+    let tighteningPass = 0;
     const scheduleSummaryTask = createSummaryTaskScheduler(params.maxParallel);
 
     // Measure the complete downstream prompt on every pass because templates,
@@ -92,7 +100,7 @@ export async function compactEvidenceToFit(params: {
     // Each batch contains only files that are provably necessary under an
     // optimistic zero-content replacement. This preserves as many raw diffs as
     // possible while allowing independent files to use the shared concurrency.
-    while (estimatedInputTokens > maxInputTokens) {
+    while (estimatedInputTokens > (didSummarize ? targetInputTokens : triggerInputTokens)) {
         const rawCandidates: RawCandidate[] = evidence
             .map((item, index) => ({ item, index }))
             .filter((entry): entry is { item: RawDiffEvidence; index: number } => entry.item.kind === 'raw')
@@ -103,11 +111,26 @@ export async function compactEvidenceToFit(params: {
             .sort((left, right) => right.estimatedTokens - left.estimatedTokens);
 
         if (rawCandidates.length === 0) {
-            const required = estimateChatMessagesTokens(buildTargetMessages(evidence));
-            throw new Error(
-                `Thinking evidence still requires approximately ${required} input tokens after every file was summarized; ` +
-                `increase gitCommitGenie.chain.maxInputTokens or reduce the staged change set.`
-            );
+            if (!didSummarize) {
+                onSummarizeStart?.();
+            }
+            didSummarize = true;
+            const tightened = tightenSummarizedEvidence(evidence, tighteningPass);
+            const tightenedTokens = estimateChatMessagesTokens(buildTargetMessages(tightened));
+            if (tightenedTokens >= estimatedInputTokens) {
+                tighteningPass += 1;
+                if (tighteningPass < SUMMARY_TIGHTENING_LIMITS.length) {
+                    continue;
+                }
+                throw new Error(
+                    `Thinking evidence still requires approximately ${estimatedInputTokens} input tokens after secondary compaction; ` +
+                    `increase gitCommitGenie.chain.contextWindowTokens or reduce the staged change set.`,
+                );
+            }
+            evidence = tightened;
+            estimatedInputTokens = tightenedTokens;
+            tighteningPass += 1;
+            continue;
         }
 
         if (!didSummarize) {
@@ -119,7 +142,7 @@ export async function compactEvidenceToFit(params: {
             candidates: rawCandidates,
             evidence,
             maxParallel: params.maxParallel,
-            maxInputTokens,
+            maxInputTokens: targetInputTokens,
             buildTargetMessages,
         });
         // Drain every request in the batch before propagating an error. Returning
@@ -133,7 +156,7 @@ export async function compactEvidenceToFit(params: {
             return summarizeFileEvidenceWithScheduler(
                 diff,
                 execution,
-                maxInputTokens,
+                hardInputTokens,
                 scheduleSummaryTask,
                 maxRetries
             );
@@ -162,6 +185,27 @@ export async function compactEvidenceToFit(params: {
         initialEstimatedInputTokens,
         estimatedInputTokens,
     };
+}
+
+/** Deterministically tightens already-grounded summaries before declaring the input impossible. */
+function tightenSummarizedEvidence(evidence: DraftEvidence[], pass: number): DraftEvidence[] {
+    const limit = SUMMARY_TIGHTENING_LIMITS[Math.min(pass, SUMMARY_TIGHTENING_LIMITS.length - 1)];
+    return evidence.map(item => item.kind === 'raw' ? item : ({
+        ...item,
+        changes: item.changes.map(change => ({
+            ...change,
+            action: truncate(change.action, limit),
+            target: truncate(change.target, limit),
+            behavior: truncate(change.behavior, limit),
+        })),
+        tests: item.tests.map(test => ({ ...test, detail: truncate(test.detail, limit) })),
+        breakingSignals: item.breakingSignals.map(signal => ({ ...signal, detail: truncate(signal.detail, limit) })),
+        uncertainties: item.uncertainties.map(uncertainty => ({ ...uncertainty, detail: truncate(uncertainty.detail, limit) })),
+    }));
+}
+
+function truncate(value: string, maxChars: number): string {
+    return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
 }
 
 export async function summarizeFileEvidence(
@@ -252,7 +296,8 @@ async function summarizeEvidenceChunkWithRetry(
     diff: DiffData,
     chunk: EvidenceUnit[],
     execution: LLMExecution,
-    maxRetries: number
+    maxRetries: number,
+    capacitySplitDepth = 0,
 ): Promise<EvidenceSummaryResponse> {
     const acceptedResponses: EvidenceSummaryResponse[] = [];
     let pendingUnits = chunk;
@@ -264,7 +309,31 @@ async function summarizeEvidenceChunkWithRetry(
         try {
             const session = execution.createSession(messages);
             parsed = await execution.run<EvidenceSummaryResponse>(session, messages, { requestType: 'summary' });
-        } catch {
+        } catch (error) {
+            const canSplitForCapacity = (
+                error instanceof StructuredOutputTerminatedError
+                && error.kind === 'visible_output_exhausted'
+            ) || isContextWindowFailure(error);
+            const splitUnits = canSplitForCapacity && capacitySplitDepth < MAX_CAPACITY_SPLIT_DEPTH
+                ? bisectEvidenceUnits(pendingUnits)
+                : undefined;
+            if (splitUnits) {
+                // Keep the recursive repair inside the scheduler slot so a failed
+                // chunk cannot exceed the configured global provider concurrency.
+                const left = await summarizeEvidenceChunkWithRetry(
+                    diff, splitUnits[0], execution, maxRetries, capacitySplitDepth + 1,
+                );
+                const right = await summarizeEvidenceChunkWithRetry(
+                    diff, splitUnits[1], execution, maxRetries, capacitySplitDepth + 1,
+                );
+                return mergeSummaryResponses([...acceptedResponses, left, right]);
+            }
+            if (isContextWindowFailure(error) || (
+                error instanceof StructuredOutputTerminatedError
+                && error.kind !== 'visible_output_exhausted'
+            )) {
+                throw error;
+            }
             // Provider-level retries have already been exhausted. Preserve the
             // unresolved ids explicitly so a Summary outage cannot abort the chain.
             return mergeSummaryResponses([
@@ -303,6 +372,23 @@ async function summarizeEvidenceChunkWithRetry(
     }
 
     throw new Error(`Summary coverage retry loop exited unexpectedly for '${diff.fileName}'.`);
+}
+
+/** Splits provider-rejected chunks without changing their stable evidence ids. */
+function bisectEvidenceUnits(units: EvidenceUnit[]): [EvidenceUnit[], EvidenceUnit[]] | undefined {
+    if (units.length > 1) {
+        const midpoint = Math.ceil(units.length / 2);
+        return [units.slice(0, midpoint), units.slice(midpoint)];
+    }
+    const unit = units[0];
+    if (!unit || unit.content.length < 2) {
+        return undefined;
+    }
+    const midpoint = Math.ceil(unit.content.length / 2);
+    return [
+        [{ ...unit, content: unit.content.slice(0, midpoint) }],
+        [{ ...unit, content: unit.content.slice(midpoint) }],
+    ];
 }
 
 function unresolvedSummaryEvidence(units: EvidenceUnit[]): EvidenceSummaryResponse {
@@ -439,7 +525,7 @@ function splitEvidenceUnit(diff: DiffData, unit: EvidenceUnit, maxInputTokens: n
     const emptyProbe = { ...unit, content: '' };
     if (!messagesFitBudget(buildSummaryBudgetProbeMessages(diff, [emptyProbe]), maxInputTokens)) {
         throw new Error(
-            `gitCommitGenie.chain.maxInputTokens (${maxInputTokens}) is too small for the Summary prompt overhead.`
+            `The safe input capacity (${maxInputTokens}) is too small for the Summary prompt overhead.`
         );
     }
 
@@ -520,7 +606,7 @@ function splitOversizedLine(
 
         if (best === 0) {
             throw new Error(
-                `gitCommitGenie.chain.maxInputTokens (${maxInputTokens}) is too small for the Summary prompt overhead.`
+                `The safe input capacity (${maxInputTokens}) is too small for the Summary prompt overhead.`
             );
         }
 

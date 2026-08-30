@@ -7,6 +7,9 @@ import {
     AIProvider,
     AISession,
     AIModelConfig,
+    AIThinkingConfig,
+    ThinkingLevel,
+    capThinkingConfig,
     createAIProvider,
     modelSecretKey,
     resolveThinkingConfig,
@@ -27,7 +30,12 @@ import {
     LLMRunOptions,
     RequestType,
 } from './llmTypes';
-import { assertChatMessagesWithinTokenBudget } from './inputTokenBudget';
+import {
+    assertChatMessagesWithinTokenBudget,
+    DEFAULT_CHAIN_CONTEXT_WINDOW_TOKENS,
+    resolveChainTokenBudget,
+    ChainTokenBudget,
+} from './inputTokenBudget';
 import { commitMessageSchema } from './providers/schemas/common';
 import { getRequestTypeLabel, getValidationSchemaFor } from './providers/utils/requestTypeMaps';
 import { runStructuredCompletion } from './structuredCompletion';
@@ -42,6 +50,24 @@ import type { StageEvent } from '../../ui/StageNotificationManager';
 
 export interface UnifiedLLMServiceOptions {
     model: AIModelConfig;
+}
+
+const STAGE_THINKING_CEILINGS: Partial<Record<RequestType, ThinkingLevel>> = {
+    summary: 'minimal',
+    changeExtraction: 'low',
+    investigationPlan: 'low',
+    investigation: 'medium',
+    informationSelection: 'low',
+    ragPreparation: 'low',
+    ragRerank: 'low',
+    draft: 'medium',
+    fix: 'minimal',
+    strictFix: 'minimal',
+    enforceLanguage: 'off',
+};
+
+function stageThinkingCeiling(requestType: RequestType, userLevel: ThinkingLevel): ThinkingLevel {
+    return STAGE_THINKING_CEILINGS[requestType] ?? userLevel;
 }
 
 /** Coordinates provider-neutral sessions for commit and repository workflows. */
@@ -100,20 +126,38 @@ export class UnifiedLLMService extends BaseLLMService {
         const signal = this.toAbortSignal(options?.token);
         const configuration = vscode.workspace.getConfiguration('gitCommitGenie');
         const temperature = configuration.get<number>('llm.temperature', 1);
-        const maxOutputTokens = configuration.get<number>('llm.maxOutputTokens', 4096);
         const maxRetries = configuration.get<number>('llm.maxRetries', 2);
-        const thinking = resolveThinkingConfig(this.options.model, {
+        const thinkingSettings = {
             defaultThinkingLevel: configuration.get<unknown>('defaultThinkingLevel', 'off'),
             modelThinkingLevels: configuration.get<unknown>('modelThinkingLevels', {}),
             thinkingBudgets: configuration.get<unknown>('thinkingBudgets', {}),
+        };
+        const thinking = resolveThinkingConfig(this.options.model, thinkingSettings);
+        const contextWindowTokens = configuration.get<number>(
+            'chain.contextWindowTokens',
+            DEFAULT_CHAIN_CONTEXT_WINDOW_TOKENS,
+        );
+        const tokenBudget = resolveChainTokenBudget({
+            provider: this.options.model.provider,
+            model: this.getCurrentModel(),
+            contextWindowTokens,
+            thinking,
         });
+        const thinkingFor = (requestType: RequestType): AIThinkingConfig => capThinkingConfig(
+            this.options.model,
+            thinkingSettings,
+            thinking,
+            stageThinkingCeiling(requestType, thinking.level),
+        );
         return {
             signal,
             temperature,
-            maxOutputTokens,
+            maxOutputTokens: tokenBudget.maxOutputTokens,
             maxRetries,
             thinkingLevel: thinking.level,
             thinkingBudget: thinking.budget,
+            tokenBudget,
+            thinkingFor,
             createSession: (messages, id) => provider.createSession({
                 id,
                 model: this.getCurrentModel(),
@@ -121,7 +165,7 @@ export class UnifiedLLMService extends BaseLLMService {
                 thinking,
             }),
             run: <T>(session: AISession, messages: AIMessage[], runOptions: LLMRunOptions) => (
-                this.runSession<T>(session, messages, runOptions, repoPath, signal)
+                this.runSession<T>(session, messages, runOptions, repoPath, tokenBudget, thinkingFor, signal)
             ),
         };
     }
@@ -131,27 +175,31 @@ export class UnifiedLLMService extends BaseLLMService {
         messages: AIMessage[],
         runOptions: LLMRunOptions,
         repoPath: string,
+        tokenBudget: ChainTokenBudget,
+        thinkingFor: (requestType: RequestType) => AIThinkingConfig,
         signal?: AbortSignal,
     ): Promise<T> {
         const requestType = runOptions.requestType;
         const schema = getValidationSchemaFor(requestType);
         const maxRetries = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.maxRetries', 2);
-        const maxInputTokens = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('chain.maxInputTokens', 32_000);
         const temperature = runOptions.temperature
             ?? vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.temperature', 1);
-        const maxOutputTokens = runOptions.maxOutputTokens
-            ?? vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.maxOutputTokens', 4096);
-        if (!Number.isInteger(maxOutputTokens) || maxOutputTokens <= 0) {
-            throw new Error(`gitCommitGenie.llm.maxOutputTokens must be a positive integer; received ${maxOutputTokens}.`);
-        }
-        assertChatMessagesWithinTokenBudget(messages, maxInputTokens, requestType);
+        const maxOutputTokens = runOptions.maxOutputTokens ?? tokenBudget.maxOutputTokens;
+        assertChatMessagesWithinTokenBudget(messages, tokenBudget, requestType);
 
         const delta = messages.filter(message => message.role !== 'system' && message.role !== 'developer');
         const provider = this.options.model.provider;
         const model = this.getCurrentModel();
         let currentLogId: string | undefined;
+        let firstRun = true;
+        const budgetMessages = [...messages];
 
         const runMessages = async (runDelta: AIMessage[]) => {
+            if (!firstRun) {
+                budgetMessages.push(...runDelta);
+            }
+            firstRun = false;
+            assertChatMessagesWithinTokenBudget(budgetMessages, tokenBudget, requestType);
             currentLogId = logger.logApiRequest(repoPath || undefined);
             try {
                 const response = await session.run({
@@ -162,9 +210,20 @@ export class UnifiedLLMService extends BaseLLMService {
                     } : undefined,
                     temperature,
                     maxOutputTokens,
+                    thinking: thinkingFor(requestType),
                     signal,
                 });
+                if (response.text) {
+                    budgetMessages.push({ role: 'assistant', content: response.text });
+                }
                 this.logUsage(repoPath, requestType, response.usage?.raw);
+                logger.info(
+                    `[Genie][${this.getProviderName()}] ${requestType} stop=${response.stopReason}` +
+                    `${response.stopReasonRaw ? ` (${response.stopReasonRaw})` : ''}; ` +
+                    `input=${response.usage?.inputTokens ?? 'unknown'}, ` +
+                    `reasoning=${response.usage?.reasoningTokens ?? 'unknown'}, ` +
+                    `visibleOutput=${response.usage?.visibleOutputTokens ?? response.usage?.outputTokens ?? 'unknown'}.`,
+                );
                 return response;
             } catch (error) {
                 if (currentLogId) {
@@ -286,8 +345,7 @@ export class UnifiedLLMService extends BaseLLMService {
                     repositoryAnalysis: parsedInput?.['repository-analysis'],
                 }, execution, {
                     maxParallel: cfg.get<number>('chain.maxParallel', 2),
-                    maxInputTokens: cfg.get<number>('chain.maxInputTokens', 32_000),
-                    model,
+                    tokenBudget: execution.tokenBudget,
                     repositoryAnalysisService: this.analysisService,
                     retrieveRagExamples: async context => {
                         if (!options?.ragRetrievalService || !options.targetRepo) {

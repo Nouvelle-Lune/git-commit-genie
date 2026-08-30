@@ -138,12 +138,12 @@
           "minimum": 1,
           "markdownDescription": "%config.chain.maxParallel.desc%"
         },
-        "gitCommitGenie.chain.maxInputTokens": {
+        "gitCommitGenie.chain.contextWindowTokens": {
           "order": 5,
           "type": "integer",
-          "default": 32000,
+          "default": 128000,
           "minimum": 1,
-          "markdownDescription": "%config.chain.maxInputTokens.desc%"
+          "markdownDescription": "%config.chain.contextWindowTokens.desc%"
         },
         "gitCommitGenie.chain.investigation.enabled": {
           "order": 5.2,
@@ -232,13 +232,6 @@
           "minimum": 0,
           "maximum": 2,
           "markdownDescription": "%config.llm.temperature.desc%"
-        },
-        "gitCommitGenie.llm.maxOutputTokens": {
-          "order": 8,
-          "type": "integer",
-          "default": 4096,
-          "minimum": 1,
-          "markdownDescription": "%config.llm.maxOutputTokens.desc%"
         },
         "gitCommitGenie.repositoryAnalysis.enabled": {
           "order": 11,

@@ -22,13 +22,14 @@ const REQUEST_TYPE_LABELS: Record<RequestType, string> = {
     ragRerank: 'rag-rerank',
     changeExtraction: 'change-extract',
     investigationPlan: 'investigation-plan',
+    investigation: 'investigation',
     semanticAnalysis: 'semantic-analysis',
     informationSelection: 'info-selection',
     strictFix: 'strict-fix',
     enforceLanguage: 'lang-fix',
 };
 
-const VALIDATION_SCHEMAS: Record<RequestType, z.ZodTypeAny> = {
+const VALIDATION_SCHEMAS: Partial<Record<RequestType, z.ZodTypeAny>> = {
     commitMessage: commitMessageSchema,
     summary: evidenceSummaryResponseSchema,
     draft: classifyAndDraftResponseSchema,

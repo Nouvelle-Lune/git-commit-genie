@@ -75,6 +75,23 @@ class CustomSession implements AISession {
             name: String(call.function?.name),
             arguments: parseJsonObject(String(call.function?.arguments ?? '{}')),
         }));
+        if (text) {
+            this.transcript.push({ role: 'assistant', content: text });
+        }
+        const reasoningTokens = response.usage?.completion_tokens_details?.reasoning_tokens;
+        const completionTokens = response.usage?.completion_tokens;
+        const stopReasonRaw = String(response.choices?.[0]?.finish_reason ?? '');
+        const stopReason = stopReasonRaw === 'stop'
+            ? 'completed' as const
+            : stopReasonRaw === 'tool_calls' || stopReasonRaw === 'function_call'
+                ? 'tool_call' as const
+                : stopReasonRaw === 'length'
+                    ? typeof reasoningTokens === 'number'
+                        ? 'max_output_tokens' as const
+                        : 'unknown_length' as const
+                    : stopReasonRaw === 'content_filter'
+                        ? 'content_filter' as const
+                        : 'unknown' as const;
         return {
             text,
             reasoning,
@@ -83,10 +100,16 @@ class CustomSession implements AISession {
             usage: response.usage ? {
                 inputTokens: response.usage.prompt_tokens,
                 outputTokens: response.usage.completion_tokens,
+                reasoningTokens,
+                visibleOutputTokens: typeof completionTokens === 'number'
+                    ? Math.max(0, completionTokens - (reasoningTokens ?? 0))
+                    : undefined,
                 totalTokens: response.usage.total_tokens,
                 cachedInputTokens: response.usage.prompt_tokens_details?.cached_tokens,
                 raw: response.usage,
             } : undefined,
+            stopReason,
+            stopReasonRaw,
             continuation: { serverManaged: false },
             raw: response,
         };

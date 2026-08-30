@@ -4,9 +4,12 @@ import {
     AIMessage,
     AIResponseFormat,
     AISession,
+    AIThinkingConfig,
     AIToolCall,
     AIToolResult,
 } from '../services/llm/providers';
+import { assertChatMessagesWithinTokenBudget, ChainTokenBudget } from '../services/llm/inputTokenBudget';
+import { RequestType } from '../services/llm/llmTypes';
 import { runStructuredCompletion } from '../services/llm/structuredCompletion';
 
 export interface AgentTool extends AIFunctionTool {
@@ -20,6 +23,9 @@ export interface AgentLoopOptions {
     maxRetries?: number;
     temperature?: number;
     maxOutputTokens?: number;
+    thinking?: AIThinkingConfig;
+    tokenBudget?: ChainTokenBudget;
+    requestType?: RequestType;
     signal?: AbortSignal;
 }
 
@@ -48,8 +54,16 @@ export async function runAgentLoop(
     const toolsByName = new Map(tools.map(tool => [tool.name, tool]));
     let messages = openingMessages;
     let toolResults: AIToolResult[] | undefined;
+    const toolResultHistory: AIMessage[] = [];
 
     for (let step = 0; step <= options.maxSteps; step += 1) {
+        if (options.tokenBudget) {
+            assertChatMessagesWithinTokenBudget(
+                [...session.snapshot().transcript, ...messages, ...toolResultHistory],
+                options.tokenBudget,
+                options.requestType,
+            );
+        }
         const response = await session.run({
             messages: toSessionDelta(messages),
             toolResults,
@@ -58,6 +72,7 @@ export async function runAgentLoop(
             toolChoice: tools.length ? 'auto' : 'none',
             temperature: options.temperature,
             maxOutputTokens: options.maxOutputTokens,
+            thinking: options.thinking,
             signal: options.signal,
         });
         messages = [];
@@ -99,14 +114,24 @@ export async function runAgentLoop(
                     content: `The previous response failed schema validation: ${firstParsed.error}. Return one corrected JSON object matching the requested schema.`,
                 }];
             const { data, response: validatedResponse } = await runStructuredCompletion({
-                run: async retryMessages => session.run({
-                    messages: retryMessages,
-                    responseFormat: options.responseFormat,
-                    toolChoice: 'none',
-                    temperature: options.temperature,
-                    maxOutputTokens: options.maxOutputTokens,
-                    signal: options.signal,
-                }),
+                run: async retryMessages => {
+                    if (options.tokenBudget) {
+                        assertChatMessagesWithinTokenBudget(
+                            [...session.snapshot().transcript, ...toolResultHistory, ...retryMessages],
+                            options.tokenBudget,
+                            options.requestType,
+                        );
+                    }
+                    return session.run({
+                        messages: retryMessages,
+                        responseFormat: options.responseFormat,
+                        toolChoice: 'none',
+                        temperature: options.temperature,
+                        maxOutputTokens: options.maxOutputTokens,
+                        thinking: options.thinking,
+                        signal: options.signal,
+                    });
+                },
                 schema: options.schema,
                 initialMessages,
                 maxRetries: Math.max(0, maxRetries - 1),
@@ -123,9 +148,17 @@ export async function runAgentLoop(
             throw new Error(`Agent loop exhausted its ${options.maxSteps} tool-step budget.`);
         }
 
+        toolResultHistory.push({
+            role: 'assistant',
+            content: JSON.stringify(response.toolCalls),
+        });
         toolResults = await Promise.all(
             response.toolCalls.map(call => executeToolCall(call, toolsByName, options.signal))
         );
+        toolResultHistory.push(...toolResults.map(result => ({
+            role: 'user' as const,
+            content: result.output,
+        })));
     }
 
     throw new Error('Agent loop exited without a final response.');

@@ -51,6 +51,11 @@ export interface StageEventData {
   error?: string;
   target?: 'changeExtraction' | 'semanticAnalysis' | 'ragPreparation' | 'draft';
   maxInputTokens?: number;
+  contextWindowTokens?: number;
+  hardInputTokens?: number;
+  compressionTriggerTokens?: number;
+  maxOutputTokens?: number;
+  safetyTokens?: number;
   initialEstimatedInputTokens?: number;
   estimatedInputTokens?: number;
   rawFiles?: number;

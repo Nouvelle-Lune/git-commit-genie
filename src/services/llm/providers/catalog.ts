@@ -317,6 +317,35 @@ export function resolveThinkingConfig(model: AIModelConfig, settings: ThinkingSe
     };
 }
 
+/** Applies a stage ceiling without ever increasing the user-selected level. */
+export function capThinkingConfig(
+    model: AIModelConfig,
+    settings: ThinkingSettingsValues,
+    resolved: AIThinkingConfig,
+    ceiling: ThinkingLevel,
+): AIThinkingConfig {
+    const resolvedIndex = THINKING_LEVELS.indexOf(resolved.level);
+    const ceilingIndex = THINKING_LEVELS.indexOf(ceiling);
+    if (resolvedIndex <= ceilingIndex) {
+        return resolved;
+    }
+
+    const metadata = getModelThinkingMetadata(model);
+    const supported = getSupportedThinkingLevels(metadata);
+    // Some always-thinking models cannot honor off. In that case the lowest
+    // supported level is the only valid implementation of an off/minimum stage.
+    const level = supported
+        .filter(candidate => THINKING_LEVELS.indexOf(candidate) <= ceilingIndex)
+        .at(-1) ?? supported[0];
+    return {
+        reasoning: metadata.reasoning,
+        level,
+        mappedValue: metadata.thinkingLevelMap?.[level],
+        ...thinkingTransport(metadata),
+        budget: resolveThinkingBudget(model, metadata, level, settings),
+    };
+}
+
 function thinkingTransport(metadata: AIModelThinkingMetadata): Pick<
     AIThinkingConfig,
     'format' | 'chatTemplateKwargs' | 'chatTemplateArgs' | 'thinkingTokenBudgetField' | 'supportsReasoningEffort' | 'requiresReasoningContentOnAssistantMessages'

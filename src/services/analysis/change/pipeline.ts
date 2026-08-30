@@ -25,6 +25,7 @@ import {
 import { analyzeSemantics } from './semanticAnalysis';
 import { buildSelectedInformation, selectInformation } from './informationSelection';
 import { ChangeAnalysisInputs, ChangeAnalysisTrace, DraftEvidence, InvestigationPlan } from './types';
+import { isContextWindowFailure } from '../../llm/inputTokenBudget';
 
 export type EvidenceRouteTarget = 'changeExtraction' | 'semanticAnalysis' | 'ragPreparation' | 'draft';
 
@@ -35,7 +36,8 @@ export interface ChangeAnalysisPipelineParams {
     getEvidence: () => DraftEvidence[];
     compactFor: (
         target: EvidenceRouteTarget,
-        buildTargetMessages: (current: DraftEvidence[]) => AIMessage[]
+        buildTargetMessages: (current: DraftEvidence[]) => AIMessage[],
+        force?: boolean,
     ) => Promise<void>;
     investigationOverrides?: Partial<InvestigationSettings>;
     repositoryAnalysisService?: Pick<IRepositoryAnalysisService, 'runChangeAnalysis'>;
@@ -57,11 +59,17 @@ export async function runChangeAnalysisPipeline(
 
     const deterministic: DeterministicChangeExtraction = extractChangesDeterministically(diffs);
     safeRun('Chain.onStage.changeExtractionStart', () => onStage?.({ type: 'changeExtractionStart' }));
-    await compactFor('changeExtraction', current => buildChangeExtractionMessages({
+    const changeExtractionMessages = (current: DraftEvidence[]) => buildChangeExtractionMessages({
         deterministic,
         evidencePayload: current,
-    }));
-    const changeExtraction = await extractChanges(diffs, getEvidence(), execution, deterministic);
+    });
+    await compactFor('changeExtraction', changeExtractionMessages);
+    const changeExtraction = await runEvidenceStage(
+        'changeExtraction',
+        changeExtractionMessages,
+        compactFor,
+        () => extractChanges(diffs, getEvidence(), execution, deterministic),
+    );
     safeRun('Chain.onStage.changeExtracted', () => onStage?.({
         type: 'changeExtracted',
         data: {
@@ -109,27 +117,36 @@ export async function runChangeAnalysisPipeline(
             if (!params.repositoryAnalysisService) {
                 throw new Error('RepositoryAnalysisService is required for change-conditioned repository analysis.');
             }
-            repositoryEvidence = await params.repositoryAnalysisService.runChangeAnalysis({
-                extraction: changeExtraction,
-                plan,
-                repositoryPath: inputs.repositoryPath,
-                excludePatterns: settings.excludePatterns,
-                execution,
-                maxSteps: settings.maxSteps,
-                maxInputTokens,
-                onStep: event => safeRun('Chain.onStage.investigationStep', () => onStage?.({
-                    type: 'investigationStep',
-                    data: {
-                        current: event.step,
-                        total: settings.maxSteps,
-                        tool: event.tool,
-                        reason: event.reason,
-                        summary: event.summary,
-                        ok: event.ok,
-                        evidenceCount: event.evidenceCount,
-                    },
-                })),
-            });
+            try {
+                repositoryEvidence = await params.repositoryAnalysisService.runChangeAnalysis({
+                    extraction: changeExtraction,
+                    plan,
+                    repositoryPath: inputs.repositoryPath,
+                    excludePatterns: settings.excludePatterns,
+                    execution,
+                    maxSteps: settings.maxSteps,
+                    maxInputTokens,
+                    onStep: event => safeRun('Chain.onStage.investigationStep', () => onStage?.({
+                        type: 'investigationStep',
+                        data: {
+                            current: event.step,
+                            total: settings.maxSteps,
+                            tool: event.tool,
+                            reason: event.reason,
+                            summary: event.summary,
+                            ok: event.ok,
+                            evidenceCount: event.evidenceCount,
+                        },
+                    })),
+                });
+            } catch (error) {
+                if (!isContextWindowFailure(error)) {
+                    throw error;
+                }
+                repositoryEvidence = emptyRepositoryEvidence(
+                    'Repository investigation reached the configured context budget; continuing from diff evidence.',
+                );
+            }
         }
     }
 
@@ -152,19 +169,25 @@ export async function runChangeAnalysisPipeline(
     }
 
     safeRun('Chain.onStage.semanticAnalysisStart', () => onStage?.({ type: 'semanticAnalysisStart' }));
-    await compactFor('semanticAnalysis', current => buildSemanticAnalysisMessages({
+    const semanticMessages = (current: DraftEvidence[]) => buildSemanticAnalysisMessages({
         changeExtraction,
         repositoryEvidence,
         evidencePayload: current,
         repositoryTerminology: inputs.repositoryAnalysis,
-    }));
-    const semanticAnalysis = await analyzeSemantics({
-        changeExtraction,
-        repositoryEvidence,
-        evidencePayload: getEvidence(),
-        repositoryTerminology: inputs.repositoryAnalysis,
-        execution,
     });
+    await compactFor('semanticAnalysis', semanticMessages);
+    const semanticAnalysis = await runEvidenceStage(
+        'semanticAnalysis',
+        semanticMessages,
+        compactFor,
+        () => analyzeSemantics({
+            changeExtraction,
+            repositoryEvidence,
+            evidencePayload: getEvidence(),
+            repositoryTerminology: inputs.repositoryAnalysis,
+            execution,
+        }),
+    );
     safeRun('Chain.onStage.semanticAnalysisComplete', () => onStage?.({
         type: 'semanticAnalysisComplete',
         data: {
@@ -208,4 +231,23 @@ export async function runChangeAnalysisPipeline(
         informationSelection,
         selectedInformation,
     };
+}
+
+async function runEvidenceStage<T>(
+    target: EvidenceRouteTarget,
+    buildMessages: (current: DraftEvidence[]) => AIMessage[],
+    compactFor: ChangeAnalysisPipelineParams['compactFor'],
+    run: () => Promise<T>,
+): Promise<T> {
+    try {
+        return await run();
+    } catch (error) {
+        if (!isContextWindowFailure(error)) {
+            throw error;
+        }
+        await compactFor(target, buildMessages, true);
+        // Every stage action creates a new provider session, so the retry does not
+        // inherit the failed request or its partial assistant response.
+        return run();
+    }
 }

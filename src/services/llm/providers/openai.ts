@@ -94,6 +94,22 @@ class OpenAISession implements AISession {
                 arguments: typeof item.arguments === 'string' ? parseJsonObject(item.arguments) : item.arguments,
             }));
         const details = response.usage?.input_tokens_details;
+        const outputDetails = response.usage?.output_tokens_details;
+        const reasoningTokens = outputDetails?.reasoning_tokens;
+        const outputTokens = response.usage?.output_tokens;
+        const stopReasonRaw = response.incomplete_details?.reason ?? response.status;
+        const stopReason = response.status === 'completed'
+            ? 'completed' as const
+            : response.incomplete_details?.reason === 'max_output_tokens'
+                ? 'max_output_tokens' as const
+                : response.incomplete_details?.reason === 'content_filter'
+                    ? 'content_filter' as const
+                    : response.status === 'incomplete'
+                        ? 'unknown_length' as const
+                        : 'unknown' as const;
+        if (text) {
+            this.transcript.push({ role: 'assistant', content: text });
+        }
         return {
             text,
             structured: request.responseFormat ? parseStructuredText(text) : undefined,
@@ -101,11 +117,17 @@ class OpenAISession implements AISession {
             usage: response.usage ? {
                 inputTokens: response.usage.input_tokens,
                 outputTokens: response.usage.output_tokens,
+                reasoningTokens,
+                visibleOutputTokens: typeof outputTokens === 'number'
+                    ? Math.max(0, outputTokens - (reasoningTokens ?? 0))
+                    : undefined,
                 totalTokens: response.usage.total_tokens,
                 cachedInputTokens: details?.cached_tokens,
                 cacheWriteInputTokens: details?.cache_write_tokens,
                 raw: response.usage,
             } : undefined,
+            stopReason,
+            stopReasonRaw: String(stopReasonRaw ?? ''),
             continuation: { nativeId: response.id, serverManaged: true },
             raw: response,
         };

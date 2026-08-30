@@ -15,7 +15,7 @@ export function applyOpenAIResponsesThinking(
     body.reasoning = { effort };
 }
 
-/** Applies Anthropic extended-thinking configuration and reserves its budget. */
+/** Applies Anthropic extended thinking within the caller's hard max_tokens ceiling. */
 export function applyAnthropicThinking(
     body: Record<string, unknown>,
     thinking: AIThinkingConfig | undefined,
@@ -35,8 +35,13 @@ export function applyAnthropicThinking(
         throw new Error('Anthropic thinking requires a configured token budget.');
     }
 
-    const maxTokens = Number(body.max_tokens ?? 4096);
-    body.max_tokens = maxTokens + thinking.budget;
+    const maxTokens = Number(body.max_tokens ?? 8192);
+    if (thinking.budget >= maxTokens) {
+        throw new Error(
+            `Anthropic thinking budget (${thinking.budget}) must be smaller than the derived output budget (${maxTokens}). ` +
+            'Raise gitCommitGenie.chain.contextWindowTokens or lower the thinking level.',
+        );
+    }
     body.thinking = { type: 'enabled', budget_tokens: thinking.budget };
     // Anthropic extended thinking does not accept sampling controls such as temperature.
     delete body.temperature;

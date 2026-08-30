@@ -247,6 +247,9 @@ export async function runChangeAnalysisAgent(params: ChangeAnalysisAgentParams):
         maxRetries: execution.maxRetries,
         temperature: execution.temperature,
         maxOutputTokens: execution.maxOutputTokens,
+        thinking: execution.thinkingFor('investigation'),
+        tokenBudget: execution.tokenBudget,
+        requestType: 'investigation',
         signal: execution.signal,
     });
     const final = investigationFinalResponseSchema.parse(result.structured);

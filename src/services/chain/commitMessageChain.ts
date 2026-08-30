@@ -10,7 +10,7 @@ import { isRagPreparationEnabled, prepareRagContext } from "./rag/preparation";
 import { logger } from "../logger";
 import { safeRun } from "../../utils/safeRun";
 import { compactEvidenceToFit, createRawDraftEvidence } from "./evidence/compaction";
-import { DEFAULT_CHAIN_MAX_INPUT_TOKENS, resolveChainInputTokenBudget } from "../llm/inputTokenBudget";
+import { ChainTokenBudget, estimateChatMessagesTokens, isContextWindowFailure } from "../llm/inputTokenBudget";
 import { buildChangeConditionedDraftMessages } from "./generation/prompts";
 import { InvestigationSettings } from "../analysis/change/investigation/config";
 import { EvidenceRouteTarget, runChangeAnalysisPipeline } from "../analysis/change/pipeline";
@@ -29,8 +29,7 @@ export async function generateCommitMessageChain(
 	options?: {
 		maxParallel?: number;
 		maxRetries?: number;
-		maxInputTokens?: number;
-		model?: string;
+		tokenBudget?: ChainTokenBudget;
 		/** Overrides the configured investigation limits; used by tests and benchmarks. */
 		investigation?: Partial<InvestigationSettings>;
 		repositoryAnalysisService?: Pick<IRepositoryAnalysisService, 'runChangeAnalysis'>;
@@ -44,11 +43,13 @@ export async function generateCommitMessageChain(
 	const { diffs } = inputs;
 	const maxParallel = options?.maxParallel ?? Math.max(4, Math.min(8, diffs.length));
 	const maxRetries = options?.maxRetries ?? 2;
-	const maxInputTokens = resolveChainInputTokenBudget(
-		options?.model || '',
-		options?.maxInputTokens ?? DEFAULT_CHAIN_MAX_INPUT_TOKENS
-	);
+	const tokenBudget = options?.tokenBudget ?? execution.tokenBudget;
+	const maxInputTokens = tokenBudget.compressionTargetTokens;
 	let evidence = createRawDraftEvidence(diffs);
+	const initialRawEvidenceTokens = estimateChatMessagesTokens([{
+		role: 'user',
+		content: JSON.stringify(evidence),
+	}]);
 	let summaryStageStarted = false;
 	let summarizedCount = 0;
 
@@ -59,20 +60,37 @@ export async function generateCommitMessageChain(
 			rawFiles: diffs.length,
 			summarizedFiles: 0,
 			maxInputTokens,
+			initialEstimatedInputTokens: initialRawEvidenceTokens,
+			contextWindowTokens: tokenBudget.effectiveContextTokens,
+			hardInputTokens: tokenBudget.hardInputTokens,
+			compressionTriggerTokens: tokenBudget.compressionTriggerTokens,
+			maxOutputTokens: tokenBudget.maxOutputTokens,
+			safetyTokens: tokenBudget.safetyTokens,
 			files: diffs.map(diff => ({ file: diff.fileName, status: diff.status })),
 		}
 	}));
 
 	const compactFor = async (
 		target: EvidenceRouteTarget,
-		buildTargetMessages: (current: DraftEvidence[]) => AIMessage[]
+		buildTargetMessages: (current: DraftEvidence[]) => AIMessage[],
+		force = false,
 	) => {
 		try {
+			const currentTokens = estimateChatMessagesTokens(buildTargetMessages(evidence));
+			const forcedTarget = Math.max(1, Math.floor(currentTokens * 0.8));
+			const triggerInputTokens = force
+				? Math.min(tokenBudget.compressionTargetTokens, forcedTarget)
+				: tokenBudget.compressionTriggerTokens;
+			const targetInputTokens = force
+				? Math.max(1, Math.floor(triggerInputTokens * 0.9))
+				: tokenBudget.compressionTargetTokens;
 			const result = await compactEvidenceToFit({
 				diffs,
 				evidence,
 				execution,
-				maxInputTokens,
+				triggerInputTokens,
+				targetInputTokens,
+				hardInputTokens: tokenBudget.hardInputTokens,
 				maxParallel,
 				maxRetries,
 				buildTargetMessages,
@@ -107,7 +125,10 @@ export async function generateCommitMessageChain(
 					initialEstimatedInputTokens: result.initialEstimatedInputTokens,
 					estimatedInputTokens: result.estimatedInputTokens,
 					maxInputTokens,
+					hardInputTokens: tokenBudget.hardInputTokens,
+					contextWindowTokens: tokenBudget.effectiveContextTokens,
 					didSummarize: result.didSummarize,
+					forced: force,
 				}
 			}));
 		} catch (error) {
@@ -217,7 +238,17 @@ export async function generateCommitMessageChain(
 
 	await compactFor('draft', buildDraftMessages);
 	safeRun('Chain.onStage.draftStart', () => options?.onStage?.({ type: 'draftStart' }));
-	const { draft, notes: classificationNotes } = await generateDraft(buildDraftMessages(evidence), execution);
+	let generatedDraft: Awaited<ReturnType<typeof generateDraft>>;
+	try {
+		generatedDraft = await generateDraft(buildDraftMessages(evidence), execution);
+	} catch (error) {
+		if (!isContextWindowFailure(error)) {
+			throw error;
+		}
+		await compactFor('draft', buildDraftMessages, true);
+		generatedDraft = await generateDraft(buildDraftMessages(evidence), execution);
+	}
+	const { draft, notes: classificationNotes } = generatedDraft;
 
 	safeRun('Chain.onStage.classifyDraft', () => options?.onStage?.({ type: 'classifyDraft', data: { draft } }));
 
