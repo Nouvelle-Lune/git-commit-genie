@@ -2,10 +2,62 @@ import { logger } from '../logger';
 import { safeRun } from '../../utils/safeRun';
 import type { StageEvent } from '../../ui/StageNotificationManager';
 import type { RequestType } from './llmTypes';
-import type { AIRunResponse } from './providers';
+import type { AIRunResponse, AIRunRequest, AISession } from './providers';
 import { formatWebviewApiResult } from './chatWebviewFormatting';
 
 export { formatWebviewApiResult } from './chatWebviewFormatting';
+
+/**
+ * Wraps an agent session so each LLM turn is mirrored in the Webview log list.
+ * Repository analysis runs through runAgentLoop instead of LLMExecution.run,
+ * so it needs this wrapper to show API request progress in the dashboard.
+ */
+export function wrapSessionWithWebviewLogging(
+    session: AISession,
+    repoPath: string,
+    requestType?: RequestType,
+): AISession {
+    return {
+        provider: session.provider,
+        model: session.model,
+        snapshot: () => session.snapshot(),
+        run: async (request: AIRunRequest) => {
+            const logId = logger.logApiRequest(repoPath || undefined);
+            try {
+                const response = await session.run(request);
+                completeApiRequestLog(
+                    logId,
+                    session.provider,
+                    session.model,
+                    response.structured ?? response.text,
+                    response,
+                    requestType,
+                    repoPath,
+                );
+                return response;
+            } catch (error) {
+                failApiRequestLog(logId, session.provider, session.model, error, repoPath);
+                throw error;
+            }
+        },
+    };
+}
+
+export function logRepositoryAnalysisToolCall(
+    repoPath: string,
+    toolName: string,
+    args: Record<string, unknown>,
+    reason: string,
+    step: number,
+    maxSteps: number,
+): void {
+    safeRun('RepoAnalysis.logToolCall', () => logger.logToolCall(
+        toolName,
+        JSON.stringify({ ...args, step, maxSteps }),
+        reason,
+        repoPath,
+    ));
+}
 
 export function logCommitStageToWebview(repoPath: string, event: StageEvent): void {
     const payload = { stage: event.type, data: event.data ?? {} };

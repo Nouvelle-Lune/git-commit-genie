@@ -212,6 +212,29 @@ export class Logger {
     }
 
     /**
+     * Log repository analysis completion with the structured agent result.
+     */
+    public logAnalysisComplete(
+        repositoryPath: string,
+        result: { projectType: string; technologies: string[]; insights: string[]; summary: string },
+    ): void {
+        const log: LogEntry = {
+            id: `analysis-done-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            timestamp: Date.now(),
+            type: LogType.FinalResult,
+            title: 'Repository analysis complete',
+            content: JSON.stringify({
+                projectType: result.projectType,
+                technologies: result.technologies,
+                insights: result.insights,
+                summary: result.summary,
+            }, null, 2),
+        };
+        (log as any).repoPath = repositoryPath;
+        this.sendLogToWebview(log);
+    }
+
+    /**
      * Log commit message generation start event
      */
     public logGenerationStart(repositoryPath: string, mode: 'default' | 'thinking'): void {
@@ -295,12 +318,18 @@ export class Logger {
             const parsedArgs = JSON.parse(args);
 
             switch (toolName) {
-                case 'readFileContent':
-                    return `Genie wants to read: ${parsedArgs.path?.split('/').pop() || 'file'}`;
-                case 'searchFiles':
-                    return `Genie wants to search for: ${parsedArgs.pattern || 'files'}`;
-                case 'listDirectory':
-                    return `Genie wants to explore: ${parsedArgs.path?.split('/').pop() || 'directory'}`;
+                case 'readFileContent': {
+                    const filePath = parsedArgs.filePath ?? parsedArgs.path;
+                    return `Genie wants to read: ${typeof filePath === 'string' ? filePath.split('/').pop() || 'file' : 'file'}`;
+                }
+                case 'searchFiles': {
+                    const query = parsedArgs.query ?? parsedArgs.pattern;
+                    return `Genie wants to search for: ${typeof query === 'string' && query.trim() ? query : 'files'}`;
+                }
+                case 'listDirectory': {
+                    const dirPath = parsedArgs.dirPath ?? parsedArgs.path;
+                    return `Genie wants to explore: ${typeof dirPath === 'string' ? dirPath.split('/').pop() || 'directory' : 'directory'}`;
+                }
                 case 'searchInFiles':
                     return `Genie wants to search in files: ${parsedArgs.searchTerm || ''}`;
                 case 'getCompressedContext':

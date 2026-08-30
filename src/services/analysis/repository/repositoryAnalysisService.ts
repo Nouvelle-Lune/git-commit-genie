@@ -38,6 +38,10 @@ import { DirectoryEntry, SearchFilesResult, ToolResult } from '../tools/types';
 import { buildGitGenieIgnoreAppend } from '../../../utils/gitignore';
 import { ChangeAnalysisAgentParams, runChangeAnalysisAgent } from '../change/investigation/agent';
 import { RepositoryEvidence } from '../change/types';
+import {
+    logRepositoryAnalysisToolCall,
+    wrapSessionWithWebviewLogging,
+} from '../../llm/chatWebviewLogging';
 
 const REPOSITORY_ANALYSIS_MARKDOWN_TITLE = '# Repository Analysis Summary';
 
@@ -652,19 +656,36 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         if (maxSteps === -1) {
             maxSteps = 99999;
         }
+        let agentStep = 0;
         const tools: AgentTool[] = toolsSpec.map(spec => ({
             name: spec.name,
             description: `${spec.desc} Set unused arguments to null.`,
             parameters: REPOSITORY_TOOL_PARAMETERS,
             execute: async argumentsValue => {
                 const reason = String(argumentsValue.reason || '').trim();
+                agentStep += 1;
                 logger.info(`[Genie][RepoAnalysis] Model chose tool '${spec.name}'. Reason: ${reason.slice(0, 500)}`);
+                // readFileContent already logs through logger.logFileRead inside the tool.
+                if (spec.name !== 'readFileContent') {
+                    logRepositoryAnalysisToolCall(
+                        repoPath,
+                        spec.name,
+                        argumentsValue,
+                        reason,
+                        agentStep,
+                        maxSteps,
+                    );
+                }
                 const toolResult = await this.runTool(repoPath, spec.name, argumentsValue, userExcludes);
                 this.logToolOutcome(spec.name, toolResult);
                 return compactToolResultForConversation(repoPath, spec.name, toolResult).compactText;
             },
         }));
-        const session = execution.createSession(msgs, sessionId);
+        const session = wrapSessionWithWebviewLogging(
+            execution.createSession(msgs, sessionId),
+            repoPath,
+            'investigation',
+        );
         const result = await runAgentLoop(session, msgs, tools, {
             maxSteps,
             responseFormat: {
@@ -682,6 +703,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         });
         const final = repoAnalysisResponseSchema.parse(result.structured);
         logger.info(`[Genie][RepoAnalysis] Final: projectType=${final.projectType}; technologies=${final.technologies.slice(0, 5).join(', ')}; insights=${final.insights.length}`);
+        logger.logAnalysisComplete(repoPath, final);
         return final;
 
     }
