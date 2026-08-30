@@ -425,6 +425,17 @@
 }
 
 /* ── Timestamp ── */
+.log-pipeline-description {
+  margin: 1px 0 0 21px;
+  font-size: 10px;
+  line-height: 1.35;
+  color: var(--vscode-descriptionForeground);
+  opacity: 0.85;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .log-submeta {
   margin: 1px 0 0 21px;
   font-size: 9px;

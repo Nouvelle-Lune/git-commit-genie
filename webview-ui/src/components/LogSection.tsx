@@ -330,9 +330,17 @@ export const LogSection: React.FC = () => {
 
             // Repository analysis tools
             if (title.includes('wants to read:')) return { label: 'READ', className: 'stage-badge-read' };
+            if (title.includes('wants to search code')) return { label: 'INVG', className: 'stage-badge-investigate' };
             if (title.includes('wants to search')) return { label: 'SRCH', className: 'stage-badge-search' };
             if (title.includes('wants to explore:')) return { label: 'EXPL', className: 'stage-badge-explore' };
             if (title.includes('compressed context')) return { label: 'ANLY', className: 'stage-badge-analyze' };
+
+            // Change-conditioned investigation tools
+            if (title.includes('wants to look up')
+                || title.includes('wants to find ')
+                || title.includes('changed symbols')) {
+                return { label: 'INVG', className: 'stage-badge-investigate' };
+            }
 
             // Default for other tool calls
             return { label: 'TOOL', className: 'stage-badge-tool' };
@@ -477,6 +485,9 @@ export const LogSection: React.FC = () => {
                                                         )}
                                                     </div>
                                                 </div>
+                                                {pipeline?.description && (
+                                                    <div className="log-pipeline-description">{pipeline.description}</div>
+                                                )}
                                                 {/* Submeta: timestamp small under header (no icon) */}
                                                 {!log.pending && (
                                                     <div className="log-submeta">{formatTime(log.timestamp)}</div>

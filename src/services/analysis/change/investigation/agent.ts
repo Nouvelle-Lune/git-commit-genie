@@ -32,6 +32,10 @@ import {
     RepositoryAnalysisContext,
 } from '../types';
 import { investigationFinalResponseSchema } from '../../../llm/providers/schemas/common';
+import {
+    logInvestigationToolCall,
+    wrapSessionWithWebviewLogging,
+} from '../../../llm/chatWebviewLogging';
 
 const MAX_TARGETS = 3;
 const MAX_QUESTIONS_PER_TARGET = 2;
@@ -217,6 +221,18 @@ export async function runChangeAnalysisAgent(params: ChangeAnalysisAgentParams):
             }
             seenCalls.add(callKey);
             toolSteps += 1;
+            const reason = String(argumentsValue.reason || '').trim();
+            // readFileContent already logs through logger.logFileRead inside the tool.
+            if (call.tool !== 'readFileContent') {
+                logInvestigationToolCall(
+                    repositoryPath,
+                    call.tool,
+                    argumentsValue,
+                    reason,
+                    toolSteps,
+                    maxSteps,
+                );
+            }
             const outcome = await runInvestigationTool(context, call);
             evidenceItems.push(...outcome.evidence);
             onStep?.({
@@ -236,7 +252,11 @@ export async function runChangeAnalysisAgent(params: ChangeAnalysisAgentParams):
             }).content;
         },
     }));
-    const session = execution.createSession(messages, sessionId);
+    const session = wrapSessionWithWebviewLogging(
+        execution.createSession(messages, sessionId),
+        repositoryPath,
+        'investigation',
+    );
     const result = await runAgentLoop(session, messages, tools, {
         maxSteps,
         responseFormat: {

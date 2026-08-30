@@ -332,6 +332,36 @@ export class Logger {
                 }
                 case 'searchInFiles':
                     return `Genie wants to search in files: ${parsedArgs.searchTerm || ''}`;
+                case 'getChangedSymbols':
+                    return 'Genie wants to review changed symbols';
+                case 'findSymbolDefinition': {
+                    const symbol = parsedArgs.symbol;
+                    return `Genie wants to look up definition: ${typeof symbol === 'string' && symbol.trim() ? symbol : 'symbol'}`;
+                }
+                case 'findSymbolReferences': {
+                    const symbol = parsedArgs.symbol;
+                    return `Genie wants to find references: ${typeof symbol === 'string' && symbol.trim() ? symbol : 'symbol'}`;
+                }
+                case 'findCallers': {
+                    const symbol = parsedArgs.symbol;
+                    return `Genie wants to find callers: ${typeof symbol === 'string' && symbol.trim() ? symbol : 'symbol'}`;
+                }
+                case 'findCallees': {
+                    const symbol = parsedArgs.symbol;
+                    return `Genie wants to find callees: ${typeof symbol === 'string' && symbol.trim() ? symbol : 'symbol'}`;
+                }
+                case 'findImplementations': {
+                    const symbol = parsedArgs.symbol;
+                    return `Genie wants to find implementations: ${typeof symbol === 'string' && symbol.trim() ? symbol : 'symbol'}`;
+                }
+                case 'findTypeDefinition': {
+                    const symbol = parsedArgs.symbol;
+                    return `Genie wants to look up type: ${typeof symbol === 'string' && symbol.trim() ? symbol : 'symbol'}`;
+                }
+                case 'searchCode': {
+                    const query = parsedArgs.query;
+                    return `Genie wants to search code: ${typeof query === 'string' && query.trim() ? query : '…'}`;
+                }
                 case 'getCompressedContext':
                     return `Genie wants to analyze compressed context`;
                 case 'commitStage': {
