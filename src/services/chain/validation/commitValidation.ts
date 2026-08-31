@@ -19,9 +19,13 @@ export async function validateAndFixCommit(
     const messages = buildValidateAndFixMessages(commitMessage, checklistText, userTemplate);
     const session = execution.createSession(messages);
     const parsed = await execution.run<any>(session, messages, { requestType: 'fix' });
+    // A valid verdict is an assertion about the original message, not a new
+    // message to reconstruct. Keeping the original preserves its body and
+    // footers when a validator echoes only the header.
+    const validMessage = parsed.status === 'valid' ? commitMessage : parsed.commitMessage;
 
     return {
-        validMessage: parsed.commitMessage,
+        validMessage,
         notes: parsed.notes,
         violations: parsed.violations,
     };

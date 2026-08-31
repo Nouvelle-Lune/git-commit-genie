@@ -1,8 +1,45 @@
 import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
+import { z } from 'zod';
 import { CustomProvider } from '../../services/llm/providers/custom';
+import { classifyAndDraftResponseSchema } from '../../services/llm/providers/schemas/common';
 
 describe('Custom provider response accounting', () => {
+    it('passes the component-only draft schema to compatible chat endpoints', async () => {
+        let requestBody: Record<string, unknown> | undefined;
+        const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
+            chat: {
+                completions: {
+                    create: async (body: Record<string, unknown>) => {
+                        requestBody = body;
+                        return {
+                            choices: [{
+                                finish_reason: 'stop',
+                                message: {
+                                    role: 'assistant',
+                                    content: '{"type":"fix","scope":null,"breaking":false,"description":"fix parsing","body":null,"footers":[],"notes":null}',
+                                },
+                            }],
+                        };
+                    },
+                },
+            },
+        } as any);
+
+        await provider.createSession({ model: 'local-model' }).run({
+            messages: [{ role: 'user', content: 'return draft components' }],
+            responseFormat: {
+                name: 'draft',
+                schema: z.toJSONSchema(classifyAndDraftResponseSchema) as Record<string, unknown>,
+            },
+        });
+
+        const format = requestBody?.response_format as {
+            json_schema: { schema: { properties?: Record<string, unknown> } };
+        };
+        assert.equal(format.json_schema.schema.properties?.commitMessage, undefined);
+    });
+
     it('normalizes reasoning token details and known length termination', async () => {
         let requestBody: Record<string, unknown> | undefined;
         const client = {

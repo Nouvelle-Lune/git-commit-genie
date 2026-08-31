@@ -1,7 +1,7 @@
 import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
 import { z } from 'zod';
-import { assembleCommitMessage } from '../../services/chain/generation/draft';
+import { assembleCommitMessage, generateDraft } from '../../services/chain/generation/draft';
 import { classifyAndDraftResponseSchema } from '../../services/llm/providers/schemas/common';
 
 describe('structured draft assembly', () => {
@@ -70,7 +70,7 @@ describe('structured draft assembly', () => {
             notes: null,
         }), /BREAKING CHANGE footer requires breaking=true/);
 
-        const draft = classifyAndDraftResponseSchema.parse({
+        assert.throws(() => classifyAndDraftResponseSchema.parse({
             type: 'refactor',
             scope: 'C1',
             breaking: false,
@@ -78,7 +78,74 @@ describe('structured draft assembly', () => {
             body: null,
             footers: [],
             notes: null,
+        }), /Scope cannot be an internal claim or evidence identifier/);
+    });
+
+    it('rejects bracketed internal scopes and duplicate breaking footers', () => {
+        assert.throws(() => classifyAndDraftResponseSchema.parse({
+            type: 'refactor',
+            scope: '[E4/P1]',
+            breaking: false,
+            description: 'tighten the runtime contract',
+            body: null,
+            footers: [],
+            notes: null,
+        }), /Scope cannot be an internal claim or evidence identifier/);
+
+        assert.throws(() => classifyAndDraftResponseSchema.parse({
+            type: 'refactor',
+            scope: null,
+            breaking: true,
+            description: 'tighten the runtime contract',
+            body: null,
+            footers: [
+                { token: 'BREAKING CHANGE', value: 'Consumers must update.' },
+                { token: 'BREAKING CHANGE', value: 'The old shape is removed.' },
+            ],
+            notes: null,
+        }), /Only one BREAKING CHANGE footer is allowed/);
+    });
+
+    it('preserves multiline body and footer values in conventional format', () => {
+        const message = assembleCommitMessage(classifyAndDraftResponseSchema.parse({
+            type: 'docs',
+            scope: null,
+            breaking: false,
+            description: 'document the response contract',
+            body: 'Explain the new fields.\nKeep the examples concise.',
+            footers: [{ token: 'Refs', value: '#123\n#456' }],
+            notes: null,
+        }));
+
+        assert.equal(
+            message,
+            'docs: document the response contract\n\n' +
+            'Explain the new fields.\nKeep the examples concise.\n\n' +
+            'Refs: #123\n #456',
+        );
+    });
+
+    it('returns the assembled message from generateDraft so validation receives the body', async () => {
+        const parsed = classifyAndDraftResponseSchema.parse({
+            type: 'refactor',
+            scope: 'agent',
+            breaking: false,
+            description: 'unify prompt layers',
+            body: 'Keep the stable protocol separate from run-specific context.',
+            footers: [{ token: 'Refs', value: '#42' }],
+            notes: 'assembled locally',
         });
-        assert.throws(() => assembleCommitMessage(draft), /internal trace identifier/);
+        const result = await generateDraft([], {
+            createSession: () => ({}) as any,
+            run: async () => parsed,
+        } as any);
+
+        assert.equal(
+            result.draft,
+            'refactor(agent): unify prompt layers\n\n' +
+            'Keep the stable protocol separate from run-specific context.\n\n' +
+            'Refs: #42',
+        );
+        assert.equal(result.notes, 'assembled locally');
     });
 });

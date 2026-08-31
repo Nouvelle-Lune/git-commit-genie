@@ -1,6 +1,8 @@
 import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
+import { z } from 'zod';
 import { OpenAIProvider } from '../../services/llm/providers/openai';
+import { classifyAndDraftResponseSchema } from '../../services/llm/providers/schemas/common';
 
 function createClient(response: unknown, seen: Array<Record<string, unknown>>) {
     return {
@@ -14,6 +16,30 @@ function createClient(response: unknown, seen: Array<Record<string, unknown>>) {
 }
 
 describe('OpenAI provider response accounting', () => {
+    it('passes the component-only draft schema to the Responses API', async () => {
+        const requests: Array<Record<string, unknown>> = [];
+        const provider = new OpenAIProvider({ apiKey: 'test' }, createClient({
+            id: 'resp_draft',
+            status: 'completed',
+            output_text: '{"type":"fix","scope":null,"breaking":false,"description":"fix parsing","body":null,"footers":[],"notes":null}',
+            output: [],
+        }, requests));
+        const session = provider.createSession({ model: 'gpt-5.4' });
+
+        await session.run({
+            messages: [{ role: 'user', content: 'return draft components' }],
+            responseFormat: {
+                name: 'draft',
+                schema: z.toJSONSchema(classifyAndDraftResponseSchema) as Record<string, unknown>,
+            },
+        });
+
+        const format = (requests[0].text as { format: Record<string, unknown> }).format;
+        const schema = format.schema as Record<string, unknown>;
+        assert.equal(format.type, 'json_schema');
+        assert.equal((schema.properties as Record<string, unknown>).commitMessage, undefined);
+    });
+
     it('normalizes reasoning and visible output tokens and max-output termination', async () => {
         const requests: Array<Record<string, unknown>> = [];
         const provider = new OpenAIProvider({ apiKey: 'test' }, createClient({

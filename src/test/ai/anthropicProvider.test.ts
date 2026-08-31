@@ -1,8 +1,39 @@
 import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
+import { z } from 'zod';
 import { AnthropicProvider } from '../../services/llm/providers/anthropic';
+import { classifyAndDraftResponseSchema } from '../../services/llm/providers/schemas/common';
 
 describe('Anthropic provider response accounting', () => {
+    it('passes the component-only draft schema to the Messages API', async () => {
+        let requestBody: Record<string, unknown> | undefined;
+        const provider = new AnthropicProvider({ apiKey: 'test' }, {
+            messages: {
+                create: async (body: Record<string, unknown>) => {
+                    requestBody = body;
+                    return {
+                        id: 'msg_draft',
+                        stop_reason: 'end_turn',
+                        content: [{ type: 'text', text: '{"type":"fix","scope":null,"breaking":false,"description":"fix parsing","body":null,"footers":[],"notes":null}' }],
+                    };
+                },
+            },
+        } as any);
+
+        await provider.createSession({ model: 'claude-sonnet-4-5' }).run({
+            messages: [{ role: 'user', content: 'return draft components' }],
+            responseFormat: {
+                name: 'draft',
+                schema: z.toJSONSchema(classifyAndDraftResponseSchema) as Record<string, unknown>,
+            },
+        });
+
+        const format = (requestBody?.output_config as { format: Record<string, unknown> }).format;
+        const schema = format.schema as Record<string, unknown>;
+        assert.equal(format.type, 'json_schema');
+        assert.equal((schema.properties as Record<string, unknown>).commitMessage, undefined);
+    });
+
     it('keeps max_tokens as the shared output ceiling while enabling thinking', async () => {
         let requestBody: Record<string, unknown> | undefined;
         const client = {

@@ -38,14 +38,29 @@ export const classifyAndDraftResponseSchema = z.object({
   })).default([]),
   notes: z.string().nullable().default(null)
 } as const).superRefine((draft, context) => {
-  const hasBreakingFooter = draft.footers.some(footer => (
+  if (draft.scope && /^\[?[CDE]\d+(?:\/P\d+)?\]?$/i.test(draft.scope)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['scope'],
+      message: 'Scope cannot be an internal claim or evidence identifier.',
+    });
+  }
+  const breakingFooterCount = draft.footers.filter(footer => (
     footer.token === 'BREAKING CHANGE' || footer.token === 'BREAKING-CHANGE'
-  ));
+  )).length;
+  const hasBreakingFooter = breakingFooterCount > 0;
   if (!draft.breaking && hasBreakingFooter) {
     context.addIssue({
       code: 'custom',
       path: ['footers'],
       message: 'BREAKING CHANGE footer requires breaking=true.',
+    });
+  }
+  if (breakingFooterCount > 1) {
+    context.addIssue({
+      code: 'custom',
+      path: ['footers'],
+      message: 'Only one BREAKING CHANGE footer is allowed.',
     });
   }
 });

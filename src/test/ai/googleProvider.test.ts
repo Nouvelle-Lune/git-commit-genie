@@ -1,6 +1,8 @@
 import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
+import { z } from 'zod';
 import { GoogleProvider } from '../../services/llm/providers/google';
+import { classifyAndDraftResponseSchema } from '../../services/llm/providers/schemas/common';
 
 function jsonResponse(payload: unknown): Response {
     return {
@@ -12,6 +14,33 @@ function jsonResponse(payload: unknown): Response {
 }
 
 describe('Google provider response accounting', () => {
+    it('passes the component-only draft schema to Gemini', async () => {
+        const requests: RequestInit[] = [];
+        const provider = new GoogleProvider({ apiKey: 'test' }, async (_input, init) => {
+            requests.push(init ?? {});
+            return jsonResponse({
+                id: 'interaction_draft',
+                status: 'completed',
+                steps: [{
+                    type: 'model_output',
+                    content: [{ type: 'text', text: '{"type":"fix","scope":null,"breaking":false,"description":"fix parsing","body":null,"footers":[],"notes":null}' }],
+                }],
+            });
+        });
+
+        await provider.createSession({ model: 'gemini-2.5-pro' }).run({
+            messages: [{ role: 'user', content: 'return draft components' }],
+            responseFormat: {
+                name: 'draft',
+                schema: z.toJSONSchema(classifyAndDraftResponseSchema) as Record<string, unknown>,
+            },
+        });
+
+        const body = JSON.parse(String(requests[0].body));
+        assert.equal(body.response_format.mime_type, 'application/json');
+        assert.equal(body.response_format.schema.properties.commitMessage, undefined);
+    });
+
     it('preserves Gemini output accounting and normalizes finish reasons', async () => {
         const requests: RequestInit[] = [];
         const provider = new GoogleProvider({ apiKey: 'test' }, async (_input, init) => {
