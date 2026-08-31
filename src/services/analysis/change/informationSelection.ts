@@ -4,63 +4,15 @@
 // chain's actual differentiator: it compresses the analysis into the few claims
 // worth stating and produces the only semantic payload the generator sees.
 
-import { LLMExecution } from '../../llm/llmTypes';
-import { buildInformationSelectionMessages } from './prompts';
 import {
-    ChangeExtraction,
     DraftEvidence,
+    ChangeAnalysisStatus,
     InformationSelection,
     SelectedSemanticInformation,
     SemanticChangeAnalysis,
 } from './types';
 
-const MAX_MUST_EXPRESS = 3;
-const MAX_OPTIONAL = 4;
-const MAX_OMIT = 8;
 const MAX_UNCERTAINTIES = 3;
-
-function cleanStrings(values: unknown, limit: number): string[] {
-    if (!Array.isArray(values)) {
-        return [];
-    }
-    return Array.from(new Set(
-        values
-            .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-            .map(value => value.trim())
-    )).slice(0, limit);
-}
-
-function cleanText(value: unknown): string | null {
-    return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
-}
-
-export async function selectInformation(params: {
-    changeExtraction: ChangeExtraction;
-    semanticAnalysis: SemanticChangeAnalysis;
-    userTemplate?: string;
-    execution: LLMExecution;
-}): Promise<InformationSelection> {
-    const messages = buildInformationSelectionMessages({
-        changeExtraction: params.changeExtraction,
-        semanticAnalysis: params.semanticAnalysis,
-        userTemplate: params.userTemplate,
-    });
-    const session = params.execution.createSession(messages);
-    const raw = await params.execution.run<InformationSelection>(session, messages, { requestType: 'informationSelection' });
-
-    const mustExpress = cleanStrings(raw?.mustExpress, MAX_MUST_EXPRESS);
-    if (!mustExpress.length) {
-        throw new Error('Information selection returned an empty mustExpress list.');
-    }
-
-    return {
-        mustExpress,
-        optional: cleanStrings(raw?.optional, MAX_OPTIONAL),
-        omit: cleanStrings(raw?.omit, MAX_OMIT),
-        suggestedScope: cleanText(raw?.suggestedScope),
-        notes: cleanText(raw?.notes),
-    };
-}
 
 /**
  * Collects breaking-change signals already grounded in the diff. Only compacted
@@ -85,6 +37,8 @@ export function buildSelectedInformation(params: {
     semanticAnalysis: SemanticChangeAnalysis;
     selection: InformationSelection;
     evidence: DraftEvidence[];
+    analysisStatus?: ChangeAnalysisStatus;
+    analysisIssues?: string[];
 }): SelectedSemanticInformation {
     const { semanticAnalysis: analysis, selection } = params;
     const confidentIntent = analysis.intentAnalysis.confidence === 'low'
@@ -92,6 +46,8 @@ export function buildSelectedInformation(params: {
         : analysis.intentAnalysis.primaryIntent;
 
     return {
+        analysisStatus: params.analysisStatus ?? 'complete',
+        analysisIssues: params.analysisIssues ?? [],
         primaryIntent: confidentIntent,
         mustExpress: selection.mustExpress,
         optional: selection.optional,

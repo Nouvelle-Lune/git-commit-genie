@@ -6,48 +6,32 @@
 // keeps this from drifting back into a repository summary.
 
 import { LLMExecution } from '../../../llm/llmTypes';
-import { AIMessage } from '../../../llm/providers';
-import { z } from 'zod';
-import { estimateChatMessagesTokens } from '../../../llm/inputTokenBudget';
-import { AgentTool, runAgentLoop } from '../../../../agent';
+import { AgentRuntime, EvidenceLedger } from '../../../../agent';
 import {
-    buildInvestigationOpeningMessage,
     buildInvestigationPlanMessages,
-    buildInvestigationSystemMessage,
-    buildInvestigationToolResultMessage,
 } from '../prompts';
 import {
-    CHANGE_ANALYSIS_TOOL_NAMES,
-    InvestigationToolCall,
-    InvestigationToolContext,
-    runInvestigationTool,
-} from './tools';
-import {
     ChangeExtraction,
-    InvestigationFinding,
+    DraftEvidence,
     InvestigationPlan,
     InvestigationTarget,
     RepositoryEvidence,
-    RepositoryEvidenceItem,
     RepositoryAnalysisContext,
 } from '../types';
-import { investigationFinalResponseSchema } from '../../../llm/providers/schemas/common';
 import {
-    logInvestigationToolCall,
+    ChangeAnalysisAgentOutput,
+    InvestigationStepEvent,
+    runChangeAnalysisProfile,
+} from './changeAnalysisProfile';
+import {
+    logSchemaValidationToWebview,
     wrapSessionWithWebviewLogging,
 } from '../../../llm/chatWebviewLogging';
 
+export type { ChangeAnalysisAgentOutput, InvestigationStepEvent } from './changeAnalysisProfile';
+
 const MAX_TARGETS = 3;
 const MAX_QUESTIONS_PER_TARGET = 2;
-
-export interface InvestigationStepEvent {
-    step: number;
-    tool: string;
-    reason: string;
-    summary: string;
-    ok: boolean;
-    evidenceCount: number;
-}
 
 function dedupeStrings(values: unknown): string[] {
     if (!Array.isArray(values)) {
@@ -126,39 +110,6 @@ export async function planInvestigation(
     return { targets, notes: parsed.notes };
 }
 
-function normalizeToolCall(tool: InvestigationToolCall['tool'], args: Record<string, unknown>): InvestigationToolCall {
-    return {
-        tool,
-        symbol: typeof args.symbol === 'string' ? args.symbol : null,
-        filePath: typeof args.filePath === 'string' ? args.filePath : null,
-        dirPath: typeof args.dirPath === 'string' ? args.dirPath : null,
-        query: typeof args.query === 'string' ? args.query : null,
-        searchType: args.searchType === 'name' || args.searchType === 'content' ? args.searchType : null,
-        useRegex: typeof args.useRegex === 'boolean' ? args.useRegex : null,
-        startLine: typeof args.startLine === 'number' ? args.startLine : null,
-        maxLines: typeof args.maxLines === 'number' ? args.maxLines : null,
-        maxResults: typeof args.maxResults === 'number' ? args.maxResults : null,
-    };
-}
-
-const INVESTIGATION_TOOL_PARAMETERS: Record<string, unknown> = {
-    type: 'object',
-    properties: {
-        reason: { type: 'string' },
-        symbol: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-        filePath: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-        dirPath: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-        query: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-        searchType: { anyOf: [{ enum: ['name', 'content'] }, { type: 'null' }] },
-        useRegex: { anyOf: [{ type: 'boolean' }, { type: 'null' }] },
-        startLine: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
-        maxLines: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
-        maxResults: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
-    },
-    required: ['reason', 'symbol', 'filePath', 'dirPath', 'query', 'searchType', 'useRegex', 'startLine', 'maxLines', 'maxResults'],
-    additionalProperties: false,
-};
-
 export interface ChangeAnalysisAgentParams {
     extraction: ChangeExtraction;
     plan: InvestigationPlan;
@@ -166,127 +117,51 @@ export interface ChangeAnalysisAgentParams {
     excludePatterns: string[];
     execution: LLMExecution;
     maxSteps: number;
-    maxInputTokens: number;
+    evidence: DraftEvidence[];
+    evidenceLedger: EvidenceLedger;
+    repositoryTerminology?: RepositoryAnalysisContext;
+    userTemplate?: string;
     onStep?: (event: InvestigationStepEvent) => void;
+    onContextCompacted?: (event: { epoch: number; estimatedTokens: number; reason: string }) => void;
 }
 
-export async function runChangeAnalysisAgent(params: ChangeAnalysisAgentParams): Promise<RepositoryEvidence> {
-    const {
-        extraction, plan, repositoryPath, excludePatterns,
-        execution, maxSteps, maxInputTokens, onStep,
-    } = params;
-
-    const evidenceItems: RepositoryEvidenceItem[] = [];
-    let evidenceCounter = 0;
-    const context: InvestigationToolContext = {
-        repositoryPath,
-        excludePatterns,
-        changedSymbols: extraction.changedSymbols.map(symbol => ({
-            name: symbol.name,
-            file: symbol.file,
-            symbolType: symbol.symbolType,
-            changeKind: symbol.changeKind,
-        })),
-        nextEvidenceId: () => {
-            evidenceCounter += 1;
-            return `E${evidenceCounter}`;
-        },
-    };
-
-    const openQuestions = plan.targets.flatMap(target =>
-        target.questions.map(question => `${target.target}: ${question}`)
-    );
-
-    const messages: AIMessage[] = [
-        buildInvestigationSystemMessage(),
-        buildInvestigationOpeningMessage({ changeExtraction: extraction, plan, stepBudget: maxSteps }),
-    ];
-    const openingTokens = estimateChatMessagesTokens(messages);
-    if (openingTokens > maxInputTokens) {
-        throw new Error(`Investigation opening context requires approximately ${openingTokens} tokens, exceeding ${maxInputTokens}.`);
-    }
-
-    let toolSteps = 0;
-    const seenCalls = new Set<string>();
-    const sessionId = `change-investigation:${repositoryPath}:${Date.now()}`;
-    const tools: AgentTool[] = CHANGE_ANALYSIS_TOOL_NAMES.map(toolName => ({
-        name: toolName,
-        description: `Investigate the changed repository using ${toolName}. Set unused arguments to null.`,
-        parameters: INVESTIGATION_TOOL_PARAMETERS,
-        execute: async argumentsValue => {
-            const call = normalizeToolCall(toolName, argumentsValue);
-            const callKey = JSON.stringify(call);
-            if (seenCalls.has(callKey)) {
-                return 'This exact tool call already ran. Use different arguments or finish the investigation.';
-            }
-            seenCalls.add(callKey);
-            toolSteps += 1;
-            const reason = String(argumentsValue.reason || '').trim();
-            // readFileContent already logs through logger.logFileRead inside the tool.
-            if (call.tool !== 'readFileContent') {
-                logInvestigationToolCall(
-                    repositoryPath,
-                    call.tool,
-                    argumentsValue,
-                    reason,
-                    toolSteps,
-                    maxSteps,
+export async function runChangeAnalysisAgent(
+    params: ChangeAnalysisAgentParams,
+): Promise<ChangeAnalysisAgentOutput> {
+    const runtime = new AgentRuntime({
+        wrapSession: session => wrapSessionWithWebviewLogging(
+            session,
+            params.repositoryPath,
+            'investigation',
+        ),
+        onEvent: event => {
+            if (event.type === 'contextCompacted') {
+                params.onContextCompacted?.(event);
+            } else if (event.type === 'schemaRetry') {
+                logSchemaValidationToWebview(
+                    params.repositoryPath,
+                    { profile: 'change-analysis', attempt: event.attempt, message: event.message },
+                    'Change analysis compound terminal schema retry',
                 );
             }
-            const outcome = await runInvestigationTool(context, call);
-            evidenceItems.push(...outcome.evidence);
-            onStep?.({
-                step: toolSteps,
-                tool: call.tool,
-                reason: String(argumentsValue.reason || '').trim(),
-                summary: outcome.summary,
-                ok: outcome.ok,
-                evidenceCount: outcome.evidence.length,
-            });
-            return buildInvestigationToolResultMessage({
-                tool: call.tool,
-                summary: outcome.summary,
-                evidence: outcome.evidence,
-                remainingSteps: maxSteps - toolSteps,
-                openQuestions,
-            }).content;
         },
-    }));
-    const session = wrapSessionWithWebviewLogging(
-        execution.createSession(messages, sessionId),
-        repositoryPath,
-        'investigation',
-    );
-    const result = await runAgentLoop(session, messages, tools, {
-        maxSteps,
-        responseFormat: {
-            name: 'investigationFinal',
-            schema: z.toJSONSchema(investigationFinalResponseSchema) as Record<string, unknown>,
-        },
-        schema: investigationFinalResponseSchema,
-        maxRetries: execution.maxRetries,
-        temperature: execution.temperature,
-        maxOutputTokens: execution.maxOutputTokens,
-        thinking: execution.thinkingFor('investigation'),
-        tokenBudget: execution.tokenBudget,
-        requestType: 'investigation',
-        signal: execution.signal,
     });
-    const final = investigationFinalResponseSchema.parse(result.structured);
-    const findings: InvestigationFinding[] = final.findings.map(finding => ({
-        target: finding.target,
-        question: finding.question,
-        answer: finding.answer,
-        evidenceRefs: dedupeStrings(finding.evidenceRefs),
-    }));
-    return {
-        items: evidenceItems,
-        findings,
-        unresolvedQuestions: dedupeStrings(final.unresolvedQuestions),
-        stopReason: final.stopReason.trim(),
-        steps: toolSteps,
-        degraded: false,
-    };
+    return runChangeAnalysisProfile({
+        execution: params.execution,
+        ledger: params.evidenceLedger,
+        runtime,
+        input: {
+            extraction: params.extraction,
+            plan: params.plan,
+            repositoryPath: params.repositoryPath,
+            excludePatterns: params.excludePatterns,
+            evidence: params.evidence,
+            repositoryTerminology: params.repositoryTerminology,
+            userTemplate: params.userTemplate,
+            maxSteps: params.maxSteps,
+            onStep: params.onStep,
+        },
+    });
 }
 
 export function emptyRepositoryEvidence(reason: string): RepositoryEvidence {

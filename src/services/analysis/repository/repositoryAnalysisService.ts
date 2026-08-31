@@ -4,7 +4,6 @@ import * as path from 'path';
 import * as crypto from 'crypto';
 import * as util from 'util';
 import { exec } from 'child_process';
-import { z } from 'zod';
 
 import {
     IRepositoryAnalysisService,
@@ -24,54 +23,35 @@ import {
     REPOSITORY_ANALYSIS_MODEL_ID_KEY,
     AIModelConfig,
     PROVIDER_LABELS,
-    AIMessage,
 } from '../../llm/providers';
-import { repoAnalysisResponseSchema } from '../../llm/providers/schemas/common';
-import { AgentTool, runAgentLoop } from '../../../agent';
-
-// Tools
-import { listDirectory } from '../tools/directory';
-import { searchFiles } from '../tools/search';
-import { readFileContent } from '../tools/file';
-import { compactToolResultForConversation } from '../tools/formatting';
-import { DirectoryEntry, SearchFilesResult, ToolResult } from '../tools/types';
 import { buildGitGenieIgnoreAppend } from '../../../utils/gitignore';
-import { ChangeAnalysisAgentParams, runChangeAnalysisAgent } from '../change/investigation/agent';
-import { RepositoryEvidence } from '../change/types';
 import {
-    logRepositoryAnalysisToolCall,
-    wrapSessionWithWebviewLogging,
-} from '../../llm/chatWebviewLogging';
+    ChangeAnalysisAgentOutput,
+    ChangeAnalysisAgentParams,
+    runChangeAnalysisAgent,
+} from '../change/investigation/agent';
+import { runRepositoryAnalysisProfile } from './repositoryAnalysisProfile';
+import type { RepositoryAnalysisAgentOutput } from './repositoryAnalysisProfile';
 
 const REPOSITORY_ANALYSIS_MARKDOWN_TITLE = '# Repository Analysis Summary';
 
-const REPOSITORY_TOOL_PARAMETERS: Record<string, unknown> = {
-    type: 'object',
-    properties: {
-        reason: { type: 'string' },
-        dirPath: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-        depth: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
-        excludePatterns: { anyOf: [{ type: 'array', items: { type: 'string' } }, { type: 'null' }] },
-        query: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-        searchType: { anyOf: [{ enum: ['name', 'content'] }, { type: 'null' }] },
-        useRegex: { anyOf: [{ type: 'boolean' }, { type: 'null' }] },
-        searchPath: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-        maxResults: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
-        caseSensitive: { anyOf: [{ type: 'boolean' }, { type: 'null' }] },
-        maxMatchesPerFile: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
-        contextLines: { anyOf: [{ type: 'integer', minimum: 0 }, { type: 'null' }] },
-        filePath: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-        startLine: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
-        maxLines: { anyOf: [{ type: 'integer', minimum: 1 }, { type: 'null' }] },
-        encoding: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-    },
-    required: [
-        'reason', 'dirPath', 'depth', 'excludePatterns', 'query', 'searchType', 'useRegex',
-        'searchPath', 'maxResults', 'caseSensitive', 'maxMatchesPerFile', 'contextLines',
-        'filePath', 'startLine', 'maxLines', 'encoding',
-    ],
-    additionalProperties: false,
-};
+/**
+ * Applies persistence semantics to one repository-agent result. Initial runs
+ * fail explicitly so callers cannot save an empty analysis; incremental runs
+ * return null so the already persisted snapshot remains untouched.
+ */
+export function resolveRepositoryAnalysisAgentResult(
+    result: RepositoryAnalysisAgentOutput,
+    previousAnalysis?: RepositoryAnalysis,
+): LLMAnalysisResponse | null {
+    if (result.analysis) {
+        return result.analysis;
+    }
+    if (previousAnalysis) {
+        return null;
+    }
+    throw new Error(`Initial repository analysis failed: ${result.issues.join(' | ')}`);
+}
 
 /**
  * Removes the file-level title from the beginning of an analysis summary.
@@ -140,7 +120,7 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
      * The commit pipeline owns the diff-specific prompt and execution context;
      * this service owns repository-agent execution and tools.
      */
-    public async runChangeAnalysis(params: ChangeAnalysisAgentParams): Promise<RepositoryEvidence> {
+    public async runChangeAnalysis(params: ChangeAnalysisAgentParams): Promise<ChangeAnalysisAgentOutput> {
         return runChangeAnalysisAgent(params);
     }
 
@@ -513,199 +493,34 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
         const repoPath = input.repositoryPath;
         logger.info(`[Genie][RepoAnalysis] Begin analysis for: ${repoPath}`);
 
-        const toolsSpec = [
-            {
-                name: 'listDirectory',
-                args: '{ dirPath: string; depth?: number; excludePatterns?: string[] }',
-                desc: 'List directory entries up to a depth; dirPath must be inside repository.'
-            },
-            {
-                name: 'searchFiles',
-                args: '{ query: string; searchType: "name"|"content"; useRegex?: boolean; searchPath?: string; maxResults?: number; caseSensitive?: boolean; excludePatterns?: string[]; maxMatchesPerFile?: number; contextLines?: number }',
-                desc: 'Search by file name or content; for content searches, results include 1-based match line numbers; paths must be inside repository.'
-            },
-            {
-                name: 'readFileContent',
-                args: '{ filePath: string; startLine?: number; maxLines?: number; encoding?: string }',
-                desc: 'Read a file segment; use startLine to jump near lines returned by content search; filePath must be inside repository.'
+        {
+            const { service } = this.pickRepoAnalysisService();
+            const execution = service.createExecution(repoPath, {
+                token: this.activeCancelSources.get(repoPath)?.token,
+            });
+            let maxSteps = vscode.workspace.getConfiguration('gitCommitGenie')
+                .get<number>('repositoryAnalysis.MaxCount', 99999);
+            if (maxSteps === -1) {
+                maxSteps = 99999;
             }
-        ];
-
-        const userExcludes = this.normalizeExcludePatterns(input.excludePatterns);
-        const isIncremental = !!input.previousAnalysis;
-        const commitWindowSize = Array.isArray(input.recentCommits) ? input.recentCommits.length : 0;
-        const system = [
-            'You are an autonomous repository analysis agent. You can call tools to explore the repository and then produce a final structured analysis.',
-            'Call the provided functions directly when repository evidence is needed.',
-            'For every tool call, include a concise English reason describing what you will do next.',
-            'When exploration is complete, stop calling tools and return the requested final JSON object.',
-            'Efficiency tip: When using searchFiles with searchType="content", results include 1-based line numbers for each match. If you then read the file, prefer calling readFileContent with startLine set near that match (e.g., max(1, line-40)) and a modest maxLines window (e.g., 100–150) to inspect local context instead of reading from the file start.',
-            '',
-            (isIncremental
-                ? [
-                    'Mode: INCREMENTAL UPDATE. There is an existing repository analysis. Prefer focused exploration over full rescans.',
-                    `Consider the last ${commitWindowSize} commit messages to decide if the project\'s purpose, architecture, key technologies, or capabilities materially changed.`,
-                    'Strategy: start from the changed files and their immediate neighbors (imports/configs/entry modules). Use searchFiles to locate related code and readFileContent to verify impact.',
-                    'Guidelines (flexible): avoid broad scans when targeted reads can answer the question; if evidence is insufficient, you MAY expand to list specific subpaths or read additional related files until impact is clear.',
-                    'Material change examples: new/removed public APIs or commands, substantial config changes (e.g., dependencies in package.json/pyproject), new services/modules, or core feature behavior changes.',
-                    'Non-material examples: docs-only, style/formatting, test-only, CI/chore/refactor with no functional effect.',
-                    'When no material change is found: immediately finalize by returning the previous summary/projectType/technologies unchanged. In insights, add a short line like: "Incremental: No significant changes in the last commits (N)."',
-                    'When a material change is found: minimally update summary/projectType/technologies only where required and add an insights line starting with "Incremental:" summarizing the change, the commit count reviewed, and the key impacted areas/files.',
-                    'Tip: If commit messages mention specific files/dirs (e.g., package.json, config.ts), prefer searchFiles for those names then readFileContent on HEAD to verify actual functional impact.',
-                    'Note: You may conceptually think of using a "git show"-style view for specific commits; however, your available tools are limited to searchFiles and readFileContent on the working tree. Use them to approximate the diff impact.',
-                ].join('\n')
-                : [
-                    'Mode: INITIAL ANALYSIS. Explore efficiently and focus on high-signal files (e.g., README, package/config files, entry points).',
-                ].join('\n')
-            ),
-            '',
-            'Tool catalog:'
-        ].concat(toolsSpec.map(t => `- ${t.name} ${t.args}: ${t.desc}`)).join('\n');
-
-        // Pre-fetch root directory structure only for initial analysis to seed context without encouraging a full scan in incremental mode
-        let rootDirContext = '';
-        if (!isIncremental) {
-            try {
-                const rootList = await listDirectory(repoPath, { depth: 1, excludePatterns: userExcludes });
-                if (rootList.success && rootList.data) {
-                    const entries = rootList.data.entries || [];
-                    const dirs = entries.filter(e => e.type === 'directory').map(e => e.name);
-                    const files = entries.filter(e => e.type === 'file').map(e => e.name);
-                    rootDirContext = [
-                        '',
-                        '## Root Directory Structure (depth=1)',
-                        dirs.length ? `Directories (${dirs.length}): ${dirs.slice(0, 30).join(', ')}${dirs.length > 30 ? ', ...' : ''}` : 'No directories',
-                        files.length ? `Files (${files.length}): ${files.slice(0, 30).join(', ')}${files.length > 30 ? ', ...' : ''}` : 'No files'
-                    ].join('\n');
-                }
-            } catch (err) {
-                logger.warn('[Genie][RepoAnalysis] Failed to pre-fetch root directory structure', err as any);
+            const result = await runRepositoryAnalysisProfile({
+                repositoryPath: repoPath,
+                recentCommits: input.recentCommits,
+                excludePatterns: this.normalizeExcludePatterns(input.excludePatterns),
+                previousAnalysis: input.previousAnalysis,
+                maxSteps,
+            }, execution);
+            if (!result.analysis) {
+                logger.warn(
+                    `[Genie][RepoAnalysis] Agent returned no persistent result: ${result.issues.join(' | ')}`,
+                );
             }
+            const analysis = resolveRepositoryAnalysisAgentResult(result, input.previousAnalysis);
+            if (analysis) {
+                logger.logAnalysisComplete(repoPath, analysis);
+            }
+            return analysis;
         }
-
-        // Build recent commit change details for incremental mode
-        let recentChangesContext = '';
-        // Keep structured recent commit summaries (hash, subject, changed files)
-        let recentCommitFiles: Array<{ hash: string; shortHash: string; subject: string; files: string[] }> = [];
-        if (isIncremental && commitWindowSize > 0) {
-            try {
-                const commits = await this.getRecentCommitsWithFiles(repoPath, commitWindowSize);
-                recentCommitFiles = commits || [];
-                if (recentCommitFiles.length) {
-                    const sections = recentCommitFiles.map(c => {
-                        const filesLine = c.files.length ? `Files (${c.files.length}): ${c.files.join(', ')}` : 'Files: none';
-                        return [
-                            `- [${c.shortHash}] ${c.subject}`,
-                            filesLine
-                        ].filter(Boolean).join('\n');
-                    });
-                    // Intentionally omit raw diffs to reduce context size. Encourage targeted exploration.
-                    const header = [
-                        '## Recent Commit Changes',
-                        'Use commit messages together with the changed file names below to hypothesize impact. Raw diffs are intentionally omitted; prefer searchFiles and selective readFileContent when needed.'
-                    ];
-                    recentChangesContext = ['', ...header, ...sections].join('\n');
-                }
-            } catch (err) {
-                logger.warn('[Genie][RepoAnalysis] Failed to gather recent commit diffs', err as any);
-            }
-        }
-
-        // Build recent commits block, annotated with changed files when available
-        let recentCommitsBlock = '';
-        if (Array.isArray(input.recentCommits) && input.recentCommits.length > 0) {
-            if (recentCommitFiles.length > 0) {
-                const lines = recentCommitFiles.map((c, i) => {
-                    const filesLine = c.files.length ? `Files (${c.files.length}): ${c.files.join(', ')}` : 'Files: none';
-                    return `C${i + 1}: ${c.subject}\n${filesLine}`;
-                }).join('\n');
-                recentCommitsBlock = `Recent commits (last ${commitWindowSize}):\n${lines}`;
-            } else {
-                recentCommitsBlock = `Recent commits (last ${commitWindowSize}):\n${input.recentCommits.map((c, i) => `C${i + 1}: ${c}`).join('\n')}`;
-            }
-        }
-
-        // If we have annotated recent commits with files above, we don't need
-        // the separate Recent Commit Changes section to avoid duplication.
-        const includeRecentChangesSection = !(Array.isArray(recentCommitFiles) && recentCommitFiles.length > 0);
-
-        let msgs: AIMessage[] = [
-            { role: 'system', content: system },
-            {
-                role: 'user', content: [
-                    `Repository root: ${repoPath}`,
-                    userExcludes.length ? `Exclude patterns (from settings, optional): ${JSON.stringify(userExcludes)}` : undefined,
-                    input.previousAnalysis ? `Previous summary: ${input.previousAnalysis.summary || ''}` : undefined,
-                    input.previousAnalysis ? `Previous technologies: ${(input.previousAnalysis.technologies || []).join(', ')}` : undefined,
-                    input.previousAnalysis ? `Previous insights: ${(input.previousAnalysis.insights || []).join('; ')}` : undefined,
-                    isIncremental ? `Analysis mode: incremental (review at most ${commitWindowSize} commits; update only if material change).` : 'Analysis mode: initial',
-                    recentCommitsBlock || undefined,
-                    isIncremental ? 'Use commit messages above to hypothesize impacted areas. Prefer targeted searchFiles and a few readFileContent calls to verify. Avoid full scans.' : undefined,
-                    rootDirContext, // Include pre-fetched root directory structure
-                    includeRecentChangesSection ? recentChangesContext : undefined, // Avoid duplication
-                    '',
-                    'Goal: Provide global context strictly for commit message generation. In incremental mode, focus on whether the latest commits change repository functionality or architecture, and finalize early if not. Include an insights line starting with "Incremental:" that states whether a repo-level update is needed and why.'
-                ].filter(Boolean).join('\n')
-            }
-        ];
-
-        const { service } = this.pickRepoAnalysisService();
-        const sessionId = `repository-analysis:${repoPath}`;
-        const execution = service.createExecution(repoPath, { token: this.activeCancelSources.get(repoPath)?.token });
-        let maxSteps = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('repositoryAnalysis.MaxCount', 99999);
-        if (maxSteps === -1) {
-            maxSteps = 99999;
-        }
-        let agentStep = 0;
-        const tools: AgentTool[] = toolsSpec.map(spec => ({
-            name: spec.name,
-            description: `${spec.desc} Set unused arguments to null.`,
-            parameters: REPOSITORY_TOOL_PARAMETERS,
-            execute: async argumentsValue => {
-                const reason = String(argumentsValue.reason || '').trim();
-                agentStep += 1;
-                logger.info(`[Genie][RepoAnalysis] Model chose tool '${spec.name}'. Reason: ${reason.slice(0, 500)}`);
-                // readFileContent already logs through logger.logFileRead inside the tool.
-                if (spec.name !== 'readFileContent') {
-                    logRepositoryAnalysisToolCall(
-                        repoPath,
-                        spec.name,
-                        argumentsValue,
-                        reason,
-                        agentStep,
-                        maxSteps,
-                    );
-                }
-                const toolResult = await this.runTool(repoPath, spec.name, argumentsValue, userExcludes);
-                this.logToolOutcome(spec.name, toolResult);
-                return compactToolResultForConversation(repoPath, spec.name, toolResult).compactText;
-            },
-        }));
-        const session = wrapSessionWithWebviewLogging(
-            execution.createSession(msgs, sessionId),
-            repoPath,
-            'investigation',
-        );
-        const result = await runAgentLoop(session, msgs, tools, {
-            maxSteps,
-            responseFormat: {
-                name: 'repositoryAnalysisFinal',
-                schema: z.toJSONSchema(repoAnalysisResponseSchema) as Record<string, unknown>,
-            },
-            schema: repoAnalysisResponseSchema,
-            maxRetries: execution.maxRetries,
-            temperature: execution.temperature,
-            maxOutputTokens: execution.maxOutputTokens,
-            thinking: execution.thinkingFor('investigation'),
-            tokenBudget: execution.tokenBudget,
-            requestType: 'investigation',
-            signal: execution.signal,
-        });
-        const final = repoAnalysisResponseSchema.parse(result.structured);
-        logger.info(`[Genie][RepoAnalysis] Final: projectType=${final.projectType}; technologies=${final.technologies.slice(0, 5).join(', ')}; insights=${final.insights.length}`);
-        logger.logAnalysisComplete(repoPath, final);
-        return final;
-
     }
 
     /**
@@ -714,105 +529,6 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
     private normalizeExcludePatterns(user: string[] = []): string[] {
         const list = Array.isArray(user) ? user : [];
         return Array.from(new Set(list.filter(v => typeof v === 'string' && v.trim().length > 0)));
-    }
-
-    /**
-     * Execute a single tool call with safety checks.
-     *
-     * @param repoPath Repository root path
-     * @param toolName Tool identifier
-     * @param args Tool arguments
-     * @param excludePatterns Exclude patterns provided by user settings
-     */
-    private async runTool(repoPath: string, toolName: string, args: any, excludePatterns: string[]): Promise<ToolResult<any>> {
-        try {
-            switch (toolName) {
-                case 'listDirectory': {
-                    const dirPath = this.resolveSafePath(repoPath, String(args.dirPath || repoPath));
-                    const depth = typeof args.depth === 'number' ? args.depth : 1;
-                    const ex = Array.isArray(args.excludePatterns) ? args.excludePatterns : excludePatterns;
-                    logger.info(`[Genie][RepoAnalysis] Running listDirectory: dirPath='${dirPath}', depth=${depth}, excludes=${ex.length}`);
-                    return await listDirectory(dirPath, { depth, excludePatterns: ex });
-                }
-                case 'searchFiles': {
-                    const query = String(args.query || '');
-                    const searchType = (args.searchType === 'content' ? 'content' : 'name') as 'name' | 'content';
-                    const useRegex = !!args.useRegex;
-                    const searchPath = args.searchPath ? this.resolveSafePath(repoPath, String(args.searchPath)) : repoPath;
-                    const maxResults = typeof args.maxResults === 'number' ? args.maxResults : 50;
-                    const caseSensitive = !!args.caseSensitive;
-                    const ex = Array.isArray(args.excludePatterns) ? args.excludePatterns : excludePatterns;
-                    const maxMatchesPerFile = typeof args.maxMatchesPerFile === 'number' ? args.maxMatchesPerFile : 5;
-                    const contextLines = typeof args.contextLines === 'number' ? args.contextLines : 2;
-                    if (!query || query.trim().length === 0) {
-                        return { success: false, error: 'searchFiles.query must be a non-empty string' };
-                    }
-                    logger.info(`[Genie][RepoAnalysis] Running searchFiles: type=${searchType}, query='${query}', useRegex=${useRegex}, path='${searchPath}', maxResults=${maxResults}`);
-                    return await searchFiles(repoPath, query, { searchType, useRegex, searchPath, maxResults, caseSensitive, excludePatterns: ex, maxMatchesPerFile, contextLines });
-                }
-                case 'readFileContent': {
-                    const filePath = this.resolveSafePath(repoPath, String(args.filePath || ''));
-                    const startLine = typeof args.startLine === 'number' ? args.startLine : 1;
-                    const maxLines = typeof args.maxLines === 'number' ? args.maxLines : 1000;
-                    const encoding = typeof args.encoding === 'string' ? args.encoding : 'utf-8';
-                    const reason = typeof args.reason === 'string' ? args.reason : 'Repository analysis';
-                    logger.info(`[Genie][RepoAnalysis] Running readFileContent: filePath='${filePath}', start=${startLine}, maxLines=${maxLines}`);
-                    return await readFileContent(filePath, { startLine, maxLines, encoding }, reason);
-                }
-                default:
-                    return { success: false, error: `Unknown tool: ${toolName}` };
-            }
-        } catch (error: any) {
-            return { success: false, error: error?.message || 'Tool execution failed' };
-        }
-    }
-
-    /**
-     * Log a compact summary of a tool's output for user visibility.
-     */
-    private logToolOutcome(toolName: string, result: ToolResult<any>): void {
-        try {
-            if (!result) { logger.info(`[Genie][RepoAnalysis] Tool '${toolName}' returned no result.`); return; }
-            if (result.success === false) { logger.warn(`[Genie][RepoAnalysis] Tool '${toolName}' failed: ${result.error || 'unknown error'}`); return; }
-            const data = result.data;
-            switch (toolName) {
-                case 'listDirectory': {
-                    const count = Array.isArray(data?.entries) ? data.entries.length : 0;
-                    logger.info(`[Genie][RepoAnalysis] listDirectory -> ${count} entries.`);
-                    break;
-                }
-                case 'searchFiles': {
-                    const total = typeof data?.totalMatches === 'number' ? data.totalMatches : 0;
-                    const files = Array.isArray(data?.results) ? data.results.length : 0;
-                    logger.info(`[Genie][RepoAnalysis] searchFiles -> ${total} matches in ${files} files.`);
-                    break;
-                }
-                case 'readFileContent': {
-                    const fp = data?.filePath || '';
-                    const start = data?.startLine;
-                    const end = data?.endLine;
-                    const hasMore = data?.hasMore ? 'yes' : 'no';
-                    logger.info(`[Genie][RepoAnalysis] readFileContent -> ${fp} [${start}-${end}], more=${hasMore}.`);
-                    break;
-                }
-                default:
-                    logger.info(`[Genie][RepoAnalysis] ${toolName} -> success.`);
-            }
-        } catch { /* ignore logging failures */ }
-    }
-
-    // Compacting helpers live in tools/formatting.ts.
-
-    /**
-     * Resolve a candidate path relative to repo root and ensure it stays inside.
-     */
-    private resolveSafePath(repoPath: string, candidate: string): string {
-        const absRepo = path.resolve(repoPath);
-        const abs = path.resolve(candidate.startsWith('/') || candidate.match(/^[a-zA-Z]:\\\\/) ? candidate : path.join(repoPath, candidate));
-        if (!abs.startsWith(absRepo)) {
-            throw new Error(`Access denied outside repository: ${candidate}`);
-        }
-        return abs;
     }
 
     /**

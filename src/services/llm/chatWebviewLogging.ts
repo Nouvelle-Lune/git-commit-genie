@@ -9,7 +9,7 @@ export { formatWebviewApiResult } from './chatWebviewFormatting';
 
 /**
  * Wraps an agent session so each LLM turn is mirrored in the Webview log list.
- * Repository analysis runs through runAgentLoop instead of LLMExecution.run,
+ * AgentRuntime calls provider sessions directly instead of LLMExecution.run,
  * so it needs this wrapper to show API request progress in the dashboard.
  */
 export function wrapSessionWithWebviewLogging(

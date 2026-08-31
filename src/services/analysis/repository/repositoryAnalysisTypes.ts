@@ -2,8 +2,7 @@
  * Repository-level analysis contracts.
  */
 import { AIMessage } from "../../llm/providers";
-import type { ChangeAnalysisAgentParams } from '../change/investigation/agent';
-import type { RepositoryEvidence } from '../change/types';
+import type { ChangeAnalysisAgentOutput, ChangeAnalysisAgentParams } from '../change/investigation/agent';
 
 export interface AnalysisPromptParts {
     system: AIMessage;
@@ -86,7 +85,7 @@ export interface IRepositoryAnalysisService {
     /**
      * Runs the repository agent in change-conditioned mode for one diff.
      */
-    runChangeAnalysis(params: ChangeAnalysisAgentParams): Promise<RepositoryEvidence>;
+    runChangeAnalysis(params: ChangeAnalysisAgentParams): Promise<ChangeAnalysisAgentOutput>;
 
     /**
      * Initialize analysis for a repository

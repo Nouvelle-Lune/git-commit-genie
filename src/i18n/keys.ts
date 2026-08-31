@@ -63,7 +63,6 @@ export const L10N_KEYS = {
     semanticAnalysis: 'Analyzing what this change means…',
     informationSelection: 'Selecting what to express…',
     ragDisabled: 'RAG disabled; continuing to draft…',
-    ragPreparationStart: 'Building RAG query…',
     ragPrepared: 'RAG query ready…',
     ragRetrievalStart: 'Searching commit history…',
     ragRetrieved: 'RAG references ready ({0})…',

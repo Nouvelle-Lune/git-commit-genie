@@ -12,15 +12,18 @@ import {
 import { buildSummarizeEvidenceMessages } from './prompts';
 import { estimateChatMessagesTokens, isContextWindowFailure } from '../../llm/inputTokenBudget';
 import { StructuredOutputTerminatedError } from '../../llm/structuredCompletion';
+import { annotateDiffWithEvidenceIds, EvidenceLedger } from '../../../agent/evidenceLedger';
+import * as crypto from 'crypto';
 
 type EvidenceUnit = {
     id: string;
+    parentId: string;
     header: string;
     content: string;
     requiresCoverage: boolean;
 };
 
-type SummaryTaskScheduler = <T>(task: () => Promise<T>) => Promise<T>;
+export type SummaryTaskScheduler = <T>(task: () => Promise<T>) => Promise<T>;
 const SUMMARY_TIGHTENING_LIMITS = [512, 256, 128, 64] as const;
 const MAX_CAPACITY_SPLIT_DEPTH = 3;
 
@@ -47,12 +50,16 @@ export type EvidenceCompactionResult = {
     estimatedInputTokens: number;
 };
 
-export function createRawDraftEvidence(diffs: DiffData[]): DraftEvidence[] {
+export function createRawDraftEvidence(
+    diffs: DiffData[],
+    ledger = EvidenceLedger.fromDiffs(diffs),
+): DraftEvidence[] {
     return diffs.map(diff => ({
         kind: 'raw',
         fileName: diff.fileName,
         status: diff.status,
-        rawDiff: diff.rawDiff,
+        evidenceIds: ledger.getDiffIds(diff.fileName),
+        rawDiff: annotateDiffWithEvidenceIds(diff, ledger),
     }));
 }
 
@@ -68,6 +75,9 @@ export async function compactEvidenceToFit(params: {
     buildTargetMessages: (evidence: DraftEvidence[]) => AIMessage[];
     onSummarizeStart?: () => void;
     onFileSummarized?: (file: FileEvidence, summarizedCount: number) => void;
+    ledger: EvidenceLedger;
+    summaryStore?: Map<string, Promise<FileEvidence>>;
+    summaryScheduler?: SummaryTaskScheduler;
 }): Promise<EvidenceCompactionResult> {
     const {
         diffs,
@@ -79,6 +89,7 @@ export async function compactEvidenceToFit(params: {
         onSummarizeStart,
         onFileSummarized,
     } = params;
+    const ledger = params.ledger;
 
     if (!Number.isInteger(params.maxParallel) || params.maxParallel <= 0) {
         throw new Error(`gitCommitGenie.chain.maxParallel must be a positive integer; received ${params.maxParallel}.`);
@@ -93,7 +104,7 @@ export async function compactEvidenceToFit(params: {
     const initialEstimatedInputTokens = estimateChatMessagesTokens(buildTargetMessages(evidence));
     let estimatedInputTokens = initialEstimatedInputTokens;
     let tighteningPass = 0;
-    const scheduleSummaryTask = createSummaryTaskScheduler(params.maxParallel);
+    const scheduleSummaryTask = params.summaryScheduler ?? createSummaryTaskScheduler(params.maxParallel);
 
     // Measure the complete downstream prompt on every pass because templates,
     // repository analysis, and RAG references all consume the same input budget.
@@ -153,13 +164,21 @@ export async function compactEvidenceToFit(params: {
             if (!diff) {
                 throw new Error(`Missing DiffData for '${target.item.fileName}' during dynamic summary routing.`);
             }
-            return summarizeFileEvidenceWithScheduler(
+            const summaryKey = buildSummaryStoreKey(diff);
+            const cached = params.summaryStore?.get(summaryKey);
+            if (cached) {
+                return cached;
+            }
+            const summaryPromise = summarizeFileEvidenceWithScheduler(
                 diff,
                 execution,
                 hardInputTokens,
                 scheduleSummaryTask,
-                maxRetries
+                maxRetries,
+                ledger,
             );
+            params.summaryStore?.set(summaryKey, summaryPromise);
+            return summaryPromise;
         }));
         const batchFailure = settledBatch.find(
             (result): result is PromiseRejectedResult => result.status === 'rejected'
@@ -213,7 +232,8 @@ export async function summarizeFileEvidence(
     execution: LLMExecution,
     maxInputTokens: number,
     maxParallel: number,
-    maxRetries = 2
+    ledger: EvidenceLedger,
+    maxRetries = 2,
 ): Promise<FileEvidence> {
     assertPositiveParallelism(maxParallel);
     assertNonNegativeRetries(maxRetries);
@@ -222,7 +242,8 @@ export async function summarizeFileEvidence(
         execution,
         maxInputTokens,
         createSummaryTaskScheduler(maxParallel),
-        maxRetries
+        maxRetries,
+        ledger,
     );
 }
 
@@ -231,11 +252,12 @@ async function summarizeFileEvidenceWithScheduler(
     execution: LLMExecution,
     maxInputTokens: number,
     scheduleSummaryTask: SummaryTaskScheduler,
-    maxRetries: number
+    maxRetries: number,
+    ledger: EvidenceLedger,
 ): Promise<FileEvidence> {
     // Stable hunk ids let downstream stages trace every extracted claim back to
     // a bounded source chunk without carrying the full large diff forward.
-    const units = buildEvidenceUnits(diff, maxInputTokens);
+    const units = buildEvidenceUnits(diff, maxInputTokens, ledger);
     const chunks = groupEvidenceUnits(diff, units, maxInputTokens);
     // A failed chunk must not cause the remaining queued chunks to outlive this
     // function; wait for all scheduler slots to drain before rethrowing.
@@ -247,7 +269,7 @@ async function summarizeFileEvidenceWithScheduler(
                 execution,
                 maxRetries
             );
-            return { index, value };
+            return { index, value: projectSummaryRefsToParent(value, chunk) };
         })
     ));
     const responseFailure = settledResponses.find(
@@ -272,7 +294,7 @@ async function summarizeFileEvidenceWithScheduler(
         kind: 'summary',
         fileName: diff.fileName,
         status: diff.status,
-        coveredHunkIds: units.map(unit => unit.id),
+        coveredHunkIds: Array.from(new Set(units.map(unit => unit.parentId))),
         changes,
         tests,
         breakingSignals,
@@ -415,7 +437,25 @@ function mergeSummaryResponses(responses: EvidenceSummaryResponse[]): EvidenceSu
     };
 }
 
-function createSummaryTaskScheduler(maxParallel: number): SummaryTaskScheduler {
+/** Internal split ids are never exposed beyond compaction. */
+function projectSummaryRefsToParent(
+    response: EvidenceSummaryResponse,
+    units: EvidenceUnit[],
+): EvidenceSummaryResponse {
+    const parentByInternalId = new Map(units.map(unit => [unit.id, unit.parentId]));
+    const project = (ids: string[]) => Array.from(new Set(ids.map(id => parentByInternalId.get(id) ?? id)));
+    return {
+        changes: response.changes.map(change => ({
+            ...change,
+            evidenceHunkIds: project(change.evidenceHunkIds),
+        })),
+        tests: response.tests.map(item => ({ ...item, evidenceHunkIds: project(item.evidenceHunkIds) })),
+        breakingSignals: response.breakingSignals.map(item => ({ ...item, evidenceHunkIds: project(item.evidenceHunkIds) })),
+        uncertainties: response.uncertainties.map(item => ({ ...item, evidenceHunkIds: project(item.evidenceHunkIds) })),
+    };
+}
+
+export function createSummaryTaskScheduler(maxParallel: number): SummaryTaskScheduler {
     assertPositiveParallelism(maxParallel);
     let activeTasks = 0;
     const waiters: Array<() => void> = [];
@@ -447,6 +487,11 @@ function createSummaryTaskScheduler(maxParallel: number): SummaryTaskScheduler {
             release();
         }
     };
+}
+
+function buildSummaryStoreKey(diff: DiffData): string {
+    const rawDiffHash = crypto.createHash('sha256').update(diff.rawDiff).digest('hex');
+    return [diff.fileName, diff.status, rawDiffHash, 'evidence-summary-v1'].join(':');
 }
 
 function selectCompactionBatch(params: {
@@ -482,24 +527,43 @@ function estimateRawEvidenceTokens(evidence: RawDiffEvidence): number {
     }]);
 }
 
-function buildEvidenceUnits(diff: DiffData, maxInputTokens: number): EvidenceUnit[] {
+function buildEvidenceUnits(
+    diff: DiffData,
+    maxInputTokens: number,
+    ledger: EvidenceLedger,
+): EvidenceUnit[] {
     const preamble = extractDiffPreamble(diff.rawDiff);
+    const allocatedIds = ledger.getDiffIds(diff.fileName);
+    const expectedIds = Math.max(1, diff.diffHunks.length);
+    if (allocatedIds.length !== expectedIds) {
+        throw new Error(
+            `Evidence ledger for '${diff.fileName}' contains ${allocatedIds.length} diff ids; expected ${expectedIds}.`,
+        );
+    }
     const baseUnits: EvidenceUnit[] = diff.diffHunks.length > 0
         ? [
             ...(preamble.trim() ? [{
-                id: 'meta',
+                id: `${allocatedIds[0]}/META`,
+                parentId: allocatedIds[0],
                 header: '',
                 content: preamble,
                 requiresCoverage: metaContainsChangeEvidence(preamble),
             }] : []),
             ...diff.diffHunks.map((hunk, index) => ({
-                id: `h${index + 1}`,
+                id: allocatedIds[index],
+                parentId: allocatedIds[index],
                 header: hunk.header,
                 content: hunk.content,
                 requiresCoverage: true,
             })),
         ]
-        : [{ id: 'h1', header: '', content: diff.rawDiff, requiresCoverage: true }];
+        : [{
+            id: allocatedIds[0],
+            parentId: allocatedIds[0],
+            header: '',
+            content: diff.rawDiff,
+            requiresCoverage: true,
+        }];
 
     return baseUnits.flatMap(unit => splitEvidenceUnit(diff, unit, maxInputTokens));
 }
@@ -536,7 +600,8 @@ function splitEvidenceUnit(diff: DiffData, unit: EvidenceUnit, maxInputTokens: n
     for (const line of lines) {
         const candidate = [...currentLines, line].join('\n');
         const probe = {
-            id: `${unit.id}:p9999`,
+            id: `${unit.parentId}/P9999`,
+            parentId: unit.parentId,
             header: unit.header,
             content: candidate,
             requiresCoverage: unit.requiresCoverage,
@@ -564,7 +629,8 @@ function splitEvidenceUnit(diff: DiffData, unit: EvidenceUnit, maxInputTokens: n
     }
 
     return parts.map((content, index) => ({
-        id: `${unit.id}:p${index + 1}`,
+        id: `${unit.parentId}/P${index + 1}`,
+        parentId: unit.parentId,
         header: unit.header,
         content,
         requiresCoverage: unit.requiresCoverage,
@@ -591,7 +657,8 @@ function splitOversizedLine(
         while (low <= high) {
             const mid = Math.floor((low + high) / 2);
             const probe = {
-                id: `${unit.id}:p9999`,
+                id: `${unit.parentId}/P9999`,
+                parentId: unit.parentId,
                 header: unit.header,
                 content: remaining.slice(0, mid),
                 requiresCoverage: unit.requiresCoverage,

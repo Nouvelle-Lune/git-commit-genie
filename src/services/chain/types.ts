@@ -60,13 +60,20 @@ export interface RetrievalFeatures {
     breakingLike: boolean;
 }
 
+/** Grounded query produced after local normalization of the Agent terminal. */
+export interface RagRetrievalQuery {
+    mustExpress: string[];
+    type: string | null;
+    scope: string | null;
+}
+
 export interface RagStyleReference {
     commitHash: string;
     message: string;
     subject: string;
     body?: string;
     committedAt?: string;
-    matchedBy: Array<'hybrid' | 'typeScope'>;
+    matchedBy: Array<'hybrid' | 'scope'>;
     styleReason: string;
     type?: string | null;
     scope?: string | null;
@@ -80,6 +87,15 @@ export interface ChainOutputs {
     ragStyleReferences?: RagStyleReference[];
     /** Stage-by-stage record of the change analysis, for logs and benchmarks. */
     changeAnalysis: ChangeAnalysisTrace;
+    timings: {
+        chainStart: number;
+        agentStart?: number;
+        agentTerminal?: number;
+        ragReady?: number;
+        draftStart: number;
+        draftReady: number;
+        ttdMs: number;
+    };
     raw?: {
         draft?: string;
         classificationNotes?: string;

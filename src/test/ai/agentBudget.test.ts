@@ -1,30 +1,21 @@
 import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
 import { z } from 'zod';
-import { runAgentLoop } from '../../agent/agentLoop';
-import { AISession, AIMessage } from '../../services/llm/providers';
+import { AgentProfile, AgentRuntime } from '../../agent';
+import { LLMExecution } from '../../services/llm/llmTypes';
+import { AIMessage, AISession } from '../../services/llm/providers';
 import { resolveChainTokenBudget } from '../../services/llm/inputTokenBudget';
 
-describe('agent loop token budgeting', () => {
-    it('remeasures the complete session before a structured repair retry', async () => {
+describe('AgentRuntime token budgeting', () => {
+    it('returns an observable partial result when no context epoch is available', async () => {
         const transcript: AIMessage[] = [];
         let calls = 0;
         const session: AISession = {
             provider: 'custom',
             model: 'test',
-            run: async request => {
+            run: async () => {
                 calls += 1;
-                transcript.push(...request.messages ?? []);
-                const text = 'x'.repeat(2_000);
-                transcript.push({ role: 'assistant', content: text });
-                return {
-                    text,
-                    structured: { value: 123 },
-                    toolCalls: [],
-                    stopReason: 'completed',
-                    continuation: { serverManaged: false },
-                    raw: {},
-                };
+                throw new Error('The request should fail before reaching the provider.');
             },
             snapshot: () => ({
                 provider: 'custom',
@@ -38,23 +29,44 @@ describe('agent loop token budgeting', () => {
             model: 'test',
             contextWindowTokens: 1_200,
         });
+        const execution: LLMExecution = {
+            model: 'test',
+            temperature: 0,
+            maxOutputTokens: tokenBudget.maxOutputTokens,
+            maxRetries: 0,
+            thinkingLevel: 'off',
+            tokenBudget,
+            thinkingFor: () => ({ reasoning: false, level: 'off' }),
+            createSession: () => session,
+            run: async () => { throw new Error('not used'); },
+        };
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'budget-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'budgetTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 0,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({
+                stable: [{ role: 'system', content: 'protocol' }],
+                opening: [{ role: 'user', content: 'x'.repeat(20_000) }],
+            }),
+            grantTools: () => [],
+            buildToolDefinitions: () => [],
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: (_state, error) => String((error as Error).message),
+        };
 
-        await assert.rejects(
-            runAgentLoop(
-                session,
-                [{ role: 'user', content: 'Return JSON.' }],
-                [],
-                {
-                    maxSteps: 0,
-                    responseFormat: { name: 'result', schema: { type: 'object' } },
-                    schema: z.object({ value: z.string() }),
-                    maxRetries: 1,
-                    tokenBudget,
-                    requestType: 'investigation',
-                },
-            ),
-            /exceeding its safe input capacity/,
-        );
-        assert.equal(calls, 1);
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'partial');
+        assert.match(result.output, /context budget/);
+        assert.equal(calls, 0);
     });
 });

@@ -1,15 +1,18 @@
 import { LLMExecution } from "../llm/llmTypes";
 import { AIMessage } from "../llm/providers";
 import { IRepositoryAnalysisService } from "../analysis/repository/repositoryAnalysisTypes";
-import { ChainInputs, ChangeSetSummary, ChainOutputs, RagStyleReference, RetrievalFeatures } from "./types";
-import { DraftEvidence } from "../analysis/change/types";
-import { buildRagPreparationMessages } from "./rag/prompts";
+import { ChainInputs, ChangeSetSummary, ChainOutputs, RagRetrievalQuery, RagStyleReference, RetrievalFeatures } from "./types";
+import { DraftEvidence, SelectedSemanticInformation } from "../analysis/change/types";
 
 import { enforceCommitLanguage } from "./validation/languageValidation";
-import { isRagPreparationEnabled, prepareRagContext } from "./rag/preparation";
+import { buildSelectionRagContext, isRagEnabled } from "./rag/selectionQuery";
 import { logger } from "../logger";
 import { safeRun } from "../../utils/safeRun";
-import { compactEvidenceToFit, createRawDraftEvidence } from "./evidence/compaction";
+import {
+	compactEvidenceToFit,
+	createRawDraftEvidence,
+	createSummaryTaskScheduler,
+} from "./evidence/compaction";
 import { ChainTokenBudget, estimateChatMessagesTokens, isContextWindowFailure } from "../llm/inputTokenBudget";
 import { buildChangeConditionedDraftMessages } from "./generation/prompts";
 import { InvestigationSettings } from "../analysis/change/investigation/config";
@@ -21,6 +24,7 @@ import {
 	validateAndFixCommit,
 } from "./validation/commitValidation";
 import { buildFileSummaries, summarizeFileEvidenceForDisplay } from "./evidence/fileSummaries";
+import { EvidenceLedger } from "../../agent/evidenceLedger";
 
 
 export async function generateCommitMessageChain(
@@ -34,24 +38,28 @@ export async function generateCommitMessageChain(
 		investigation?: Partial<InvestigationSettings>;
 		repositoryAnalysisService?: Pick<IRepositoryAnalysisService, 'runChangeAnalysis'>;
 		onStage?: (event: import('../../ui/StageNotificationManager').StageEvent) => void;
-		retrieveRagExamples?: (context: {
-			changeSetSummary: ChangeSetSummary;
-			retrievalFeatures: RetrievalFeatures;
-		}) => Promise<RagStyleReference[]>;
+		retrieveRagExamples?: (query: RagRetrievalQuery) => Promise<RagStyleReference[]>;
 	}
 ): Promise<ChainOutputs> {
 	const { diffs } = inputs;
+	const timings: Partial<ChainOutputs['timings']> & { chainStart: number } = {
+		chainStart: Date.now(),
+	};
 	const maxParallel = options?.maxParallel ?? Math.max(4, Math.min(8, diffs.length));
 	const maxRetries = options?.maxRetries ?? 2;
 	const tokenBudget = options?.tokenBudget ?? execution.tokenBudget;
 	const maxInputTokens = tokenBudget.compressionTargetTokens;
-	let evidence = createRawDraftEvidence(diffs);
+	const evidenceLedger = EvidenceLedger.fromDiffs(diffs);
+	const analysisEvidence = { current: createRawDraftEvidence(diffs, evidenceLedger) };
 	const initialRawEvidenceTokens = estimateChatMessagesTokens([{
 		role: 'user',
-		content: JSON.stringify(evidence),
+		content: JSON.stringify(analysisEvidence.current),
 	}]);
 	let summaryStageStarted = false;
 	let summarizedCount = 0;
+	const summarizedFiles = new Set<string>();
+	const summaryStore = new Map<string, Promise<Extract<DraftEvidence, { kind: 'summary' }>>>();
+	const summaryScheduler = createSummaryTaskScheduler(maxParallel);
 
 	safeRun('Chain.onStage.evidenceReady', () => options?.onStage?.({
 		type: 'evidenceReady',
@@ -70,13 +78,13 @@ export async function generateCommitMessageChain(
 		}
 	}));
 
-	const compactFor = async (
+	const createCompactFor = (branch: { current: DraftEvidence[] }) => async (
 		target: EvidenceRouteTarget,
 		buildTargetMessages: (current: DraftEvidence[]) => AIMessage[],
 		force = false,
-	) => {
+	): Promise<void> => {
 		try {
-			const currentTokens = estimateChatMessagesTokens(buildTargetMessages(evidence));
+			const currentTokens = estimateChatMessagesTokens(buildTargetMessages(branch.current));
 			const forcedTarget = Math.max(1, Math.floor(currentTokens * 0.8));
 			const triggerInputTokens = force
 				? Math.min(tokenBudget.compressionTargetTokens, forcedTarget)
@@ -86,7 +94,10 @@ export async function generateCommitMessageChain(
 				: tokenBudget.compressionTargetTokens;
 			const result = await compactEvidenceToFit({
 				diffs,
-				evidence,
+				evidence: branch.current,
+				ledger: evidenceLedger,
+				summaryStore,
+				summaryScheduler,
 				execution,
 				triggerInputTokens,
 				targetInputTokens,
@@ -101,7 +112,11 @@ export async function generateCommitMessageChain(
 					}
 				},
 				onFileSummarized: (file) => {
-					summarizedCount += 1;
+					if (summarizedFiles.has(file.fileName)) {
+						return;
+					}
+					summarizedFiles.add(file.fileName);
+					summarizedCount = summarizedFiles.size;
 					safeRun('Chain.onStage.summarizeProgress', () => options?.onStage?.({
 						type: 'summarizeProgress',
 						data: {
@@ -114,14 +129,14 @@ export async function generateCommitMessageChain(
 					}));
 				},
 			});
-			evidence = result.evidence;
+			branch.current = result.evidence;
 			safeRun('Chain.onStage.evidenceRouted', () => options?.onStage?.({
 				type: 'evidenceRouted',
 				data: {
 					target,
-					fileCount: evidence.length,
-					rawFiles: evidence.filter(item => item.kind === 'raw').length,
-					summarizedFiles: evidence.filter(item => item.kind === 'summary').length,
+					fileCount: branch.current.length,
+					rawFiles: branch.current.filter(item => item.kind === 'raw').length,
+					summarizedFiles: branch.current.filter(item => item.kind === 'summary').length,
 					initialEstimatedInputTokens: result.initialEstimatedInputTokens,
 					estimatedInputTokens: result.estimatedInputTokens,
 					maxInputTokens,
@@ -141,6 +156,7 @@ export async function generateCommitMessageChain(
 			throw error;
 		}
 	};
+	const compactFor = createCompactFor(analysisEvidence);
 
 	// Stages 1-5 of the change-conditioned chain. Their only product is the
 	// compact selected-information payload; the investigation trajectory itself
@@ -149,84 +165,24 @@ export async function generateCommitMessageChain(
 		diffs,
 		inputs,
 		execution,
-		getEvidence: () => evidence,
+		getEvidence: () => analysisEvidence.current,
 		compactFor,
 		investigationOverrides: options?.investigation,
 		repositoryAnalysisService: options?.repositoryAnalysisService,
-		maxInputTokens,
+		evidenceLedger,
 		onStage: options?.onStage,
+		onAgentMilestone: (milestone, timestamp) => {
+			if (milestone === 'start') {
+				timings.agentStart = timestamp;
+			} else {
+				timings.agentTerminal = timestamp;
+			}
+		},
 	});
 
-	let changeSetSummary: ChangeSetSummary | undefined;
-	let retrievalFeatures: RetrievalFeatures | undefined;
-	let ragStyleReferences: RagStyleReference[] = [];
-
-	if (isRagPreparationEnabled()) {
-		let ragEvidenceReady = false;
-		try {
-			await compactFor('ragPreparation', current => buildRagPreparationMessages(current));
-			ragEvidenceReady = true;
-		} catch {
-			// compactFor already reports this as a Summary-stage failure. RAG is optional,
-			// so generation can continue without misclassifying the failed prerequisite.
-		}
-
-		if (ragEvidenceReady) {
-			try {
-				safeRun('Chain.onStage.ragPreparationStart', () => options?.onStage?.({ type: 'ragPreparationStart' }));
-				const ragContext = await prepareRagContext(diffs, evidence, execution);
-				changeSetSummary = ragContext.changeSetSummary;
-				retrievalFeatures = ragContext.retrievalFeatures;
-				safeRun('Chain.onStage.ragPrepared', () => options?.onStage?.({
-					type: 'ragPrepared',
-					data: {
-						changeSetSummary,
-						retrievalFeatures,
-					}
-				}));
-			} catch (error) {
-				const errorMessage = String((error as any)?.message || error || 'Unknown error');
-				logger.warn('[Genie][Chain] RAG preparation failed; continuing without RAG context.', error);
-				safeRun('Chain.onStage.ragPreparationSkipped', () => options?.onStage?.({
-					type: 'ragPreparationSkipped',
-					data: { error: errorMessage }
-				}));
-			}
-		}
-	} else {
-		safeRun('Chain.onStage.ragDisabled', () => options?.onStage?.({
-			type: 'ragDisabled',
-			data: { reason: 'disabled' }
-		}));
-	}
-
-	if (changeSetSummary && retrievalFeatures && options?.retrieveRagExamples) {
-		try {
-			safeRun('Chain.onStage.ragRetrievalStart', () => options?.onStage?.({ type: 'ragRetrievalStart' }));
-			ragStyleReferences = await options.retrieveRagExamples({ changeSetSummary, retrievalFeatures });
-			safeRun('Chain.onStage.ragRetrieved', () => options?.onStage?.({
-				type: 'ragRetrieved',
-				data: {
-					count: ragStyleReferences.length,
-					messages: ragStyleReferences.map(reference => reference.message),
-					references: ragStyleReferences.map(reference => ({
-						message: reference.message,
-						matchedBy: reference.matchedBy,
-						styleReason: reference.styleReason,
-						type: reference.type ?? null,
-						scope: reference.scope ?? null,
-					})),
-				}
-			}));
-		} catch (error) {
-			const errorMessage = String((error as any)?.message || error || 'Unknown error');
-			logger.warn('[Genie][Chain] RAG retrieval failed; continuing without style references.', error);
-			safeRun('Chain.onStage.ragRetrievalSkipped', () => options?.onStage?.({
-				type: 'ragRetrievalSkipped',
-				data: { error: errorMessage }
-			}));
-		}
-	}
+	const { changeSetSummary, retrievalFeatures, ragStyleReferences } = await runRagBranch(
+		trace.selectedInformation,
+	);
 
 	const buildDraftMessages = (current: DraftEvidence[]): AIMessage[] =>
 		buildChangeConditionedDraftMessages({
@@ -237,18 +193,20 @@ export async function generateCommitMessageChain(
 		});
 
 	await compactFor('draft', buildDraftMessages);
+	timings.draftStart = Date.now();
 	safeRun('Chain.onStage.draftStart', () => options?.onStage?.({ type: 'draftStart' }));
 	let generatedDraft: Awaited<ReturnType<typeof generateDraft>>;
 	try {
-		generatedDraft = await generateDraft(buildDraftMessages(evidence), execution);
+		generatedDraft = await generateDraft(buildDraftMessages(analysisEvidence.current), execution);
 	} catch (error) {
 		if (!isContextWindowFailure(error)) {
 			throw error;
 		}
 		await compactFor('draft', buildDraftMessages, true);
-		generatedDraft = await generateDraft(buildDraftMessages(evidence), execution);
+		generatedDraft = await generateDraft(buildDraftMessages(analysisEvidence.current), execution);
 	}
 	const { draft, notes: classificationNotes } = generatedDraft;
+	timings.draftReady = Date.now();
 
 	safeRun('Chain.onStage.classifyDraft', () => options?.onStage?.({ type: 'classifyDraft', data: { draft } }));
 
@@ -282,15 +240,84 @@ export async function generateCommitMessageChain(
 
 	return {
 		commitMessage: finalMessage,
-		fileSummaries: buildFileSummaries(evidence, diffs),
+		fileSummaries: buildFileSummaries(analysisEvidence.current, diffs),
 		changeSetSummary,
 		retrievalFeatures,
 		ragStyleReferences,
 		changeAnalysis: trace,
+		timings: {
+			chainStart: timings.chainStart,
+			agentStart: timings.agentStart,
+			agentTerminal: timings.agentTerminal,
+			ragReady: timings.ragReady,
+			draftStart: timings.draftStart!,
+			draftReady: timings.draftReady!,
+			ttdMs: timings.draftReady! - timings.chainStart,
+		},
 		raw: {
 			draft,
 			classificationNotes: classificationNotes ?? '',
 			validationNotes: validationNotes ?? ''
 		}
 	};
+
+	async function runRagBranch(
+		selected: SelectedSemanticInformation,
+	): Promise<{
+		changeSetSummary?: ChangeSetSummary;
+		retrievalFeatures?: RetrievalFeatures;
+		ragStyleReferences: RagStyleReference[];
+	}> {
+		if (!isRagEnabled()) {
+			safeRun('Chain.onStage.ragDisabled', () => options?.onStage?.({
+				type: 'ragDisabled',
+				data: { reason: 'disabled' },
+			}));
+			timings.ragReady = Date.now();
+			return { ragStyleReferences: [] };
+		}
+
+		const context = buildSelectionRagContext(selected, diffs);
+		safeRun('Chain.onStage.ragPrepared', () => options?.onStage?.({
+			type: 'ragPrepared',
+			data: {
+				query: context.query,
+				changeSetSummary: context.changeSetSummary,
+				retrievalFeatures: context.retrievalFeatures,
+			},
+		}));
+
+		let references: RagStyleReference[] = [];
+		try {
+			if (options?.retrieveRagExamples) {
+				safeRun('Chain.onStage.ragRetrievalStart', () => options.onStage?.({ type: 'ragRetrievalStart' }));
+				references = await options.retrieveRagExamples(context.query);
+			}
+			safeRun('Chain.onStage.ragRetrieved', () => options?.onStage?.({
+				type: 'ragRetrieved',
+				data: {
+					count: references.length,
+					messages: references.map(reference => reference.message),
+					references,
+				},
+			}));
+		} catch (error) {
+			if (execution.signal?.aborted) {
+				throw error;
+			}
+			const errorMessage = String((error as { message?: unknown })?.message ?? error ?? 'Unknown error');
+			logger.warn('[Genie][Chain] RAG retrieval failed; continuing without style references.', error);
+			safeRun('Chain.onStage.ragRetrievalSkipped', () => options?.onStage?.({
+				type: 'ragRetrievalSkipped',
+				data: { error: errorMessage },
+			}));
+		}
+
+		timings.ragReady = Date.now();
+		return {
+			changeSetSummary: context.changeSetSummary,
+			retrievalFeatures: context.retrievalFeatures,
+			ragStyleReferences: references,
+		};
+	}
 }

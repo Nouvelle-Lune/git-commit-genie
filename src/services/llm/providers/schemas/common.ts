@@ -27,18 +27,28 @@ export const evidenceSummaryResponseSchema = z.object({
 } as const);
 
 export const classifyAndDraftResponseSchema = z.object({
-  type: z.string().min(1),
-  scope: z.string().nullable().default(null),
+  type: z.string().trim().min(1).regex(/^[a-z]+$/),
+  scope: z.string().trim().min(1).regex(/^[A-Za-z0-9_.-]+$/).nullable().default(null),
   breaking: z.boolean(),
-  description: z.string().min(1),
-  body: z.string().nullable().default(null),
+  description: z.string().trim().min(1).regex(/^[^\r\n]+$/),
+  body: z.string().trim().min(1).nullable().default(null),
   footers: z.array(z.object({
-    token: z.string().default(''),
-    value: z.string().default('')
+    token: z.string().trim().min(1).regex(/^(?:BREAKING CHANGE|[A-Za-z][A-Za-z0-9-]*)$/),
+    value: z.string().trim().min(1)
   })).default([]),
-  commitMessage: z.string().min(1),
   notes: z.string().nullable().default(null)
-} as const);
+} as const).superRefine((draft, context) => {
+  const hasBreakingFooter = draft.footers.some(footer => (
+    footer.token === 'BREAKING CHANGE' || footer.token === 'BREAKING-CHANGE'
+  ));
+  if (!draft.breaking && hasBreakingFooter) {
+    context.addIssue({
+      code: 'custom',
+      path: ['footers'],
+      message: 'BREAKING CHANGE footer requires breaking=true.',
+    });
+  }
+});
 
 export const validateAndFixResponseSchema = z.object({
   status: z.enum(['valid', 'fixed']).default('valid'),
@@ -47,42 +57,12 @@ export const validateAndFixResponseSchema = z.object({
   notes: z.string().nullable().default(null)
 } as const);
 
-export const ragPreparationResponseSchema = z.object({
-  changeSetSummary: z.object({
-    text: z.string().min(1),
-    dominantType: z.string().nullable().default(null),
-    dominantScope: z.string().nullable().default(null),
-    areas: z.array(z.string().min(1)).default([]),
-    fileKinds: z.array(z.string().min(1)).default([]),
-    changeActions: z.array(z.string().min(1)).default([]),
-    entities: z.array(z.string().min(1)).default([]),
-  }),
-  retrievalFeatures: z.object({
-    predictedType: z.string().nullable().default(null),
-    predictedScope: z.string().nullable().default(null),
-    areas: z.array(z.string().min(1)).default([]),
-    fileKinds: z.array(z.string().min(1)).default([]),
-    changeActions: z.array(z.string().min(1)).default([]),
-    entities: z.array(z.string().min(1)).default([]),
-    touchedPaths: z.array(z.string().min(1)).default([]),
-    fileExtensions: z.array(z.string().min(1)).default([]),
-    statusMix: z.array(z.enum(['added', 'modified', 'deleted', 'renamed', 'untracked', 'ignored'])).default([]),
-    fileCount: z.number().int().min(0),
-    hasDocs: z.boolean(),
-    hasTests: z.boolean(),
-    hasConfig: z.boolean(),
-    hasRenames: z.boolean(),
-    isCrossLayer: z.boolean(),
-    breakingLike: z.boolean(),
-  })
-} as const);
-
 export const ragRerankResponseSchema = z.object({
   selected: z.array(z.object({
     id: z.string().min(1),
     reason: z.string().min(1),
-  })).default([]),
-  notes: z.string().nullable().default(null),
+  })),
+  notes: z.string().nullable(),
 } as const);
 
 // ----- Change-Conditioned Chain -----
@@ -127,38 +107,46 @@ export const investigationPlanResponseSchema = z.object({
   notes: z.string().nullable(),
 } as const);
 
-export const investigationFinalResponseSchema = z.object({
-  findings: z.array(z.object({
-    target: z.string().min(1),
-    question: z.string().min(1),
-    answer: z.string().min(1),
-    evidenceRefs: z.array(z.string().min(1)),
-  } as const)),
-  unresolvedQuestions: z.array(z.string().min(1)),
-  stopReason: z.string().min(1),
-} as const);
+export const AGENT_CLAIM_CATEGORIES = [
+  'observed_change',
+  'repository_fact',
+  'supported_inference',
+  'uncertain_inference',
+] as const;
 
-const evidenceBackedClaimSchema = z.object({
-  claim: z.string().min(1),
-  evidenceRefs: z.array(z.string().min(1)),
-} as const);
+export const AGENT_CLAIM_DISPOSITIONS = ['must_express', 'optional', 'omit'] as const;
 
-export const semanticAnalysisResponseSchema = z.object({
+/** One terminal replaces the former investigation, semantic, and selection requests. */
+export const changeAnalysisAgentFinalResponseSchema = z.object({
+  investigation: z.object({
+    findings: z.array(z.object({
+      target: z.string().min(1),
+      question: z.string().min(1),
+      answer: z.string().min(1),
+      evidenceRefs: z.array(z.string().min(1)).max(8),
+    } as const)).max(12),
+    unresolvedQuestions: z.array(z.string().min(1)).max(12),
+    stopReason: z.string().min(1),
+  } as const),
   changeTargets: z.array(z.object({
     symbol: z.string().min(1),
     file: z.string().min(1),
     role: z.string().min(1),
-    evidenceRefs: z.array(z.string().min(1)),
-  } as const)),
+    evidenceRefs: z.array(z.string().min(1)).max(8),
+  } as const)).max(12),
   dependencyContext: z.object({
-    callers: z.array(z.string().min(1)),
-    callees: z.array(z.string().min(1)),
-    stateDependencies: z.array(z.string().min(1)),
-    relatedConfigs: z.array(z.string().min(1)),
-    relatedTypes: z.array(z.string().min(1)),
+    callers: z.array(z.string().min(1)).max(20),
+    callees: z.array(z.string().min(1)).max(20),
+    stateDependencies: z.array(z.string().min(1)).max(20),
+    relatedConfigs: z.array(z.string().min(1)).max(20),
+    relatedTypes: z.array(z.string().min(1)).max(20),
   } as const),
-  observedChanges: z.array(evidenceBackedClaimSchema),
-  repositoryFacts: z.array(evidenceBackedClaimSchema),
+  claims: z.array(z.object({
+    category: z.enum(AGENT_CLAIM_CATEGORIES),
+    claim: z.string().min(1),
+    evidenceRefs: z.array(z.string().min(1)).max(8),
+    disposition: z.enum(AGENT_CLAIM_DISPOSITIONS),
+  } as const)).max(20),
   behaviorAnalysis: z.object({
     before: z.string().nullable(),
     after: z.string().nullable(),
@@ -168,11 +156,9 @@ export const semanticAnalysisResponseSchema = z.object({
     technicalCapability: z.string().nullable(),
     productCapability: z.string().nullable(),
   } as const),
-  supportedInferences: z.array(evidenceBackedClaimSchema),
-  uncertainInferences: z.array(evidenceBackedClaimSchema),
   intentAnalysis: z.object({
     primaryIntent: z.string().nullable(),
-    supportedBy: z.array(z.string().min(1)),
+    supportedBy: z.array(z.string().min(1)).max(8),
     confidence: z.enum(['low', 'medium', 'high']),
   } as const),
   changeClassification: z.object({
@@ -183,15 +169,9 @@ export const semanticAnalysisResponseSchema = z.object({
     recommendedType: z.string().nullable(),
     reason: z.string().nullable(),
   } as const),
-  uncertainties: z.array(z.string().min(1)),
-} as const);
-
-export const informationSelectionResponseSchema = z.object({
-  mustExpress: z.array(z.string().min(1)).min(1).max(3),
-  optional: z.array(z.string().min(1)).max(4),
-  omit: z.array(z.string().min(1)).max(8),
   suggestedScope: z.string().nullable(),
-  notes: z.string().nullable(),
+  selectionNotes: z.string().nullable(),
+  uncertainties: z.array(z.string().min(1)).max(12),
 } as const);
 
 export const repoAnalysisResponseSchema = z.object({

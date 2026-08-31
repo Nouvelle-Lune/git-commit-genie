@@ -57,8 +57,6 @@ const STAGE_THINKING_CEILINGS: Partial<Record<RequestType, ThinkingLevel>> = {
     changeExtraction: 'low',
     investigationPlan: 'low',
     investigation: 'medium',
-    informationSelection: 'low',
-    ragPreparation: 'low',
     ragRerank: 'low',
     draft: 'medium',
     fix: 'minimal',
@@ -150,6 +148,7 @@ export class UnifiedLLMService extends BaseLLMService {
             stageThinkingCeiling(requestType, thinking.level),
         );
         return {
+            model: this.getCurrentModel(),
             signal,
             temperature,
             maxOutputTokens: tokenBudget.maxOutputTokens,
@@ -353,8 +352,7 @@ export class UnifiedLLMService extends BaseLLMService {
                         }
                         return options.ragRetrievalService.retrieveStyleReferences({
                             repo: options.targetRepo,
-                            changeSetSummary: context.changeSetSummary,
-                            retrievalFeatures: context.retrievalFeatures,
+                            query: context,
                             execution,
                         });
                     },

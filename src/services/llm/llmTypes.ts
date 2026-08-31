@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { DiffData } from '../git/gitTypes';
 import { Repository } from '../git/git';
-import { ChangeSetSummary, FileSummary, RagStyleReference, RetrievalFeatures } from '../chain/types';
+import { ChangeSetSummary, FileSummary, RagRetrievalQuery, RagStyleReference, RetrievalFeatures } from '../chain/types';
 import { AIMessage, AISession, AIThinkingConfig, ThinkingLevel } from './providers';
 import type { ChainTokenBudget } from './inputTokenBudget';
 
@@ -10,13 +10,10 @@ export type RequestType =
     | 'summary'
     | 'draft'
     | 'fix'
-    | 'ragPreparation'
     | 'ragRerank'
     // Change-conditioned chain stages
     | 'changeExtraction'
     | 'investigationPlan'
-    | 'semanticAnalysis'
-    | 'informationSelection'
     | 'investigation'
     // More granular chain stages for clearer logging
     | 'strictFix'
@@ -30,6 +27,7 @@ export interface LLMRunOptions {
 
 /** Request-scoped access to provider-neutral sessions. */
 export interface LLMExecution {
+    readonly model?: string;
     readonly signal?: AbortSignal;
     readonly temperature: number;
     readonly maxOutputTokens: number;
@@ -45,8 +43,7 @@ export interface LLMExecution {
 export interface RagRetrievalAdapter {
     retrieveStyleReferences(params: {
         repo: Repository;
-        changeSetSummary: ChangeSetSummary;
-        retrievalFeatures: RetrievalFeatures;
+        query: RagRetrievalQuery;
         execution: LLMExecution;
         maxResults?: number;
     }): Promise<RagStyleReference[]>;

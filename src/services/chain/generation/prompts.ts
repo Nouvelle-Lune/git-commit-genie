@@ -14,6 +14,11 @@ function structuredSchemaBlock(schema: z.ZodTypeAny): string {
     ].join('\n');
 }
 
+/** Internal claim/evidence ids describe traceability, never a code scope. */
+function isInternalTraceIdentifier(value: string | null): boolean {
+    return value !== null && /^\[?[CDE]\d+(?:\/P\d+)?\]?$/i.test(value.trim());
+}
+
 // Stage 6: Commit Generation
 // ---------------------------------------------------------------------------
 
@@ -30,6 +35,7 @@ export function buildChangeConditionedDraftMessages(input: {
 }): AIMessage[] {
     const { userTemplate, currentTime, targetLanguage } = input.inputs;
     const ragStyleReferences = input.ragStyleReferences ?? [];
+    const suggestedScopeIsInternal = isInternalTraceIdentifier(input.selected.suggestedScope);
 
     const system: AIMessage = {
         role: 'system',
@@ -55,11 +61,14 @@ export function buildChangeConditionedDraftMessages(input: {
             now: currentTime ?? new Date().toISOString(),
             target_language: targetLanguage || '',
             selected_information: {
+                analysis_status: input.selected.analysisStatus,
+                analysis_issues: input.selected.analysisIssues,
                 primary_intent: input.selected.primaryIntent,
                 must_express: input.selected.mustExpress,
                 optional: input.selected.optional,
                 omit: input.selected.omit,
-                suggested_scope: input.selected.suggestedScope,
+                suggested_scope: suggestedScopeIsInternal ? null : input.selected.suggestedScope,
+                discarded_internal_scope: suggestedScopeIsInternal,
                 recommended_type: input.selected.recommendedType,
                 behavior_before: input.selected.behaviorBefore,
                 behavior_after: input.selected.behaviorAfter,
@@ -86,7 +95,11 @@ export function buildChangeConditionedDraftMessages(input: {
         '• Statements in omit never appear, not even reworded.',
         '• uncertainties are never presented as facts; prefer leaving them out entirely.',
         '• When primary_intent is null, describe the observable change instead of guessing why.',
+        '• When analysis_status is degraded or unavailable, use only changes directly observable in change_evidence.',
+        '• When must_express is empty, do not state intent, product impact, or repository facts; describe the concrete diff conservatively.',
         '• Do not enumerate changed files; describe the change.',
+        '• C1, D1, E1, D1/P1, and similar C*/D*/E* values are internal claim/evidence identifiers, not semantic content.',
+        '• Never copy internal claim/evidence identifiers into the commit header, body, or footers.',
         '</content_policy>',
         '',
         '<type_and_scope>',
@@ -97,6 +110,9 @@ export function buildChangeConditionedDraftMessages(input: {
         'allowed type. When recommended_type is null, choose the type from the diff.',
         'Prefer suggested_scope when it is non-null; omit the scope when it is null and',
         'no single area honestly covers the change.',
+        'A scope must name a real module, package, component, feature, or code area that a developer would recognize.',
+        'Never use an internal identifier such as C1, D2, E3, [D1], or D1/P2 as the scope.',
+        'When discarded_internal_scope is true, derive a real scope from changed symbols or paths; omit scope if none is clear.',
         '',
         'HARD RULES FOR DOCUMENTATION-ONLY CHANGES:',
         '- Do NOT infer new features or bug fixes from documentation changes.',
@@ -110,6 +126,8 @@ export function buildChangeConditionedDraftMessages(input: {
         'Body must start after one blank line.',
         'Footers must start after one blank line (after body if present).',
         'First line length must be <= 72 characters; imperative; no trailing period.',
+        'Return only the structured components in the schema; local code assembles the final commit message.',
+        'Do not repeat footer lines such as BREAKING CHANGE inside body.',
         'No markdown, code fences, or extra commentary in any field.',
         '</format_requirements>',
         '',

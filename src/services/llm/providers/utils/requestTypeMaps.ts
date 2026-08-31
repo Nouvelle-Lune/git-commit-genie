@@ -5,12 +5,9 @@ import {
     classifyAndDraftResponseSchema,
     validateAndFixResponseSchema,
     commitMessageSchema,
-    ragPreparationResponseSchema,
     ragRerankResponseSchema,
     changeExtractionResponseSchema,
     investigationPlanResponseSchema,
-    semanticAnalysisResponseSchema,
-    informationSelectionResponseSchema,
 } from '../schemas/common';
 
 const REQUEST_TYPE_LABELS: Record<RequestType, string> = {
@@ -18,13 +15,10 @@ const REQUEST_TYPE_LABELS: Record<RequestType, string> = {
     summary: 'summarize',
     draft: 'draft',
     fix: 'validate-fix',
-    ragPreparation: 'rag-prep',
     ragRerank: 'rag-rerank',
     changeExtraction: 'change-extract',
     investigationPlan: 'investigation-plan',
     investigation: 'investigation',
-    semanticAnalysis: 'semantic-analysis',
-    informationSelection: 'info-selection',
     strictFix: 'strict-fix',
     enforceLanguage: 'lang-fix',
 };
@@ -34,12 +28,9 @@ const VALIDATION_SCHEMAS: Partial<Record<RequestType, z.ZodTypeAny>> = {
     summary: evidenceSummaryResponseSchema,
     draft: classifyAndDraftResponseSchema,
     fix: validateAndFixResponseSchema,
-    ragPreparation: ragPreparationResponseSchema,
     ragRerank: ragRerankResponseSchema,
     changeExtraction: changeExtractionResponseSchema,
     investigationPlan: investigationPlanResponseSchema,
-    semanticAnalysis: semanticAnalysisResponseSchema,
-    informationSelection: informationSelectionResponseSchema,
     strictFix: commitMessageSchema,
     enforceLanguage: commitMessageSchema,
 };

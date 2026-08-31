@@ -4,17 +4,10 @@
 // evidence contract in code. Prompt instructions alone do not guarantee
 // traceability, so unsupported conclusions are demoted here rather than trusted.
 
-import { LLMExecution } from '../../llm/llmTypes';
-import { buildSemanticAnalysisMessages } from './prompts';
-import {
-    ChangeExtraction,
-    EvidenceBackedClaim,
-    RepositoryEvidence,
-    SemanticChangeAnalysis,
-    RepositoryAnalysisContext,
-} from './types';
+import { EvidenceBackedClaim, RepositoryEvidence, SemanticChangeAnalysis } from './types';
+import { EvidenceLedger } from '../../../agent/evidenceLedger';
 
-const EVIDENCE_ID_PATTERN = /^E\d+$/;
+const EVIDENCE_ID_PATTERN = /^[DE]\d+$/;
 
 type DeepPartial<T> = T extends Array<infer Item>
     ? Array<DeepPartial<Item>>
@@ -48,11 +41,17 @@ function cleanText(value: unknown): string | null {
  * A fabricated citation is worse than a missing one because it makes an
  * unsupported claim look traceable.
  */
-function filterEvidenceRefs(refs: unknown, knownIds: Set<string>): string[] {
-    return cleanStrings(refs).filter(ref => !EVIDENCE_ID_PATTERN.test(ref) || knownIds.has(ref));
+function filterEvidenceRefs(refs: unknown, knownIds: Set<string>, ledgerEnforced: boolean): string[] {
+    return cleanStrings(refs).filter(ref => (
+        EVIDENCE_ID_PATTERN.test(ref) ? knownIds.has(ref) : !ledgerEnforced
+    ));
 }
 
-function normalizeClaims(claims: unknown, knownIds: Set<string>): EvidenceBackedClaim[] {
+function normalizeClaims(
+    claims: unknown,
+    knownIds: Set<string>,
+    ledgerEnforced: boolean,
+): EvidenceBackedClaim[] {
     if (!Array.isArray(claims)) {
         return [];
     }
@@ -70,7 +69,8 @@ function normalizeClaims(claims: unknown, knownIds: Set<string>): EvidenceBacked
                 claim,
                 evidenceRefs: filterEvidenceRefs(
                     record.evidenceRefs,
-                    knownIds
+                    knownIds,
+                    ledgerEnforced,
                 ),
             };
         })
@@ -91,15 +91,19 @@ function normalizeBehaviorText(value: unknown): string | null {
  */
 export function normalizeSemanticAnalysis(
     raw: RawSemanticAnalysis,
-    repositoryEvidence: RepositoryEvidence
+    repositoryEvidence: RepositoryEvidence,
+    ledger?: EvidenceLedger,
 ): SemanticChangeAnalysis {
-    const knownIds = new Set(repositoryEvidence.items.map(item => item.id));
+    const knownIds = new Set(
+        ledger ? ledger.snapshot().map(item => item.id) : repositoryEvidence.items.map(item => item.id)
+    );
+    const ledgerEnforced = ledger !== undefined;
     const uncertainties = cleanStrings(raw.uncertainties);
 
-    const observedChanges = normalizeClaims(raw.observedChanges, knownIds);
-    const repositoryFactCandidates = normalizeClaims(raw.repositoryFacts, knownIds);
-    const supportedCandidates = normalizeClaims(raw.supportedInferences, knownIds);
-    const uncertainInferences = normalizeClaims(raw.uncertainInferences, knownIds);
+    const observedChanges = normalizeClaims(raw.observedChanges, knownIds, ledgerEnforced);
+    const repositoryFactCandidates = normalizeClaims(raw.repositoryFacts, knownIds, ledgerEnforced);
+    const supportedCandidates = normalizeClaims(raw.supportedInferences, knownIds, ledgerEnforced);
+    const uncertainInferences = normalizeClaims(raw.uncertainInferences, knownIds, ledgerEnforced);
 
     const repositoryFacts: EvidenceBackedClaim[] = [];
     for (const fact of repositoryFactCandidates) {
@@ -121,7 +125,7 @@ export function normalizeSemanticAnalysis(
 
     const rawIntent = raw.intentAnalysis;
     const primaryIntent = cleanText(rawIntent?.primaryIntent);
-    const supportedBy = filterEvidenceRefs(rawIntent?.supportedBy, knownIds);
+    const supportedBy = filterEvidenceRefs(rawIntent?.supportedBy, knownIds, ledgerEnforced);
     let confidence: SemanticChangeAnalysis['intentAnalysis']['confidence'] =
         rawIntent?.confidence === 'high' || rawIntent?.confidence === 'medium' ? rawIntent.confidence : 'low';
     if (primaryIntent && !supportedBy.length && !observedChanges.length) {
@@ -142,7 +146,7 @@ export function normalizeSemanticAnalysis(
                 symbol: cleanText(target?.symbol) ?? '',
                 file: cleanText(target?.file) ?? '',
                 role: cleanText(target?.role) ?? '',
-                evidenceRefs: filterEvidenceRefs(target?.evidenceRefs, knownIds),
+                evidenceRefs: filterEvidenceRefs(target?.evidenceRefs, knownIds, ledgerEnforced),
             }))
             .filter(target => target.symbol && target.role),
         dependencyContext: {
@@ -182,22 +186,4 @@ export function normalizeSemanticAnalysis(
         },
         uncertainties: Array.from(new Set(uncertainties)),
     };
-}
-
-export async function analyzeSemantics(params: {
-    changeExtraction: ChangeExtraction;
-    repositoryEvidence: RepositoryEvidence;
-    evidencePayload: unknown;
-    repositoryTerminology?: RepositoryAnalysisContext;
-    execution: LLMExecution;
-}): Promise<SemanticChangeAnalysis> {
-    const messages = buildSemanticAnalysisMessages({
-        changeExtraction: params.changeExtraction,
-        repositoryEvidence: params.repositoryEvidence,
-        evidencePayload: params.evidencePayload,
-        repositoryTerminology: params.repositoryTerminology,
-    });
-    const session = params.execution.createSession(messages);
-    const raw = await params.execution.run<SemanticChangeAnalysis>(session, messages, { requestType: 'semanticAnalysis' });
-    return normalizeSemanticAnalysis(raw, params.repositoryEvidence);
 }

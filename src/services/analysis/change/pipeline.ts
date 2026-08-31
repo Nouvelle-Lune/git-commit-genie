@@ -11,7 +11,6 @@ import {
 } from './extraction';
 import {
     buildChangeExtractionMessages,
-    buildSemanticAnalysisMessages,
 } from './prompts';
 import {
     emptyRepositoryEvidence,
@@ -22,12 +21,19 @@ import {
     InvestigationSettings,
     resolveInvestigationSettings,
 } from './investigation/config';
-import { analyzeSemantics } from './semanticAnalysis';
-import { buildSelectedInformation, selectInformation } from './informationSelection';
-import { ChangeAnalysisInputs, ChangeAnalysisTrace, DraftEvidence, InvestigationPlan } from './types';
+import { normalizeSemanticAnalysis } from './semanticAnalysis';
+import { buildSelectedInformation } from './informationSelection';
+import {
+    ChangeAnalysisInputs,
+    ChangeAnalysisTrace,
+    DraftEvidence,
+    InformationSelection,
+    InvestigationPlan,
+} from './types';
 import { isContextWindowFailure } from '../../llm/inputTokenBudget';
+import { EvidenceLedger } from '../../../agent/evidenceLedger';
 
-export type EvidenceRouteTarget = 'changeExtraction' | 'semanticAnalysis' | 'ragPreparation' | 'draft';
+export type EvidenceRouteTarget = 'changeExtraction' | 'semanticAnalysis' | 'draft';
 
 export interface ChangeAnalysisPipelineParams {
     diffs: DiffData[];
@@ -41,35 +47,40 @@ export interface ChangeAnalysisPipelineParams {
     ) => Promise<void>;
     investigationOverrides?: Partial<InvestigationSettings>;
     repositoryAnalysisService?: Pick<IRepositoryAnalysisService, 'runChangeAnalysis'>;
-    maxInputTokens: number;
+    evidenceLedger: EvidenceLedger;
     onStage?: (event: StageEvent) => void;
+    onAgentMilestone?: (milestone: 'start' | 'terminal', timestamp: number) => void;
 }
 
 /**
- * Runs Change Extraction, Investigation Planning, Repository Investigation,
- * Semantic Analysis, and Information Selection in order.
+ * Runs Change Extraction and Investigation Planning, then delegates repository
+ * tools plus compound semantic/selection output to one continued agent session.
+ * Analyze and Select remain local projection stages for validation and UI.
  *
- * Evidence compaction is re-run before every stage that embeds the diff because
- * each prompt has a different fixed cost and therefore a different evidence budget.
+ * Evidence compaction is re-run before every remote stage that embeds the diff
+ * because each prompt has a different fixed cost and evidence budget.
  */
 export async function runChangeAnalysisPipeline(
     params: ChangeAnalysisPipelineParams
 ): Promise<ChangeAnalysisTrace> {
-    const { diffs, inputs, execution, getEvidence, compactFor, maxInputTokens, onStage } = params;
+    const { diffs, inputs, execution, getEvidence, compactFor, onStage } = params;
 
-    const deterministic: DeterministicChangeExtraction = extractChangesDeterministically(diffs);
+    const deterministic: DeterministicChangeExtraction = normalizeExtractionEvidenceRefs(
+        extractChangesDeterministically(diffs),
+        params.evidenceLedger,
+    );
     safeRun('Chain.onStage.changeExtractionStart', () => onStage?.({ type: 'changeExtractionStart' }));
     const changeExtractionMessages = (current: DraftEvidence[]) => buildChangeExtractionMessages({
         deterministic,
         evidencePayload: current,
     });
     await compactFor('changeExtraction', changeExtractionMessages);
-    const changeExtraction = await runEvidenceStage(
+    const changeExtraction = normalizeExtractionEvidenceRefs(await runEvidenceStage(
         'changeExtraction',
         changeExtractionMessages,
         compactFor,
         () => extractChanges(diffs, getEvidence(), execution, deterministic),
-    );
+    ), params.evidenceLedger);
     safeRun('Chain.onStage.changeExtracted', () => onStage?.({
         type: 'changeExtracted',
         data: {
@@ -87,6 +98,18 @@ export async function runChangeAnalysisPipeline(
     };
 
     let repositoryEvidence = emptyRepositoryEvidence('Repository investigation did not run.');
+    let semanticAnalysis = normalizeSemanticAnalysis({}, repositoryEvidence, params.evidenceLedger);
+    let informationSelection: InformationSelection = {
+        mustExpress: [],
+        optional: [],
+        omit: [],
+        suggestedScope: null,
+        notes: null,
+    };
+    let analysisStatus: ChangeAnalysisTrace['analysisStatus'] = 'unavailable';
+    let analysisIssues: string[] = [];
+    let agentMetrics: ChangeAnalysisTrace['agentMetrics'];
+    let agentClaims: ChangeAnalysisTrace['agentClaims'] = [];
     let investigationPlan: InvestigationPlan | undefined;
     if (!settings.enabled) {
         repositoryEvidence = emptyRepositoryEvidence('Repository investigation is disabled by configuration.');
@@ -118,14 +141,26 @@ export async function runChangeAnalysisPipeline(
                 throw new Error('RepositoryAnalysisService is required for change-conditioned repository analysis.');
             }
             try {
-                repositoryEvidence = await params.repositoryAnalysisService.runChangeAnalysis({
+                await compactFor('semanticAnalysis', current => [{
+                    role: 'user',
+                    content: JSON.stringify({ changeExtraction, plan, evidence: current }),
+                }]);
+                params.onAgentMilestone?.('start', Date.now());
+                const agentOutput = await params.repositoryAnalysisService.runChangeAnalysis({
                     extraction: changeExtraction,
                     plan,
                     repositoryPath: inputs.repositoryPath,
                     excludePatterns: settings.excludePatterns,
                     execution,
                     maxSteps: settings.maxSteps,
-                    maxInputTokens,
+                    evidence: getEvidence(),
+                    evidenceLedger: params.evidenceLedger,
+                    repositoryTerminology: inputs.repositoryAnalysis,
+                    userTemplate: inputs.userTemplate,
+                    onContextCompacted: event => safeRun('Chain.onStage.contextCompacted', () => onStage?.({
+                        type: 'contextCompacted',
+                        data: event,
+                    })),
                     onStep: event => safeRun('Chain.onStage.investigationStep', () => onStage?.({
                         type: 'investigationStep',
                         data: {
@@ -139,6 +174,14 @@ export async function runChangeAnalysisPipeline(
                         },
                     })),
                 });
+                repositoryEvidence = agentOutput.repositoryEvidence;
+                semanticAnalysis = agentOutput.semanticAnalysis;
+                informationSelection = agentOutput.informationSelection;
+                analysisStatus = agentOutput.analysisStatus;
+                analysisIssues = agentOutput.issues;
+                agentMetrics = agentOutput.runtimeMetrics;
+                agentClaims = agentOutput.claims;
+                params.onAgentMilestone?.('terminal', Date.now());
             } catch (error) {
                 if (!isContextWindowFailure(error)) {
                     throw error;
@@ -146,11 +189,13 @@ export async function runChangeAnalysisPipeline(
                 repositoryEvidence = emptyRepositoryEvidence(
                     'Repository investigation reached the configured context budget; continuing from diff evidence.',
                 );
+                semanticAnalysis = normalizeSemanticAnalysis({}, repositoryEvidence, params.evidenceLedger);
+                analysisIssues = [repositoryEvidence.stopReason];
             }
         }
     }
 
-    if (repositoryEvidence.degraded) {
+    if (analysisStatus === 'unavailable' && repositoryEvidence.degraded) {
         safeRun('Chain.onStage.investigationSkipped', () => onStage?.({
             type: 'investigationSkipped',
             data: { reason: repositoryEvidence.stopReason },
@@ -168,26 +213,21 @@ export async function runChangeAnalysisPipeline(
         }));
     }
 
+    if (analysisStatus !== 'complete') {
+        if (!analysisIssues.length) {
+            analysisIssues = [repositoryEvidence.stopReason];
+        }
+        safeRun('Chain.onStage.analysisDegraded', () => onStage?.({
+            type: 'analysisDegraded',
+            data: {
+                status: analysisStatus,
+                reason: analysisIssues.join(' | '),
+                issueCount: analysisIssues.length,
+            },
+        }));
+    }
+
     safeRun('Chain.onStage.semanticAnalysisStart', () => onStage?.({ type: 'semanticAnalysisStart' }));
-    const semanticMessages = (current: DraftEvidence[]) => buildSemanticAnalysisMessages({
-        changeExtraction,
-        repositoryEvidence,
-        evidencePayload: current,
-        repositoryTerminology: inputs.repositoryAnalysis,
-    });
-    await compactFor('semanticAnalysis', semanticMessages);
-    const semanticAnalysis = await runEvidenceStage(
-        'semanticAnalysis',
-        semanticMessages,
-        compactFor,
-        () => analyzeSemantics({
-            changeExtraction,
-            repositoryEvidence,
-            evidencePayload: getEvidence(),
-            repositoryTerminology: inputs.repositoryAnalysis,
-            execution,
-        }),
-    );
     safeRun('Chain.onStage.semanticAnalysisComplete', () => onStage?.({
         type: 'semanticAnalysisComplete',
         data: {
@@ -201,16 +241,12 @@ export async function runChangeAnalysisPipeline(
     }));
 
     safeRun('Chain.onStage.informationSelectionStart', () => onStage?.({ type: 'informationSelectionStart' }));
-    const informationSelection = await selectInformation({
-        changeExtraction,
-        semanticAnalysis,
-        userTemplate: inputs.userTemplate,
-        execution,
-    });
     const selectedInformation = buildSelectedInformation({
         semanticAnalysis,
         selection: informationSelection,
         evidence: getEvidence(),
+        analysisStatus,
+        analysisIssues,
     });
     safeRun('Chain.onStage.informationSelected', () => onStage?.({
         type: 'informationSelected',
@@ -224,12 +260,39 @@ export async function runChangeAnalysisPipeline(
     }));
 
     return {
+        analysisStatus,
+        analysisIssues,
+        ...(agentMetrics ? { agentMetrics } : {}),
+        agentClaims,
         changeExtraction,
         ...(investigationPlan ? { investigationPlan } : {}),
         repositoryEvidence,
         semanticAnalysis,
         informationSelection,
         selectedInformation,
+    };
+}
+
+function normalizeExtractionEvidenceRefs<T extends ChangeAnalysisTrace['changeExtraction']>(
+    extraction: T,
+    ledger: EvidenceLedger,
+): T {
+    return {
+        ...extraction,
+        changedSymbols: extraction.changedSymbols.map(symbol => ({
+            ...symbol,
+            evidenceRefs: Array.from(new Set(symbol.evidenceRefs.flatMap(ref => {
+                if (/^D\d+$/.test(ref) && ledger.has(ref)) {
+                    return [ref];
+                }
+                const match = ref.match(/^(.*):(\d+)$/);
+                if (!match) {
+                    return [];
+                }
+                const id = ledger.resolveDiffAnchor(match[1], Number(match[2]));
+                return id ? [id] : [];
+            }))),
+        })),
     };
 }
 

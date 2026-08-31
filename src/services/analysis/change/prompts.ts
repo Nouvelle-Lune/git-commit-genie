@@ -9,16 +9,12 @@ import { AIMessage } from '../../llm/providers';
 import { z } from 'zod';
 import {
     changeExtractionResponseSchema,
-    informationSelectionResponseSchema,
     investigationPlanResponseSchema,
-    semanticAnalysisResponseSchema,
 } from '../../llm/providers/schemas/common';
 import {
     ChangeExtraction,
     InvestigationPlan,
-    RepositoryEvidence,
     RepositoryEvidenceItem,
-    SemanticChangeAnalysis,
     RepositoryAnalysisContext,
 } from './types';
 import { DeterministicChangeExtraction } from './extraction';
@@ -123,7 +119,7 @@ export function buildChangeExtractionMessages(input: {
             'Do not list symbols that merely appear as context lines.',
             'Use exact identifiers as written in the code; never paraphrase a name.',
             'Attribute every symbol to a file that appears in changed_files.',
-            'Use `path:line` anchors from the diff for evidenceRefs when you can identify them.',
+            'Use only the D identifiers embedded in the diff for evidenceRefs.',
             '</instructions>',
             '',
             '<field_semantics>',
@@ -359,210 +355,4 @@ export function buildInvestigationToolResultMessage(input: {
     );
 
     return { role: 'user', content: lines.join('\n') };
-}
-
-// ---------------------------------------------------------------------------
-// Evidence-Backed Semantic Analysis
-// ---------------------------------------------------------------------------
-
-export function buildSemanticAnalysisMessages(input: {
-    changeExtraction: ChangeExtraction;
-    repositoryEvidence: RepositoryEvidence;
-    evidencePayload: unknown;
-    repositoryTerminology?: RepositoryAnalysisContext;
-}): AIMessage[] {
-    const system: AIMessage = {
-        role: 'system',
-        content: [
-            '<role>',
-            'You determine what a specific code change means, using only the diff and the',
-            'repository evidence that was actually retrieved for it.',
-            '</role>',
-            '',
-            '<critical>',
-            'Return STRICT JSON only.',
-            'Separate what you observed from what you inferred.',
-            'Every non-trivial claim carries the evidence that supports it.',
-            'Anything the evidence cannot settle stays null or empty and is recorded in',
-            'uncertainties. Never complete a gap from general knowledge or from what a',
-            'change like this usually means.',
-            '</critical>',
-        ].join('\n'),
-    };
-
-    const user: AIMessage = {
-        role: 'user',
-        content: [
-            '<instructions>',
-            'Produce the semantic analysis of this change.',
-            '</instructions>',
-            '',
-            '<claim_separation>',
-            '- observedChanges: facts read directly from the diff.',
-            '- repositoryFacts: facts read from the retrieved repository evidence.',
-            '- supportedInferences: conclusions that follow from the two above.',
-            '- uncertainInferences: plausible readings the evidence does not establish.',
-            'Any causal statement must connect change -> repository evidence -> conclusion.',
-            EVIDENCE_DISCIPLINE,
-            '</claim_separation>',
-            '',
-            '<behavior_analysis>',
-            'State the behavior before and after the change, and the externally observable',
-            'effect. If the evidence does not establish the previous behavior, set',
-            '"before" to null. Do not reconstruct it.',
-            '</behavior_analysis>',
-            '',
-            '<capability_analysis>',
-            'technicalCapability is the code-level capability the change affects.',
-            'productCapability is a user- or business-facing capability. Set it to null',
-            'unless repository evidence connects this change to it. Technical evidence is',
-            'not product intent.',
-            '</capability_analysis>',
-            '',
-            '<intent_analysis>',
-            'Derive primaryIntent from observed changes plus repository facts plus the',
-            'before/after behavior. If several readings remain equally consistent with the',
-            'evidence, set primaryIntent to null and record the competing readings in',
-            'uncertainties. Do not force a unique intent so a commit message can be written.',
-            '</intent_analysis>',
-            '',
-            '<classification>',
-            'First decide the four booleans from evidence, then derive the type:',
-            '- an existing incorrect behavior was corrected -> fix',
-            '- a new externally meaningful capability was added -> feat',
-            '- behavior preserved, internal structure changed -> refactor',
-            '- test-only change -> test',
-            '- documentation-only change -> docs',
-            '- build tooling, dependencies, or project config only -> build or chore',
-            '- formatting only, no behavior change -> style',
-            '- measurable performance improvement -> perf',
-            'Set recommendedType to null when the evidence does not support one of these.',
-            'Never invent a justification for a type.',
-            '</classification>',
-            '',
-            structuredSchemaBlock(semanticAnalysisResponseSchema),
-            '',
-            'Shape rules that models commonly get wrong:',
-            '- observedChanges / repositoryFacts / supportedInferences / uncertainInferences',
-            '  are arrays of OBJECTS with claim + evidenceRefs — never bare strings.',
-            '- behaviorAnalysis.before / after / observableEffect are plain strings or null',
-            '  — never claim objects.',
-            '- Always include dependencyContext, capabilityContext, intentAnalysis, and',
-            '  changeClassification even when every field is empty or null.',
-            '- evidenceRefs cite investigation ids like "E1" or diff anchors like "path:line".',
-            '',
-            jsonBlock('change_extraction', input.changeExtraction),
-            '',
-            '<repository_evidence>',
-            input.repositoryEvidence.degraded
-                ? 'Repository investigation was unavailable for this change. Treat repositoryFacts as empty and rely on the diff alone; leave repository-dependent conclusions null.'
-                : `Investigation stopped after ${input.repositoryEvidence.steps} step(s): ${input.repositoryEvidence.stopReason}`,
-            JSON.stringify({
-                findings: input.repositoryEvidence.findings,
-                unresolved_questions: input.repositoryEvidence.unresolvedQuestions,
-                evidence: input.repositoryEvidence.items.map(item => ({
-                    id: item.id,
-                    kind: item.kind,
-                    target: item.target,
-                    ref: item.ref,
-                    excerpt: item.excerpt,
-                })),
-            }, null, 2),
-            '</repository_evidence>',
-            '',
-            jsonBlock('change_evidence', input.evidencePayload),
-            ...(input.repositoryTerminology
-                ? [
-                    '',
-                    '<repository_terminology>',
-                    'Background only: project vocabulary and architecture naming. It cannot',
-                    'establish the purpose, effect, or scope of this change.',
-                    JSON.stringify(input.repositoryTerminology, null, 2),
-                    '</repository_terminology>',
-                ]
-                : []),
-        ].join('\n'),
-    };
-
-    return [system, user];
-}
-
-// ---------------------------------------------------------------------------
-// Information Selection
-// ---------------------------------------------------------------------------
-
-export function buildInformationSelectionMessages(input: {
-    changeExtraction: ChangeExtraction;
-    semanticAnalysis: SemanticChangeAnalysis;
-    userTemplate?: string;
-}): AIMessage[] {
-    const system: AIMessage = {
-        role: 'system',
-        content: [
-            '<role>',
-            'You decide which parts of a change analysis belong in a commit message.',
-            '</role>',
-            '',
-            '<critical>',
-            'Return STRICT JSON only.',
-            'The value of this stage is selection, not accumulation. A commit message that',
-            'states fewer, correct things is better than one that states everything known.',
-            '</critical>',
-        ].join('\n'),
-    };
-
-    const user: AIMessage = {
-        role: 'user',
-        content: [
-            '<instructions>',
-            'Partition what is known into mustExpress, optional, and omit.',
-            'Write each entry as a short, self-contained statement in English; a later',
-            'stage handles wording, commit type, and output language.',
-            '</instructions>',
-            '',
-            '<must_express>',
-            'The primary behavioral change, the primary intent when it is established, and',
-            'the scope needed to understand the commit. Keep this to at most 2 entries.',
-            '</must_express>',
-            '',
-            '<optional>',
-            'The important implementation mechanism, secondary behavior, and details that',
-            'aid understanding without being required. At most 3 entries.',
-            '</optional>',
-            '',
-            '<omit>',
-            'By default: ordinary test additions, mechanical edits, generated files,',
-            'lockfiles, formatting, incidental refactors, helper signature churn, and any',
-            'implementation detail that does not change the core meaning.',
-            'Also omit anything the analysis marked uncertain or unsupported.',
-            '</omit>',
-            '',
-            '<scope>',
-            'Set suggestedScope from the investigated code paths and the affected technical',
-            'capability, not from file names alone. Use null when the change spans areas',
-            'with no single honest scope.',
-            '</scope>',
-            '',
-            structuredSchemaBlock(informationSelectionResponseSchema),
-            '',
-            jsonBlock('change_extraction', {
-                changed_files: input.changeExtraction.changedFiles,
-                changed_symbols: input.changeExtraction.changedSymbols,
-            }),
-            '',
-            jsonBlock('semantic_analysis', input.semanticAnalysis),
-            ...(input.userTemplate && input.userTemplate.trim()
-                ? [
-                    '',
-                    '<user_template>',
-                    'The final message follows this user template. Select information that the',
-                    'template can actually express, and include what its required sections need.',
-                    input.userTemplate,
-                    '</user_template>',
-                ]
-                : []),
-        ].join('\n'),
-    };
-
-    return [system, user];
 }

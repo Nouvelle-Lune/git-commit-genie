@@ -54,7 +54,6 @@ export interface PipelineTextCatalog {
     stepDraft: string;
     stepVerify: string;
     draftInput: string;
-    ragInput: string;
     extractInput: string;
     analyzeInput: string;
     tokenUsage: string;
@@ -143,8 +142,6 @@ export interface PipelineTextCatalog {
     informationSelectedDescription: string;
     ragDisabledTitle: string;
     ragDisabledDescription: string;
-    ragPreparationStartTitle: string;
-    ragPreparationStartDescription: string;
     ragPreparedTitle: string;
     ragRetrievalStartTitle: string;
     ragRetrievalStartDescription: string;
@@ -152,8 +149,6 @@ export interface PipelineTextCatalog {
     ragRetrievedEmptyTitle: string;
     ragRetrievedDescription: string;
     ragRetrievedEmptyDescription: string;
-    ragPreparationFailedTitle: string;
-    ragPreparationFailedDefault: string;
     ragRetrievalFailedTitle: string;
     ragRetrievalFailedDefault: string;
     draftStartTitle: string;
@@ -194,7 +189,6 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     stepDraft: 'Draft',
     stepVerify: 'Verify',
     draftInput: 'Draft input',
-    ragInput: 'RAG input',
     extractInput: 'Change extraction input',
     analyzeInput: 'Semantic analysis input',
     tokenUsage: 'Input token usage {0}%',
@@ -283,17 +277,13 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     informationSelectedDescription: '{0}',
     ragDisabledTitle: 'RAG skipped',
     ragDisabledDescription: 'Historical style retrieval is disabled for this generation.',
-    ragPreparationStartTitle: 'Building retrieval query',
-    ragPreparationStartDescription: 'The model is converting current change evidence into a semantic summary and retrieval features.',
     ragPreparedTitle: 'Retrieval query prepared',
     ragRetrievalStartTitle: 'Searching commit history',
-    ragRetrievalStartDescription: 'Hybrid and type/scope recall are selecting historical style candidates.',
+    ragRetrievalStartDescription: 'Type-filtered Dense, BM25, and scope recall are selecting historical style candidates.',
     ragRetrievedTitle: 'Style references selected',
     ragRetrievedEmptyTitle: 'No style references selected',
     ragRetrievedDescription: '{0} historical commit messages will be used for style calibration only.',
     ragRetrievedEmptyDescription: 'Drafting will continue from current change evidence without historical examples.',
-    ragPreparationFailedTitle: 'RAG preparation failed',
-    ragPreparationFailedDefault: 'Retrieval context could not be prepared.',
     ragRetrievalFailedTitle: 'Historical retrieval failed',
     ragRetrievalFailedDefault: 'Historical style references could not be retrieved.',
     draftStartTitle: 'Drafting commit message',
@@ -354,7 +344,7 @@ export interface PipelineSnapshot {
     predictedScope?: string;
     referenceCount?: number;
     latestHandoff?: {
-        target: 'changeExtraction' | 'semanticAnalysis' | 'ragPreparation' | 'draft';
+        target: 'changeExtraction' | 'semanticAnalysis' | 'draft';
         rawFiles: number;
         summarizedFiles: number;
         estimatedInputTokens: number;
@@ -388,14 +378,14 @@ export type PipelineStageName =
     | 'investigationSkipped'
     | 'semanticAnalysisStart'
     | 'semanticAnalysisComplete'
+    | 'analysisDegraded'
+    | 'contextCompacted'
     | 'informationSelectionStart'
     | 'informationSelected'
     | 'ragDisabled'
-    | 'ragPreparationStart'
     | 'ragPrepared'
     | 'ragRetrievalStart'
     | 'ragRetrieved'
-    | 'ragPreparationSkipped'
     | 'ragRetrievalSkipped'
     | 'draftStart'
     | 'classifyDraft'
@@ -436,14 +426,14 @@ export const PIPELINE_STAGE_BADGES: Record<PipelineStageName, PipelineStageBadge
     investigationSkipped: { label: 'SKIP', className: 'stage-badge-skipped' },
     semanticAnalysisStart: { label: 'SEM', className: 'stage-badge-semantic' },
     semanticAnalysisComplete: { label: 'SEM', className: 'stage-badge-semantic' },
+    analysisDegraded: { label: 'WARN', className: 'stage-badge-skipped' },
+    contextCompacted: { label: 'CTX', className: 'stage-badge-summarize' },
     informationSelectionStart: { label: 'SEL', className: 'stage-badge-select' },
     informationSelected: { label: 'SEL', className: 'stage-badge-select' },
     ragDisabled: { label: 'RAG', className: 'stage-badge-rag' },
-    ragPreparationStart: { label: 'RAG', className: 'stage-badge-rag' },
     ragPrepared: { label: 'RAG', className: 'stage-badge-rag' },
     ragRetrievalStart: { label: 'RAG', className: 'stage-badge-rag' },
     ragRetrieved: { label: 'RAG', className: 'stage-badge-rag' },
-    ragPreparationSkipped: { label: 'RAG', className: 'stage-badge-rag' },
     ragRetrievalSkipped: { label: 'RAG', className: 'stage-badge-rag' },
     draftStart: { label: 'DRFT', className: 'stage-badge-classify' },
     classifyDraft: { label: 'DRFT', className: 'stage-badge-classify' },
@@ -518,8 +508,6 @@ function handoffTargetLabel(target: unknown, text: PipelineTextCatalog): string 
             return text.extractInput;
         case 'semanticAnalysis':
             return text.analyzeInput;
-        case 'ragPreparation':
-            return text.ragInput;
         default:
             return text.draftInput;
     }
@@ -769,6 +757,28 @@ export function presentPipelineEvent(
                 data,
             };
         }
+        case 'analysisDegraded':
+            return {
+                stage,
+                phase: text.phaseAnalyze,
+                title: text.semanticAnalysisCompleteTitle,
+                description: asString(data.reason) || text.semanticAnalysisNoIntentDescription,
+                metrics: [],
+                tone: 'warning',
+                data,
+            };
+        case 'contextCompacted':
+            return {
+                stage,
+                phase: text.phaseTransform,
+                title: text.summarizeStartTitle,
+                description: asString(data.reason) || text.summarizeStartDescription,
+                metrics: asNumber(data.epoch) !== undefined
+                    ? [{ label: text.metricProgress, value: String(asNumber(data.epoch)), tone: 'budget' }]
+                    : [],
+                tone: 'success',
+                data,
+            };
         case 'informationSelectionStart':
             return {
                 stage,
@@ -809,16 +819,6 @@ export function presentPipelineEvent(
                 description: text.ragDisabledDescription,
                 metrics: [],
                 tone: 'neutral',
-                data,
-            };
-        case 'ragPreparationStart':
-            return {
-                stage,
-                phase: text.phaseRetrieval,
-                title: text.ragPreparationStartTitle,
-                description: text.ragPreparationStartDescription,
-                metrics: [],
-                tone: 'active',
                 data,
             };
         case 'ragPrepared': {
@@ -867,16 +867,6 @@ export function presentPipelineEvent(
                 data,
             };
         }
-        case 'ragPreparationSkipped':
-            return {
-                stage,
-                phase: text.phaseRetrieval,
-                title: text.ragPreparationFailedTitle,
-                description: asString(data.error) || text.ragPreparationFailedDefault,
-                metrics: [],
-                tone: 'warning',
-                data,
-            };
         case 'ragRetrievalSkipped':
             return {
                 stage,
@@ -1044,9 +1034,6 @@ export function deriveLatestPipelineSnapshot(
                 break;
             case 'summarizeFailed':
                 stepStates.summary = 'warning';
-                if (data.target === 'ragPreparation' && stepStates.rag === 'pending') {
-                    stepStates.rag = 'skipped';
-                }
                 degraded = true;
                 break;
             case 'evidenceRouted':
@@ -1056,8 +1043,7 @@ export function deriveLatestPipelineSnapshot(
                     stepStates.summary = 'skipped';
                 }
                 if (
-                    (data.target === 'ragPreparation' || data.target === 'draft'
-                        || data.target === 'changeExtraction' || data.target === 'semanticAnalysis')
+                    (data.target === 'draft' || data.target === 'changeExtraction' || data.target === 'semanticAnalysis')
                     && asNumber(data.rawFiles) !== undefined
                     && asNumber(data.summarizedFiles) !== undefined
                     && asNumber(data.estimatedInputTokens) !== undefined
@@ -1097,21 +1083,28 @@ export function deriveLatestPipelineSnapshot(
                 break;
             case 'semanticAnalysisStart':
                 changeConditioned = true;
-                stepStates.analyze = 'active';
+                stepStates.analyze = degraded ? 'warning' : 'active';
                 break;
             case 'semanticAnalysisComplete':
                 changeConditioned = true;
-                stepStates.analyze = 'complete';
+                stepStates.analyze = degraded ? 'warning' : 'complete';
+                break;
+            case 'analysisDegraded':
+                changeConditioned = true;
+                stepStates.analyze = 'warning';
+                stepStates.select = 'warning';
+                degraded = true;
+                break;
+            case 'contextCompacted':
                 break;
             case 'informationSelectionStart':
                 changeConditioned = true;
-                stepStates.select = 'active';
+                stepStates.select = degraded ? 'warning' : 'active';
                 break;
             case 'informationSelected':
                 changeConditioned = true;
-                stepStates.select = 'complete';
+                stepStates.select = degraded ? 'warning' : 'complete';
                 break;
-            case 'ragPreparationStart':
             case 'ragRetrievalStart':
                 stepStates.rag = 'active';
                 break;
@@ -1131,7 +1124,6 @@ export function deriveLatestPipelineSnapshot(
             case 'ragDisabled':
                 stepStates.rag = 'skipped';
                 break;
-            case 'ragPreparationSkipped':
             case 'ragRetrievalSkipped':
                 stepStates.rag = 'warning';
                 degraded = true;

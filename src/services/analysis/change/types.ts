@@ -7,6 +7,7 @@
 // that carry repository evidence.
 
 import { DiffData } from '../../git/gitTypes';
+import type { AgentRunMetrics } from '../../../agent/runtime';
 import type { RepositoryAnalysis } from '../repository/repositoryAnalysisTypes';
 
 export type RepositoryAnalysisContext = Partial<Pick<
@@ -44,6 +45,8 @@ export interface RawDiffEvidence {
     kind: 'raw';
     fileName: string;
     status: DiffData['status'];
+    /** Globally unique D identifiers allocated before the first model call. */
+    evidenceIds: string[];
     rawDiff: string;
 }
 
@@ -185,6 +188,18 @@ export interface EvidenceBackedClaim {
     evidenceRefs: string[];
 }
 
+export interface AgentClaim extends EvidenceBackedClaim {
+    category: 'observed_change' | 'repository_fact' | 'supported_inference' | 'uncertain_inference';
+    disposition: 'must_express' | 'optional' | 'omit';
+}
+
+/** Locally assigned identifier used only by trace and benchmark output. */
+export interface TracedAgentClaim extends AgentClaim {
+    id: string;
+}
+
+export type ChangeAnalysisStatus = 'complete' | 'degraded' | 'unavailable';
+
 export interface ChangeTargetRole {
     symbol: string;
     file: string;
@@ -257,6 +272,8 @@ export interface InformationSelection {
 
 /** Compact payload handed to the commit generator. */
 export interface SelectedSemanticInformation {
+    analysisStatus: 'complete' | 'degraded' | 'unavailable';
+    analysisIssues: string[];
     primaryIntent: string | null;
     mustExpress: string[];
     optional: string[];
@@ -272,6 +289,11 @@ export interface SelectedSemanticInformation {
 }
 
 export interface ChangeAnalysisTrace {
+    analysisStatus: ChangeAnalysisStatus;
+    analysisIssues: string[];
+    /** Runtime counters and per-request provider usage for benchmark collection. */
+    agentMetrics?: AgentRunMetrics;
+    agentClaims: TracedAgentClaim[];
     changeExtraction: ChangeExtraction;
     investigationPlan?: InvestigationPlan;
     repositoryEvidence: RepositoryEvidence;

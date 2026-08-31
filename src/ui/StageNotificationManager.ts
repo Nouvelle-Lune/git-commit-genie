@@ -18,10 +18,11 @@ export type StageEventType =
   | 'investigationSkipped'
   | 'semanticAnalysisStart'
   | 'semanticAnalysisComplete'
+  | 'analysisDegraded'
+  | 'contextCompacted'
   | 'informationSelectionStart'
   | 'informationSelected'
   | 'ragDisabled'
-  | 'ragPreparationStart'
   | 'ragPrepared'
   | 'ragRetrievalStart'
   | 'classifyDraft'
@@ -32,7 +33,6 @@ export type StageEventType =
   | 'strictFixStart'
   | 'enforceLanguage'
   | 'enforceLanguageStart'
-  | 'ragPreparationSkipped'
   | 'ragRetrieved'
   | 'ragRetrievalSkipped'
   | 'done'
@@ -49,7 +49,7 @@ export interface StageEventData {
   message?: string;
   finalMessage?: string;
   error?: string;
-  target?: 'changeExtraction' | 'semanticAnalysis' | 'ragPreparation' | 'draft';
+  target?: 'changeExtraction' | 'semanticAnalysis' | 'draft';
   maxInputTokens?: number;
   contextWindowTokens?: number;
   hardInputTokens?: number;
@@ -81,8 +81,6 @@ function targetLabel(target: StageEventData['target']): string {
       return I18N.pipeline.extractInput;
     case 'semanticAnalysis':
       return I18N.pipeline.analyzeInput;
-    case 'ragPreparation':
-      return I18N.pipeline.ragInput;
     default:
       return I18N.pipeline.draftInput;
   }
@@ -202,7 +200,11 @@ export class StageNotificationManager {
         break;
       case 'semanticAnalysisStart':
       case 'semanticAnalysisComplete':
+      case 'analysisDegraded':
         this.active.updateMessage(t(I18N.stages.semanticAnalysis));
+        break;
+      case 'contextCompacted':
+        this.active.updateMessage(t(I18N.stages.summarizingStart));
         break;
       case 'informationSelectionStart':
       case 'informationSelected':
@@ -210,9 +212,6 @@ export class StageNotificationManager {
         break;
       case 'ragDisabled':
         this.active.updateMessage(t(I18N.stages.ragDisabled));
-        break;
-      case 'ragPreparationStart':
-        this.active.updateMessage(t(I18N.stages.ragPreparationStart));
         break;
       case 'ragPrepared':
         this.active.updateMessage(t(I18N.stages.ragPrepared));
@@ -223,7 +222,6 @@ export class StageNotificationManager {
       case 'ragRetrieved':
         this.active.updateMessage(t(I18N.stages.ragRetrieved, Number(event.data?.count ?? 0)));
         break;
-      case 'ragPreparationSkipped':
       case 'ragRetrievalSkipped':
         this.active.updateMessage(t(I18N.stages.ragSkipped));
         break;

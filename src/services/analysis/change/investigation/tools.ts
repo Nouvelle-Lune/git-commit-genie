@@ -58,8 +58,8 @@ export interface InvestigationToolContext {
     excludePatterns: string[];
     /** Changed symbols from Stage 1, surfaced through getChangedSymbols. */
     changedSymbols: Array<{ name: string; file: string; symbolType: string; changeKind: string }>;
-    /** Allocates stable evidence ids (`E1`, `E2`, …) across the whole run. */
-    nextEvidenceId: () => string;
+    /** Allocates and records stable evidence ids (`E1`, `E2`, …) through AgentRuntime. */
+    allocateEvidence: (evidence: Omit<RepositoryEvidenceItem, 'id'>) => RepositoryEvidenceItem;
 }
 
 /**
@@ -193,8 +193,7 @@ function toEvidence(
     target: string,
     matches: Array<{ filePath: string; line: number; content: string }>
 ): RepositoryEvidenceItem[] {
-    return matches.slice(0, MAX_EVIDENCE_PER_CALL).map(match => ({
-        id: context.nextEvidenceId(),
+    return matches.slice(0, MAX_EVIDENCE_PER_CALL).map(match => context.allocateEvidence({
         kind: classifyPath(match.filePath) ?? kind,
         target,
         ref: `${match.filePath}:${match.line}`,
@@ -347,13 +346,12 @@ export async function runInvestigationTool(
 
                 const best = matches[0];
                 const body = await readDeclarationBody(context, best.filePath, best.line);
-                const primary: RepositoryEvidenceItem = {
-                    id: context.nextEvidenceId(),
+                const primary = context.allocateEvidence({
                     kind: 'definition',
                     target: symbol,
                     ref: body ? `${best.filePath}:${best.line}-${body.endLine}` : `${best.filePath}:${best.line}`,
                     excerpt: truncate(body ? body.text : best.content, 1200),
-                };
+                });
                 const others = toEvidence(context, 'definition', symbol, matches.slice(1, 4));
                 return {
                     ok: true,
@@ -423,11 +421,12 @@ export async function runInvestigationTool(
                         ? `'${symbol}' calls: ${Array.from(callees).slice(0, 25).join(', ')}.`
                         : `'${symbol}' makes no direct calls.`,
                     evidence: [{
-                        id: context.nextEvidenceId(),
-                        kind: 'callees',
-                        target: symbol,
-                        ref: `${best.filePath}:${best.line}-${body.endLine}`,
-                        excerpt: truncate(body.text, 1200),
+                        ...context.allocateEvidence({
+                            kind: 'callees',
+                            target: symbol,
+                            ref: `${best.filePath}:${best.line}-${body.endLine}`,
+                            excerpt: truncate(body.text, 1200),
+                        }),
                     }],
                 };
             }
@@ -463,11 +462,12 @@ export async function runInvestigationTool(
                     ok: true,
                     summary: `Type '${symbol}' is defined at ${best.filePath}:${best.line}.`,
                     evidence: [{
-                        id: context.nextEvidenceId(),
-                        kind: 'type',
-                        target: symbol,
-                        ref: body ? `${best.filePath}:${best.line}-${body.endLine}` : `${best.filePath}:${best.line}`,
-                        excerpt: truncate(body ? body.text : best.content, 1000),
+                        ...context.allocateEvidence({
+                            kind: 'type',
+                            target: symbol,
+                            ref: body ? `${best.filePath}:${best.line}-${body.endLine}` : `${best.filePath}:${best.line}`,
+                            excerpt: truncate(body ? body.text : best.content, 1000),
+                        }),
                     }],
                 };
             }
@@ -533,11 +533,12 @@ export async function runInvestigationTool(
                     ok: true,
                     summary: `Read ${relative}:${read.data.startLine}-${read.data.endLine}${read.data.hasMore ? ' (more lines follow)' : ''}.`,
                     evidence: [{
-                        id: context.nextEvidenceId(),
-                        kind: classifyPath(relative) ?? 'search',
-                        target: relative,
-                        ref: `${relative}:${read.data.startLine}-${read.data.endLine}`,
-                        excerpt: truncate(read.data.content, 2000),
+                        ...context.allocateEvidence({
+                            kind: classifyPath(relative) ?? 'search',
+                            target: relative,
+                            ref: `${relative}:${read.data.startLine}-${read.data.endLine}`,
+                            excerpt: truncate(read.data.content, 2000),
+                        }),
                     }],
                 };
             }

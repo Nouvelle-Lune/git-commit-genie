@@ -5,7 +5,7 @@ import OpenAI from 'openai';
 import { Repository } from '../git/git';
 import { RepoService } from '../repo/repo';
 import { buildRagRerankMessages } from '../chain/rag/prompts';
-import { ChangeSetSummary, RagStyleReference, RetrievalFeatures } from '../chain/types';
+import { ChangeSetSummary, RagRetrievalQuery, RagStyleReference, RetrievalFeatures } from '../chain/types';
 import { logger } from '../logger';
 import { RAG_DOCUMENTS_FILE, RAG_STATE_FILE, RagEmbeddingConfig, normalizeVector, readEmbeddingConfig } from './ragShared';
 import { LLMExecution } from '../llm/llmTypes';
@@ -53,13 +53,13 @@ type RecallCandidate = IndexedCommitRow & {
     bm25Score: number;
     featureScore: number;
     recencyBoost: number;
-    matchedBy: Set<'hybrid' | 'typeScope'>;
+    matchedBy: Set<'hybrid' | 'scope'>;
 };
 
 type RagRerankResponse = {
-    selected?: Array<{
-        id?: string;
-        reason?: string;
+    selected: Array<{
+        id: string;
+        reason: string;
     }>;
 };
 
@@ -75,12 +75,11 @@ export class RagRetrievalService {
 
     public async retrieveStyleReferences(params: {
         repo: Repository;
-        changeSetSummary: ChangeSetSummary;
-        retrievalFeatures: RetrievalFeatures;
+        query: RagRetrievalQuery;
         execution: LLMExecution;
         maxResults?: number;
     }): Promise<RagStyleReference[]> {
-        const { repo, changeSetSummary, retrievalFeatures, execution } = params;
+        const { repo, query, execution } = params;
         const maxResults = Math.max(1, params.maxResults ?? DEFAULT_RERANK_TOP_K);
         const loaded = await this.loadIndexedRows(repo);
 
@@ -89,10 +88,19 @@ export class RagRetrievalService {
             return [];
         }
 
-        const { rows, bm25 } = loaded;
-        const hybrid = await this.hybridRecall(rows, bm25, changeSetSummary.text || '');
-        const typeScope = this.typeScopeRecall(rows, retrievalFeatures);
-        const mergedCandidates = this.mergeCandidates(hybrid, typeScope);
+        // Type is a hard eligibility boundary. A known current type must never
+        // retrieve a historical message framed as a different commit type.
+        const rows = this.filterRowsByType(loaded.rows, query.type);
+        if (!rows.length) {
+            logger.info(`[Genie][RAG] Retrieval produced no candidates after type filtering for ${repo.rootUri.fsPath}.`);
+            return [];
+        }
+        const bm25 = rows.length === loaded.rows.length ? loaded.bm25 : this.buildBm25Corpus(rows);
+        const denseQuery = query.mustExpress.join('\n');
+        const lexicalQuery = [...query.mustExpress, query.scope || ''].filter(Boolean).join('\n');
+        const hybrid = await this.hybridRecall(rows, bm25, denseQuery, lexicalQuery);
+        const scope = this.scopeRecall(rows, query.scope);
+        const mergedCandidates = this.mergeCandidates(hybrid, scope);
         // Apply recency boost before final sort so newer commits get a small
         // ranking lift (and older ones a small penalty), capped at +/-30%.
         const now = Date.now();
@@ -112,27 +120,31 @@ export class RagRetrievalService {
             return [];
         }
 
-        try {
-            const reranked = await this.rerankCandidates(execution, changeSetSummary, retrievalFeatures, merged, maxResults);
-            if (reranked.length) {
-                logger.info(`[Genie][RAG] Reranked ${merged.length} candidates down to ${reranked.length} style references for ${repo.rootUri.fsPath}.`);
-                return reranked;
-            }
-        } catch (error) {
-            logger.warn('[Genie][RAG] Candidate reranking failed; falling back to retrieval order.', error as any);
-        }
-
-        return merged.slice(0, maxResults).map(candidate => this.toStyleReference(candidate, this.buildFallbackStyleReason(candidate)));
+        const reranked = await this.rerankCandidates(execution, query, merged, maxResults);
+        logger.info(`[Genie][RAG] Reranked ${merged.length} candidates down to ${reranked.length} style references for ${repo.rootUri.fsPath}.`);
+        return reranked;
     }
 
-    private async hybridRecall(rows: IndexedCommitRow[], bm25: Bm25CorpusStats, queryText: string): Promise<RecallCandidate[]> {
-        const cleanQuery = (queryText || '').trim();
-        if (!cleanQuery) {
+    private async hybridRecall(
+        rows: IndexedCommitRow[],
+        bm25: Bm25CorpusStats,
+        denseQueryText: string,
+        lexicalQueryText: string,
+    ): Promise<RecallCandidate[]> {
+        const cleanDenseQuery = (denseQueryText || '').trim();
+        const cleanLexicalQuery = (lexicalQueryText || '').trim();
+        if (!cleanDenseQuery && !cleanLexicalQuery) {
             return [];
         }
 
-        const { scores: denseScores, available: denseAvailable } = await this.computeDenseScores(rows, cleanQuery);
-        const bm25Scores = this.computeBm25Scores(bm25, cleanQuery);
+        const denseResult = cleanDenseQuery
+            ? await this.computeDenseScores(rows, cleanDenseQuery)
+            : { scores: new Array(rows.length).fill(0), available: new Array(rows.length).fill(false) };
+        const denseScores = denseResult.scores;
+        const denseAvailable = denseResult.available;
+        const bm25Scores = cleanLexicalQuery
+            ? this.computeBm25Scores(bm25, cleanLexicalQuery)
+            : new Array(rows.length).fill(0);
         const denseNormalized = this.normalizeScores(denseScores);
         const bm25Normalized = this.normalizeScores(bm25Scores);
 
@@ -150,7 +162,7 @@ export class RagRetrievalService {
                 bm25Score: bm25Scores[index] ?? 0,
                 featureScore: 0,
                 recencyBoost: 0,
-                matchedBy: new Set<'hybrid' | 'typeScope'>(hybridScore > 0 ? ['hybrid'] : []),
+                matchedBy: new Set<'hybrid' | 'scope'>(hybridScore > 0 ? ['hybrid'] : []),
             };
         });
 
@@ -160,30 +172,25 @@ export class RagRetrievalService {
             .slice(0, HYBRID_RECALL_LIMIT);
     }
 
-    private typeScopeRecall(rows: IndexedCommitRow[], retrievalFeatures: RetrievalFeatures): RecallCandidate[] {
-        const targetType = this.normalizeLabel(retrievalFeatures.predictedType);
-        const targetScope = this.normalizeLabel(retrievalFeatures.predictedScope);
-
-        if (!targetType && !targetScope) {
+    private scopeRecall(rows: IndexedCommitRow[], requestedScope: string | null): RecallCandidate[] {
+        const targetScope = this.normalizeLabel(requestedScope);
+        if (!targetScope) {
             return [];
         }
 
         return rows
             .map((row) => {
-                const rowType = this.normalizeLabel(row.retrievalFeatures.predictedType || row.changeSetSummary.dominantType);
                 const rowScope = this.normalizeLabel(row.retrievalFeatures.predictedScope || row.changeSetSummary.dominantScope);
-                const typeScore = targetType && rowType === targetType ? 0.62 : 0;
                 const scopeScore = this.computeScopeScore(targetScope, rowScope);
-                const featureScore = Math.min(1, typeScore + scopeScore);
 
                 return {
                     ...row,
                     hybridScore: 0,
                     denseScore: 0,
                     bm25Score: 0,
-                    featureScore,
+                    featureScore: scopeScore,
                     recencyBoost: 0,
-                    matchedBy: new Set<'hybrid' | 'typeScope'>(featureScore > 0 ? ['typeScope'] : []),
+                    matchedBy: new Set<'hybrid' | 'scope'>(scopeScore > 0 ? ['scope'] : []),
                 };
             })
             .filter(candidate => candidate.featureScore > 0)
@@ -218,8 +225,7 @@ export class RagRetrievalService {
 
     private async rerankCandidates(
         execution: LLMExecution,
-        changeSetSummary: ChangeSetSummary,
-        retrievalFeatures: RetrievalFeatures,
+        query: RagRetrievalQuery,
         candidates: RecallCandidate[],
         maxResults: number
     ): Promise<RagStyleReference[]> {
@@ -240,16 +246,16 @@ export class RagRetrievalService {
             };
         });
 
-        const messages = buildRagRerankMessages(changeSetSummary, retrievalFeatures, promptCandidates, maxResults);
+        const messages = buildRagRerankMessages(query, promptCandidates, maxResults);
         const session = execution.createSession(messages);
         const parsed = await execution.run<RagRerankResponse>(session, messages, { requestType: 'ragRerank' });
-        const selected = Array.isArray(parsed?.selected) ? parsed.selected : [];
+        const selected = parsed.selected;
         const candidateMap = new Map(candidates.map(candidate => [candidate.commitHash, candidate]));
         const out: RagStyleReference[] = [];
         const seen = new Set<string>();
 
         for (const item of selected) {
-            const id = String(item?.id || '').trim();
+            const id = item.id.trim();
             const commitHash = idToHash.get(id);
             if (!commitHash || seen.has(commitHash)) {
                 continue;
@@ -259,7 +265,7 @@ export class RagRetrievalService {
                 continue;
             }
             seen.add(commitHash);
-            out.push(this.toStyleReference(candidate, String(item?.reason || '').trim() || this.buildFallbackStyleReason(candidate)));
+            out.push(this.toStyleReference(candidate, item.reason.trim()));
             if (out.length >= maxResults) {
                 break;
             }
@@ -293,18 +299,14 @@ export class RagRetrievalService {
         };
     }
 
-    private buildFallbackStyleReason(candidate: RecallCandidate): string {
-        const reasons: string[] = [];
-        if (candidate.matchedBy.has('typeScope')) {
-            reasons.push('type/scope pattern aligns with the current change');
+    private filterRowsByType(rows: IndexedCommitRow[], requestedType: string | null): IndexedCommitRow[] {
+        const targetType = this.normalizeLabel(requestedType);
+        if (!targetType) {
+            return rows;
         }
-        if (candidate.matchedBy.has('hybrid')) {
-            reasons.push('summary is semantically close to the current change');
-        }
-        if (!reasons.length) {
-            reasons.push('historical style is broadly compatible with the current change');
-        }
-        return reasons.join('; ');
+        return rows.filter(row => this.normalizeLabel(
+            row.retrievalFeatures.predictedType || row.changeSetSummary.dominantType,
+        ) === targetType);
     }
 
     private computeScopeScore(targetScope: string | null, rowScope: string | null): number {
