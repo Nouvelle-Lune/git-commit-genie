@@ -10,6 +10,7 @@ import {
     AIThinkingConfig,
     CustomProviderConfig,
 } from './types';
+import { structuredOutputPromptInjection } from '../structuredOutputPrompt';
 import { assertHttpBaseUrl, parseJsonObject, parseStructuredText } from './json';
 import { applyOpenAICompatibleThinking } from './thinking';
 
@@ -143,7 +144,7 @@ class CustomSession implements AISession {
         responseFormat: NonNullable<AIRunRequest['responseFormat']>,
     ): CustomMessage[] {
         const messages = requestMessages.map(message => ({ ...message }));
-        const formatInstruction = `Return exactly one JSON object matching this JSON Schema: ${JSON.stringify(responseFormat.schema)}`;
+        const formatInstruction = structuredOutputPromptInjection(responseFormat.schema);
         const systemMessage = messages.find(message => message.role === 'system');
         if (systemMessage) {
             systemMessage.content = `${systemMessage.content ?? ''}\n\n${formatInstruction}`;

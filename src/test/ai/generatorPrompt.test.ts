@@ -137,4 +137,32 @@ describe('change-conditioned generator prompt boundary', () => {
         assert.match(content, /Historical commit messages below are STYLE REFERENCES ONLY/);
         assert.match(content, /must not borrow topic-specific content/);
     });
+
+    it('does not embed the full JSON schema because responseFormat carries it', () => {
+        const messages = buildChangeConditionedDraftMessages({
+            selected: {
+                analysisStatus: 'complete',
+                analysisIssues: [],
+                primaryIntent: 'simplify parsing',
+                mustExpress: ['simplifies parser branching'],
+                optional: [],
+                omit: [],
+                suggestedScope: 'parser',
+                recommendedType: 'refactor',
+                behaviorBefore: null,
+                behaviorAfter: null,
+                observableEffect: null,
+                technicalCapability: null,
+                breakingSignals: [],
+                uncertainties: [],
+            },
+            evidencePayload: [{ kind: 'raw', fileName: 'parser.ts', rawDiff: '[D1] +stable' }],
+            inputs: { diffs: [] },
+        });
+        const content = messages.map(message => message.content).join('\n');
+
+        assert.match(content, /provider response schema/);
+        assert.doesNotMatch(content, /"properties":\s*\{/);
+        assert.doesNotMatch(content, /"footers":\s*\{/);
+    });
 });

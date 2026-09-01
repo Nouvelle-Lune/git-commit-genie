@@ -6,11 +6,7 @@
 //   3. Explicit uncertainty — unprovable information stays null, never inferred.
 
 import { AIMessage } from '../../llm/providers';
-import { z } from 'zod';
-import {
-    changeExtractionResponseSchema,
-    investigationPlanResponseSchema,
-} from '../../llm/providers/schemas/common';
+import { structuredOutputInstructionBlock } from '../../llm/structuredOutputPrompt';
 import {
     ChangeExtraction,
     InvestigationPlan,
@@ -61,21 +57,6 @@ export const REPOSITORY_INVESTIGATION_SYSTEM_PROMPT = [
 
 function jsonBlock(tag: string, value: unknown): string {
     return [`<${tag}>`, JSON.stringify(value, null, 2), `</${tag}>`].join('\n');
-}
-
-/**
- * Derives the prompt contract from the same Zod schema used for local
- * validation. Keeping one source of truth prevents prompt, provider, and
- * consumer shapes from drifting apart.
- */
-function structuredSchemaBlock(schema: z.ZodTypeAny): string {
-    return [
-        '<schema>',
-        'Return exactly one JSON object matching this JSON Schema. Use the exact camelCase keys.',
-        'Do not add keys, wrap the object, use markdown, or replace primitive values with objects.',
-        JSON.stringify(z.toJSONSchema(schema), null, 2),
-        '</schema>',
-    ].join('\n');
 }
 
 // ---------------------------------------------------------------------------
@@ -133,7 +114,7 @@ export function buildChangeExtractionMessages(input: {
             'Return an empty array whenever a category genuinely has no members.',
             '</field_semantics>',
             '',
-            structuredSchemaBlock(changeExtractionResponseSchema),
+            structuredOutputInstructionBlock(),
             '',
             jsonBlock('deterministic_extraction', {
                 changed_files: input.deterministic.changedFiles,
@@ -227,7 +208,7 @@ export function buildInvestigationPlanMessages(input: {
             '- Is the behavior user-visible?',
             '</question_templates>',
             '',
-            structuredSchemaBlock(investigationPlanResponseSchema),
+            structuredOutputInstructionBlock(),
             '',
             jsonBlock('change_extraction', input.changeExtraction),
             ...(input.repositoryTerminology

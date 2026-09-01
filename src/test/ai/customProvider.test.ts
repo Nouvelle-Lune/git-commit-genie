@@ -40,6 +40,93 @@ describe('Custom provider response accounting', () => {
         assert.equal(format.json_schema.schema.properties?.commitMessage, undefined);
     });
 
+    it('injects the JSON schema into the prompt when structured output is unsupported', async () => {
+        const schema = z.toJSONSchema(classifyAndDraftResponseSchema) as Record<string, unknown>;
+        let requestBody: Record<string, unknown> | undefined;
+        let attempts = 0;
+        const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
+            chat: {
+                completions: {
+                    create: async (body: Record<string, unknown>) => {
+                        attempts += 1;
+                        requestBody = body;
+                        if (attempts === 1) {
+                            const error = new Error('response_format json_schema is not supported');
+                            (error as { status?: number }).status = 400;
+                            throw error;
+                        }
+                        return {
+                            choices: [{
+                                finish_reason: 'stop',
+                                message: {
+                                    role: 'assistant',
+                                    content: '{"type":"fix","scope":null,"breaking":false,"description":"fix parsing","body":null,"footers":[],"notes":null}',
+                                },
+                            }],
+                        };
+                    },
+                },
+            },
+        } as any);
+
+        await provider.createSession({ model: 'local-model' }).run({
+            messages: [{ role: 'user', content: 'return draft components' }],
+            responseFormat: { name: 'draft', schema },
+        });
+
+        assert.equal(attempts, 2);
+        assert.equal((requestBody?.response_format as { type?: string })?.type, 'json_object');
+        const messages = requestBody?.messages as Array<{ role: string; content: string }>;
+        assert.match(messages[0].content, /"type":\s*"object"/);
+        assert.match(messages[0].content, /Use the exact camelCase keys/);
+    });
+
+    it('appends the JSON schema to an existing system instruction on fallback', async () => {
+        const schema = z.toJSONSchema(classifyAndDraftResponseSchema) as Record<string, unknown>;
+        let requestBody: Record<string, unknown> | undefined;
+        let attempts = 0;
+        const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
+            chat: {
+                completions: {
+                    create: async (body: Record<string, unknown>) => {
+                        attempts += 1;
+                        requestBody = body;
+                        if (attempts === 1) {
+                            const error = new Error('response_format json_schema is not supported');
+                            (error as { status?: number }).status = 400;
+                            throw error;
+                        }
+                        return {
+                            choices: [{
+                                finish_reason: 'stop',
+                                message: {
+                                    role: 'assistant',
+                                    content: '{"type":"fix","scope":null,"breaking":false,"description":"fix parsing","body":null,"footers":[],"notes":null}',
+                                },
+                            }],
+                        };
+                    },
+                },
+            },
+        } as any);
+
+        const session = provider.createSession({
+            model: 'local-model',
+            systemInstruction: 'You are a commit message generator.',
+        });
+        await session.run({
+            messages: [{ role: 'user', content: 'return draft components' }],
+            responseFormat: { name: 'draft', schema },
+        });
+
+        assert.equal(attempts, 2);
+        const messages = requestBody?.messages as Array<{ role: string; content: string }>;
+        assert.equal(messages.length, 2);
+        assert.match(messages[0].content, /You are a commit message generator\./);
+        assert.match(messages[0].content, /"type":\s*"object"/);
+        assert.equal(messages[1].role, 'user');
+    });
+
     it('normalizes reasoning token details and known length termination', async () => {
         let requestBody: Record<string, unknown> | undefined;
         const client = {

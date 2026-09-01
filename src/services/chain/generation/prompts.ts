@@ -1,18 +1,7 @@
-import { z } from 'zod';
 import { AIMessage } from '../../llm/providers';
-import { classifyAndDraftResponseSchema } from '../../llm/providers/schemas/common';
+import { structuredOutputInstructionBlock } from '../../llm/structuredOutputPrompt';
 import { SelectedSemanticInformation } from '../../analysis/change/types';
 import { ChainInputs, RagStyleReference } from '../types';
-
-function structuredSchemaBlock(schema: z.ZodTypeAny): string {
-    return [
-        '<schema>',
-        'Return exactly one JSON object matching this JSON Schema. Use the exact camelCase keys.',
-        'Do not add keys, wrap the object, use markdown, or replace primitive values with objects.',
-        JSON.stringify(z.toJSONSchema(schema), null, 2),
-        '</schema>',
-    ].join('\n');
-}
 
 /** Internal claim/evidence ids describe traceability, never a code scope. */
 function isInternalTraceIdentifier(value: string | null): boolean {
@@ -138,7 +127,7 @@ export function buildChangeConditionedDraftMessages(input: {
         (targetLanguage && targetLanguage.trim() ? `Target language hint: ${targetLanguage}` : 'Target language hint: en'),
         '</language_requirement>',
         '',
-        structuredSchemaBlock(classifyAndDraftResponseSchema),
+        structuredOutputInstructionBlock(),
     ];
 
     if (userTemplate && userTemplate.trim()) {
