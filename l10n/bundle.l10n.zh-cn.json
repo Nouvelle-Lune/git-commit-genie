@@ -303,6 +303,7 @@
 	"Repository investigation skipped": "已跳过仓库调查",
 	"Analyzing what the change means": "正在分析变更语义",
 	"Semantic analysis ready": "语义分析已完成",
+	"Semantic analysis degraded": "语义分析已降级",
 	"Selecting what to express": "正在筛选要表达的信息",
 	"Message content selected": "提交信息内容已确定"
 }

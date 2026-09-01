@@ -134,6 +134,7 @@ export interface PipelineTextCatalog {
     semanticAnalysisStartTitle: string;
     semanticAnalysisStartDescription: string;
     semanticAnalysisCompleteTitle: string;
+    semanticAnalysisDegradedTitle: string;
     semanticAnalysisCompleteDescription: string;
     semanticAnalysisNoIntentDescription: string;
     informationSelectionStartTitle: string;
@@ -269,6 +270,7 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     semanticAnalysisStartTitle: 'Analyzing what the change means',
     semanticAnalysisStartDescription: 'Observed facts, repository facts, before/after behavior, and intent are being separated.',
     semanticAnalysisCompleteTitle: 'Semantic analysis ready',
+    semanticAnalysisDegradedTitle: 'Semantic analysis degraded',
     semanticAnalysisCompleteDescription: '{0}',
     semanticAnalysisNoIntentDescription: 'The evidence did not establish a single intent; the observable change will be described instead.',
     informationSelectionStartTitle: 'Selecting what to express',
@@ -761,7 +763,7 @@ export function presentPipelineEvent(
             return {
                 stage,
                 phase: text.phaseAnalyze,
-                title: text.semanticAnalysisCompleteTitle,
+                title: text.semanticAnalysisDegradedTitle,
                 description: asString(data.reason) || text.semanticAnalysisNoIntentDescription,
                 metrics: [],
                 tone: 'warning',

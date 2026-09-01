@@ -14,6 +14,7 @@ describe('pipeline display for parallel analysis events', () => {
         });
 
         assert.equal(presentation.tone, 'warning');
+        assert.equal(presentation.title, 'Semantic analysis degraded');
         assert.match(presentation.description, /invalid/);
         assert.deepEqual(pipelineStageBadge('analysisDegraded'), {
             label: 'WARN',

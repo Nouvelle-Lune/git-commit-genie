@@ -303,6 +303,7 @@
 	"Repository investigation skipped": "Repository investigation skipped",
 	"Analyzing what the change means": "Analyzing what the change means",
 	"Semantic analysis ready": "Semantic analysis ready",
+	"Semantic analysis degraded": "Semantic analysis degraded",
 	"Selecting what to express": "Selecting what to express",
 	"Message content selected": "Message content selected"
 }
