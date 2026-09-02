@@ -24,11 +24,19 @@ const extraction: ChangeExtraction = {
 };
 
 function executionFor(plan: InvestigationPlan): LLMExecution {
+    return executionForPlans([plan]);
+}
+
+function executionForPlans(
+    plans: InvestigationPlan[],
+    requests: AIMessage[][] = [],
+): LLMExecution {
+    let callIndex = 0;
     return {
         signal: undefined,
         temperature: 0,
         maxOutputTokens: 128,
-        maxRetries: 0,
+        maxRetries: plans.length - 1,
         thinkingLevel: 'off',
         tokenBudget: {} as LLMExecution['tokenBudget'],
         thinkingFor: () => ({ reasoning: false, level: 'off' }),
@@ -43,9 +51,13 @@ function executionFor(plan: InvestigationPlan): LLMExecution {
                 transcript: [],
             }),
         }),
-        run: async <T>(_session: AISession, _messages: AIMessage[], _options: LLMRunOptions): Promise<T> => (
-            plan as T
-        ),
+        run: async <T>(_session: AISession, messages: AIMessage[], _options: LLMRunOptions): Promise<T> => {
+            requests.push(messages);
+            const plan = plans[callIndex];
+            assert.ok(plan, `Unexpected investigation planning call ${callIndex + 1}.`);
+            callIndex += 1;
+            return plan as T;
+        },
     };
 }
 
@@ -123,5 +135,55 @@ describe('investigation planning target grounding', () => {
         }));
 
         assert.deepEqual(plan.targets, []);
+    });
+
+    it('retries when non-empty candidates are all rejected by grounding', async () => {
+        const requests: AIMessage[][] = [];
+        const plan = await planInvestigation(extraction, executionForPlans([{
+            targets: [{
+                target: 'src/ui/pipelineDisplay.ts',
+                kind: 'symbol',
+                file: 'src/ui/pipelineDisplay.ts',
+                questions: ['What role does this symbol play?'],
+            }],
+            notes: 'The file path was mislabeled as a symbol.',
+        }, {
+            targets: [{
+                target: 'src/ui/pipelineDisplay.ts',
+                kind: 'file',
+                file: 'src/ui/pipelineDisplay.ts',
+                questions: ['How do the changed declarations work together?'],
+            }],
+            notes: 'The corrected target uses the file kind.',
+        }], requests));
+
+        assert.deepEqual(plan.targets, [{
+            target: 'src/ui/pipelineDisplay.ts',
+            kind: 'file',
+            file: 'src/ui/pipelineDisplay.ts',
+            questions: ['How do the changed declarations work together?'],
+        }]);
+        assert.equal(requests.length, 2);
+        assert.match(requests[1][0].content, /<grounding_rejected>/);
+        assert.match(requests[1][0].content, /Allowed changed file paths/);
+    });
+
+    it('does not retry an intentionally empty investigation plan', async () => {
+        const requests: AIMessage[][] = [];
+        const plan = await planInvestigation(extraction, executionForPlans([{
+            targets: [],
+            notes: 'The diff is self-explanatory.',
+        }, {
+            targets: [{
+                target: 'src/ui/pipelineDisplay.ts',
+                kind: 'file',
+                file: 'src/ui/pipelineDisplay.ts',
+                questions: ['What role does this file play?'],
+            }],
+            notes: null,
+        }], requests));
+
+        assert.deepEqual(plan.targets, []);
+        assert.equal(requests.length, 1);
     });
 });

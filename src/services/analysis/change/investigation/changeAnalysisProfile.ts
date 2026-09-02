@@ -149,7 +149,7 @@ export function createChangeAnalysisProfile(
 
     return {
         id: 'change-analysis',
-        promptVersion: '2',
+        promptVersion: '3',
         toolsetVersion: '2',
         requestType: 'investigation',
         finalName: 'changeAnalysisCompoundTerminal',
@@ -182,6 +182,10 @@ export function createChangeAnalysisProfile(
                     'You investigate one concrete code change and finish with one structured compound terminal.',
                     'Tools may only inspect the granted repository. Use the fixed D*/E* evidence ledger identifiers.',
                     'D identifiers cite changed diff hunks. E identifiers cite repository observations returned by tools.',
+                    'Claims about code directly visible in the diff are observed_change and must cite D* evidence.',
+                    'Claims learned from repository tool results are repository_fact and must cite E* evidence.',
+                    'A supported_inference must cite the D* and/or E* evidence that supports the inference.',
+                    'Never label a diff-only observation as repository_fact. If no E* evidence exists, emit no repository_fact claims.',
                     'Never invent evidence ids and never use path:line as an evidence id.',
                     'Separate observed change, repository fact, supported inference, and uncertainty.',
                     'Each claim selects must_express, optional, or omit. Uncertain claims must be omitted.',
@@ -202,6 +206,7 @@ export function createChangeAnalysisProfile(
                     '</run_context>',
                     '<terminal_contract>',
                     'After investigation, return the fixed compound JSON terminal. Keep must_express to at most 3 claims and optional to at most 4.',
+                    'When the investigation plan contains targets, call evidence-producing repository tools and collect at least one E* item before returning the terminal.',
                     'If evidence cannot establish intent or impact, use null fields and uncertainties instead of guessing.',
                     '</terminal_contract>',
                 ].join('\n'),
@@ -219,6 +224,15 @@ export function createChangeAnalysisProfile(
         buildToolDefinitions: (_profileInput, state) => CHANGE_ANALYSIS_TOOL_NAMES.map(name => (
             createExecutableDefinition(name, input, state, evidenceItems, openQuestions)
         )),
+        validateTerminal: (_raw, state) => {
+            if (!input.plan.targets.length) {
+                return null;
+            }
+            const hasRepositoryEvidence = state.ledger.snapshot().some(item => item.source === 'repository');
+            return hasRepositoryEvidence
+                ? null
+                : 'The investigation plan contains targets, but no E* repository evidence was collected. A non-empty plan must produce repository evidence before the compound terminal can be accepted.';
+        },
         normalizeFinal: (raw, state) => normalizeCompoundTerminal(raw, state, evidenceItems),
         preservePartialResult: (state, error) => unavailableOutput(
             state,
@@ -310,7 +324,8 @@ function normalizeCompoundTerminal(
     evidenceItems: RepositoryEvidenceItem[],
 ): ChangeAnalysisAgentOutput {
     const issues: string[] = [];
-    const claims = raw.claims.map(claim => normalizeClaim(claim, state, issues));
+    const degradations: string[] = [];
+    const claims = raw.claims.map(claim => normalizeClaim(claim, state, issues, degradations));
     const validClaims = claims.filter((claim): claim is AgentClaim => claim !== null);
     const tracedClaims = validClaims.map((claim, index) => ({ ...claim, id: `C${index + 1}` }));
     const changeTargets = raw.changeTargets.map(target => ({
@@ -320,6 +335,7 @@ function normalizeCompoundTerminal(
             target.evidenceRefs,
             state,
             issues,
+            degradations,
         ),
     }));
     const intentAnalysis = {
@@ -329,6 +345,7 @@ function normalizeCompoundTerminal(
             raw.intentAnalysis.supportedBy,
             state,
             issues,
+            degradations,
         ),
     };
     const rawSemantic: SemanticChangeAnalysis = {
@@ -349,7 +366,7 @@ function normalizeCompoundTerminal(
                 .map(claim => claim.claim),
         ],
     };
-    const repositoryEvidence = normalizeRepositoryEvidence(raw, state, evidenceItems, issues);
+    const repositoryEvidence = normalizeRepositoryEvidence(raw, state, evidenceItems, issues, degradations);
     const semanticAnalysis = normalizeSemanticAnalysis(rawSemantic, repositoryEvidence, state.ledger);
     const selectable = validClaims.filter(claim => (
         claim.category !== 'uncertain_inference' && claim.evidenceRefs.length > 0
@@ -374,7 +391,7 @@ function normalizeCompoundTerminal(
         repositoryEvidence,
         semanticAnalysis,
         informationSelection: selection,
-        analysisStatus: issues.length ? 'degraded' : 'complete',
+        analysisStatus: degradations.length ? 'degraded' : 'complete',
         issues,
         claims: tracedClaims,
     };
@@ -384,11 +401,13 @@ function normalizeClaim(
     claim: RawFinal['claims'][number],
     state: AgentRunState,
     issues: string[],
+    degradations: string[],
 ): AgentClaim | null {
     const claimText = claim.claim.trim();
     if (!claimText) {
         const message = 'Compound terminal contained an empty claim after trimming.';
         issues.push(message);
+        degradations.push(message);
         state.issues.push({ type: 'terminal_failure', message, step: state.steps });
         return null;
     }
@@ -416,6 +435,7 @@ function normalizeClaim(
         if (claim.category !== 'uncertain_inference') {
             const message = `Claim '${claimText}' has no valid evidence after normalization and was downgraded to uncertainty.`;
             issues.push(message);
+            degradations.push(message);
             state.issues.push({ type: 'invalid_reference', message, step: state.steps });
         }
         return {
@@ -433,14 +453,17 @@ function normalizeRepositoryEvidence(
     state: AgentRunState,
     evidenceItems: RepositoryEvidenceItem[],
     issues: string[],
+    degradations: string[],
 ): RepositoryEvidence {
-    const repositoryIssueStart = issues.length;
+    const repositoryDegradationStart = degradations.length;
     const findings: InvestigationFinding[] = raw.investigation.findings.map(finding => {
         const refs = filterKnownRefs(
             `Investigation finding '${finding.question}'`,
             finding.evidenceRefs,
             state,
             issues,
+            degradations,
+            'repository',
         );
         return { ...finding, evidenceRefs: refs };
     });
@@ -450,7 +473,7 @@ function normalizeRepositoryEvidence(
         unresolvedQuestions: cleanStrings(raw.investigation.unresolvedQuestions),
         stopReason: raw.investigation.stopReason.trim(),
         steps: state.steps,
-        degraded: issues.length > repositoryIssueStart,
+        degraded: degradations.length > repositoryDegradationStart,
     };
 }
 
@@ -459,13 +482,32 @@ function filterKnownRefs(
     values: unknown,
     state: AgentRunState,
     issues: string[],
+    degradations: string[],
+    expectedSource?: 'diff' | 'repository',
 ): string[] {
     const refs = cleanStrings(values);
-    const valid = refs.filter(ref => state.ledger.has(ref));
+    const known = refs.filter(ref => state.ledger.has(ref));
+    const valid = expectedSource
+        ? known.filter(ref => state.ledger.get(ref)?.source === expectedSource)
+        : known;
     const invalid = refs.filter(ref => !state.ledger.has(ref));
+    const incompatible = expectedSource
+        ? known.filter(ref => !valid.includes(ref))
+        : [];
     if (invalid.length) {
         const message = `${label} referenced unknown evidence: ${invalid.join(', ')}.`;
         issues.push(message);
+        state.issues.push({ type: 'invalid_reference', message, step: state.steps });
+    }
+    if (incompatible.length) {
+        const message = `${label} used evidence incompatible with '${expectedSource}' source: ${incompatible.join(', ')}.`;
+        issues.push(message);
+        state.issues.push({ type: 'invalid_reference', message, step: state.steps });
+    }
+    if (refs.length > 0 && valid.length === 0) {
+        const message = `${label} has no valid evidence after normalization.`;
+        issues.push(message);
+        degradations.push(message);
         state.issues.push({ type: 'invalid_reference', message, step: state.steps });
     }
     return valid;

@@ -67,6 +67,7 @@ export interface AgentToolOutcome {
 export interface AgentRuntimeIssue {
     type:
         | 'schema_retry'
+        | 'terminal_retry'
         | 'invalid_reference'
         | 'duplicate_tool_call'
         | 'unknown_tool'
@@ -101,6 +102,7 @@ export type AgentRuntimeEvent =
     | { type: 'toolStart'; step: number; tool: string; args: Record<string, unknown> }
     | { type: 'toolComplete'; observation: AgentObservation }
     | { type: 'schemaRetry'; attempt: number; message: string }
+    | { type: 'terminalRetry'; attempt: number; message: string }
     | { type: 'contextCompacted'; epoch: number; estimatedTokens: number; reason: string }
     | { type: 'partialResult'; message: string };
 
@@ -115,6 +117,8 @@ export interface AgentProfile<Input, RawFinal, Output> {
     buildPrompt(input: Input): AgentPromptLayers;
     grantTools(input: Input): ToolGrant[];
     buildToolDefinitions(input: Input, state: AgentRunState): AgentToolDefinition<Input>[];
+    /** Rejects a structurally valid terminal when profile-specific work is incomplete. */
+    validateTerminal?(raw: RawFinal, state: AgentRunState): string | null;
     normalizeFinal(raw: RawFinal, state: AgentRunState): Output;
     preservePartialResult(state: AgentRunState, error: unknown): Output;
 }
@@ -195,6 +199,7 @@ export class AgentRuntime {
         let toolResults: AIToolResult[] | undefined;
         let epochOpening = prompt.opening;
         let epochObservationStart = 0;
+        let terminalValidationRetries = 0;
         const seenCalls = new Set<string>();
 
         try {
@@ -245,6 +250,33 @@ export class AgentRuntime {
                         execution,
                         state,
                     });
+                    const terminalValidationError = profile.validateTerminal?.(raw, state) ?? null;
+                    if (terminalValidationError) {
+                        if (terminalValidationRetries >= execution.maxRetries) {
+                            const message = `Compound terminal for '${profile.id}' remained invalid after ${terminalValidationRetries} profile retry attempt(s): ${terminalValidationError}`;
+                            state.issues.push({ type: 'terminal_failure', message, step: state.steps });
+                            throw new Error(message);
+                        }
+                        terminalValidationRetries += 1;
+                        const message = `Retrying compound terminal for '${profile.id}' after profile validation failed: ${terminalValidationError}`;
+                        state.issues.push({ type: 'terminal_retry', message, step: state.steps });
+                        this.options.onEvent?.({
+                            type: 'terminalRetry',
+                            attempt: terminalValidationRetries,
+                            message,
+                        });
+                        messages = [{
+                            role: 'user',
+                            content: [
+                                '<terminal_rejected>',
+                                terminalValidationError,
+                                'Continue the same run and call the granted repository tools needed to satisfy this requirement before returning the terminal again.',
+                                '</terminal_rejected>',
+                            ].join('\n'),
+                        }];
+                        toolResults = undefined;
+                        continue;
+                    }
                     state.stopReason = 'compound_terminal';
                     return {
                         output: profile.normalizeFinal(raw, state),

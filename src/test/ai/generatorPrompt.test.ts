@@ -65,8 +65,37 @@ describe('change-conditioned generator prompt boundary', () => {
         const content = messages.map(message => message.content).join('\n');
 
         assert.match(content, /analysis_status/);
-        assert.match(content, /analysis_status is degraded or unavailable/);
+        assert.match(content, /analysis_status is unavailable/);
         assert.match(content, /must_express is empty/);
+    });
+
+    it('keeps surviving normalized claims available when analysis is degraded', () => {
+        const selected: SelectedSemanticInformation = {
+            analysisStatus: 'degraded',
+            analysisIssues: ['one unrelated claim lost all evidence'],
+            primaryIntent: 'preserve grounded behavior',
+            mustExpress: ['keeps the repository-backed caller contract'],
+            optional: [],
+            omit: ['unsupported claim'],
+            suggestedScope: 'parser',
+            recommendedType: 'fix',
+            behaviorBefore: null,
+            behaviorAfter: null,
+            observableEffect: 'grounded behavior remains available',
+            technicalCapability: 'parser dispatch',
+            breakingSignals: [],
+            uncertainties: ['unsupported claim'],
+        };
+        const messages = buildChangeConditionedDraftMessages({
+            selected,
+            evidencePayload: [{ kind: 'raw', fileName: 'parser.ts', rawDiff: '[D1] +stable' }],
+            inputs: { diffs: [] },
+        });
+        const content = messages.map(message => message.content).join('\n');
+
+        assert.match(content, /surviving normalized must_express and optional claims/);
+        assert.match(content, /keeps the repository-backed caller contract/);
+        assert.doesNotMatch(content, /degraded or unavailable/);
     });
 
     it('rejects trace identifiers as scope candidates and forbids emitting them', () => {

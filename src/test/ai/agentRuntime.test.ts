@@ -379,6 +379,115 @@ describe('AgentRuntime contracts', () => {
         assert.equal(requests[1].toolChoice, 'none');
     });
 
+    it('rejects a premature terminal and keeps tools available for profile-required evidence', async () => {
+        const requests: AIRunRequest[] = [];
+        const events: string[] = [];
+        const execution = createExecution([
+            response({ structured: { value: 'premature' }, text: '{"value":"premature"}' }),
+            response({
+                toolCalls: [{ id: 'collect', name: 'inspect', arguments: { reason: 'collect evidence' } }],
+                stopReason: 'tool_call',
+            }),
+            response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
+        ], requests, []);
+        const profile: AgentProfile<string, { value: string }, string> = {
+            id: 'terminal-boundary-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'terminalBoundaryTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 1,
+                maxEpochs: 0,
+                maxObservationChars: 1_000,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: repositoryPath => ({
+                stable: [{ role: 'system', content: 'collect repository evidence' }],
+                opening: [{ role: 'user', content: repositoryPath }],
+            }),
+            grantTools: repositoryPath => [{
+                name: 'inspect',
+                allowedRoot: repositoryPath,
+                excludePatterns: [],
+                allocateEvidence: true,
+            }],
+            buildToolDefinitions: () => [{
+                name: 'inspect',
+                description: 'Inspect and collect evidence.',
+                parameters: { type: 'object' },
+                execute: async context => {
+                    context.allocateEvidence({
+                        kind: 'search',
+                        target: 'value',
+                        ref: 'src/value.ts:1',
+                        excerpt: 'export const value = 1;',
+                    });
+                    return { output: 'evidence collected' };
+                },
+            }],
+            validateTerminal: (_raw, state) => state.ledger.snapshot().some(item => item.source === 'repository')
+                ? null
+                : 'Repository evidence is required.',
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime({
+            onEvent: event => {
+                if (event.type === 'terminalRetry') {
+                    events.push(`retry:${event.attempt}`);
+                }
+            },
+        }).run(execution, profile, '/tmp/repository');
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'done');
+        assert.deepEqual(events, ['retry:1']);
+        assert.equal(requests.length, 3);
+        assert.equal(requests[1].toolChoice, 'auto');
+        assert.match(requests[1].messages?.[0].content ?? '', /Repository evidence is required/);
+        assert.equal(result.state.ledger.snapshot().some(item => item.id === 'E1'), true);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'terminal_retry').length, 1);
+    });
+
+    it('stops terminal retries at the configured boundary', async () => {
+        const requests: AIRunRequest[] = [];
+        const execution = createExecution([
+            response({ structured: { value: 'premature-1' } }),
+            response({ structured: { value: 'premature-2' } }),
+        ], requests, []);
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'terminal-retry-limit-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'terminalRetryLimitTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 0,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [], opening: [] }),
+            grantTools: () => [],
+            buildToolDefinitions: () => [],
+            validateTerminal: () => 'Evidence remains missing.',
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: (_state, error) => String((error as Error).message),
+        };
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'partial');
+        assert.match(result.output, /remained invalid after 1 profile retry attempt/);
+        assert.equal(requests.length, 2);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'terminal_retry').length, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'terminal_failure').length, 1);
+    });
+
     it('records max-step exhaustion once when a tool call arrives after the budget', async () => {
         const execution = createExecution([
             response({

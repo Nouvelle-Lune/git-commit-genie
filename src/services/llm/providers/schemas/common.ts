@@ -131,6 +131,56 @@ export const AGENT_CLAIM_CATEGORIES = [
 
 export const AGENT_CLAIM_DISPOSITIONS = ['must_express', 'optional', 'omit'] as const;
 
+const agentEvidenceReferenceSchema = z.string().regex(
+  /^[DE]\d+$/,
+  'Evidence references must be ledger-owned D* diff ids or E* repository ids.'
+);
+
+const repositoryEvidenceReferenceSchema = z.array(agentEvidenceReferenceSchema).max(8).superRefine((refs, context) => {
+  if (!refs.some(ref => ref.startsWith('E'))) {
+    context.addIssue({
+      code: 'custom',
+      message: 'Repository findings require at least one E* repository evidence reference.',
+    });
+  }
+});
+
+const agentClaimSchema = z.object({
+  category: z.enum(AGENT_CLAIM_CATEGORIES),
+  claim: z.string().min(1),
+  evidenceRefs: z.array(agentEvidenceReferenceSchema).max(8),
+  disposition: z.enum(AGENT_CLAIM_DISPOSITIONS),
+} as const).superRefine((claim, context) => {
+  if (claim.category === 'observed_change' && !claim.evidenceRefs.some(ref => ref.startsWith('D'))) {
+    context.addIssue({
+      code: 'custom',
+      path: ['evidenceRefs'],
+      message: 'observed_change requires at least one D* diff evidence reference.',
+    });
+  }
+  if (claim.category === 'repository_fact' && !claim.evidenceRefs.some(ref => ref.startsWith('E'))) {
+    context.addIssue({
+      code: 'custom',
+      path: ['evidenceRefs'],
+      message: 'repository_fact requires at least one E* repository evidence reference.',
+    });
+  }
+  if (claim.category === 'supported_inference' && claim.evidenceRefs.length === 0) {
+    context.addIssue({
+      code: 'custom',
+      path: ['evidenceRefs'],
+      message: 'supported_inference requires at least one D* or E* evidence reference.',
+    });
+  }
+  if (claim.category === 'uncertain_inference' && claim.disposition !== 'omit') {
+    context.addIssue({
+      code: 'custom',
+      path: ['disposition'],
+      message: 'uncertain_inference must use the omit disposition.',
+    });
+  }
+});
+
 /** One terminal replaces the former investigation, semantic, and selection requests. */
 export const changeAnalysisAgentFinalResponseSchema = z.object({
   investigation: z.object({
@@ -138,7 +188,7 @@ export const changeAnalysisAgentFinalResponseSchema = z.object({
       target: z.string().min(1),
       question: z.string().min(1),
       answer: z.string().min(1),
-      evidenceRefs: z.array(z.string().min(1)).max(8),
+      evidenceRefs: repositoryEvidenceReferenceSchema,
     } as const)).max(12),
     unresolvedQuestions: z.array(z.string().min(1)).max(12),
     stopReason: z.string().min(1),
@@ -147,7 +197,7 @@ export const changeAnalysisAgentFinalResponseSchema = z.object({
     symbol: z.string().min(1),
     file: z.string().min(1),
     role: z.string().min(1),
-    evidenceRefs: z.array(z.string().min(1)).max(8),
+    evidenceRefs: z.array(agentEvidenceReferenceSchema).max(8),
   } as const)).max(12),
   dependencyContext: z.object({
     callers: z.array(z.string().min(1)).max(20),
@@ -156,12 +206,7 @@ export const changeAnalysisAgentFinalResponseSchema = z.object({
     relatedConfigs: z.array(z.string().min(1)).max(20),
     relatedTypes: z.array(z.string().min(1)).max(20),
   } as const),
-  claims: z.array(z.object({
-    category: z.enum(AGENT_CLAIM_CATEGORIES),
-    claim: z.string().min(1),
-    evidenceRefs: z.array(z.string().min(1)).max(8),
-    disposition: z.enum(AGENT_CLAIM_DISPOSITIONS),
-  } as const)).max(20),
+  claims: z.array(agentClaimSchema).max(20),
   behaviorAnalysis: z.object({
     before: z.string().nullable(),
     after: z.string().nullable(),
@@ -173,7 +218,7 @@ export const changeAnalysisAgentFinalResponseSchema = z.object({
   } as const),
   intentAnalysis: z.object({
     primaryIntent: z.string().nullable(),
-    supportedBy: z.array(z.string().min(1)).max(8),
+    supportedBy: z.array(agentEvidenceReferenceSchema).max(8),
     confidence: z.enum(['low', 'medium', 'high']),
   } as const),
   changeClassification: z.object({

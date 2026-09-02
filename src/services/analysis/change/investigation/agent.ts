@@ -101,8 +101,34 @@ export async function planInvestigation(
 ): Promise<InvestigationPlan> {
     const messages = buildInvestigationPlanMessages({ changeExtraction: extraction, repositoryTerminology });
     const session = execution.createSession(messages);
-    const parsed = await execution.run<InvestigationPlan>(session, messages, { requestType: 'investigationPlan' });
+    let requestMessages = messages;
 
+    for (let attempt = 0; attempt <= execution.maxRetries; attempt += 1) {
+        const parsed = await execution.run<InvestigationPlan>(session, requestMessages, {
+            requestType: 'investigationPlan',
+        });
+        const groundedPlan = groundInvestigationPlan(extraction, parsed);
+
+        // An intentionally empty plan means the diff is self-explanatory. Retry only
+        // when the model attempted to investigate but every proposed target violated
+        // the deterministic grounding boundary.
+        if (!parsed.targets.length || groundedPlan.targets.length || attempt === execution.maxRetries) {
+            return groundedPlan;
+        }
+
+        requestMessages = [{
+            role: 'user',
+            content: buildGroundingRetryMessage(extraction, parsed),
+        }];
+    }
+
+    throw new Error('Investigation planning exhausted its grounding attempts without a result.');
+}
+
+function groundInvestigationPlan(
+    extraction: ChangeExtraction,
+    parsed: InvestigationPlan,
+): InvestigationPlan {
     const grounded = collectGroundedNames(extraction);
     const targets: InvestigationTarget[] = [];
     for (const candidate of parsed.targets) {
@@ -127,6 +153,25 @@ export async function planInvestigation(
     }
 
     return { targets, notes: parsed.notes };
+}
+
+function buildGroundingRetryMessage(
+    extraction: ChangeExtraction,
+    parsed: InvestigationPlan,
+): string {
+    return [
+        '<grounding_rejected>',
+        'None of the proposed investigation targets could be grounded in the supplied change extraction.',
+        `Rejected targets: ${JSON.stringify(parsed.targets.map(target => ({
+            target: target.target,
+            kind: target.kind,
+            file: target.file,
+        })))}`,
+        `Allowed changed file paths for kind "file": ${JSON.stringify(extraction.changedFiles.map(file => file.path))}`,
+        `Allowed changed names for non-file kinds: ${JSON.stringify(Array.from(collectGroundedNames(extraction)))}`,
+        'Return a corrected investigation plan using exact values and the matching target kind. Return an empty targets array only if the diff itself fully answers every useful repository question.',
+        '</grounding_rejected>',
+    ].join('\n');
 }
 
 export interface ChangeAnalysisAgentParams {

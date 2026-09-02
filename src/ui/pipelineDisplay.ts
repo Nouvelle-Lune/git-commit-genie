@@ -405,7 +405,7 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     detailRetrievalFeatures: 'Retrieval features',
     detailReferences: 'References',
     detailEmptyList: 'None',
-    detailIssueCount: 'Issues',
+    detailIssueCount: 'Diagnostics',
     detailStage: 'Stage',
     detailError: 'Error',
     detailFailureKind: 'Failure kind',
