@@ -62,6 +62,25 @@ function collectGroundedNames(extraction: ChangeExtraction): Set<string> {
 }
 
 /**
+ * Validates planner targets against the part of the extraction appropriate for
+ * their kind. File targets are deliberately checked against changedFiles rather
+ * than the general name set so an unchanged repository path cannot redirect the
+ * investigation.
+ */
+function isGroundedTarget(
+    extraction: ChangeExtraction,
+    groundedNames: Set<string>,
+    target: string,
+    kind: InvestigationTarget['kind'],
+    file: string | null,
+): boolean {
+    if (kind === 'file') {
+        return file === target && extraction.changedFiles.some(changedFile => changedFile.path === target);
+    }
+    return groundedNames.has(target);
+}
+
+/**
  * Returns true when the diff alone already determines the change's meaning, so
  * repository investigation would only add cost. Documentation, lockfile, and
  * pure-formatting changes have no code path to trace.
@@ -88,7 +107,7 @@ export async function planInvestigation(
     const targets: InvestigationTarget[] = [];
     for (const candidate of parsed.targets) {
         const name = candidate.target.trim();
-        if (!name || !grounded.has(name)) {
+        if (!name || !isGroundedTarget(extraction, grounded, name, candidate.kind, candidate.file)) {
             continue;
         }
         if (targets.some(existing => existing.target === name)) {

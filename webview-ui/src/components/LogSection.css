@@ -229,12 +229,16 @@
   gap: 5px;
   padding: 2px 3px;
   border-radius: var(--radius-sm);
-  cursor: pointer;
+  cursor: default;
   user-select: none;
   transition: background var(--transition-fast);
 }
 
-.log-header:hover {
+.log-header-expandable {
+  cursor: pointer;
+}
+
+.log-header-expandable:hover {
   background: var(--vscode-list-hoverBackground);
 }
 
@@ -527,9 +531,27 @@
   animation: contentIn 150ms ease-out;
 }
 
+.log-content.log-content-semantic {
+  max-height: min(420px, 50vh);
+  background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+  border-left: 2px solid var(--vscode-focusBorder);
+  border-radius: 2px;
+  padding: 8px 10px;
+}
+
 @keyframes contentIn {
   from { opacity: 0; max-height: 0; }
   to   { opacity: 1; max-height: 250px; }
+}
+
+.log-content.log-content-semantic {
+  animation-name: contentInSemantic;
+}
+
+@keyframes contentInSemantic {
+  from { opacity: 0; max-height: 0; }
+  to   { opacity: 1; max-height: min(420px, 50vh); }
 }
 
 .log-content::-webkit-scrollbar {
@@ -616,5 +638,23 @@
   }
   .log-loading {
     margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .log-list {
+    scroll-behavior: auto;
+  }
+
+  .log-item-new,
+  .log-content,
+  .new-logs-indicator,
+  .new-logs-indicator::before {
+    animation: none;
+  }
+
+  .log-expand-icon,
+  .new-logs-indicator {
+    transition: none;
   }
 }

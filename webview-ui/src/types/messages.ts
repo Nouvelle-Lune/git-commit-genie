@@ -128,5 +128,6 @@ export interface LogEntry {
     endLine?: number; // For file read end line
     cost?: number; // For API requests
     pending?: boolean; // For API requests waiting for response
+    requestType?: string;
     cancelled?: boolean; // Mark as cancelled by user
 }

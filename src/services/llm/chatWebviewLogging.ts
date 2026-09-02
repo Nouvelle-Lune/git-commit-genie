@@ -117,6 +117,7 @@ export function completeApiRequestLog(
         response.usage?.raw,
         isFinal,
         repoPath || undefined,
+        requestType,
     );
 }
 

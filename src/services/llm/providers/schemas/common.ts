@@ -93,7 +93,7 @@ export const CHANGE_KINDS = [
 ] as const;
 
 export const INVESTIGATION_TARGET_KINDS = [
-  'symbol', 'config', 'type', 'dependency', 'interface', 'cli_or_api'
+  'file', 'symbol', 'config', 'type', 'dependency', 'interface', 'cli_or_api'
 ] as const;
 
 export const changeExtractionResponseSchema = z.object({

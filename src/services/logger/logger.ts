@@ -4,6 +4,7 @@ import { PRICING_TABLE } from '../cost/pricing';
 import { WebviewProvider } from '../../ui/WebviewProvider';
 import { LogType, LogEntry } from '../../ui/types/messages';
 import { isCurrentPersistedLogEntry } from '../../ui/persistedLogSchema';
+import { getRequestTypeLabel } from '../llm/providers/utils/requestTypeMaps';
 
 export enum LogLevel {
     Debug = 0,
@@ -406,9 +407,12 @@ export class Logger {
     /**
      * Update API request log with function call result
      */
-    public logApiRequestWithResult(logId: string, provider: string, model: string, result: any, usage?: any, isFinal: boolean = false, repoPath?: string): void {
+    public logApiRequestWithResult(logId: string, provider: string, model: string, result: any, usage?: any, isFinal: boolean = false, repoPath?: string, requestType?: string): void {
         // Format result as JSON string for parsing in frontend
         const content = typeof result === 'string' ? result : JSON.stringify(result);
+        const failed = result !== null
+            && typeof result === 'object'
+            && typeof result.error === 'string';
 
         // Extract reason from result if available
         let reason: string | undefined;
@@ -464,11 +468,16 @@ export class Logger {
             id: logId,
             timestamp: Date.now(),
             type: isFinal ? LogType.FinalResult : LogType.ApiRequest,
-            title: isFinal ? `Analysis Result` : `API Request`,
+            title: failed
+                ? `API request failed`
+                : isFinal
+                ? `Analysis Result`
+                : (requestType ? `${getRequestTypeLabel(requestType)} API request` : `API Request`),
             content,
             // inline reason moved to a separate log entry
             cost,
-            pending: false
+            pending: false,
+            ...(requestType ? { requestType } : {}),
         };
         if (repoPath) { (log as any).repoPath = repoPath; }
         this.sendLogToWebview(log);

@@ -44,6 +44,8 @@ describe('change analysis structured output prompts', () => {
         const content = messages.map(message => message.content).join('\n');
 
         assert.match(content, /provider response schema/);
+        assert.match(content, /Use kind "file" only for a path in changedFiles/);
+        assert.match(content, /set file to that same path/);
         assert.doesNotMatch(content, /"targets":\s*\{/);
         assert.doesNotMatch(content, /"properties":\s*\{/);
     });

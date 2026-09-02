@@ -1,0 +1,210 @@
+.pipeline-log-details {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--vscode-foreground);
+  font-family: var(--vscode-font-family);
+}
+
+.pipeline-details-section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.pipeline-details-section-title {
+  margin: 0;
+  color: var(--vscode-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.pipeline-details-prose {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.pipeline-details-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 0;
+  padding: 0;
+}
+
+.pipeline-details-metric {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  min-width: 0;
+}
+
+.pipeline-details-metric-label,
+.pipeline-details-metric-value {
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.pipeline-details-metric-label {
+  color: var(--vscode-descriptionForeground);
+}
+
+.pipeline-details-metric-label::after {
+  content: ':';
+}
+
+.pipeline-details-metric-value {
+  color: var(--vscode-foreground);
+  overflow-wrap: anywhere;
+}
+
+.pipeline-details-fields {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+
+.pipeline-details-field {
+  display: grid;
+  grid-template-columns: minmax(96px, 28%) minmax(0, 1fr);
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.pipeline-details-field dt,
+.pipeline-details-field dd {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.pipeline-details-field dt {
+  color: var(--vscode-descriptionForeground);
+  font-size: 10px;
+}
+
+.pipeline-details-field dd {
+  min-width: 0;
+  color: var(--vscode-foreground);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.pipeline-details-list {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.pipeline-details-list li {
+  margin: 2px 0;
+  padding: 0;
+  color: var(--vscode-foreground);
+  font-size: 11px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.pipeline-details-list li::marker {
+  color: var(--vscode-descriptionForeground);
+}
+
+.pipeline-details-reference-list {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+
+.pipeline-details-reference {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+
+.pipeline-details-reference-subject {
+  color: var(--vscode-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.pipeline-details-tag {
+  display: inline;
+  max-width: 100%;
+  color: var(--vscode-textPreformat-foreground);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.pipeline-details-commit {
+  margin: 0;
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 2px;
+  background: var(--vscode-editor-background);
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-editor-font-family);
+  font-size: max(11px, var(--vscode-editor-font-size));
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.pipeline-details-commit code {
+  font-family: inherit;
+}
+
+.pipeline-details-empty {
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+}
+
+.pipeline-details-warning {
+  color: var(--vscode-editorWarning-foreground);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* LogSection owns general Markdown styles. These selectors keep semantic
+   details aligned with VS Code's compact widget spacing. */
+.log-content .pipeline-details-list {
+  margin: 0;
+  padding-left: 16px;
+}
+
+.log-content .pipeline-details-list li {
+  margin: 2px 0;
+  padding: 0;
+}
+
+.log-content .pipeline-details-commit {
+  margin: 0;
+  padding: 8px 10px;
+  background: var(--vscode-editor-background);
+}
+
+.log-content .pipeline-details-commit code {
+  padding: 0;
+  background: transparent;
+  font-family: inherit;
+  font-size: inherit;
+}
+
+@media (max-width: 360px) {
+  .pipeline-details-field {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+}

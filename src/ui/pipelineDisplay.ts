@@ -166,6 +166,66 @@ export interface PipelineTextCatalog {
     enforceLanguageStartDefault: string;
     enforceLanguageTitle: string;
     doneTitle: string;
+    detailPrimaryIntent: string;
+    detailObservableEffect: string;
+    detailRecommendedType: string;
+    detailSuggestedScope: string;
+    detailFacts: string;
+    detailUncertainties: string;
+    detailInvestigationTargets: string;
+    detailQuestions: string;
+    detailFindings: string;
+    detailOptional: string;
+    detailOmitted: string;
+    detailQuery: string;
+    detailStyleReason: string;
+    detailMatchedBy: string;
+    detailCompleteCommitMessage: string;
+    detailAttempt: string;
+    detailTotalAttempts: string;
+    detailMissingStructuredOutput: string;
+    detailSchemaMismatch: string;
+    detailFiles: string;
+    detailFile: string;
+    detailStatus: string;
+    detailReason: string;
+    detailSummary: string;
+    detailBreaking: string;
+    detailProgress: string;
+    detailTarget: string;
+    detailDidSummarize: string;
+    detailSymbols: string;
+    detailConfigs: string;
+    detailTypes: string;
+    detailDependencies: string;
+    detailMaxSteps: string;
+    detailSuccess: string;
+    detailEvidence: string;
+    detailUnresolved: string;
+    detailEpoch: string;
+    detailProblems: string;
+    detailSource: string;
+    detailChangeSetSummary: string;
+    detailRetrievalFeatures: string;
+    detailReferences: string;
+    detailEmptyList: string;
+    detailIssueCount: string;
+    detailStage: string;
+    detailError: string;
+    detailFailureKind: string;
+    detailYes: string;
+    detailNo: string;
+    detailMustExpress: string;
+    detailTool: string;
+    detailSteps: string;
+    detailHardInput: string;
+    detailSafetyTokens: string;
+    detailForced: string;
+    sourceDraft: string;
+    sourceValidation: string;
+    sourceStrictFix: string;
+    sourceLanguageEnforcement: string;
+    sourceFinal: string;
 }
 
 export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
@@ -302,6 +362,66 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     enforceLanguageStartDefault: 'Narrative text is being checked against the target language.',
     enforceLanguageTitle: 'Target language checked',
     doneTitle: 'Commit message ready',
+    detailPrimaryIntent: 'Primary intent',
+    detailObservableEffect: 'Observable effect',
+    detailRecommendedType: 'Recommended type',
+    detailSuggestedScope: 'Suggested scope',
+    detailFacts: 'Facts',
+    detailUncertainties: 'Uncertainties',
+    detailInvestigationTargets: 'Investigation targets',
+    detailQuestions: 'Questions',
+    detailFindings: 'Findings',
+    detailOptional: 'Optional',
+    detailOmitted: 'Omitted',
+    detailQuery: 'Query',
+    detailStyleReason: 'Style reason',
+    detailMatchedBy: 'Matched by',
+    detailCompleteCommitMessage: 'Complete commit message',
+    detailAttempt: 'Attempt',
+    detailTotalAttempts: 'Total attempts',
+    detailMissingStructuredOutput: 'Missing structured output',
+    detailSchemaMismatch: 'Schema mismatch',
+    detailFiles: 'Files',
+    detailFile: 'File',
+    detailStatus: 'Status',
+    detailReason: 'Reason',
+    detailSummary: 'Summary',
+    detailBreaking: 'Breaking change',
+    detailProgress: 'Progress',
+    detailTarget: 'Target',
+    detailDidSummarize: 'Summarized',
+    detailSymbols: 'Symbols',
+    detailConfigs: 'Configs',
+    detailTypes: 'Types',
+    detailDependencies: 'Dependencies',
+    detailMaxSteps: 'Max steps',
+    detailSuccess: 'Success',
+    detailEvidence: 'Evidence',
+    detailUnresolved: 'Unresolved',
+    detailEpoch: 'Epoch',
+    detailProblems: 'Problems',
+    detailSource: 'Source',
+    detailChangeSetSummary: 'Change-set summary',
+    detailRetrievalFeatures: 'Retrieval features',
+    detailReferences: 'References',
+    detailEmptyList: 'None',
+    detailIssueCount: 'Issues',
+    detailStage: 'Stage',
+    detailError: 'Error',
+    detailFailureKind: 'Failure kind',
+    detailYes: 'Yes',
+    detailNo: 'No',
+    detailMustExpress: 'Must express',
+    detailTool: 'Tool',
+    detailSteps: 'Steps',
+    detailHardInput: 'Hard input',
+    detailSafetyTokens: 'Safety tokens',
+    detailForced: 'Forced compaction',
+    sourceDraft: 'Draft',
+    sourceValidation: 'Validation',
+    sourceStrictFix: 'Strict fix',
+    sourceLanguageEnforcement: 'Language enforcement',
+    sourceFinal: 'Final',
 };
 
 const LOCALIZED_PIPELINE_LANGUAGES = new Set(['zh-cn', 'zh-tw']);
@@ -321,6 +441,43 @@ export interface PipelineMetric {
     tone?: 'raw' | 'summary' | 'budget' | 'rag';
 }
 
+export interface EvidenceFileEntry {
+    file: string;
+    status: string;
+}
+
+export interface RagReferenceEntry {
+    message: string;
+    styleReason: string;
+    matchedBy: string[];
+    subject?: string;
+    commitHash?: string;
+}
+
+export type CommitMessageSource = 'draft' | 'validation' | 'strictFix' | 'languageEnforcement' | 'final';
+
+export type PipelineEventDetails =
+    | { kind: 'evidenceReady'; files: EvidenceFileEntry[]; fileCount: number; rawFiles: number; summarizedFiles: number; initialEstimatedInputTokens: number; maxInputTokens: number; contextWindowTokens: number; hardInputTokens: number; compressionTriggerTokens: number; maxOutputTokens: number; safetyTokens?: number }
+    | { kind: 'summarizeProgress'; file: string; summary: string; breaking: boolean; current: number; total: number }
+    | { kind: 'summarizeFailed'; target: string; error: string }
+    | { kind: 'evidenceRouted'; target: string; rawFiles: number; summarizedFiles: number; initialEstimatedInputTokens: number; estimatedInputTokens: number; maxInputTokens: number; didSummarize: boolean; forced?: boolean }
+    | { kind: 'changeExtracted'; symbols: string[]; symbolCount: number; configCount: number; typeCount: number; dependencyCount: number }
+    | { kind: 'investigationPlanned'; targets: string[]; targetCount: number; questionCount: number }
+    | { kind: 'investigationStart'; maxSteps: number }
+    | { kind: 'investigationStep'; current: number; total: number; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number }
+    | { kind: 'investigationComplete'; steps: number; evidenceCount: number; findingCount: number; unresolvedCount?: number; reason: string }
+    | { kind: 'investigationSkipped'; reason: string }
+    | { kind: 'analysisDegraded'; status: string; issueCount: number; reason: string }
+    | { kind: 'contextCompacted'; epoch: number; reason: string; estimatedTokens?: number }
+    | { kind: 'semanticAnalysisComplete'; primaryIntent?: string; observableEffect?: string; recommendedType?: string; confidence?: string; factCount: number; uncertaintyCount: number }
+    | { kind: 'informationSelected'; mustExpress: string[]; optional: string[]; omitCount: number; suggestedScope?: string; recommendedType?: string }
+    | { kind: 'ragPrepared'; mustExpress: string[]; type: string | null; scope: string | null; changeSetSummary: string; retrievalFeatures: string[] }
+    | { kind: 'ragRetrieved'; count: number; references: RagReferenceEntry[] }
+    | { kind: 'ragRetrievalSkipped'; error: string }
+    | { kind: 'commitMessage'; message: string; source: CommitMessageSource }
+    | { kind: 'strictFixStart'; problems: string[] }
+    | { kind: 'structuredValidation'; stage: string; failureKind: 'missingOutput' | 'schemaMismatch'; status: 'retrying' | 'failed'; attempt?: number; totalAttempts?: number; error?: string };
+
 export interface PipelineEventPresentation {
     stage: string;
     phase: string;
@@ -328,6 +485,14 @@ export interface PipelineEventPresentation {
     description: string;
     metrics: PipelineMetric[];
     tone: 'neutral' | 'active' | 'success' | 'warning';
+    details?: PipelineEventDetails;
+    data: Record<string, unknown>;
+}
+
+export interface StructuredValidationPresentation {
+    title: string;
+    tone: 'warning';
+    details: Extract<PipelineEventDetails, { kind: 'structuredValidation' }>;
     data: Record<string, unknown>;
 }
 
@@ -521,7 +686,352 @@ function asStringList(value: unknown, limit: number): string[] {
         : [];
 }
 
+function asFullStringList(value: unknown, stage: string, field: string): string[] {
+    if (!Array.isArray(value)) {
+        throw new Error(`Commit pipeline stage '${stage}' is missing required field '${field}'.`);
+    }
+    return value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+}
+
+function requireNumberField(data: Record<string, unknown>, stage: string, field: string): number {
+    const value = asNumber(data[field]);
+    if (value === undefined) {
+        throw new Error(`Commit pipeline stage '${stage}' is missing required field '${field}'.`);
+    }
+    return value;
+}
+
+function requireStringField(data: Record<string, unknown>, stage: string, field: string): string {
+    const value = asString(data[field]);
+    if (!value) {
+        throw new Error(`Commit pipeline stage '${stage}' is missing required field '${field}'.`);
+    }
+    return value;
+}
+
+function requireBooleanField(data: Record<string, unknown>, stage: string, field: string): boolean {
+    if (typeof data[field] !== 'boolean') {
+        throw new Error(`Commit pipeline stage '${stage}' is missing required field '${field}'.`);
+    }
+    return data[field];
+}
+
+function requireMessageField(data: Record<string, unknown>, stage: string, field: string): string {
+    if (typeof data[field] !== 'string') {
+        throw new Error(`Commit pipeline stage '${stage}' is missing required field '${field}'.`);
+    }
+    return data[field];
+}
+
+function optionalMessageField(data: Record<string, unknown>, field: string): string {
+    return typeof data[field] === 'string' ? data[field] : '';
+}
+
+function parseEvidenceFiles(value: unknown, stage: string): EvidenceFileEntry[] {
+    if (!Array.isArray(value)) {
+        throw new Error(`Commit pipeline stage '${stage}' is missing required field 'files'.`);
+    }
+    return value.map((entry, index) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            throw new Error(`Commit pipeline stage '${stage}' has invalid files[${index}].`);
+        }
+        const record = entry as Record<string, unknown>;
+        return {
+            file: requireStringField(record, stage, 'file'),
+            status: requireStringField(record, stage, 'status'),
+        };
+    });
+}
+
+function formatRetrievalFeatures(features: Record<string, unknown>): string[] {
+    const lines: string[] = [];
+    const predictedType = asString(features.predictedType);
+    const predictedScope = asString(features.predictedScope);
+    const fileCount = asNumber(features.fileCount);
+    if (predictedType) {
+        lines.push(`type: ${predictedType}`);
+    }
+    if (predictedScope) {
+        lines.push(`scope: ${predictedScope}`);
+    }
+    if (fileCount !== undefined) {
+        lines.push(`fileCount: ${fileCount}`);
+    }
+    for (const key of ['areas', 'fileKinds', 'changeActions', 'entities', 'touchedPaths', 'fileExtensions', 'statusMix'] as const) {
+        if (!Array.isArray(features[key])) {
+            continue;
+        }
+        const list = features[key].filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0);
+        if (list.length) {
+            lines.push(`${key}: ${list.join(', ')}`);
+        }
+    }
+    for (const flag of ['hasDocs', 'hasTests', 'hasConfig', 'hasRenames', 'isCrossLayer', 'breakingLike'] as const) {
+        if (typeof features[flag] === 'boolean') {
+            lines.push(`${flag}: ${features[flag]}`);
+        }
+    }
+    return lines;
+}
+
+function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unknown>): PipelineEventDetails | undefined {
+    switch (stage) {
+        case 'evidenceReady':
+            return {
+                kind: 'evidenceReady',
+                files: parseEvidenceFiles(data.files, stage),
+                fileCount: requireNumberField(data, stage, 'fileCount'),
+                rawFiles: requireNumberField(data, stage, 'rawFiles'),
+                summarizedFiles: requireNumberField(data, stage, 'summarizedFiles'),
+                initialEstimatedInputTokens: requireNumberField(data, stage, 'initialEstimatedInputTokens'),
+                maxInputTokens: requireNumberField(data, stage, 'maxInputTokens'),
+                contextWindowTokens: requireNumberField(data, stage, 'contextWindowTokens'),
+                hardInputTokens: requireNumberField(data, stage, 'hardInputTokens'),
+                compressionTriggerTokens: requireNumberField(data, stage, 'compressionTriggerTokens'),
+                maxOutputTokens: requireNumberField(data, stage, 'maxOutputTokens'),
+                ...(asNumber(data.safetyTokens) !== undefined ? { safetyTokens: asNumber(data.safetyTokens) } : {}),
+            };
+        case 'summarizeProgress':
+            return {
+                kind: 'summarizeProgress',
+                file: requireStringField(data, stage, 'file'),
+                summary: requireStringField(data, stage, 'summary'),
+                breaking: requireBooleanField(data, stage, 'breaking'),
+                current: requireNumberField(data, stage, 'current'),
+                total: requireNumberField(data, stage, 'total'),
+            };
+        case 'summarizeFailed':
+            return {
+                kind: 'summarizeFailed',
+                target: requireStringField(data, stage, 'target'),
+                error: requireStringField(data, stage, 'error'),
+            };
+        case 'evidenceRouted':
+            return {
+                kind: 'evidenceRouted',
+                target: requireStringField(data, stage, 'target'),
+                rawFiles: requireNumberField(data, stage, 'rawFiles'),
+                summarizedFiles: requireNumberField(data, stage, 'summarizedFiles'),
+                initialEstimatedInputTokens: requireNumberField(data, stage, 'initialEstimatedInputTokens'),
+                estimatedInputTokens: requireNumberField(data, stage, 'estimatedInputTokens'),
+                maxInputTokens: requireNumberField(data, stage, 'maxInputTokens'),
+                didSummarize: requireBooleanField(data, stage, 'didSummarize'),
+                ...(typeof data.forced === 'boolean' ? { forced: data.forced } : {}),
+            };
+        case 'changeExtracted':
+            return {
+                kind: 'changeExtracted',
+                symbols: asFullStringList(data.symbols, stage, 'symbols'),
+                symbolCount: requireNumberField(data, stage, 'symbolCount'),
+                configCount: requireNumberField(data, stage, 'configCount'),
+                typeCount: requireNumberField(data, stage, 'typeCount'),
+                dependencyCount: requireNumberField(data, stage, 'dependencyCount'),
+            };
+        case 'investigationPlanned':
+            return {
+                kind: 'investigationPlanned',
+                targets: asFullStringList(data.targets, stage, 'targets'),
+                targetCount: requireNumberField(data, stage, 'targetCount'),
+                questionCount: requireNumberField(data, stage, 'questionCount'),
+            };
+        case 'investigationStart':
+            return {
+                kind: 'investigationStart',
+                maxSteps: requireNumberField(data, stage, 'maxSteps'),
+            };
+        case 'investigationStep':
+            return {
+                kind: 'investigationStep',
+                current: requireNumberField(data, stage, 'current'),
+                total: requireNumberField(data, stage, 'total'),
+                tool: requireStringField(data, stage, 'tool'),
+                ok: requireBooleanField(data, stage, 'ok'),
+                ...(asString(data.reason) ? { reason: asString(data.reason) } : {}),
+                ...(asString(data.summary) ? { summary: asString(data.summary) } : {}),
+                ...(asNumber(data.evidenceCount) !== undefined ? { evidenceCount: asNumber(data.evidenceCount) } : {}),
+            };
+        case 'investigationComplete':
+            return {
+                kind: 'investigationComplete',
+                steps: requireNumberField(data, stage, 'steps'),
+                evidenceCount: requireNumberField(data, stage, 'evidenceCount'),
+                findingCount: requireNumberField(data, stage, 'findingCount'),
+                reason: requireStringField(data, stage, 'reason'),
+                ...(asNumber(data.unresolvedCount) !== undefined ? { unresolvedCount: asNumber(data.unresolvedCount) } : {}),
+            };
+        case 'investigationSkipped':
+            return {
+                kind: 'investigationSkipped',
+                reason: requireStringField(data, stage, 'reason'),
+            };
+        case 'analysisDegraded':
+            return {
+                kind: 'analysisDegraded',
+                status: requireStringField(data, stage, 'status'),
+                issueCount: requireNumberField(data, stage, 'issueCount'),
+                reason: requireStringField(data, stage, 'reason'),
+            };
+        case 'contextCompacted':
+            return {
+                kind: 'contextCompacted',
+                epoch: requireNumberField(data, stage, 'epoch'),
+                reason: requireStringField(data, stage, 'reason'),
+                ...(asNumber(data.estimatedTokens) !== undefined ? { estimatedTokens: asNumber(data.estimatedTokens) } : {}),
+            };
+        case 'semanticAnalysisComplete':
+            return {
+                kind: 'semanticAnalysisComplete',
+                factCount: requireNumberField(data, stage, 'factCount'),
+                uncertaintyCount: requireNumberField(data, stage, 'uncertaintyCount'),
+                ...(asString(data.primaryIntent) ? { primaryIntent: asString(data.primaryIntent) } : {}),
+                ...(asString(data.observableEffect) ? { observableEffect: asString(data.observableEffect) } : {}),
+                ...(asString(data.recommendedType) ? { recommendedType: asString(data.recommendedType) } : {}),
+                ...(asString(data.confidence) ? { confidence: asString(data.confidence) } : {}),
+            };
+        case 'informationSelected':
+            return {
+                kind: 'informationSelected',
+                mustExpress: asFullStringList(data.mustExpress, stage, 'mustExpress'),
+                optional: asFullStringList(data.optional, stage, 'optional'),
+                omitCount: requireNumberField(data, stage, 'omitCount'),
+                ...(asString(data.suggestedScope) ? { suggestedScope: asString(data.suggestedScope) } : {}),
+                ...(asString(data.recommendedType) ? { recommendedType: asString(data.recommendedType) } : {}),
+            };
+        case 'ragPrepared': {
+            const query = (data.query || {}) as Record<string, unknown>;
+            const changeSetSummary = (data.changeSetSummary || {}) as Record<string, unknown>;
+            const retrievalFeatures = (data.retrievalFeatures || {}) as Record<string, unknown>;
+            return {
+                kind: 'ragPrepared',
+                mustExpress: asFullStringList(query.mustExpress, stage, 'query.mustExpress'),
+                type: typeof query.type === 'string' || query.type === null ? query.type : null,
+                scope: typeof query.scope === 'string' || query.scope === null ? query.scope : null,
+                changeSetSummary: optionalMessageField(changeSetSummary, 'text'),
+                retrievalFeatures: formatRetrievalFeatures(retrievalFeatures),
+            };
+        }
+        case 'ragRetrieved': {
+            const references = Array.isArray(data.references) ? data.references : [];
+            return {
+                kind: 'ragRetrieved',
+                count: requireNumberField(data, stage, 'count'),
+                references: references.map((entry, index) => {
+                    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+                        throw new Error(`Commit pipeline stage '${stage}' has invalid references[${index}].`);
+                    }
+                    const record = entry as Record<string, unknown>;
+                    return {
+                        message: requireMessageField(record, stage, 'message'),
+                        styleReason: requireStringField(record, stage, 'styleReason'),
+                        matchedBy: asFullStringList(record.matchedBy, stage, 'matchedBy'),
+                        ...(asString(record.subject) ? { subject: asString(record.subject) } : {}),
+                        ...(asString(record.commitHash) ? { commitHash: asString(record.commitHash) } : {}),
+                    };
+                }),
+            };
+        }
+        case 'ragRetrievalSkipped':
+            return {
+                kind: 'ragRetrievalSkipped',
+                error: requireStringField(data, stage, 'error'),
+            };
+        case 'classifyDraft':
+            return {
+                kind: 'commitMessage',
+                message: requireMessageField(data, stage, 'draft'),
+                source: 'draft',
+            };
+        case 'validateFix':
+            return {
+                kind: 'commitMessage',
+                message: requireMessageField(data, stage, 'validMessage'),
+                source: 'validation',
+            };
+        case 'strictFixStart':
+            return {
+                kind: 'strictFixStart',
+                problems: asFullStringList(data.problems, stage, 'problems'),
+            };
+        case 'strictFix':
+            return {
+                kind: 'commitMessage',
+                message: requireMessageField(data, stage, 'message'),
+                source: 'strictFix',
+            };
+        case 'enforceLanguage':
+            return {
+                kind: 'commitMessage',
+                message: requireMessageField(data, stage, 'message'),
+                source: 'languageEnforcement',
+            };
+        case 'done':
+            return {
+                kind: 'commitMessage',
+                message: requireMessageField(data, stage, 'finalMessage'),
+                source: 'final',
+            };
+        default:
+            return undefined;
+    }
+}
+
+export function isStructuredValidationLog(log: PipelineLogLike): boolean {
+    const title = (log.title || '').toLowerCase();
+    const reason = ((log as { reason?: string }).reason || '').toLowerCase();
+    return log.type === 'toolCall' && (
+        title.includes('schema validation')
+        || title.includes('structured output')
+        || reason.includes('schema validation')
+        || reason.includes('structured output')
+    );
+}
+
+export function presentStructuredValidationLog(
+    log: PipelineLogLike,
+    text: PipelineTextCatalog = DEFAULT_PIPELINE_TEXT
+): StructuredValidationPresentation | null {
+    if (!isStructuredValidationLog(log)) {
+        return null;
+    }
+    if (!log.content) {
+        throw new Error(`Structured validation log '${log.id}' is missing its payload.`);
+    }
+    const payload = JSON.parse(log.content) as Record<string, unknown>;
+    const stage = requireStringField(payload, 'structuredValidation', 'stage');
+    const missingResponse = payload.missingResponse === true;
+    const finalFailure = payload.finalFailure === true;
+    const failureKind = missingResponse ? 'missingOutput' : 'schemaMismatch';
+    const status = finalFailure ? 'failed' : 'retrying';
+    const template = missingResponse
+        ? (finalFailure ? text.structuredOutputFailedTitle : text.structuredOutputRetryTitle)
+        : (finalFailure ? text.schemaValidationFailedTitle : text.schemaValidationRetryTitle);
+    const title = formatPipelineText(template, stage);
+    return {
+        title,
+        tone: 'warning',
+        details: {
+            kind: 'structuredValidation',
+            stage,
+            failureKind,
+            status,
+            ...(asNumber(payload.attempt) !== undefined ? { attempt: asNumber(payload.attempt) } : {}),
+            ...(asNumber(payload.totalAttempts) !== undefined ? { totalAttempts: asNumber(payload.totalAttempts) } : {}),
+            ...(asString(payload.error) ? { error: asString(payload.error) } : {}),
+        },
+        data: payload,
+    };
+}
+
 export function presentPipelineEvent(
+    payload: CommitStagePayload,
+    text: PipelineTextCatalog = DEFAULT_PIPELINE_TEXT
+): PipelineEventPresentation {
+    const presentation = presentPipelineEventCore(payload, text);
+    const details = buildDetailsForStage(payload.stage as PipelineStageName, payload.data);
+    return details ? { ...presentation, details } : presentation;
+}
+
+function presentPipelineEventCore(
     payload: CommitStagePayload,
     text: PipelineTextCatalog = DEFAULT_PIPELINE_TEXT
 ): PipelineEventPresentation {

@@ -4,7 +4,9 @@ import { LogEntry, LogType } from '../types/messages';
 import { vscodeApi } from '../utils/vscode';
 import './LogSection.css';
 import { GenieCheckIcon, GenieCloudIcon, GenieReadIcon, GenieReasonIcon, GenieToolIcon, GenieWarningIcon } from './icons';
-import { formatPipelineText, parseCommitStageLog, pipelineStageBadge, presentPipelineEvent } from '../../../src/ui/pipelineDisplay';
+import { formatPipelineText, parseCommitStageLog, pipelineStageBadge, presentPipelineEvent, presentStructuredValidationLog } from '../../../src/ui/pipelineDisplay';
+import { PipelineLogDetails } from './PipelineLogDetails';
+import { isApiRequestLog } from '../../../src/ui/apiLogPolicy';
 // @ts-ignore - react-markdown types
 import ReactMarkdown from 'react-markdown';
 
@@ -164,8 +166,13 @@ export const LogSection: React.FC = () => {
     };
 
     const getPipelinePresentation = (log: LogEntry) => {
-        const payload = parseCommitStageLog(log);
-        return payload ? presentPipelineEvent(payload, state.i18n.pipeline) : null;
+        try {
+            const payload = parseCommitStageLog(log);
+            return payload ? presentPipelineEvent(payload, state.i18n.pipeline) : null;
+        } catch (error) {
+            console.error(`[Genie] Failed to present commit stage log '${log.id}'.`, error);
+            return null;
+        }
     };
 
     const getGenerationStartTitle = (log: LogEntry): string => {
@@ -185,9 +192,25 @@ export const LogSection: React.FC = () => {
         return formatPipelineText(state.i18n.pipeline.generationStarted, repositoryName, mode);
     };
 
+    const getValidationPresentation = (log: LogEntry) => {
+        try {
+            return presentStructuredValidationLog(log, state.i18n.pipeline);
+        } catch (error) {
+            console.error(`[Genie] Failed to present structured validation log '${log.id}'.`, error);
+            return null;
+        }
+    };
+
+    const isStructuredValidationLogEntry = (log: LogEntry) => getValidationPresentation(log) !== null;
+
+    const isValidationRetryLog = (log: LogEntry) => {
+        const presentation = getValidationPresentation(log);
+        return presentation?.details.status === 'retrying';
+    };
+
     const isFailureLog = (log: LogEntry) => {
         if (isValidationRetryLog(log)) return false;
-        if (isSchemaValidationLog(log)) return true;
+        if (isStructuredValidationLogEntry(log)) return true;
         if (getPipelinePresentation(log)?.tone === 'warning') return true;
         const t = (log.title || '').toLowerCase();
         const r = (log.reason || '').toLowerCase();
@@ -206,7 +229,7 @@ export const LogSection: React.FC = () => {
         if (pipeline?.tone === 'success') {
             return <GenieCheckIcon size={13} />;
         }
-        if (isSchemaValidationLog(log)) {
+        if (isStructuredValidationLogEntry(log)) {
             return <GenieWarningIcon size={13} />;
         }
         switch (log.type) {
@@ -229,44 +252,34 @@ export const LogSection: React.FC = () => {
         }
     };
 
-    const isSchemaValidationLog = (log: LogEntry) => {
-        const t = (log.title || '').toLowerCase();
-        const r = (log.reason || '').toLowerCase();
-        return log.type === LogType.ToolCall && (
-            t.includes('schema validation')
-            || t.includes('structured output')
-            || r.includes('schema validation')
-            || r.includes('structured output')
-        );
-    };
+    const isSchemaValidationLog = (log: LogEntry) => isStructuredValidationLogEntry(log);
 
-    const isValidationRetryLog = (log: LogEntry) => {
-        const title = (log.title || '').toLowerCase();
-        return log.type === LogType.ToolCall && (
-            title.includes('schema validation retry')
-            || title.includes('structured output retry')
-        );
-    };
-
-    const getValidationTitle = (log: LogEntry): string | null => {
-        if (!isSchemaValidationLog(log)) {
-            return null;
+    const canExpandLog = (
+        log: LogEntry,
+        pipeline: ReturnType<typeof getPipelinePresentation>,
+        validationPresentation: ReturnType<typeof getValidationPresentation>,
+    ) => {
+        // API rows represent transport activity in the log stream. Keeping them
+        // closed prevents response-schema differences from changing row behavior.
+        if (isApiRequestLog(log)) {
+            return false;
         }
-        if (!log.content) {
-            throw new Error(`Structured validation log '${log.id}' is missing its payload.`);
+        if (log.type === LogType.Reason) {
+            return false;
         }
-        const payload = JSON.parse(log.content) as { stage?: unknown; finalFailure?: unknown; missingResponse?: unknown };
-        if (typeof payload.stage !== 'string' || payload.stage.length === 0) {
-            throw new Error(`Structured validation log '${log.id}' is missing its stage.`);
+        if ((log.pending || log.cancelled) && !(log.content || log.fileContent)) {
+            return false;
         }
-        const template = payload.missingResponse
-            ? (payload.finalFailure
-                ? state.i18n.pipeline.structuredOutputFailedTitle
-                : state.i18n.pipeline.structuredOutputRetryTitle)
-            : (payload.finalFailure
-                ? state.i18n.pipeline.schemaValidationFailedTitle
-                : state.i18n.pipeline.schemaValidationRetryTitle);
-        return formatPipelineText(template, payload.stage);
+        if (pipeline) {
+            return pipeline.details !== undefined;
+        }
+        if (validationPresentation) {
+            return validationPresentation.details !== undefined;
+        }
+        if (log.type === LogType.FileRead && log.fileContent) {
+            return true;
+        }
+        return Boolean(log.content);
     };
 
     const getRepoInfoForLog = (log: LogEntry): { name: string; colorIdx: number } | null => {
@@ -428,6 +441,11 @@ export const LogSection: React.FC = () => {
                                 const success = isSuccessLog(log);
                                 const failure = isFailureLog(log);
                                 const pipeline = getPipelinePresentation(log);
+                                const validationPresentation = getValidationPresentation(log);
+                                const expandable = canExpandLog(log, pipeline, validationPresentation);
+                                const displayTitle = pipeline?.title || validationPresentation?.title || log.title;
+                                const displayDescription = pipeline?.description;
+                                const semanticDetails = pipeline?.details || validationPresentation?.details;
                                 return (
                                     <div key={log.id} className={`log-item ${(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? 'log-divider' : ''} ${failure ? 'log-error' : ''} ${success ? 'log-success' : ''} ${isNew ? 'log-item-new' : ''}`}>
                                         {(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? (
@@ -439,30 +457,22 @@ export const LogSection: React.FC = () => {
                                         ) : (
                                             <>
                                                 <div
-                                                    className="log-header"
+                                                    className={`log-header${expandable ? ' log-header-expandable' : ''}`}
                                                     onClick={() => {
-                                                        // Reason logs are not expandable
-                                                        if (log.type === LogType.Reason) { return; }
-                                                        // Allow expanding even when pending/cancelled if there is content
-                                                        if ((log.pending || log.cancelled) && !(log.content || log.fileContent)) { return; }
-
-                                                        // For file reads with content, allow expanding instead of opening
-                                                        if (log.type === LogType.FileRead && log.fileContent) {
-                                                            toggleExpand(log.id);
-                                                        } else if (log.type === LogType.FileRead && log.filePath) {
+                                                        if (!expandable) { return; }
+                                                        if (log.type === LogType.FileRead && log.filePath && !log.fileContent) {
                                                             handleFileClick(log.filePath);
-                                                        } else if (log.content) {
-                                                            toggleExpand(log.id);
+                                                            return;
                                                         }
+                                                        toggleExpand(log.id);
                                                     }}
-                                                    style={{ cursor: (log.type === LogType.Reason || ((log.pending || log.cancelled) && !(log.content || log.fileContent))) ? 'default' : 'pointer' }}
                                                 >
                                                     <span className="log-icon">{renderLogIcon(log)}</span>
                                                     <div className="log-main-content">
                                                         <span className="log-title-text">
                                                             {(() => { const info = getRepoInfoForLog(log); return info ? (<span className={`log-repo-badge repo-badge-c${info.colorIdx}`}>{info.name}</span>) : null; })()}
                                                             {(() => { const badge = getStageBadge(log); return badge ? (<span className={`stage-badge ${badge.className}`}>{badge.label}</span>) : null; })()}
-                                                            <span className="log-display-title">{pipeline?.title || getValidationTitle(log) || log.title}</span>
+                                                            <span className="log-display-title">{displayTitle}</span>
                                                         </span>
                                                         {/* inline reason removed; reason is a separate log */}
                                                     </div>
@@ -480,13 +490,13 @@ export const LogSection: React.FC = () => {
                                                         {log.type === LogType.FileRead && log.filePath && !log.fileContent && (
                                                             <span className="log-file-icon" title="Open file"><GenieReadIcon size={12} /></span>
                                                         )}
-                                                        {(log.content || log.fileContent) && log.type !== LogType.Reason && (
+                                                        {expandable && (
                                                             <span className={`codicon codicon-chevron-right log-expand-icon${expandedLog === log.id ? ' expanded' : ''}`}></span>
                                                         )}
                                                     </div>
                                                 </div>
-                                                {pipeline?.description && (
-                                                    <div className="log-pipeline-description">{pipeline.description}</div>
+                                                {displayDescription && (
+                                                    <div className="log-pipeline-description">{displayDescription}</div>
                                                 )}
                                                 {/* Submeta: timestamp small under header (no icon) */}
                                                 {!log.pending && (
@@ -496,23 +506,26 @@ export const LogSection: React.FC = () => {
                                                 {log.type === LogType.Reason && log.content && (
                                                     <div className="log-reason-block">{log.content}</div>
                                                 )}
-                                                {(log.content || log.fileContent) && expandedLog === log.id && log.type !== LogType.Reason && (
-                                                    <div className="log-content">
+                                                {expandedLog === log.id && expandable && (
+                                                    <div className={`log-content${semanticDetails ? ' log-content-semantic' : ''}`}>
                                                         {log.fileContent ? (
                                                             <pre className="file-content-preview">
                                                                 <code>{log.fileContent}</code>
                                                             </pre>
+                                                        ) : semanticDetails ? (
+                                                            <PipelineLogDetails
+                                                                details={semanticDetails}
+                                                                text={state.i18n.pipeline}
+                                                            />
+                                                        ) : log.type === LogType.ToolCall ? (
+                                                            <pre><code>{(() => { try { return JSON.stringify(JSON.parse(log.content!), null, 2); } catch { return String(log.content || ''); } })()}</code></pre>
                                                         ) : (
-                                                            log.type === LogType.ToolCall ? (
-                                                                <pre><code>{(() => { try { return JSON.stringify(JSON.parse(log.content!), null, 2); } catch { return String(log.content || ''); } })()}</code></pre>
-                                                            ) : (
-                                                                <ReactMarkdown>
-                                                                    {log.type === LogType.ApiRequest || log.type === LogType.FinalResult
-                                                                        ? formatFunctionCallContent(log.content!)
-                                                                        : log.content!
-                                                                    }
-                                                                </ReactMarkdown>
-                                                            )
+                                                            <ReactMarkdown>
+                                                                {log.type === LogType.FinalResult
+                                                                    ? formatFunctionCallContent(log.content!)
+                                                                    : log.content!
+                                                                }
+                                                            </ReactMarkdown>
                                                         )}
                                                     </div>
                                                 )}
