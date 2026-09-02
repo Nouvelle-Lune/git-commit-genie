@@ -59,23 +59,6 @@ export function logRepositoryAnalysisToolCall(
     ));
 }
 
-/** Mirrors repository-analysis tool logging for change-conditioned investigation. */
-export function logInvestigationToolCall(
-    repoPath: string,
-    toolName: string,
-    args: Record<string, unknown>,
-    reason: string,
-    step: number,
-    maxSteps: number,
-): void {
-    safeRun('Investigation.logToolCall', () => logger.logToolCall(
-        toolName,
-        JSON.stringify({ ...args, step, maxSteps }),
-        reason,
-        repoPath,
-    ));
-}
-
 export function logCommitStageToWebview(repoPath: string, event: StageEvent): void {
     const payload = { stage: event.type, data: event.data ?? {} };
     safeRun('LLM.logCommitStage', () => logger.logToolCall(

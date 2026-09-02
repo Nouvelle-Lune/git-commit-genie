@@ -25,7 +25,6 @@ import {
     TracedAgentClaim,
 } from '../types';
 import { buildInvestigationToolResultMessage } from '../prompts';
-import { logInvestigationToolCall } from '../../../llm/chatWebviewLogging';
 import {
     CHANGE_ANALYSIS_TOOL_NAMES,
     InvestigationToolCall,
@@ -266,16 +265,6 @@ function createExecutableDefinition(
                 })),
                 allocateEvidence: evidence => context.allocateEvidence(evidence),
             };
-            if (toolName !== 'readFileContent') {
-                logInvestigationToolCall(
-                    input.repositoryPath,
-                    toolName,
-                    args,
-                    String(args.reason ?? '').trim(),
-                    state.steps,
-                    input.maxSteps,
-                );
-            }
             const outcome = await runInvestigationTool(toolContext, toToolCall(toolName, args));
             for (const item of outcome.evidence) {
                 evidenceItems.push(item);
