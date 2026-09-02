@@ -251,7 +251,7 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     stepVerify: 'Verify',
     draftInput: 'Draft input',
     extractInput: 'Change extraction input',
-    analyzeInput: 'Semantic analysis input',
+    analyzeInput: 'Repository Investigation and Semantic Analysis',
     tokenUsage: 'Input token usage {0}%',
     payloadEvidence: 'Evidence',
     payloadRaw: 'raw',

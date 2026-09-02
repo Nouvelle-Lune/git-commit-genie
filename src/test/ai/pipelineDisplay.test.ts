@@ -8,6 +8,27 @@ import {
 } from '../../ui/pipelineDisplay';
 
 describe('pipeline display for parallel analysis events', () => {
+    it('labels the compound analysis handoff before repository tool calls', () => {
+        const presentation = presentPipelineEvent({
+            stage: 'evidenceRouted',
+            data: {
+                target: 'semanticAnalysis',
+                rawFiles: 2,
+                summarizedFiles: 0,
+                initialEstimatedInputTokens: 1200,
+                estimatedInputTokens: 1200,
+                maxInputTokens: 8000,
+                didSummarize: false,
+            },
+        });
+
+        assert.equal(
+            presentation.title,
+            'Evidence ready for Repository Investigation and Semantic Analysis',
+        );
+        assert.doesNotMatch(presentation.title, /Semantic analysis input/);
+    });
+
     it('renders degraded analysis as a visible warning', () => {
         const presentation = presentPipelineEvent({
             stage: 'analysisDegraded',
