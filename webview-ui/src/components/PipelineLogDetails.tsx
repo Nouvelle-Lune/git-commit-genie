@@ -15,10 +15,21 @@ function SemanticTag({ value }: { value: string }) {
     return <span className="pipeline-details-tag">{value}</span>;
 }
 
-function CommitMessageBlock({ message }: { message: string }) {
-    return (
-        <pre className="pipeline-details-commit"><code>{message}</code></pre>
-    );
+/**
+ * Split a commit message so the subject can be a section title and the body
+ * can be prose, matching semantic-analysis cards. Only peel the heading when
+ * it is literally the start of `message`; otherwise keep the full text as body
+ * to avoid inventing a duplicate title.
+ */
+function splitCommitHeading(message: string, subject?: string): { heading: string; body: string } {
+    const heading = (subject || message.split('\n')[0] || '').trim();
+    if (heading && (message === heading || message.startsWith(`${heading}\n`))) {
+        return {
+            heading,
+            body: message.slice(heading.length).replace(/^\n+/, ''),
+        };
+    }
+    return { heading: '', body: message };
 }
 
 function DetailSection({ title, children }: { title?: string; children: React.ReactNode }) {
@@ -274,19 +285,23 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
         case 'ragRetrieved':
             return (
                 <>
-                    <DetailMetrics items={[{ label: text.detailReferences, value: String(details.count) }]} />
                     <div className="pipeline-details-reference-list">
-                        {details.references.map((reference, index) => (
-                            <article key={`${reference.commitHash || reference.subject || index}`} className="pipeline-details-reference">
-                                {reference.subject ? <div className="pipeline-details-reference-subject">{reference.subject}</div> : null}
-                                <CommitMessageBlock message={reference.message} />
-                                <DetailFields rows={[
-                                    { label: text.detailStyleReason, value: reference.styleReason },
-                                    { label: text.detailMatchedBy, value: <StringList items={reference.matchedBy} emptyLabel={text.detailEmptyList} /> },
-                                ]} />
-                            </article>
-                        ))}
+                        {details.references.map((reference, index) => {
+                            const { heading, body } = splitCommitHeading(reference.message, reference.subject);
+                            return (
+                                <article key={`${reference.commitHash || reference.subject || index}`} className="pipeline-details-reference">
+                                    <DetailSection title={heading || undefined}>
+                                        {body ? <DetailProse>{body}</DetailProse> : null}
+                                    </DetailSection>
+                                    <DetailFields rows={[
+                                        { label: text.detailStyleReason, value: reference.styleReason },
+                                        { label: text.detailMatchedBy, value: <StringList items={reference.matchedBy} emptyLabel={text.detailEmptyList} /> },
+                                    ]} />
+                                </article>
+                            );
+                        })}
                     </div>
+                    <DetailMetrics items={[{ label: text.detailReferences, value: String(details.count) }]} />
                 </>
             );
         case 'ragRetrievalSkipped':
@@ -294,10 +309,10 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
         case 'commitMessage':
             return (
                 <>
-                    <DetailMetrics items={[{ label: text.detailSource, value: <SemanticTag value={sourceLabel(details.source, text)} /> }]} />
                     <DetailSection title={text.detailCompleteCommitMessage}>
-                        <CommitMessageBlock message={details.message} />
+                        <DetailProse>{details.message}</DetailProse>
                     </DetailSection>
+                    <DetailMetrics items={[{ label: text.detailSource, value: <SemanticTag value={sourceLabel(details.source, text)} /> }]} />
                 </>
             );
         case 'strictFixStart':

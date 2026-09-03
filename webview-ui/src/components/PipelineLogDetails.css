@@ -1,9 +1,15 @@
 .pipeline-log-details {
+  /* Track editor size so the expanded card scales with the workbench, while
+     the 0.85 factor keeps title/prose at the compact size used by semantic
+     analysis (~11px at a 13px editor). */
+  --pipeline-details-font-size: calc(var(--vscode-editor-font-size, var(--vscode-font-size)) * 0.85);
+  --pipeline-details-meta-size: calc(var(--pipeline-details-font-size) * 0.91);
   display: flex;
   flex-direction: column;
   gap: 10px;
   color: var(--vscode-foreground);
   font-family: var(--vscode-font-family);
+  font-size: var(--pipeline-details-font-size);
 }
 
 .pipeline-details-section {
@@ -15,14 +21,14 @@
 .pipeline-details-section-title {
   margin: 0;
   color: var(--vscode-foreground);
-  font-size: 11px;
+  font-size: 1em;
   font-weight: 600;
   line-height: 1.4;
 }
 
 .pipeline-details-prose {
   color: var(--vscode-descriptionForeground);
-  font-size: 11px;
+  font-size: 1em;
   line-height: 1.5;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
@@ -46,7 +52,7 @@
 .pipeline-details-metric-label,
 .pipeline-details-metric-value {
   margin: 0;
-  font-size: 10px;
+  font-size: var(--pipeline-details-meta-size);
   line-height: 1.4;
 }
 
@@ -86,13 +92,13 @@
 
 .pipeline-details-field dt {
   color: var(--vscode-descriptionForeground);
-  font-size: 10px;
+  font-size: var(--pipeline-details-meta-size);
 }
 
 .pipeline-details-field dd {
   min-width: 0;
   color: var(--vscode-foreground);
-  font-size: 11px;
+  font-size: 1em;
   overflow-wrap: anywhere;
 }
 
@@ -105,7 +111,7 @@
   margin: 2px 0;
   padding: 0;
   color: var(--vscode-foreground);
-  font-size: 11px;
+  font-size: 1em;
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -117,7 +123,6 @@
 .pipeline-details-reference-list {
   display: flex;
   flex-direction: column;
-  border-top: 1px solid var(--vscode-panel-border);
 }
 
 .pipeline-details-reference {
@@ -128,11 +133,13 @@
   border-bottom: 1px solid var(--vscode-panel-border);
 }
 
-.pipeline-details-reference-subject {
-  color: var(--vscode-foreground);
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 1.4;
+.pipeline-details-reference:first-child {
+  padding-top: 0;
+}
+
+.pipeline-details-reference:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
 }
 
 .pipeline-details-tag {
@@ -140,34 +147,14 @@
   max-width: 100%;
   color: var(--vscode-textPreformat-foreground);
   font-family: var(--vscode-editor-font-family);
-  font-size: 10px;
+  font-size: var(--pipeline-details-meta-size);
   line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
-.pipeline-details-commit {
-  margin: 0;
-  padding: 8px 10px;
-  overflow-x: auto;
-  border: 1px solid var(--vscode-panel-border);
-  border-radius: 2px;
-  background: var(--vscode-editor-background);
-  color: var(--vscode-editor-foreground);
-  font-family: var(--vscode-editor-font-family);
-  font-size: max(11px, var(--vscode-editor-font-size));
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.pipeline-details-commit code {
-  font-family: inherit;
-}
-
 .pipeline-details-empty {
   color: var(--vscode-descriptionForeground);
-  font-size: 11px;
+  font-size: 1em;
 }
 
 .pipeline-details-warning {
@@ -187,19 +174,6 @@
 .log-content .pipeline-details-list li {
   margin: 2px 0;
   padding: 0;
-}
-
-.log-content .pipeline-details-commit {
-  margin: 0;
-  padding: 8px 10px;
-  background: var(--vscode-editor-background);
-}
-
-.log-content .pipeline-details-commit code {
-  padding: 0;
-  background: transparent;
-  font-family: inherit;
-  font-size: inherit;
 }
 
 @media (max-width: 360px) {
