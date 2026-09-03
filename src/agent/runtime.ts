@@ -200,10 +200,15 @@ export class AgentRuntime {
         let epochOpening = prompt.opening;
         let epochObservationStart = 0;
         let terminalValidationRetries = 0;
+        // After the tool-step budget is exhausted, one more API turn must emit the
+        // compound terminal with tools disabled instead of hard-failing the run.
+        let forceFinalize = false;
         const seenCalls = new Set<string>();
+        const maxSteps = profile.contextPolicy.maxSteps;
+        const budgetExhaustedOutput = buildBudgetExhaustedToolOutput(profile.id, maxSteps);
 
         try {
-            while (state.steps <= profile.contextPolicy.maxSteps) {
+            while (state.steps <= maxSteps) {
                 const prepared = this.prepareEpoch({
                     execution,
                     profile,
@@ -228,7 +233,7 @@ export class AgentRuntime {
                     toolResults,
                     tools,
                     responseFormat,
-                    toolChoice: tools.length ? 'auto' : 'none',
+                    toolChoice: forceFinalize || tools.length === 0 ? 'none' : 'auto',
                     temperature: execution.temperature,
                     maxOutputTokens: execution.maxOutputTokens,
                     thinking,
@@ -252,6 +257,13 @@ export class AgentRuntime {
                     });
                     const terminalValidationError = profile.validateTerminal?.(raw, state) ?? null;
                     if (terminalValidationError) {
+                        // Tools cannot run once the budget is spent; asking the model
+                        // to call more tools would only empty-loop until partial failure.
+                        if (forceFinalize || state.steps >= maxSteps) {
+                            const message = `Compound terminal for '${profile.id}' remained invalid after tool-step budget exhaustion: ${terminalValidationError}`;
+                            state.issues.push({ type: 'terminal_failure', message, step: state.steps });
+                            throw new Error(message);
+                        }
                         if (terminalValidationRetries >= execution.maxRetries) {
                             const message = `Compound terminal for '${profile.id}' remained invalid after ${terminalValidationRetries} profile retry attempt(s): ${terminalValidationError}`;
                             state.issues.push({ type: 'terminal_failure', message, step: state.steps });
@@ -287,18 +299,28 @@ export class AgentRuntime {
                     };
                 }
 
-                if (state.steps === profile.contextPolicy.maxSteps) {
-                    const message = `Agent profile '${profile.id}' exhausted its ${profile.contextPolicy.maxSteps} tool-step budget.`;
-                    state.issues.push({ type: 'max_steps', message, step: state.steps });
+                if (forceFinalize) {
+                    const message = `Agent profile '${profile.id}' returned tool calls after its ${maxSteps} tool-step budget was exhausted.`;
+                    if (!state.issues.some(issue => issue.type === 'max_steps')) {
+                        state.issues.push({ type: 'max_steps', message, step: state.steps });
+                    }
                     throw new Error(message);
                 }
 
                 toolResults = [];
                 for (const call of response.toolCalls) {
-                    if (state.steps >= profile.contextPolicy.maxSteps) {
-                        const message = `Agent profile '${profile.id}' exhausted its ${profile.contextPolicy.maxSteps} tool-step budget.`;
-                        state.issues.push({ type: 'max_steps', message, step: state.steps });
-                        throw new Error(message);
+                    if (state.steps >= maxSteps) {
+                        // Providers require tool_result for each pending tool_use.
+                        // Reject overflow calls in-band, then force a terminal turn.
+                        recordMaxStepsIssue(state, profile.id, maxSteps);
+                        forceFinalize = true;
+                        toolResults.push({
+                            callId: call.id,
+                            name: call.name,
+                            output: budgetExhaustedOutput,
+                            isError: true,
+                        });
+                        continue;
                     }
                     state.steps += 1;
                     const callKey = canonicalToolCallKey(call);
@@ -539,6 +561,28 @@ function buildRunMetrics(state: AgentRunState): AgentRunMetrics {
         usage: [...state.usages],
         issues: state.issues.map(issue => ({ ...issue })),
     };
+}
+
+/** Stable tool_result body used when a call is refused after the step budget is spent. */
+function buildBudgetExhaustedToolOutput(profileId: string, maxSteps: number): string {
+    return [
+        '<budget_exhausted>',
+        `Agent profile '${profileId}' exhausted its ${maxSteps} tool-step budget.`,
+        'Do not call any more tools.',
+        'Return the fixed structured terminal now using only evidence and observations already collected.',
+        '</budget_exhausted>',
+    ].join('\n');
+}
+
+function recordMaxStepsIssue(state: AgentRunState, profileId: string, maxSteps: number): void {
+    if (state.issues.some(issue => issue.type === 'max_steps')) {
+        return;
+    }
+    state.issues.push({
+        type: 'max_steps',
+        message: `Agent profile '${profileId}' exhausted its ${maxSteps} tool-step budget.`,
+        step: state.steps,
+    });
 }
 
 function canonicalToolCallKey(call: AIToolCall): string {

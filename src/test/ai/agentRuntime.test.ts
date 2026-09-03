@@ -591,7 +591,9 @@ describe('AgentRuntime contracts', () => {
             finalName: 'terminalRetryLimitTestFinal',
             finalSchema: z.object({ value: z.string() }),
             contextPolicy: {
-                maxSteps: 0,
+                // Keep unused step budget so failure uses profile retry limits,
+                // not the budget-exhaustion path that skips tool-asking retries.
+                maxSteps: 1,
                 maxEpochs: 0,
                 maxObservationChars: 100,
                 buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
@@ -613,13 +615,15 @@ describe('AgentRuntime contracts', () => {
         assert.equal(result.metrics.issues.filter(issue => issue.type === 'terminal_failure').length, 1);
     });
 
-    it('records max-step exhaustion once when a tool call arrives after the budget', async () => {
+    it('soft-rejects over-budget tool calls then completes on forced terminal', async () => {
+        const requests: AIRunRequest[] = [];
         const execution = createExecution([
             response({
                 toolCalls: [{ id: 'over-budget', name: 'inspect', arguments: { reason: 'too late' } }],
                 stopReason: 'tool_call',
             }),
-        ], [], []);
+            response({ structured: { value: 'forced-done' }, text: '{"value":"forced-done"}' }),
+        ], requests, []);
         const profile: AgentProfile<null, { value: string }, string> = {
             id: 'max-step-test',
             promptVersion: '1',
@@ -639,7 +643,112 @@ describe('AgentRuntime contracts', () => {
                 name: 'inspect',
                 description: 'Inspect.',
                 parameters: { type: 'object' },
-                execute: async () => ({ output: 'must not execute' }),
+                execute: async () => { throw new Error('execute must not run'); },
+            }],
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'forced-done');
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'max_steps').length, 1);
+        assert.equal(requests.length, 2);
+        assert.equal(requests[1].toolChoice, 'none');
+        assert.equal(requests[1].toolResults?.length, 1);
+        assert.equal(requests[1].toolResults?.[0].isError, true);
+        assert.match(requests[1].toolResults?.[0].output ?? '', /budget_exhausted/);
+    });
+
+    it('executes the first tool in a batch then soft-rejects the rest before forced terminal', async () => {
+        const requests: AIRunRequest[] = [];
+        let executeCount = 0;
+        const execution = createExecution([
+            response({
+                toolCalls: [
+                    { id: 'first', name: 'inspect', arguments: { reason: 'one' } },
+                    { id: 'second', name: 'inspect', arguments: { reason: 'two' } },
+                ],
+                stopReason: 'tool_call',
+            }),
+            response({ structured: { value: 'after-batch' }, text: '{"value":"after-batch"}' }),
+        ], requests, []);
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'mid-batch-budget-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'midBatchBudgetTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 1,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [{ role: 'system', content: 'protocol' }], opening: [] }),
+            grantTools: () => [{ name: 'inspect', allowedRoot: '/tmp/repository', excludePatterns: [], allocateEvidence: false }],
+            buildToolDefinitions: () => [{
+                name: 'inspect',
+                description: 'Inspect.',
+                parameters: { type: 'object' },
+                execute: async () => {
+                    executeCount += 1;
+                    return { output: 'executed-once' };
+                },
+            }],
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(executeCount, 1);
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'after-batch');
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'max_steps').length, 1);
+        assert.equal(requests.length, 2);
+        assert.equal(requests[1].toolChoice, 'none');
+        assert.equal(requests[1].toolResults?.length, 2);
+        assert.equal(requests[1].toolResults?.[0].output, 'executed-once');
+        assert.notEqual(requests[1].toolResults?.[0].isError, true);
+        assert.equal(requests[1].toolResults?.[1].isError, true);
+        assert.match(requests[1].toolResults?.[1].output ?? '', /budget_exhausted/);
+    });
+
+    it('returns partial when forced finalize turn still requests tools', async () => {
+        const requests: AIRunRequest[] = [];
+        const execution = createExecution([
+            response({
+                toolCalls: [{ id: 'over-budget', name: 'inspect', arguments: { reason: 'first' } }],
+                stopReason: 'tool_call',
+            }),
+            response({
+                toolCalls: [{ id: 'still-tools', name: 'inspect', arguments: { reason: 'second' } }],
+                stopReason: 'tool_call',
+            }),
+        ], requests, []);
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'forced-finalize-tools-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'forcedFinalizeToolsTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 0,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [{ role: 'system', content: 'protocol' }], opening: [] }),
+            grantTools: () => [{ name: 'inspect', allowedRoot: '/tmp/repository', excludePatterns: [], allocateEvidence: false }],
+            buildToolDefinitions: () => [{
+                name: 'inspect',
+                description: 'Inspect.',
+                parameters: { type: 'object' },
+                execute: async () => { throw new Error('execute must not run'); },
             }],
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
@@ -648,7 +757,54 @@ describe('AgentRuntime contracts', () => {
         const result = await new AgentRuntime().run(execution, profile, null);
 
         assert.equal(result.status, 'partial');
-        assert.equal(result.state.issues.filter(issue => issue.type === 'max_steps').length, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'max_steps').length, 1);
+        assert.equal(requests.length, 2);
+    });
+
+    it('returns partial on invalid forced terminal without tool-asking retry', async () => {
+        const requests: AIRunRequest[] = [];
+        const execution = createExecution([
+            response({
+                toolCalls: [{ id: 'over-budget', name: 'inspect', arguments: { reason: 'too late' } }],
+                stopReason: 'tool_call',
+            }),
+            response({ structured: { value: 'invalid-terminal' }, text: '{"value":"invalid-terminal"}' }),
+        ], requests, []);
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'forced-finalize-invalid-terminal-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'forcedFinalizeInvalidTerminalTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 0,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [{ role: 'system', content: 'protocol' }], opening: [] }),
+            grantTools: () => [{ name: 'inspect', allowedRoot: '/tmp/repository', excludePatterns: [], allocateEvidence: false }],
+            buildToolDefinitions: () => [{
+                name: 'inspect',
+                description: 'Inspect.',
+                parameters: { type: 'object' },
+                execute: async () => { throw new Error('execute must not run'); },
+            }],
+            validateTerminal: () => 'Evidence remains missing.',
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: (_state, error) => String((error as Error).message),
+        };
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'partial');
+        assert.equal(requests.length, 2);
+        const allContent = requests.flatMap(request => request.messages ?? []).map(message => message.content).join('\n');
+        assert.ok(!allContent.includes('terminal_rejected'));
+        assert.ok(!allContent.includes('call the granted repository tools'));
+        assert.ok(result.metrics.issues.some(issue => issue.type === 'terminal_failure'
+            && (/budget exhaustion|Evidence remains missing/.test(issue.message))));
     });
 
     it('does not allow a read-only tool to allocate repository evidence', async () => {
