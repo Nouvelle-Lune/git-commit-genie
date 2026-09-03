@@ -21,3 +21,13 @@ export function structuredOutputPromptInjection(schema: Record<string, unknown>)
         JSON.stringify(schema, null, 2),
     ].join('\n');
 }
+
+/** Describes the terminal JSON without constraining an earlier native tool call. */
+export function toolLoopTerminalPromptInjection(schema: Record<string, unknown>): string {
+    return [
+        'When no further tool call is needed, return exactly one JSON object matching this JSON Schema.',
+        'Use the exact camelCase keys. Do not add keys, wrap the object, use markdown, or replace primitive values with objects.',
+        'When calling a tool, return only one tool call and no accompanying text.',
+        JSON.stringify(schema, null, 2),
+    ].join('\n');
+}

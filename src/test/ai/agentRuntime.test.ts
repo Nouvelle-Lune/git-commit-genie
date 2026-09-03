@@ -5,7 +5,7 @@ import { AgentProfile, AgentRuntime, EvidenceLedger } from '../../agent';
 import { createChangeAnalysisProfile } from '../../services/analysis/change/investigation/changeAnalysisProfile';
 import { DiffData } from '../../services/git/gitTypes';
 import { LLMExecution } from '../../services/llm/llmTypes';
-import { AIRunRequest, AIRunResponse, AISession } from '../../services/llm/providers';
+import { AIRunRequest, AIRunResponse, AISession, CustomProvider } from '../../services/llm/providers';
 import { resolveChainTokenBudget } from '../../services/llm/inputTokenBudget';
 
 function createExecution(
@@ -377,6 +377,131 @@ describe('AgentRuntime contracts', () => {
         assert.deepEqual(events, ['retry:1']);
         assert.deepEqual(requests[0].responseFormat, requests[1].responseFormat);
         assert.equal(requests[1].toolChoice, 'none');
+    });
+
+    it('repairs an invalid mixed terminal through a no-tools strict Custom request', async () => {
+        const requests: Array<Record<string, unknown>> = [];
+        let callCount = 0;
+        const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
+            chat: {
+                completions: {
+                    create: async (body: Record<string, unknown>) => {
+                        requests.push(body);
+                        callCount += 1;
+                        if (callCount === 1) {
+                            return {
+                                choices: [{
+                                    finish_reason: 'tool_calls',
+                                    message: {
+                                        role: 'assistant',
+                                        content: null,
+                                        tool_calls: [{
+                                            id: 'call_inspect',
+                                            type: 'function',
+                                            function: { name: 'inspect', arguments: '{"reason":"collect evidence"}' },
+                                        }],
+                                    },
+                                }],
+                            };
+                        }
+                        if (callCount === 2) {
+                            return {
+                                choices: [{
+                                    finish_reason: 'stop',
+                                    message: { role: 'assistant', content: '{"value":42}' },
+                                }],
+                            };
+                        }
+                        return {
+                            choices: [{
+                                finish_reason: 'stop',
+                                message: { role: 'assistant', content: '{"value":"repaired"}' },
+                            }],
+                        };
+                    },
+                },
+            },
+        } as any);
+        const tokenBudget = resolveChainTokenBudget({
+            provider: 'custom',
+            model: 'local-model',
+            contextWindowTokens: 128_000,
+        });
+        const execution: LLMExecution = {
+            model: 'local-model',
+            temperature: 0.2,
+            maxOutputTokens: tokenBudget.maxOutputTokens,
+            maxRetries: 1,
+            thinkingLevel: 'low',
+            tokenBudget,
+            thinkingFor: () => ({ reasoning: true, level: 'low' }),
+            createSession: messages => provider.createSession({
+                model: 'local-model',
+                systemInstruction: messages.find(message => message.role === 'system')?.content,
+            }),
+            run: async () => { throw new Error('not used'); },
+        };
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'custom-mixed-repair-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'customMixedRepairFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 1,
+                maxEpochs: 0,
+                maxObservationChars: 1_000,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({
+                stable: [{ role: 'system', content: 'Investigate the repository.' }],
+                opening: [{ role: 'user', content: 'collect evidence' }],
+            }),
+            grantTools: () => [{
+                name: 'inspect',
+                allowedRoot: '/tmp/repository',
+                excludePatterns: [],
+                allocateEvidence: false,
+            }],
+            buildToolDefinitions: () => [{
+                name: 'inspect',
+                description: 'Inspect the repository.',
+                parameters: {
+                    type: 'object',
+                    properties: { reason: { type: 'string' } },
+                    required: ['reason'],
+                    additionalProperties: false,
+                },
+                execute: async () => ({ output: 'verified repository evidence' }),
+            }],
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'repaired');
+        assert.equal(requests.length, 3);
+        assert.equal(requests[0].response_format, undefined);
+        assert.equal(requests[1].response_format, undefined);
+        assert.equal(requests[0].tool_choice, 'auto');
+        assert.equal(requests[1].tool_choice, 'auto');
+        assert.equal(requests[0].parallel_tool_calls, false);
+        assert.equal(requests[1].parallel_tool_calls, false);
+        assert.ok(Array.isArray(requests[0].tools));
+        assert.ok(Array.isArray(requests[1].tools));
+        assert.equal(requests[2].tool_choice, 'none');
+        assert.equal(requests[2].tools, undefined);
+        assert.equal(requests[2].parallel_tool_calls, undefined);
+        const format = requests[2].response_format as {
+            type: string;
+            json_schema: { name: string; strict: boolean };
+        };
+        assert.equal(format.type, 'json_schema');
+        assert.equal(format.json_schema.name, 'customMixedRepairFinal');
+        assert.equal(format.json_schema.strict, true);
     });
 
     it('rejects a premature terminal and keeps tools available for profile-required evidence', async () => {

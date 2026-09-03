@@ -10,7 +10,10 @@ import {
     AIThinkingConfig,
     CustomProviderConfig,
 } from './types';
-import { structuredOutputPromptInjection } from '../structuredOutputPrompt';
+import {
+    structuredOutputPromptInjection,
+    toolLoopTerminalPromptInjection,
+} from '../structuredOutputPrompt';
 import { assertHttpBaseUrl, parseJsonObject, parseStructuredText } from './json';
 import { applyOpenAICompatibleThinking } from './thinking';
 
@@ -121,6 +124,21 @@ class CustomSession implements AISession {
             return this.requestCompletion(request, requestMessages, undefined);
         }
 
+        const hasCallableTools = Boolean(request.tools?.length) && request.toolChoice !== 'none';
+        if (hasCallableTools) {
+            // llama.cpp and similar Chat Completions servers build different
+            // grammars for native tool calls and response_format. Combining the
+            // two can leave tagged Qwen tool calls to a failing post-generation
+            // parser. Keep the tool turn unconstrained and validate its eventual
+            // terminal JSON locally; schema repair runs later without tools.
+            const toolLoopMessages = this.withPromptSchemaInstruction(
+                requestMessages,
+                request.responseFormat,
+                toolLoopTerminalPromptInjection,
+            );
+            return this.requestCompletion(request, toolLoopMessages, undefined);
+        }
+
         try {
             return await this.requestCompletion(request, requestMessages, {
                 type: 'json_schema',
@@ -142,9 +160,10 @@ class CustomSession implements AISession {
     private withPromptSchemaInstruction(
         requestMessages: CustomMessage[],
         responseFormat: NonNullable<AIRunRequest['responseFormat']>,
+        buildInstruction = structuredOutputPromptInjection,
     ): CustomMessage[] {
         const messages = requestMessages.map(message => ({ ...message }));
-        const formatInstruction = structuredOutputPromptInjection(responseFormat.schema);
+        const formatInstruction = buildInstruction(responseFormat.schema);
         const systemMessage = messages.find(message => message.role === 'system');
         if (systemMessage) {
             systemMessage.content = `${systemMessage.content ?? ''}\n\n${formatInstruction}`;
@@ -159,17 +178,19 @@ class CustomSession implements AISession {
         requestMessages: CustomMessage[],
         responseFormat: Record<string, unknown> | undefined,
     ): Promise<unknown> {
+        const callableTools = request.toolChoice === 'none' ? undefined : request.tools;
         const body: Record<string, unknown> = {
             model: this.model,
             messages: requestMessages,
             temperature: request.temperature,
             max_tokens: request.maxOutputTokens,
             response_format: responseFormat,
-            tools: request.tools?.map(tool => ({
+            tools: callableTools?.map(tool => ({
                 type: 'function',
                 function: { name: tool.name, description: tool.description, parameters: tool.parameters },
             })),
             tool_choice: request.toolChoice,
+            parallel_tool_calls: callableTools?.length ? false : undefined,
         };
         applyOpenAICompatibleThinking(body, request.thinking ?? this.thinking);
         return (this.client.chat.completions.create as any)(body, {
