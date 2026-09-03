@@ -1,5 +1,5 @@
 {
-	"Git Commit Genie: {0} / {1}": "Git Commit Genie: {0} / {1}",
+	"Git Commit Genie: {0}": "Git Commit Genie: {0}",
 	"Git Commit Genie: {0} — click to configure models": "Git Commit Genie: {0} — click to configure models",
 	"Select Model": "Select Model",
 	" · Chain": " · Thinking",
@@ -41,7 +41,7 @@
 	"Open Settings": "Open Settings",
 	"Dismiss": "Dismiss",
 	"Max Parallel Chains": "Max Parallel Chains",
-	"Repository Analysis Model: {0} / {1}": "Repository Analysis Model: {0} / {1}",
+	"Repository Analysis Model: {0}": "Repository Analysis Model: {0}",
 	"No workspace folder is open.": "No workspace folder is open.",
 	"Git Commit Genie": "Git Commit Genie",
 	"$(gear) Manage Models": "$(gear) Manage Models",

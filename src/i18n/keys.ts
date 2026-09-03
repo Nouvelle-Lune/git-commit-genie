@@ -6,11 +6,11 @@ import { DEFAULT_PIPELINE_TEXT } from '../ui/pipelineDisplay';
 
 export const L10N_KEYS = {
   statusBar: {
-    tooltipConfigured: 'Git Commit Genie: {0} / {1}',
+    tooltipConfigured: 'Git Commit Genie: {0}',
     tooltipNeedConfig: 'Git Commit Genie: {0} — click to configure models',
     selectModel: 'Select Model',
     chainBadge: ' · Thinking',
-    analysisModel: 'Repository Analysis Model: {0} / {1}'
+    analysisModel: 'Repository Analysis Model: {0}'
   },
   manageModels: {
     selectProvider: 'Select a provider…',

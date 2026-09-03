@@ -379,25 +379,21 @@ export class StatusBarManager {
         if (!provider) {
             return vscode.l10n.t(I18N.statusBar.selectModel);
         }
-        const providerLabel = `${PROVIDER_LABELS[provider]} · ${label}`;
 
         if (hasApiKey && model.trim()) {
-            return vscode.l10n.t(I18N.statusBar.tooltipConfigured, providerLabel, model);
+            return vscode.l10n.t(I18N.statusBar.tooltipConfigured, this.shortenModelName(model.trim()));
         }
 
-        return vscode.l10n.t(I18N.statusBar.tooltipNeedConfig, providerLabel);
+        return vscode.l10n.t(I18N.statusBar.tooltipNeedConfig, label.trim() || PROVIDER_LABELS[provider]);
     }
 
     private getAnalysisTooltip(): string {
-        const { provider, label, model } = this.analysisState;
+        const { provider, model } = this.analysisState;
         if (!provider || !model) {
             return '';
         }
 
-        const providerLabel = `${PROVIDER_LABELS[provider]} · ${label}`;
-        const modelLabel = this.shortenModelName(model);
-
-        return vscode.l10n.t(I18N.statusBar.analysisModel, providerLabel, modelLabel || '');
+        return vscode.l10n.t(I18N.statusBar.analysisModel, this.shortenModelName(model));
     }
 
     private getRepoTooltip(): string {
