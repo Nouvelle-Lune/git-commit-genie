@@ -8,15 +8,16 @@ import {
 import { EvidenceLedger } from '../../agent';
 import { DiffData } from '../../services/git/gitTypes';
 import { LLMExecution } from '../../services/llm/llmTypes';
+import { AIMessage } from '../../services/llm/providers';
 import { DraftEvidence } from '../../services/analysis/change/types';
 
-function diff(fileName: string, content: string): DiffData {
+function diff(fileName: string, content: string, header = '@@ -1 +1 @@'): DiffData {
     return {
         fileName,
         status: 'modified',
         rawDiff: content,
         diffHunks: [{
-            header: '@@ -1 +1 @@',
+            header,
             content,
             additions: [content],
             deletions: [],
@@ -24,7 +25,7 @@ function diff(fileName: string, content: string): DiffData {
     };
 }
 
-function fakeExecution(): LLMExecution {
+function fakeExecution(onCreateSession?: (messages: AIMessage[]) => void): LLMExecution {
     return {
         signal: undefined,
         temperature: 0,
@@ -33,17 +34,20 @@ function fakeExecution(): LLMExecution {
         thinkingLevel: 'off',
         tokenBudget: {} as any,
         thinkingFor: () => ({ reasoning: false, level: 'off' }),
-        createSession: () => ({
-            provider: 'custom',
-            model: 'test',
-            run: async () => { throw new Error('unused'); },
-            snapshot: () => ({
+        createSession: (messages: AIMessage[]) => {
+            onCreateSession?.(messages);
+            return {
                 provider: 'custom',
                 model: 'test',
-                continuation: { serverManaged: false },
-                transcript: [],
-            }),
-        }),
+                run: async () => { throw new Error('unused'); },
+                snapshot: () => ({
+                    provider: 'custom',
+                    model: 'test',
+                    continuation: { serverManaged: false },
+                    transcript: [],
+                }),
+            };
+        },
         run: async () => ({
             changes: [],
             tests: [],
@@ -54,6 +58,33 @@ function fakeExecution(): LLMExecution {
 }
 
 describe('evidence compaction state machine', () => {
+    it('keeps the complete hunk header in the Summary request', async () => {
+        const header = '@@ -12,3 +12,5 @@ export function parseConfig()';
+        const diffs = [diff('config.ts', 'x'.repeat(1_200), header)];
+        const ledger = EvidenceLedger.fromDiffs(diffs);
+        const summaryRequests: AIMessage[][] = [];
+
+        await compactEvidenceToFit({
+            diffs,
+            evidence: createRawDraftEvidence(diffs, ledger),
+            ledger,
+            execution: fakeExecution(messages => summaryRequests.push(messages)),
+            triggerInputTokens: 100,
+            targetInputTokens: 90,
+            hardInputTokens: 10_000,
+            maxParallel: 1,
+            maxRetries: 0,
+            buildTargetMessages: evidence => [{ role: 'user', content: JSON.stringify(evidence) }],
+        });
+
+        const summaryInput = summaryRequests
+            .flat()
+            .find(message => message.role === 'user')?.content;
+        assert.ok(summaryInput);
+        assert.match(summaryInput, /"id": "D1"/);
+        assert.ok(summaryInput.includes(header));
+    });
+
     it('compacts only after the trigger and converges to the target', async () => {
         const diffs = [diff('a.ts', 'a'.repeat(1_200)), diff('b.ts', 'b'.repeat(200))];
         const ledger = EvidenceLedger.fromDiffs(diffs);

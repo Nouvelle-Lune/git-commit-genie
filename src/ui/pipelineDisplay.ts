@@ -593,7 +593,7 @@ export const PIPELINE_STAGE_BADGES: Record<PipelineStageName, PipelineStageBadge
     investigationSkipped: { label: 'SKIP', className: 'stage-badge-skipped' },
     semanticAnalysisStart: { label: 'SEM', className: 'stage-badge-semantic' },
     semanticAnalysisComplete: { label: 'SEM', className: 'stage-badge-semantic' },
-    analysisDegraded: { label: 'WARN', className: 'stage-badge-skipped' },
+    analysisDegraded: { label: 'WARN', className: 'stage-badge-warning' },
     contextCompacted: { label: 'CTX', className: 'stage-badge-summarize' },
     informationSelectionStart: { label: 'SEL', className: 'stage-badge-select' },
     informationSelected: { label: 'SEL', className: 'stage-badge-select' },

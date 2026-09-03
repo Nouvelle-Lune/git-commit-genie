@@ -17,15 +17,13 @@
   --transition-normal: 150ms;
   --transition-slow: 220ms;
 
-  /* Semantic badge colors (used with color-mix for backgrounds) */
-  --semantic-info: #0ea5e9;
-  --semantic-process: #d97706;
-  --semantic-generate: #8b5cf6;
-  --semantic-success: #16a34a;
-  --semantic-error: #ef4444;
-  /* The change-conditioned investigation stages read as one phase, so they
-     share a single hue and are told apart by their label. */
-  --semantic-investigate: #0d9488;
+  /* Theme-aware semantic foreground colors for accents outside badges. */
+  --semantic-info: var(--vscode-inputValidation-infoForeground, var(--vscode-editorInfo-foreground));
+  --semantic-process: var(--vscode-inputValidation-warningForeground, var(--vscode-editorWarning-foreground));
+  --semantic-generate: var(--vscode-charts-purple);
+  --semantic-success: var(--vscode-testing-iconPassed);
+  --semantic-error: var(--vscode-inputValidation-errorForeground, var(--vscode-errorForeground));
+  --semantic-investigate: var(--vscode-textLink-foreground);
 }
 
 /* ── Base ── */

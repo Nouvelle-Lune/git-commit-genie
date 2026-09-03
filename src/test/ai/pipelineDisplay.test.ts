@@ -41,7 +41,7 @@ describe('pipeline display for parallel analysis events', () => {
         assert.equal(presentation.details?.kind, 'analysisDegraded');
         assert.deepEqual(pipelineStageBadge('analysisDegraded'), {
             label: 'WARN',
-            className: 'stage-badge-skipped',
+            className: 'stage-badge-warning',
         });
     });
 

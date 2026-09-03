@@ -294,25 +294,29 @@
 
 /* ── Repo badge ── */
 .log-repo-badge {
+  --repo-accent: var(--vscode-charts-blue);
   display: inline-block;
   font-size: 9px;
   line-height: 1;
   padding: 2px 5px;
   border-radius: var(--radius-pill);
   vertical-align: middle;
-  color: var(--vscode-badge-foreground);
+  background: color-mix(in srgb, var(--repo-accent) 22%, var(--vscode-editor-background));
+  color: var(--vscode-editor-foreground);
+  border: 1px solid color-mix(in srgb, var(--repo-accent) 58%, var(--vscode-editor-background));
   flex-shrink: 0;
 }
 
-.repo-badge-c0 { background: color-mix(in srgb, #3b82f6 22%, transparent); }
-.repo-badge-c1 { background: color-mix(in srgb, #22c55e 22%, transparent); }
-.repo-badge-c2 { background: color-mix(in srgb, #eab308 22%, transparent); }
-.repo-badge-c3 { background: color-mix(in srgb, #a855f7 22%, transparent); }
-.repo-badge-c4 { background: color-mix(in srgb, #ec4899 22%, transparent); }
-.repo-badge-c5 { background: color-mix(in srgb, #14b8a6 22%, transparent); }
+.repo-badge-c0 { --repo-accent: var(--vscode-charts-blue); }
+.repo-badge-c1 { --repo-accent: var(--vscode-charts-green); }
+.repo-badge-c2 { --repo-accent: var(--vscode-charts-yellow); }
+.repo-badge-c3 { --repo-accent: var(--vscode-charts-purple); }
+.repo-badge-c4 { --repo-accent: var(--vscode-charts-red); }
+.repo-badge-c5 { --repo-accent: var(--vscode-charts-orange); }
 
 /* ── Stage badges ── */
 .stage-badge {
+  --stage-accent: var(--vscode-charts-blue);
   display: inline-block;
   font-size: 9px;
   line-height: 1;
@@ -322,92 +326,66 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.03em;
+  background: color-mix(in srgb, var(--stage-accent) 20%, var(--vscode-editor-background));
+  color: var(--vscode-editor-foreground);
+  border: 1px solid color-mix(in srgb, var(--stage-accent) 58%, var(--vscode-editor-background));
   flex-shrink: 0;
 }
 
-/* Info: Read, Search, Explore */
+/* Assign each observable stage family a distinct theme-provided hue. */
 .stage-badge-read,
 .stage-badge-search,
-.stage-badge-explore {
-  background: color-mix(in srgb, var(--semantic-info) 18%, transparent);
-  color: var(--semantic-info);
-  border: 1px solid color-mix(in srgb, var(--semantic-info) 30%, transparent);
+.stage-badge-data,
+.stage-badge-tool {
+  --stage-accent: var(--vscode-charts-blue);
 }
 
-/* Process: API, Tool, Think, Analyze */
+.stage-badge-explore,
+.stage-badge-extract,
+.stage-badge-rag,
+.stage-badge-verify,
+.stage-badge-done {
+  --stage-accent: var(--vscode-charts-green);
+}
+
 .stage-badge-api,
-.stage-badge-tool,
+.stage-badge-plan {
+  --stage-accent: var(--vscode-charts-orange);
+}
+
 .stage-badge-reason,
 .stage-badge-analyze,
-.stage-badge-data,
-.stage-badge-rag,
-.stage-badge-verify {
-  background: color-mix(in srgb, var(--semantic-process) 18%, transparent);
-  color: var(--semantic-process);
-  border: 1px solid color-mix(in srgb, var(--semantic-process) 30%, transparent);
-}
-
-/* Generate: Classify, Summarize, Result */
 .stage-badge-classify,
 .stage-badge-summarize,
-.stage-badge-result {
-  background: color-mix(in srgb, var(--semantic-generate) 18%, transparent);
-  color: var(--semantic-generate);
-  border: 1px solid color-mix(in srgb, var(--semantic-generate) 30%, transparent);
+.stage-badge-result,
+.stage-badge-semantic {
+  --stage-accent: var(--vscode-charts-purple);
 }
 
-/* Success: Done */
-.stage-badge-done {
-  background: color-mix(in srgb, var(--semantic-success) 18%, transparent);
-  color: var(--semantic-success);
-  border: 1px solid color-mix(in srgb, var(--semantic-success) 30%, transparent);
+.stage-badge-select {
+  --stage-accent: var(--vscode-charts-yellow);
 }
 
-/* Error: Validation, Validate, Strict, Fix, Language */
+.stage-badge-investigate {
+  --stage-accent: var(--vscode-charts-red);
+}
+
+.stage-badge-warning,
 .stage-badge-validation,
 .stage-badge-validate,
 .stage-badge-strict,
 .stage-badge-language {
-  background: color-mix(in srgb, var(--semantic-error) 18%, transparent);
-  color: var(--semantic-error);
-  border: 1px solid color-mix(in srgb, var(--semantic-error) 30%, transparent);
+  --stage-accent: var(--vscode-charts-red);
 }
 
-.stage-badge-data {
-  background: color-mix(in srgb, var(--semantic-info) 13%, transparent);
-  color: var(--semantic-info);
-  border-color: color-mix(in srgb, var(--semantic-info) 28%, transparent);
-}
-
-.stage-badge-rag {
-  background: color-mix(in srgb, var(--semantic-process) 13%, transparent);
-  color: var(--semantic-process);
-  border-color: color-mix(in srgb, var(--semantic-process) 28%, transparent);
-}
-
-.stage-badge-verify {
-  background: color-mix(in srgb, var(--semantic-info) 10%, transparent);
-  color: var(--vscode-editor-foreground);
-  border-color: color-mix(in srgb, var(--semantic-info) 24%, transparent);
-}
-
-/* Change-conditioned chain: Extract, Plan, Investigate, Semantics, Select */
-.stage-badge-extract,
-.stage-badge-plan,
-.stage-badge-investigate,
-.stage-badge-semantic,
-.stage-badge-select {
-  background: color-mix(in srgb, var(--semantic-investigate) 16%, transparent);
-  color: var(--semantic-investigate);
-  border: 1px solid color-mix(in srgb, var(--semantic-investigate) 30%, transparent);
-}
-
-/* A stage that deliberately did not run. Muted so a skip reads as information
-   rather than as a failure. */
+/* A stage that deliberately did not run. Keep it distinct without reducing
+   text contrast through description opacity. */
 .stage-badge-skipped {
-  background: color-mix(in srgb, var(--vscode-descriptionForeground) 12%, transparent);
-  color: var(--vscode-descriptionForeground);
-  border: 1px solid color-mix(in srgb, var(--vscode-descriptionForeground) 26%, transparent);
+  --stage-accent: var(--vscode-descriptionForeground);
+}
+
+body.vscode-high-contrast .stage-badge {
+  border-color: var(--vscode-contrastBorder);
 }
 
 /* ── Trailing cluster ── */
@@ -449,13 +427,14 @@
 
 /* ── Cost chip ── */
 .log-cost {
+  --cost-accent: var(--vscode-charts-green);
   font-size: 9px;
   line-height: 1;
-  color: var(--vscode-badge-foreground);
+  color: var(--vscode-editor-foreground);
   font-weight: 600;
   padding: 1px 5px;
-  background: color-mix(in srgb, var(--vscode-charts-green) 20%, transparent);
-  border: 1px solid color-mix(in srgb, var(--vscode-charts-green) 36%, transparent);
+  background: color-mix(in srgb, var(--cost-accent) 20%, var(--vscode-editor-background));
+  border: 1px solid color-mix(in srgb, var(--cost-accent) 58%, var(--vscode-editor-background));
   border-radius: var(--radius-sm);
   letter-spacing: 0.02em;
   white-space: nowrap;
