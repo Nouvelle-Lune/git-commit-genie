@@ -7,7 +7,7 @@ export type DiffStatus = 'added' | 'deleted' | 'modified' | 'renamed' | 'untrack
  * A "hunk" is a contiguous block of changes in a diff.
  */
 export interface DiffHunk {
-  header: string; // The hunk header, e.g., @@ -1,3 +1,9 @@
+  header: string; // The complete hunk header, e.g., @@ -1,3 +1,9 @@ function run()
   content: string; // The actual lines of the hunk
   additions: string[]; // Lines added in this hunk
   deletions: string[]; // Lines removed in this hunk

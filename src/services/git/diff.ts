@@ -462,8 +462,9 @@ export class DiffService {
 		const deletions: string[] = [];
 		const contentLines: string[] = [];
 
-		const matchResult = lines[hunkStartPosition].match(/@@.*?@@/g);
-		const header: string = matchResult ? matchResult[0] : '';
+		// Keep Git's optional section heading because it can identify the function
+		// or declaration that owns a body-only change.
+		const header: string = lines[hunkStartPosition];
 
 		let pos = hunkStartPosition + 1;
 		while (pos < lines.length && !lines[pos].startsWith('@@')) {
