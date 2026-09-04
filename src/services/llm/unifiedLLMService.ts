@@ -47,9 +47,15 @@ import {
     logSchemaValidationToWebview,
 } from './chatWebviewLogging';
 import type { StageEvent } from '../../ui/StageNotificationManager';
+import type { CostTrackingService } from '../cost/costTrackingService';
+import type { CostQuote } from '../cost/costTypes';
+import { resolveModelPricing } from '../cost/costAccounting';
+import { summarizeTaskCostQuotes } from '../cost/costDisplay';
+import type { AIUsage } from './providers';
 
 export interface UnifiedLLMServiceOptions {
     model: AIModelConfig;
+    costTracker: CostTrackingService;
 }
 
 const STAGE_THINKING_CEILINGS: Partial<Record<RequestType, ThinkingLevel>> = {
@@ -147,8 +153,26 @@ export class UnifiedLLMService extends BaseLLMService {
             thinking,
             stageThinkingCeiling(requestType, thinking.level),
         );
+        // Snapshot pricing at execution creation so mid-task override edits do not affect in-flight calls.
+        const pricing = resolveModelPricing(this.options.model.model, this.options.model.pricingOverride);
+        const recordedQuotes: CostQuote[] = [];
+        const costTracker = this.options.costTracker;
+        const modelConfig = this.options.model;
+        const modelName = this.getCurrentModel();
+
+        const accountCall = async (usage: AIUsage | undefined): Promise<CostQuote> => {
+            const quote = await costTracker.recordCall({
+                repoPath,
+                provider: modelConfig.provider,
+                pricing,
+                usage,
+            });
+            recordedQuotes.push(quote);
+            return quote;
+        };
+
         return {
-            model: this.getCurrentModel(),
+            model: modelName,
             signal,
             temperature,
             maxOutputTokens: tokenBudget.maxOutputTokens,
@@ -159,13 +183,31 @@ export class UnifiedLLMService extends BaseLLMService {
             thinkingFor,
             createSession: (messages, id) => provider.createSession({
                 id,
-                model: this.getCurrentModel(),
+                model: modelName,
                 systemInstruction: this.systemInstruction(messages),
                 thinking,
             }),
             run: <T>(session: AISession, messages: AIMessage[], runOptions: LLMRunOptions) => (
-                this.runSession<T>(session, messages, runOptions, repoPath, tokenBudget, thinkingFor, signal)
+                this.runSession<T>(session, messages, runOptions, repoPath, tokenBudget, thinkingFor, signal, accountCall)
             ),
+            accountCall,
+            getRecordedQuotes: () => recordedQuotes,
+            notifyUsageCostIfEnabled: (callType) => {
+                const summary = summarizeTaskCostQuotes(recordedQuotes);
+                if (!summary) {
+                    return;
+                }
+                const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
+                if (!cfg.get('showUsageCost', false)) {
+                    return;
+                }
+                const costLabel = summary.totalUsd === 0 ? 'Free' : `$${summary.totalUsd.toFixed(6)}`;
+                const cacheLabel = summary.cacheHitPercent.toFixed(2);
+                const messageKey = callType === 'repoAnalysis'
+                    ? 'Repository analysis: ${0} | Cache hit: {1}%'
+                    : 'Commit message generation: ${0} | Cache hit: {1}%';
+                vscode.window.showInformationMessage(vscode.l10n.t(messageKey, costLabel, cacheLabel));
+            },
         };
     }
 
@@ -176,7 +218,8 @@ export class UnifiedLLMService extends BaseLLMService {
         repoPath: string,
         tokenBudget: ChainTokenBudget,
         thinkingFor: (requestType: RequestType) => AIThinkingConfig,
-        signal?: AbortSignal,
+        signal: AbortSignal | undefined,
+        accountCall: (usage: AIUsage | undefined) => Promise<CostQuote>,
     ): Promise<T> {
         const requestType = runOptions.requestType;
         const schema = getValidationSchemaFor(requestType);
@@ -192,6 +235,7 @@ export class UnifiedLLMService extends BaseLLMService {
         let currentLogId: string | undefined;
         let firstRun = true;
         const budgetMessages = [...messages];
+        let lastCostQuote: CostQuote | undefined;
 
         const runMessages = async (runDelta: AIMessage[]) => {
             if (!firstRun) {
@@ -215,7 +259,14 @@ export class UnifiedLLMService extends BaseLLMService {
                 if (response.text) {
                     budgetMessages.push({ role: 'assistant', content: response.text });
                 }
-                this.logUsage(repoPath, requestType, response.usage?.raw);
+                // Account once per successful HTTP response; quote is shared with the webview log.
+                lastCostQuote = await accountCall(response.usage);
+                logger.logUsageQuote(
+                    provider,
+                    model,
+                    lastCostQuote,
+                    getRequestTypeLabel(requestType),
+                );
                 logger.info(
                     `[Genie][${this.getProviderName()}] ${requestType} stop=${response.stopReason}` +
                     `${response.stopReasonRaw ? ` (${response.stopReasonRaw})` : ''}; ` +
@@ -235,11 +286,10 @@ export class UnifiedLLMService extends BaseLLMService {
         if (!schema) {
             const response = await runMessages(delta);
             const result = response.structured ?? response.text;
-            completeApiRequestLog(currentLogId!, provider, model, result, response, requestType, repoPath);
+            completeApiRequestLog(currentLogId!, provider, model, result, response, requestType, repoPath, lastCostQuote);
             return result as T;
         }
 
-        const totalAttempts = maxRetries + 1;
         try {
             const { data, response } = await runStructuredCompletion<T>({
                 run: runMessages,
@@ -262,7 +312,7 @@ export class UnifiedLLMService extends BaseLLMService {
                         } else {
                             logSchemaValidationToWebview(repoPath, retryPayload, 'Structured output missing');
                         }
-                        completeApiRequestLog(currentLogId!, provider, model, undefined, response, requestType, repoPath);
+                        completeApiRequestLog(currentLogId!, provider, model, undefined, response, requestType, repoPath, lastCostQuote);
                     },
                     onValidationFailed: (attempt, attempts, response, error) => {
                         if (attempt < attempts) {
@@ -280,11 +330,11 @@ export class UnifiedLLMService extends BaseLLMService {
                                 error: String(error),
                             }, 'Schema validation failed');
                         }
-                        completeApiRequestLog(currentLogId!, provider, model, response.structured, response, requestType, repoPath);
+                        completeApiRequestLog(currentLogId!, provider, model, response.structured, response, requestType, repoPath, lastCostQuote);
                     },
                 },
             });
-            completeApiRequestLog(currentLogId!, provider, model, data, response, requestType, repoPath);
+            completeApiRequestLog(currentLogId!, provider, model, data, response, requestType, repoPath, lastCostQuote);
             return data;
         } catch (error) {
             if (currentLogId && !(error instanceof ApiRequestLogFailedError)) {
@@ -310,68 +360,73 @@ export class UnifiedLLMService extends BaseLLMService {
             safeRun('UnifiedLLM.logGenerationStart', () => logger.logGenerationStart(repoPath, useChain ? 'thinking' : 'default'));
             const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
             const execution = this.createExecution(repoPath, options);
-            if (!useChain) {
-                const rules = this.readRules();
-                const messages: AIMessage[] = [
-                    { role: 'system', content: rules.baseRule },
-                    { role: 'user', content: jsonMessage },
-                ];
-                const session = execution.createSession(messages);
-
-                const result = await execution.run<z.infer<typeof commitMessageSchema>>(
-                    session,
-                    messages,
-                    { requestType: 'commitMessage' },
-                );
-                safeRun('UnifiedLLM.logCommitStageDone', () => logCommitStageToWebview(repoPath, {
-                    type: 'done',
-                    data: { finalMessage: result.commitMessage },
-                }));
-                return { content: result.commitMessage };
-            }
-
-            const parsedInput = JSON.parse(jsonMessage);
-            stageNotifications.begin();
             try {
-                const out = await generateCommitMessageChain({
-                    diffs,
-                    currentTime: parsedInput?.['current-time'],
-                    userTemplate: parsedInput?.['user-template'],
-                    targetLanguage: parsedInput?.['target-language'],
-                    validationChecklist: this.readRules().checklistText,
-                    repositoryPath: repoPath,
-                    targetRepo: options?.targetRepo,
-                    repositoryAnalysis: parsedInput?.['repository-analysis'],
-                }, execution, {
-                    maxParallel: cfg.get<number>('chain.maxParallel', 2),
-                    tokenBudget: execution.tokenBudget,
-                    repositoryAnalysisService: this.analysisService,
-                    retrieveRagExamples: async context => {
-                        if (!options?.ragRetrievalService || !options.targetRepo) {
-                            return [];
-                        }
-                        return options.ragRetrievalService.retrieveStyleReferences({
-                            repo: options.targetRepo,
-                            query: context,
-                            execution,
-                        });
-                    },
-                    onStage: (event: StageEvent) => {
-                        stageNotifications.update({ type: event.type, data: event.data });
-                        safeRun('UnifiedLLM.logCommitStage', () => logCommitStageToWebview(repoPath, event));
-                    },
-                });
-                return {
-                    content: out.commitMessage,
-                    ragMetadata: {
-                        fileSummaries: out.fileSummaries,
-                        changeSetSummary: out.changeSetSummary,
-                        retrievalFeatures: out.retrievalFeatures,
-                        ragStyleReferences: out.ragStyleReferences,
-                    },
-                };
+                if (!useChain) {
+                    const rules = this.readRules();
+                    const messages: AIMessage[] = [
+                        { role: 'system', content: rules.baseRule },
+                        { role: 'user', content: jsonMessage },
+                    ];
+                    const session = execution.createSession(messages);
+
+                    const result = await execution.run<z.infer<typeof commitMessageSchema>>(
+                        session,
+                        messages,
+                        { requestType: 'commitMessage' },
+                    );
+                    safeRun('UnifiedLLM.logCommitStageDone', () => logCommitStageToWebview(repoPath, {
+                        type: 'done',
+                        data: { finalMessage: result.commitMessage },
+                    }));
+                    return { content: result.commitMessage };
+                }
+
+                const parsedInput = JSON.parse(jsonMessage);
+                stageNotifications.begin();
+                try {
+                    const out = await generateCommitMessageChain({
+                        diffs,
+                        currentTime: parsedInput?.['current-time'],
+                        userTemplate: parsedInput?.['user-template'],
+                        targetLanguage: parsedInput?.['target-language'],
+                        validationChecklist: this.readRules().checklistText,
+                        repositoryPath: repoPath,
+                        targetRepo: options?.targetRepo,
+                        repositoryAnalysis: parsedInput?.['repository-analysis'],
+                    }, execution, {
+                        maxParallel: cfg.get<number>('chain.maxParallel', 2),
+                        tokenBudget: execution.tokenBudget,
+                        repositoryAnalysisService: this.analysisService,
+                        retrieveRagExamples: async context => {
+                            if (!options?.ragRetrievalService || !options.targetRepo) {
+                                return [];
+                            }
+                            return options.ragRetrievalService.retrieveStyleReferences({
+                                repo: options.targetRepo,
+                                query: context,
+                                execution,
+                            });
+                        },
+                        onStage: (event: StageEvent) => {
+                            stageNotifications.update({ type: event.type, data: event.data });
+                            safeRun('UnifiedLLM.logCommitStage', () => logCommitStageToWebview(repoPath, event));
+                        },
+                    });
+                    return {
+                        content: out.commitMessage,
+                        ragMetadata: {
+                            fileSummaries: out.fileSummaries,
+                            changeSetSummary: out.changeSetSummary,
+                            retrievalFeatures: out.retrievalFeatures,
+                            ragStyleReferences: out.ragStyleReferences,
+                        },
+                    };
+                } finally {
+                    stageNotifications.end();
+                }
             } finally {
-                stageNotifications.end();
+                // Show once per task from already-recorded quotes (success, failure, or cancel).
+                execution.notifyUsageCostIfEnabled('commit');
             }
         } catch (error: any) {
             return this.convertToLLMError(error);
@@ -406,10 +461,6 @@ export class UnifiedLLMService extends BaseLLMService {
             token.onCancellationRequested(() => controller.abort());
         }
         return controller.signal;
-    }
-
-    private logUsage(repoPath: string, requestType: RequestType | undefined, usage: any): void {
-        logger.usage(repoPath, this.options.model.provider, usage, this.getCurrentModel(), getRequestTypeLabel(requestType));
     }
 
     private readRules(): { baseRule: string; checklistText: string } {

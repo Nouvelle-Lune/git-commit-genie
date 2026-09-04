@@ -58,6 +58,9 @@ function executionForPlans(
             callIndex += 1;
             return plan as T;
         },
+        accountCall: async () => ({ status: 'pricing-not-configured' as const }),
+        getRecordedQuotes: () => [],
+        notifyUsageCostIfEnabled: () => undefined,
     };
 }
 

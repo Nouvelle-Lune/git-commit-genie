@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAppContext } from '../context/AppContext';
 import { vscodeApi } from '../utils/vscode';
+import { formatCostDisplayShort } from '../types/messages';
 import './RepoSection.css';
 import { GenieCheckIcon, GenieWarningIcon, GenieKillIcon } from './icons';
 
@@ -153,7 +154,7 @@ export const RepoSection: React.FC = () => {
                                 {getRagBadge(repo)}
                             </div>
                             <div className="repo-actions">
-                                <span className="repo-cost">${repo.cost.toFixed(4)}</span>
+                                <span className="repo-cost">{formatCostDisplayShort(repo.cost, 4)}</span>
                                 {repo.ragStatus?.repairNeeded ? (
                                     <button
                                         className="icon-btn"

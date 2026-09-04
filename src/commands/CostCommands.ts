@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
 import { ServiceRegistry } from '../core/ServiceRegistry';
+import { L10N_KEYS as I18N } from '../i18n/keys';
+import { repositoryCostToDisplay } from '../services/cost/costDisplay';
 
 export class CostCommands {
     constructor(
@@ -8,7 +10,6 @@ export class CostCommands {
     ) { }
 
     public registerCommands(): void {
-        // Register cost-related commands
         this.context.subscriptions.push(
             vscode.commands.registerCommand('git-commit-genie.showRepositoryCost', this.showRepositoryCost.bind(this))
         );
@@ -38,17 +39,26 @@ export class CostCommands {
             }
 
             const costTracker = this.serviceRegistry.getCostTrackingService();
-            const cost = await costTracker.getRepositoryCost(repoPath);
-            const formattedCost = cost.toFixed(6);
+            const snapshot = await costTracker.getRepositoryCostSnapshot(repoPath);
+            const display = repositoryCostToDisplay(snapshot);
 
-            if (cost === 0) {
-                vscode.window.showInformationMessage(
-                    vscode.l10n.t('No Genie usage cost recorded for this repository yet.')
-                );
-            } else {
-                vscode.window.showInformationMessage(
-                    vscode.l10n.t('Total Genie usage cost for this repository: ${0}', formattedCost)
-                );
+            switch (display.status) {
+                case 'none':
+                    vscode.window.showInformationMessage(vscode.l10n.t(I18N.cost.noCostRecorded));
+                    break;
+                case 'free':
+                    vscode.window.showInformationMessage(vscode.l10n.t(I18N.cost.totalCostFree));
+                    break;
+                case 'partial':
+                    vscode.window.showInformationMessage(
+                        vscode.l10n.t(I18N.cost.totalCostPartial, (display.amountUsd ?? 0).toFixed(6)),
+                    );
+                    break;
+                default:
+                    vscode.window.showInformationMessage(
+                        vscode.l10n.t(I18N.cost.totalCost, (display.amountUsd ?? snapshot.totalUsd).toFixed(6)),
+                    );
+                    break;
             }
         } catch (error) {
             vscode.window.showErrorMessage(

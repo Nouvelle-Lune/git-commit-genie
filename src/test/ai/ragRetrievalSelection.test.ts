@@ -199,5 +199,8 @@ function createExecution(
         run: async <T>(_session: AISession, _messages: AIMessage[], options: LLMRunOptions): Promise<T> => (
             runRequest(options.requestType) as Promise<T>
         ),
+        accountCall: async () => ({ status: 'pricing-not-configured' as const }),
+        getRecordedQuotes: () => [],
+        notifyUsageCostIfEnabled: () => undefined,
     };
 }

@@ -498,28 +498,32 @@ export class RepositoryAnalysisService implements IRepositoryAnalysisService {
             const execution = service.createExecution(repoPath, {
                 token: this.activeCancelSources.get(repoPath)?.token,
             });
-            let maxSteps = vscode.workspace.getConfiguration('gitCommitGenie')
-                .get<number>('repositoryAnalysis.MaxCount', 99999);
-            if (maxSteps === -1) {
-                maxSteps = 99999;
+            try {
+                let maxSteps = vscode.workspace.getConfiguration('gitCommitGenie')
+                    .get<number>('repositoryAnalysis.MaxCount', 99999);
+                if (maxSteps === -1) {
+                    maxSteps = 99999;
+                }
+                const result = await runRepositoryAnalysisProfile({
+                    repositoryPath: repoPath,
+                    recentCommits: input.recentCommits,
+                    excludePatterns: this.normalizeExcludePatterns(input.excludePatterns),
+                    previousAnalysis: input.previousAnalysis,
+                    maxSteps,
+                }, execution);
+                if (!result.analysis) {
+                    logger.warn(
+                        `[Genie][RepoAnalysis] Agent returned no persistent result: ${result.issues.join(' | ')}`,
+                    );
+                }
+                const analysis = resolveRepositoryAnalysisAgentResult(result, input.previousAnalysis);
+                if (analysis) {
+                    logger.logAnalysisComplete(repoPath, analysis);
+                }
+                return analysis;
+            } finally {
+                execution.notifyUsageCostIfEnabled('repoAnalysis');
             }
-            const result = await runRepositoryAnalysisProfile({
-                repositoryPath: repoPath,
-                recentCommits: input.recentCommits,
-                excludePatterns: this.normalizeExcludePatterns(input.excludePatterns),
-                previousAnalysis: input.previousAnalysis,
-                maxSteps,
-            }, execution);
-            if (!result.analysis) {
-                logger.warn(
-                    `[Genie][RepoAnalysis] Agent returned no persistent result: ${result.issues.join(' | ')}`,
-                );
-            }
-            const analysis = resolveRepositoryAnalysisAgentResult(result, input.previousAnalysis);
-            if (analysis) {
-                logger.logAnalysisComplete(repoPath, analysis);
-            }
-            return analysis;
         }
     }
 

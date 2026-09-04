@@ -39,6 +39,10 @@ export interface TieredPricing {
 
 export type ModelPricing = FlatPricing | TieredPricing;
 
+export function isTieredPricing(pricing: ModelPricing): pricing is TieredPricing {
+    return 'tiers' in pricing;
+}
+
 export const PRICING_TABLE: Record<string, ModelPricing> = {
     // Local OpenAI-compatible deployments (no pricing by default)
     'local': { input: 0, output: 0, cached: 0 },

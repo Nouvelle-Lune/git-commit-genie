@@ -2,21 +2,33 @@ import { logger } from '../logger';
 import { safeRun } from '../../utils/safeRun';
 import type { StageEvent } from '../../ui/StageNotificationManager';
 import type { RequestType } from './llmTypes';
+import type { LLMExecution } from './llmTypes';
 import type { AIRunResponse, AIRunRequest, AISession } from './providers';
+import type { CostQuote } from '../cost/costTypes';
 import { formatWebviewApiResult } from './chatWebviewFormatting';
+import { getRequestTypeLabel } from './providers/utils/requestTypeMaps';
 
 export { formatWebviewApiResult } from './chatWebviewFormatting';
 
+export interface WebviewSessionLoggingOptions {
+    repoPath: string;
+    requestType?: RequestType;
+    /**
+     * Bound accounting callback from LLMExecution.
+     * Agent Runtime bypasses execution.run, so the wrapper must record each successful turn.
+     */
+    accountCall: (usage: AIRunResponse['usage']) => Promise<CostQuote>;
+}
+
 /**
- * Wraps an agent session so each LLM turn is mirrored in the Webview log list.
- * AgentRuntime calls provider sessions directly instead of LLMExecution.run,
- * so it needs this wrapper to show API request progress in the dashboard.
+ * Wraps an agent session so each LLM turn is mirrored in the Webview log list
+ * and recorded exactly once through the execution-bound accounting callback.
  */
 export function wrapSessionWithWebviewLogging(
     session: AISession,
-    repoPath: string,
-    requestType?: RequestType,
+    options: WebviewSessionLoggingOptions,
 ): AISession {
+    const { repoPath, requestType, accountCall } = options;
     return {
         provider: session.provider,
         model: session.model,
@@ -25,6 +37,13 @@ export function wrapSessionWithWebviewLogging(
             const logId = logger.logApiRequest(repoPath || undefined);
             try {
                 const response = await session.run(request);
+                const quote = await accountCall(response.usage);
+                logger.logUsageQuote(
+                    session.provider,
+                    session.model,
+                    quote,
+                    requestType ? getRequestTypeLabel(requestType) : '',
+                );
                 completeApiRequestLog(
                     logId,
                     session.provider,
@@ -33,6 +52,7 @@ export function wrapSessionWithWebviewLogging(
                     response,
                     requestType,
                     repoPath,
+                    quote,
                 );
                 return response;
             } catch (error) {
@@ -41,6 +61,20 @@ export function wrapSessionWithWebviewLogging(
             }
         },
     };
+}
+
+/** Convenience wrapper used by agent call sites that already hold an LLMExecution. */
+export function wrapExecutionSessionForWebview(
+    session: AISession,
+    execution: LLMExecution,
+    repoPath: string,
+    requestType?: RequestType,
+): AISession {
+    return wrapSessionWithWebviewLogging(session, {
+        repoPath,
+        requestType,
+        accountCall: usage => execution.accountCall(usage),
+    });
 }
 
 export function logRepositoryAnalysisToolCall(
@@ -90,6 +124,7 @@ export function completeApiRequestLog(
     response: Pick<AIRunResponse, 'usage'>,
     requestType: RequestType | undefined,
     repoPath: string,
+    costQuote?: CostQuote,
 ): void {
     const { result, isFinal } = formatWebviewApiResult(data);
     logger.logApiRequestWithResult(
@@ -97,10 +132,10 @@ export function completeApiRequestLog(
         provider,
         model,
         result,
-        response.usage?.raw,
         isFinal,
         repoPath || undefined,
         requestType,
+        costQuote,
     );
 }
 
@@ -124,7 +159,6 @@ export function failApiRequestLog(
         provider,
         model,
         { error: String((error as Error)?.message || error) },
-        undefined,
         false,
         repoPath || undefined,
     ));

@@ -218,7 +218,7 @@
 	"Evidence": "证据",
 	"Summary": "摘要",
 	"RAG": "RAG",
-	"Draft": "起草",
+	"Draft": "草稿",
 	"Verify": "校验",
 	"Draft input": "起草输入",
 	"RAG input": "RAG 输入",
@@ -325,9 +325,7 @@
 	"File": "文件",
 	"Status": "状态",
 	"Reason": "原因",
-	"Summary": "摘要",
 	"Breaking change": "破坏性变更",
-	"Progress": "进度",
 	"Target": "目标",
 	"Summarized": "已摘要",
 	"Configs": "配置",
@@ -350,9 +348,10 @@
 	"Hard input": "硬输入上限",
 	"Safety tokens": "安全 token",
 	"Forced compaction": "强制压缩",
-	"Draft": "草稿",
 	"Validation": "校验",
 	"Strict fix": "严格修复",
 	"Language enforcement": "语言处理",
-	"Final": "最终"
+	"Final": "最终",
+	"Total Genie usage cost for this repository: Free": "此仓库的 Genie 使用总费用：免费",
+	"Total Genie usage cost for this repository: ${0} (incomplete)": "此仓库的 Genie 使用总费用：${0}（不完整）"
 }

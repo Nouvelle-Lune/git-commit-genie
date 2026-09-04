@@ -1,4 +1,5 @@
 import { AIModelThinkingMetadata, ProviderKind } from './types';
+import type { FlatModelPricing } from '../../cost/costTypes';
 
 /** Current persisted model configuration schema version. */
 export const AI_CONFIG_VERSION = 2;
@@ -22,6 +23,12 @@ export interface AIModelConfig extends Partial<AIModelThinkingMetadata> {
     model: string;
     /** Required only for OpenAI-compatible custom providers. */
     baseUrl?: string;
+    /**
+     * Optional flat USD/1M-token override for this model instance.
+     * Absent means use built-in PRICING_TABLE exact match, otherwise unpriced.
+     * Editing label/endpoint/key must preserve this field; deleting the model removes it.
+     */
+    pricingOverride?: FlatModelPricing;
 }
 
 export function customSecretKey(id: string): string {

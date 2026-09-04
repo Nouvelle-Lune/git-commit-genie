@@ -20,6 +20,14 @@ export function isCurrentPersistedLogEntry(value: unknown): value is LogEntry {
         return false;
     }
 
+    // Legacy numeric cost field is no longer valid — drop those records.
+    if ('cost' in value && value.cost !== undefined) {
+        return false;
+    }
+    if (value.costDisplay !== undefined && !isCostDisplay(value.costDisplay)) {
+        return false;
+    }
+
     if (value.type === LogType.GenerationStart) {
         return typeof value.repoPath === 'string'
             && value.repoPath.length > 0
@@ -44,6 +52,21 @@ export function isCurrentPersistedLogEntry(value: unknown): value is LogEntry {
         }
     }
 
+    return true;
+}
+
+function isCostDisplay(value: unknown): boolean {
+    if (!isRecord(value) || typeof value.status !== 'string') {
+        return false;
+    }
+    const allowed = new Set(['amount', 'free', 'unpriced', 'unavailable', 'none', 'partial']);
+    if (!allowed.has(value.status)) {
+        return false;
+    }
+    if (value.amountUsd !== undefined
+        && (typeof value.amountUsd !== 'number' || !Number.isFinite(value.amountUsd))) {
+        return false;
+    }
     return true;
 }
 

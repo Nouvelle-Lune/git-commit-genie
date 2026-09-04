@@ -19,7 +19,7 @@ import { logger } from '../../logger';
 import {
     logRepositoryAnalysisToolCall,
     logSchemaValidationToWebview,
-    wrapSessionWithWebviewLogging,
+    wrapExecutionSessionForWebview,
 } from '../../llm/chatWebviewLogging';
 import { LLMAnalysisResponse, RepositoryAnalysis } from './repositoryAnalysisTypes';
 
@@ -286,8 +286,9 @@ export async function runRepositoryAnalysisProfile(
     execution: LLMExecution,
 ): Promise<RepositoryAnalysisAgentOutput> {
     const runtime = new AgentRuntime({
-        wrapSession: session => wrapSessionWithWebviewLogging(
+        wrapSession: session => wrapExecutionSessionForWebview(
             session,
+            execution,
             input.repositoryPath,
             'investigation',
         ),

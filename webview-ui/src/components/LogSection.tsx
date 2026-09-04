@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { LogEntry, LogType } from '../types/messages';
+import { LogEntry, LogType, formatCostDisplayShort } from '../types/messages';
 import { vscodeApi } from '../utils/vscode';
 import './LogSection.css';
 import { GenieCheckIcon, GenieCloudIcon, GenieReadIcon, GenieReasonIcon, GenieToolIcon, GenieWarningIcon } from './icons';
@@ -477,8 +477,8 @@ export const LogSection: React.FC = () => {
                                                         {/* inline reason removed; reason is a separate log */}
                                                     </div>
                                                     <div className="log-trailing">
-                                                        {log.cost !== undefined && log.cost > 0 && !log.cancelled && (
-                                                            <span className="log-cost">${log.cost.toFixed(6)}</span>
+                                                        {log.costDisplay && !log.cancelled && (
+                                                            <span className="log-cost">{formatCostDisplayShort(log.costDisplay, 6)}</span>
                                                         )}
                                                         {log.pending === true ? (
                                                             <span className="log-loading">

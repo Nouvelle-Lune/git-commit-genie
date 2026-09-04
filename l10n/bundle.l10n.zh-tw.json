@@ -218,7 +218,7 @@
 	"Evidence": "證據",
 	"Summary": "摘要",
 	"RAG": "RAG",
-	"Draft": "起草",
+	"Draft": "草稿",
 	"Verify": "驗證",
 	"Draft input": "起草輸入",
 	"RAG input": "RAG 輸入",
@@ -325,9 +325,7 @@
 	"File": "檔案",
 	"Status": "狀態",
 	"Reason": "原因",
-	"Summary": "摘要",
 	"Breaking change": "破壞性變更",
-	"Progress": "進度",
 	"Target": "目標",
 	"Summarized": "已摘要",
 	"Configs": "設定",
@@ -350,9 +348,10 @@
 	"Hard input": "硬輸入上限",
 	"Safety tokens": "安全 token",
 	"Forced compaction": "強制壓縮",
-	"Draft": "草稿",
 	"Validation": "驗證",
 	"Strict fix": "嚴格修復",
 	"Language enforcement": "語言處理",
-	"Final": "最終"
+	"Final": "最終",
+	"Total Genie usage cost for this repository: Free": "此倉庫的 Genie 使用總費用：免費",
+	"Total Genie usage cost for this repository: ${0} (incomplete)": "此倉庫的 Genie 使用總費用：${0}（不完整）"
 }

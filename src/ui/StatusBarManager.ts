@@ -7,6 +7,7 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
 import { GitExtension } from '../services/git/git';
 import { RepoService } from '../services/repo/repo';
 import { CostTrackingService } from '../services/cost/costTrackingService';
+import { repositoryCostToDisplay } from '../services/cost/costDisplay';
 import { logger } from '../services/logger';
 import {
     REPOSITORY_ANALYSIS_MODEL_ID_KEY,
@@ -474,16 +475,26 @@ export class StatusBarManager {
                 return;
             }
 
-            const cost = await this.costTracker.getRepositoryCost(this.gitState.repoPath);
+            const snapshot = await this.costTracker.getRepositoryCostSnapshot(this.gitState.repoPath);
+            const display = repositoryCostToDisplay(snapshot);
             const parts: string[] = [baseTooltip];
-
-            if (cost > 0) {
-                const formatted = cost.toFixed(6);
-                parts.push(vscode.l10n.t(I18N.cost.totalCost, formatted));
-            } else {
-                parts.push(vscode.l10n.t(I18N.cost.noCostRecorded));
+            switch (display.status) {
+                case 'none':
+                    parts.push(vscode.l10n.t(I18N.cost.noCostRecorded));
+                    break;
+                case 'free':
+                    parts.push(vscode.l10n.t(I18N.cost.totalCostFree));
+                    break;
+                case 'partial':
+                    parts.push(vscode.l10n.t(I18N.cost.totalCostPartial, (display.amountUsd ?? 0).toFixed(6)));
+                    break;
+                case 'amount':
+                    parts.push(vscode.l10n.t(I18N.cost.totalCost, (display.amountUsd ?? 0).toFixed(6)));
+                    break;
+                default:
+                    parts.push(vscode.l10n.t(I18N.cost.totalCost, snapshot.totalUsd.toFixed(6)));
+                    break;
             }
-
             this.statusBarItem.tooltip = parts.join('\n');
         } catch {
             this.statusBarItem.tooltip = baseTooltip;

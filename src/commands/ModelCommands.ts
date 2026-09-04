@@ -21,6 +21,13 @@ import {
 } from '../services/llm/providers';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
+import {
+    describePricingSource,
+    isTieredPricing,
+    parseFlatModelPricingInput,
+} from '../services/cost';
+import type { FlatModelPricing } from '../services/cost/costTypes';
+import type { FlatPricing, ModelPricing } from '../services/cost/pricing';
 
 type ModelPurpose = 'generation' | 'repositoryAnalysis';
 type MenuExit = 'back' | 'done';
@@ -122,7 +129,8 @@ export class ModelCommands {
         }
     }
 
-    private async manageConfiguredModel(model: AIModelConfig): Promise<MenuExit> {
+    private async manageConfiguredModel(initial: AIModelConfig): Promise<MenuExit> {
+        let model = initial;
         for (;;) {
             const items: Array<vscode.QuickPickItem & { value: string }> = [
                 this.backItem(),
@@ -134,6 +142,7 @@ export class ModelCommands {
                     description: 'Only for endpoints with non-standard Chat Completions parameters',
                     value: 'thinkingCompatibility',
                 }] : []),
+                { label: 'Pricing', description: this.pricingDescription(model), value: 'pricing' },
                 { label: 'Edit model', value: 'edit' },
                 { label: 'Replace API key', value: 'key' },
                 { label: 'Delete model', value: 'delete' },
@@ -154,8 +163,16 @@ export class ModelCommands {
                 if (exit === 'back') { continue; }
                 continue;
             }
+            if (picked.value === 'pricing') {
+                const exit = await this.manageModelPricing(model);
+                if (exit === 'back') { continue; }
+                // Reload model after pricing changes so subsequent menu items see fresh config.
+                model = this.requireModel(model.id);
+                continue;
+            }
             if (picked.value === 'edit') {
                 await this.editModel(model);
+                model = this.requireModel(model.id);
                 continue;
             }
             if (picked.value === 'key') {
@@ -214,7 +231,15 @@ export class ModelCommands {
             ? await this.promptCustomModel(current)
             : await this.promptNativeModel(current.provider, apiKey);
         if (!updated) { return; }
-        const model = { ...updated, id: current.id };
+        // Preserve pricing override and thinking metadata across label/model/endpoint edits.
+        const model: AIModelConfig = {
+            ...current,
+            label: updated.label,
+            model: updated.model,
+            baseUrl: updated.baseUrl,
+            id: current.id,
+            provider: current.provider,
+        };
         await this.validateModel(model, apiKey);
         await this.context.globalState.update(
             AI_MODELS_KEY,
@@ -468,6 +493,130 @@ export class ModelCommands {
             baseUrl: baseUrl.trim(),
             model: model.trim(),
         };
+    }
+
+    private pricingDescription(model: AIModelConfig): string {
+        const described = describePricingSource(model.model, model.pricingOverride);
+        if (described.source === 'Unpriced') {
+            return 'Unpriced';
+        }
+        const ratesLabel = this.formatRatesForMenu(described.rates!);
+        return `${described.source} · ${ratesLabel}`;
+    }
+
+    private formatRatesForMenu(rates: ModelPricing): string {
+        if (isTieredPricing(rates)) {
+            const first = rates.tiers[0];
+            return `tiered in $${first.input}/out $${first.output}/cache $${first.cached} (per 1M)`;
+        }
+        const flat = rates as FlatPricing;
+        return `in $${flat.input}/out $${flat.output}/cache $${flat.cached} (per 1M)`;
+    }
+
+    private async manageModelPricing(initial: AIModelConfig): Promise<MenuExit> {
+        let model = initial;
+        for (;;) {
+            const described = describePricingSource(model.model, model.pricingOverride);
+            const detail = described.source === 'Unpriced'
+                ? 'No built-in or custom price configured'
+                : this.formatRatesForMenu(described.rates!);
+            const picked = await vscode.window.showQuickPick([
+                this.backItem(),
+                {
+                    label: `Current: ${described.source}`,
+                    description: detail,
+                    value: '__info__',
+                },
+                { label: 'Set custom pricing', description: 'USD per 1M tokens · input / output / cached input', value: 'set' },
+                {
+                    label: 'Use built-in pricing',
+                    description: described.source === 'Custom'
+                        ? 'Remove override and fall back to the built-in table'
+                        : 'Already using built-in or unpriced',
+                    value: 'builtin',
+                },
+            ], { placeHolder: `${model.label} pricing` });
+            if (!picked || picked.value === BACK_VALUE) { return 'back'; }
+            if (picked.value === '__info__') { continue; }
+            if (picked.value === 'set') {
+                const pricing = await this.promptCustomPricing(model.pricingOverride);
+                if (!pricing) { continue; }
+                await this.updateConfiguredModel({ ...model, pricingOverride: pricing });
+                model = this.requireModel(model.id);
+                vscode.window.showInformationMessage(`Custom pricing saved for ${model.label}.`);
+                continue;
+            }
+            if (picked.value === 'builtin') {
+                if (!model.pricingOverride) {
+                    continue;
+                }
+                const { pricingOverride: _removed, ...rest } = model;
+                await this.updateConfiguredModel(rest);
+                model = this.requireModel(model.id);
+                const after = describePricingSource(model.model, model.pricingOverride);
+                vscode.window.showInformationMessage(
+                    after.source === 'Unpriced'
+                        ? `${model.label} has no built-in price (Unpriced).`
+                        : `${model.label} restored to built-in pricing.`,
+                );
+                continue;
+            }
+        }
+    }
+
+    /**
+     * Prompt for input / output / cached-input rates.
+     * Cancelling any step leaves the existing override unchanged.
+     */
+    private async promptCustomPricing(current?: FlatModelPricing): Promise<FlatModelPricing | undefined> {
+        const input = await vscode.window.showInputBox({
+            title: 'Input price (USD per 1M tokens)',
+            value: current ? String(current.input) : '',
+            prompt: 'All three rates are required. Use 0 for free. Without a cache discount, set cached input equal to input.',
+            ignoreFocusOut: true,
+            validateInput: value => {
+                try {
+                    parseFlatModelPricingInput(value, '0', '0');
+                    return undefined;
+                } catch (error) {
+                    return String((error as Error).message);
+                }
+            },
+        });
+        if (input === undefined) { return undefined; }
+
+        const output = await vscode.window.showInputBox({
+            title: 'Output price (USD per 1M tokens)',
+            value: current ? String(current.output) : '',
+            ignoreFocusOut: true,
+            validateInput: value => {
+                try {
+                    parseFlatModelPricingInput(input, value, '0');
+                    return undefined;
+                } catch (error) {
+                    return String((error as Error).message);
+                }
+            },
+        });
+        if (output === undefined) { return undefined; }
+
+        const cachedInput = await vscode.window.showInputBox({
+            title: 'Cached input price (USD per 1M tokens)',
+            value: current ? String(current.cachedInput) : '',
+            prompt: 'If the provider has no cache discount, enter the same value as input.',
+            ignoreFocusOut: true,
+            validateInput: value => {
+                try {
+                    parseFlatModelPricingInput(input, output, value);
+                    return undefined;
+                } catch (error) {
+                    return String((error as Error).message);
+                }
+            },
+        });
+        if (cachedInput === undefined) { return undefined; }
+
+        return parseFlatModelPricingInput(input, output, cachedInput);
     }
 
     private async updateConfiguredModel(model: AIModelConfig): Promise<void> {

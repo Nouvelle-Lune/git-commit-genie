@@ -171,6 +171,9 @@ function createExecution(
             return session;
         },
         run: async () => { throw new Error('not used'); },
+        accountCall: async () => ({ status: 'pricing-not-configured' as const }),
+        getRecordedQuotes: () => [],
+        notifyUsageCostIfEnabled: () => undefined,
     };
 }
 

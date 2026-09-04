@@ -25,7 +25,7 @@ import {
 } from './changeAnalysisProfile';
 import {
     logSchemaValidationToWebview,
-    wrapSessionWithWebviewLogging,
+    wrapExecutionSessionForWebview,
 } from '../../../llm/chatWebviewLogging';
 
 export type { ChangeAnalysisAgentOutput, InvestigationStepEvent } from './changeAnalysisProfile';
@@ -193,8 +193,9 @@ export async function runChangeAnalysisAgent(
     params: ChangeAnalysisAgentParams,
 ): Promise<ChangeAnalysisAgentOutput> {
     const runtime = new AgentRuntime({
-        wrapSession: session => wrapSessionWithWebviewLogging(
+        wrapSession: session => wrapExecutionSessionForWebview(
             session,
+            params.execution,
             params.repositoryPath,
             'investigation',
         ),

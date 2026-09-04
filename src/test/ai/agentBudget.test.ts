@@ -39,6 +39,9 @@ describe('AgentRuntime token budgeting', () => {
             thinkingFor: () => ({ reasoning: false, level: 'off' }),
             createSession: () => session,
             run: async () => { throw new Error('not used'); },
+            accountCall: async () => ({ status: 'pricing-not-configured' as const }),
+            getRecordedQuotes: () => [],
+            notifyUsageCostIfEnabled: () => undefined,
         };
         const profile: AgentProfile<null, { value: string }, string> = {
             id: 'budget-test',

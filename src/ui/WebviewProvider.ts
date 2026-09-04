@@ -6,6 +6,7 @@ import { WebviewMessage, ExtensionMessage, RepositoryInfo, I18nTexts } from './t
 import { logger } from '../services/logger';
 import { StatusBarManager } from './StatusBarManager';
 import { isLocalizedPipelineLanguage } from './pipelineDisplay';
+import { repositoryCostToDisplay } from '../services/cost/costDisplay';
 
 /**
  * WebviewViewProvider for Git Commit Genie panel
@@ -324,7 +325,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
         for (const repo of repositories) {
             const repoPath = repo.rootUri.fsPath;
             const repoName = path.basename(repoPath);
-            const cost = await costService.getRepositoryCost(repoPath);
+            const cost = await costService.getRepositoryCostSnapshot(repoPath);
 
             // Determine analysis status
             let analysisStatus: 'missing' | 'analyzing' | 'idle' = 'missing';
@@ -351,7 +352,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
             repoCosts.push({
                 name: repoName,
                 path: repoPath,
-                cost,
+                cost: repositoryCostToDisplay(cost),
                 analysisStatus,
                 analysisPath,
                 ragStatus: (() => {

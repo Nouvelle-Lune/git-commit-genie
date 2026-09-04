@@ -325,9 +325,7 @@
 	"File": "File",
 	"Status": "Status",
 	"Reason": "Reason",
-	"Summary": "Summary",
 	"Breaking change": "Breaking change",
-	"Progress": "Progress",
 	"Target": "Target",
 	"Summarized": "Summarized",
 	"Configs": "Configs",
@@ -350,9 +348,10 @@
 	"Hard input": "Hard input",
 	"Safety tokens": "Safety tokens",
 	"Forced compaction": "Forced compaction",
-	"Draft": "Draft",
 	"Validation": "Validation",
 	"Strict fix": "Strict fix",
 	"Language enforcement": "Language enforcement",
-	"Final": "Final"
+	"Final": "Final",
+	"Total Genie usage cost for this repository: Free": "Total Genie usage cost for this repository: Free",
+	"Total Genie usage cost for this repository: ${0} (incomplete)": "Total Genie usage cost for this repository: ${0} (incomplete)"
 }

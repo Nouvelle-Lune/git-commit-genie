@@ -3,6 +3,7 @@
  */
 
 import type { PipelineTextCatalog } from '../pipelineDisplay';
+import type { CostDisplay } from '../../services/cost/costTypes';
 
 // Extension -> Webview Messages
 export interface UpdateRepoMessage {
@@ -70,7 +71,8 @@ export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMe
 export interface RepositoryInfo {
     name: string;
     path: string;
-    cost: number;
+    /** Structured cost status — replaces bare numeric totals. */
+    cost: CostDisplay;
     analysisStatus: 'missing' | 'analyzing' | 'idle'; // Repository analysis status
     analysisPath?: string; // Path to analysis markdown file
     ragStatus?: {
@@ -122,7 +124,8 @@ export interface LogEntry {
     fileContent?: string; // For file read content preview
     startLine?: number; // For file read start line
     endLine?: number; // For file read end line
-    cost?: number; // For API requests
+    /** Structured cost from CostTrackingService — legacy numeric `cost` is rejected by persistence validation. */
+    costDisplay?: CostDisplay;
     pending?: boolean; // For API requests waiting for response
     requestType?: string;
     cancelled?: boolean; // Mark as cancelled by user

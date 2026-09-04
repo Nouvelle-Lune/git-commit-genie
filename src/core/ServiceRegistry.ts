@@ -44,7 +44,6 @@ export class ServiceRegistry {
         this.ragHistoricalIndexService = new RagHistoricalIndexService(this.repoService, this.ragRuntimeService);
         this.ragRetrievalService = new RagRetrievalService(this.context, this.repoService);
         this.ragRuntimeService.setBackgroundEnsureCallback(reason => this.ragHistoricalIndexService.ensureAllRepositoriesIndexed(reason));
-        logger.setCostTracker(this.costTrackingService);
 
         this.analysisService = new RepositoryAnalysisService(this.context, this.repoService);
         await this.reloadProviderServices();
@@ -79,7 +78,7 @@ export class ServiceRegistry {
                 this.context,
                 this.templateService,
                 this.analysisService,
-                { model },
+                { model, costTracker: this.costTrackingService },
             );
             await service.refreshFromSettings();
             this.llmServices.set(model.id, service);

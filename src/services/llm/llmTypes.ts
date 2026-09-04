@@ -2,8 +2,9 @@ import * as vscode from 'vscode';
 import { DiffData } from '../git/gitTypes';
 import { Repository } from '../git/git';
 import { ChangeSetSummary, FileSummary, RagRetrievalQuery, RagStyleReference, RetrievalFeatures } from '../chain/types';
-import { AIMessage, AISession, AIThinkingConfig, ThinkingLevel } from './providers';
+import { AIMessage, AISession, AIThinkingConfig, AIUsage, ThinkingLevel } from './providers';
 import type { ChainTokenBudget } from './inputTokenBudget';
+import type { CostQuote } from '../cost/costTypes';
 
 export type RequestType =
     | 'commitMessage'
@@ -38,6 +39,15 @@ export interface LLMExecution {
     thinkingFor(requestType: RequestType): AIThinkingConfig;
     createSession(messages: AIMessage[], id?: string): AISession;
     run<T>(session: AISession, messages: AIMessage[], options: LLMRunOptions): Promise<T>;
+    /**
+     * Record one successful API response using the pricing snapshot bound at createExecution.
+     * Shared by ordinary runs, structured retries, and Agent Runtime wrappers.
+     */
+    accountCall(usage: AIUsage | undefined): Promise<CostQuote>;
+    /** Quotes already recorded for this execution (task-scoped). */
+    getRecordedQuotes(): readonly CostQuote[];
+    /** Show showUsageCost notification from recorded quotes; does not recompute or re-accumulate. */
+    notifyUsageCostIfEnabled(callType: 'commit' | 'repoAnalysis'): void;
 }
 
 export interface RagRetrievalAdapter {

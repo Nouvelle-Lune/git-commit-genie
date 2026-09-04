@@ -4,6 +4,40 @@
 
 import type { PipelineTextCatalog } from '../../../src/ui/pipelineDisplay';
 
+export type CostDisplayStatus =
+    | 'amount'
+    | 'free'
+    | 'unpriced'
+    | 'unavailable'
+    | 'none'
+    | 'partial';
+
+export interface CostDisplay {
+    status: CostDisplayStatus;
+    amountUsd?: number;
+}
+
+function formatCostDisplayShort(display: CostDisplay, fractionDigits: number): string {
+    switch (display.status) {
+        case 'none':
+            return '$0.00';
+        case 'free':
+            return 'Free';
+        case 'unpriced':
+            return 'Unpriced';
+        case 'unavailable':
+            return 'Cost unavailable';
+        case 'amount':
+            return `$${(display.amountUsd ?? 0).toFixed(fractionDigits)}`;
+        case 'partial':
+            return `$${(display.amountUsd ?? 0).toFixed(fractionDigits)}*`;
+        default:
+            return 'Cost unavailable';
+    }
+}
+
+export { formatCostDisplayShort };
+
 // Extension -> Webview Messages
 export interface UpdateRepoMessage {
     type: 'updateRepo';
@@ -74,7 +108,7 @@ export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMe
 export interface RepositoryInfo {
     name: string;
     path: string;
-    cost: number;
+    cost: CostDisplay;
     analysisStatus: 'missing' | 'analyzing' | 'idle';
     analysisPath?: string;
     ragStatus?: {
@@ -126,7 +160,7 @@ export interface LogEntry {
     fileContent?: string; // For file read content preview
     startLine?: number; // For file read start line
     endLine?: number; // For file read end line
-    cost?: number; // For API requests
+    costDisplay?: CostDisplay;
     pending?: boolean; // For API requests waiting for response
     requestType?: string;
     cancelled?: boolean; // Mark as cancelled by user
