@@ -257,6 +257,12 @@
           "default": true,
           "markdownDescription": "%config.ui.stageNotifications.enabled.desc%"
         },
+        "gitCommitGenie.ui.rawData.enabled": {
+          "order": 11,
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%config.ui.rawData.enabled.desc%"
+        },
         "gitCommitGenie.rag.enabled": {
           "order": 19,
           "type": "boolean",

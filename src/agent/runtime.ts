@@ -62,6 +62,9 @@ export interface AgentToolDefinition<Input = unknown> {
 export interface AgentToolOutcome {
     output: string;
     ok?: boolean;
+    summary?: string;
+    evidenceCount?: number;
+    sourceStatuses?: string[];
 }
 
 export interface AgentRuntimeIssue {
@@ -71,6 +74,7 @@ export interface AgentRuntimeIssue {
         | 'invalid_reference'
         | 'duplicate_tool_call'
         | 'unknown_tool'
+        | 'tool_rejected'
         | 'max_steps'
         | 'context_compacted'
         | 'cancelled'
@@ -83,8 +87,13 @@ export interface AgentObservation {
     step: number;
     tool: string;
     arguments: Record<string, unknown>;
+    rawOutput: string;
     output: string;
+    outputTruncated: boolean;
     ok: boolean;
+    summary?: string;
+    evidenceCount?: number;
+    sourceStatuses?: string[];
 }
 
 export interface AgentRunState {
@@ -400,13 +409,19 @@ export class AgentRuntime {
                             return state.ledger.allocateRepositoryEvidence(evidence);
                         },
                     }, args);
-                    const output = truncateObservation(outcome.output, maxObservationChars);
+                    const rawOutput = outcome.output;
+                    const output = truncateObservation(rawOutput, maxObservationChars);
                     const observation: AgentObservation = {
                         step: state.steps,
                         tool: definition.name,
                         arguments: args,
+                        rawOutput,
                         output,
+                        outputTruncated: output !== rawOutput,
                         ok: outcome.ok !== false,
+                        ...(outcome.summary !== undefined ? { summary: outcome.summary } : {}),
+                        ...(outcome.evidenceCount !== undefined ? { evidenceCount: outcome.evidenceCount } : {}),
+                        ...(outcome.sourceStatuses !== undefined ? { sourceStatuses: outcome.sourceStatuses } : {}),
                     };
                     state.observations.push(observation);
                     this.options.onEvent?.({ type: 'toolComplete', observation });
@@ -547,7 +562,29 @@ export class AgentRuntime {
             state.issues.push({ type: 'unknown_tool', message, step: state.steps });
             throw new Error(message);
         }
-        return { callId: call.id, name: call.name, output: await tool.execute(call.arguments) };
+        try {
+            return { callId: call.id, name: call.name, output: await tool.execute(call.arguments) };
+        } catch (error) {
+            if (!(error instanceof ToolGrantViolationError)) {
+                throw error;
+            }
+            const message = error.message;
+            state.issues.push({ type: 'tool_rejected', message, step: state.steps });
+            const observation: AgentObservation = {
+                step: state.steps,
+                tool: call.name,
+                arguments: call.arguments,
+                rawOutput: message,
+                output: message,
+                outputTruncated: false,
+                ok: false,
+                summary: message,
+                evidenceCount: 0,
+            };
+            state.observations.push(observation);
+            this.options.onEvent?.({ type: 'toolComplete', observation });
+            return { callId: call.id, name: call.name, output: message, isError: true };
+        }
     }
 }
 
@@ -625,7 +662,9 @@ function validateToolGrant(grant: ToolGrant, args: Record<string, unknown>): voi
         const absolute = path.isAbsolute(candidate) ? path.resolve(candidate) : path.resolve(root, candidate);
         const relative = path.relative(root, absolute);
         if (relative.startsWith('..') || path.isAbsolute(relative)) {
-            throw new Error(`Tool '${grant.name}' cannot access path outside '${grant.allowedRoot}': ${candidate}`);
+            throw new ToolGrantViolationError(
+                `Tool '${grant.name}' cannot access path outside '${grant.allowedRoot}': ${candidate}`,
+            );
         }
     }
     enforceMaximum(grant.name, 'maxResults', args.maxResults, grant.maxResults);
@@ -638,6 +677,16 @@ function enforceMaximum(tool: string, field: string, value: unknown, maximum: nu
         return;
     }
     if (typeof value !== 'number' || !Number.isInteger(value) || value < 0 || value > maximum) {
-        throw new Error(`Tool '${tool}' argument '${field}' exceeds its grant limit (${maximum}).`);
+        throw new ToolGrantViolationError(
+            `Tool '${tool}' argument '${field}' exceeds its grant limit (${maximum}).`,
+        );
+    }
+}
+
+/** Identifies a denied tool call that the model may correct without ending the run. */
+class ToolGrantViolationError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'ToolGrantViolationError';
     }
 }

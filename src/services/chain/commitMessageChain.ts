@@ -73,7 +73,13 @@ export async function generateCommitMessageChain(
 			maxOutputTokens: tokenBudget.maxOutputTokens,
 			safetyTokens: tokenBudget.safetyTokens,
 			files: diffs.map(diff => ({ file: diff.fileName, status: diff.status })),
-		}
+		},
+		rawData: {
+			output: {
+				evidence: analysisEvidence.current,
+				tokenBudget,
+			},
+		},
 	}));
 
 	const createCompactFor = (branch: { current: DraftEvidence[] }) => async (
@@ -81,6 +87,7 @@ export async function generateCommitMessageChain(
 		buildTargetMessages: (current: DraftEvidence[]) => AIMessage[],
 		force = false,
 	): Promise<void> => {
+		const evidenceBefore = branch.current;
 		try {
 			const currentTokens = estimateChatMessagesTokens(buildTargetMessages(branch.current));
 			const forcedTarget = Math.max(1, Math.floor(currentTokens * 0.8));
@@ -106,7 +113,10 @@ export async function generateCommitMessageChain(
 				onSummarizeStart: () => {
 					if (!summaryStageStarted) {
 						summaryStageStarted = true;
-						safeRun('Chain.onStage.summarizeStart', () => options?.onStage?.({ type: 'summarizeStart' }));
+						safeRun('Chain.onStage.summarizeStart', () => options?.onStage?.({
+							type: 'summarizeStart',
+							rawData: { input: { target, evidence: evidenceBefore } },
+						}));
 					}
 				},
 				onFileSummarized: (file) => {
@@ -123,7 +133,11 @@ export async function generateCommitMessageChain(
 							file: file.fileName,
 							summary: summarizeFileEvidenceForDisplay(file),
 							breaking: file.breakingSignals.length > 0,
-						}
+						},
+						rawData: {
+							input: { diff: diffs.find(diff => diff.fileName === file.fileName) },
+							output: file,
+						},
 					}));
 				},
 			});
@@ -142,14 +156,27 @@ export async function generateCommitMessageChain(
 					contextWindowTokens: tokenBudget.effectiveContextTokens,
 					didSummarize: result.didSummarize,
 					forced: force,
-				}
+				},
+				rawData: {
+					input: { target, evidence: evidenceBefore, force },
+					output: {
+						evidence: branch.current,
+						initialEstimatedInputTokens: result.initialEstimatedInputTokens,
+						estimatedInputTokens: result.estimatedInputTokens,
+						didSummarize: result.didSummarize,
+					},
+				},
 			}));
 		} catch (error) {
 			const errorMessage = String((error as any)?.message || error || 'Unknown error');
 			logger.warn(`[Genie][Chain] Evidence compaction failed for ${target}.`, error);
 			safeRun('Chain.onStage.summarizeFailed', () => options?.onStage?.({
 				type: 'summarizeFailed',
-				data: { target, error: errorMessage }
+				data: { target, error: errorMessage },
+				rawData: {
+					input: { target, evidence: evidenceBefore, force },
+					output: { error: errorMessage },
+				},
 			}));
 			throw error;
 		}
@@ -191,7 +218,19 @@ export async function generateCommitMessageChain(
 
 	await compactFor('draft', buildDraftMessages);
 	timings.draftStart = Date.now();
-	safeRun('Chain.onStage.draftStart', () => options?.onStage?.({ type: 'draftStart' }));
+	safeRun('Chain.onStage.draftStart', () => options?.onStage?.({
+		type: 'draftStart',
+		rawData: {
+			input: {
+				selectedInformation: trace.selectedInformation,
+				evidence: analysisEvidence.current,
+				ragStyleReferences,
+				currentTime: inputs.currentTime,
+				targetLanguage: inputs.targetLanguage,
+				userTemplate: inputs.userTemplate,
+			},
+		},
+	}));
 	let generatedDraft: Awaited<ReturnType<typeof generateDraft>>;
 	try {
 		generatedDraft = await generateDraft(buildDraftMessages(analysisEvidence.current), execution);
@@ -205,11 +244,28 @@ export async function generateCommitMessageChain(
 	const { draft, notes: classificationNotes } = generatedDraft;
 	timings.draftReady = Date.now();
 
-	safeRun('Chain.onStage.classifyDraft', () => options?.onStage?.({ type: 'classifyDraft', data: { draft } }));
+	safeRun('Chain.onStage.classifyDraft', () => options?.onStage?.({
+		type: 'classifyDraft',
+		data: { draft },
+		rawData: { output: generatedDraft },
+	}));
 
-	safeRun('Chain.onStage.validationStart', () => options?.onStage?.({ type: 'validationStart' }));
+	safeRun('Chain.onStage.validationStart', () => options?.onStage?.({
+		type: 'validationStart',
+		rawData: {
+			input: {
+				draft,
+				validationChecklist: inputs.validationChecklist ?? '',
+				userTemplate: inputs.userTemplate,
+			},
+		},
+	}));
 	const { validMessage, notes: validationNotes } = await validateAndFixCommit(draft, inputs.validationChecklist ?? '', execution, inputs.userTemplate);
-	safeRun('Chain.onStage.validateFix', () => options?.onStage?.({ type: 'validateFix', data: { validMessage } }));
+	safeRun('Chain.onStage.validateFix', () => options?.onStage?.({
+		type: 'validateFix',
+		data: { validMessage },
+		rawData: { output: { validMessage, validationNotes } },
+	}));
 
 	// Local strict check; if still not conforming, ask LLM for a minimal strict fix
 	let finalMessage = validMessage;
@@ -217,23 +273,43 @@ export async function generateCommitMessageChain(
 	if (!check.ok) {
 		safeRun('Chain.onStage.strictFixStart', () => options?.onStage?.({
 			type: 'strictFixStart',
-			data: { problems: check.problems }
+			data: { problems: check.problems },
+			rawData: { input: { message: finalMessage, problems: check.problems, userTemplate: inputs.userTemplate } },
 		}));
 		finalMessage = await enforceStrictCommitFormat(finalMessage, check.problems, execution, inputs.userTemplate);
-		safeRun('Chain.onStage.strictFix', () => options?.onStage?.({ type: 'strictFix', data: { message: finalMessage } }));
+		safeRun('Chain.onStage.strictFix', () => options?.onStage?.({
+			type: 'strictFix',
+			data: { message: finalMessage },
+			rawData: { output: { message: finalMessage } },
+		}));
 	}
 
 	// Enforce target language strictly while preserving tokens/structure
 	if ((inputs.targetLanguage || '').trim()) {
 		safeRun('Chain.onStage.enforceLanguageStart', () => options?.onStage?.({
 			type: 'enforceLanguageStart',
-			data: { targetLanguage: inputs.targetLanguage }
+			data: { targetLanguage: inputs.targetLanguage },
+			rawData: {
+				input: {
+					message: finalMessage,
+					targetLanguage: inputs.targetLanguage,
+					userTemplate: inputs.userTemplate,
+				},
+			},
 		}));
 		finalMessage = await enforceCommitLanguage(finalMessage, inputs.targetLanguage, execution, inputs.userTemplate);
-		safeRun('Chain.onStage.enforceLanguage', () => options?.onStage?.({ type: 'enforceLanguage', data: { message: finalMessage } }));
+		safeRun('Chain.onStage.enforceLanguage', () => options?.onStage?.({
+			type: 'enforceLanguage',
+			data: { message: finalMessage },
+			rawData: { output: { message: finalMessage } },
+		}));
 	}
 
-	safeRun('Chain.onStage.done', () => options?.onStage?.({ type: 'done', data: { finalMessage } }));
+	safeRun('Chain.onStage.done', () => options?.onStage?.({
+		type: 'done',
+		data: { finalMessage },
+		rawData: { output: { finalMessage } },
+	}));
 
 	return {
 		commitMessage: finalMessage,
@@ -269,6 +345,7 @@ export async function generateCommitMessageChain(
 			safeRun('Chain.onStage.ragDisabled', () => options?.onStage?.({
 				type: 'ragDisabled',
 				data: { reason: 'disabled' },
+				rawData: { input: { selectedInformation: selected } },
 			}));
 			timings.ragReady = Date.now();
 			return { ragStyleReferences: [] };
@@ -282,12 +359,19 @@ export async function generateCommitMessageChain(
 				changeSetSummary: context.changeSetSummary,
 				retrievalFeatures: context.retrievalFeatures,
 			},
+			rawData: {
+				input: { selectedInformation: selected },
+				output: context,
+			},
 		}));
 
 		let references: RagStyleReference[] = [];
 		try {
 			if (options?.retrieveRagExamples) {
-				safeRun('Chain.onStage.ragRetrievalStart', () => options.onStage?.({ type: 'ragRetrievalStart' }));
+				safeRun('Chain.onStage.ragRetrievalStart', () => options.onStage?.({
+					type: 'ragRetrievalStart',
+					rawData: { input: { query: context.query } },
+				}));
 				references = await options.retrieveRagExamples(context.query);
 			}
 			safeRun('Chain.onStage.ragRetrieved', () => options?.onStage?.({
@@ -297,6 +381,7 @@ export async function generateCommitMessageChain(
 					messages: references.map(reference => reference.message),
 					references,
 				},
+				rawData: { output: { references } },
 			}));
 		} catch (error) {
 			if (execution.signal?.aborted) {
@@ -307,6 +392,10 @@ export async function generateCommitMessageChain(
 			safeRun('Chain.onStage.ragRetrievalSkipped', () => options?.onStage?.({
 				type: 'ragRetrievalSkipped',
 				data: { error: errorMessage },
+				rawData: {
+					input: { query: context.query },
+					output: { error: errorMessage },
+				},
 			}));
 		}
 

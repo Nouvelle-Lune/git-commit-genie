@@ -535,7 +535,7 @@ export async function runInvestigationTool(
                 }
                 const absolute = resolveInsideRepository(context.repositoryPath, filePath);
                 const startLine = call.startLine ?? 1;
-                const maxLines = Math.min(call.maxLines ?? 120, 400);
+                const maxLines = call.maxLines ?? 120;
                 const read = await readSnapshotFile(context.snapshot, absolute, { startLine, maxLines }, context.excludePatterns, context.side);
                 if (!read.success || !read.data) {
                     return { ok: false, summary: `Could not read ${filePath}.`, evidence: [], error: read.error };

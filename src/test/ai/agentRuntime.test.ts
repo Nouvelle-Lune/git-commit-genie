@@ -224,27 +224,116 @@ describe('AgentRuntime contracts', () => {
         assert.equal(result.output.semanticAnalysis.repositoryFacts.length, 0);
     });
 
-    it('rejects paths and numeric arguments outside a tool grant', async () => {
+    it('soft-rejects readFileContent maxLines above its grant and lets the model correct it', async () => {
         const requests: AIRunRequest[] = [];
+        const executedArguments: Array<Record<string, unknown>> = [];
         const execution = createExecution([
             response({
                 toolCalls: [{
-                    id: 'escape',
-                    name: 'inspect',
-                    arguments: { filePath: '../outside.ts', maxResults: 51, maxLines: 401, depth: 2 },
+                    id: 'too-many-lines',
+                    name: 'readFileContent',
+                    arguments: { reason: 'read the implementation', filePath: 'src/example.ts', maxLines: 401 },
                 }],
                 stopReason: 'tool_call',
             }),
+            response({
+                toolCalls: [{
+                    id: 'bounded-lines',
+                    name: 'readFileContent',
+                    arguments: { reason: 'retry with the grant limit', filePath: 'src/example.ts', maxLines: 400 },
+                }],
+                stopReason: 'tool_call',
+            }),
+            response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
         ], requests, []);
-        const profile: AgentProfile<string, { value: string }, string> = {
-            id: 'permission-test',
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'max-lines-permission-test',
             promptVersion: '1',
             toolsetVersion: '1',
             requestType: 'investigation',
             finalName: 'permissionTestFinal',
             finalSchema: z.object({ value: z.string() }),
             contextPolicy: {
-                maxSteps: 1,
+                maxSteps: 2,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [{ role: 'system', content: 'protocol' }], opening: [] }),
+            grantTools: () => [{
+                name: 'readFileContent',
+                allowedRoot: '/tmp/repository',
+                excludePatterns: [],
+                maxLines: 400,
+                allocateEvidence: false,
+            }],
+            buildToolDefinitions: () => [{
+                name: 'readFileContent',
+                description: 'Read a bounded file range.',
+                parameters: { type: 'object' },
+                execute: async (_context, args) => {
+                    executedArguments.push(args);
+                    return {
+                        output: `read ${String(args.maxLines)} lines`,
+                        summary: 'Read the requested bounded range.',
+                        evidenceCount: 1,
+                    };
+                },
+            }],
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'done');
+        assert.deepEqual(executedArguments.map(args => args.maxLines), [400]);
+        assert.equal(requests.length, 3);
+        assert.equal(requests[1].toolResults?.[0].isError, true);
+        assert.match(requests[1].toolResults?.[0].output ?? '', /maxLines.*400/);
+        assert.equal(requests[2].toolResults?.[0].output, 'read 400 lines');
+        assert.equal(result.state.steps, 2);
+        assert.equal(result.state.observations.length, 2);
+        assert.equal(result.state.observations[0].ok, false);
+        assert.match(result.state.observations[0].output, /maxLines.*400/);
+        assert.equal(result.state.observations[1].ok, true);
+        assert.equal(result.state.observations[1].summary, 'Read the requested bounded range.');
+        assert.equal(result.state.observations[1].evidenceCount, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'tool_rejected').length, 1);
+    });
+
+    it('soft-rejects a path escape and lets the model retry inside the granted root', async () => {
+        const requests: AIRunRequest[] = [];
+        const executedPaths: unknown[] = [];
+        const execution = createExecution([
+            response({
+                toolCalls: [{
+                    id: 'escape',
+                    name: 'inspect',
+                    arguments: { reason: 'inspect outside', filePath: '../outside.ts' },
+                }],
+                stopReason: 'tool_call',
+            }),
+            response({
+                toolCalls: [{
+                    id: 'inside',
+                    name: 'inspect',
+                    arguments: { reason: 'inspect inside', filePath: 'src/inside.ts' },
+                }],
+                stopReason: 'tool_call',
+            }),
+            response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
+        ], requests, []);
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'path-permission-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'pathPermissionTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 2,
                 maxEpochs: 0,
                 maxObservationChars: 100,
                 buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
@@ -254,27 +343,30 @@ describe('AgentRuntime contracts', () => {
                 name: 'inspect',
                 allowedRoot: '/tmp/repository',
                 excludePatterns: [],
-                maxResults: 50,
-                maxLines: 400,
-                maxDepth: 1,
                 allocateEvidence: false,
             }],
             buildToolDefinitions: () => [{
                 name: 'inspect',
                 description: 'Inspect a bounded path.',
                 parameters: { type: 'object' },
-                execute: async () => ({ output: 'must not execute' }),
+                execute: async (_context, args) => {
+                    executedPaths.push(args.filePath);
+                    return { output: 'inside root' };
+                },
             }],
             normalizeFinal: raw => raw.value,
-            preservePartialResult: (_state, error) => String((error as Error).message),
+            preservePartialResult: () => 'partial',
         };
 
-        const result = await new AgentRuntime().run(execution, profile, '/tmp/repository');
+        const result = await new AgentRuntime().run(execution, profile, null);
 
-        assert.equal(result.status, 'partial');
-        assert.match(result.output, /outside/);
-        assert.equal(requests.length, 1);
-        assert.equal(result.state.observations.length, 0);
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'done');
+        assert.deepEqual(executedPaths, ['src/inside.ts']);
+        assert.equal(requests[1].toolResults?.[0].isError, true);
+        assert.match(requests[1].toolResults?.[0].output ?? '', /outside/);
+        assert.equal(requests[2].toolResults?.[0].output, 'inside root');
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'tool_rejected').length, 1);
     });
 
     it('creates one deterministic epoch and preserves ledger ids across continuation', async () => {
@@ -860,6 +952,62 @@ describe('AgentRuntime contracts', () => {
         assert.equal(result.status, 'partial');
         assert.match(result.output, /not allowed to allocate evidence/);
         assert.equal(result.state.ledger.snapshot().length, 0);
+        assert.equal(result.metrics.issues.some(issue => issue.type === 'tool_rejected'), false);
+        assert.equal(result.metrics.issues.some(issue => issue.type === 'terminal_failure'), true);
+    });
+
+    it('keeps raw and model-visible observation output separate when runtime truncates it', async () => {
+        const requests: AIRunRequest[] = [];
+        const execution = createExecution([
+            response({
+                toolCalls: [{ id: 'inspect', name: 'inspect', arguments: { reason: 'collect details' } }],
+                stopReason: 'tool_call',
+            }),
+            response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
+        ], requests, []);
+        const rawOutput = 'A complete repository observation that is longer than the visible budget.';
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'observation-output-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'observationOutputTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 1,
+                maxEpochs: 0,
+                maxObservationChars: 20,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [{ role: 'system', content: 'protocol' }], opening: [] }),
+            grantTools: () => [{ name: 'inspect', allowedRoot: '/tmp/repository', excludePatterns: [], allocateEvidence: false }],
+            buildToolDefinitions: () => [{
+                name: 'inspect',
+                description: 'Inspect.',
+                parameters: { type: 'object' },
+                execute: async () => ({
+                    output: rawOutput,
+                    summary: 'Collected a complete observation.',
+                    evidenceCount: 2,
+                }),
+            }],
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'done');
+        assert.equal(result.state.observations.length, 1);
+        const observation = result.state.observations[0];
+        assert.equal(observation.rawOutput, rawOutput);
+        assert.equal(observation.outputTruncated, true);
+        assert.notEqual(observation.output, rawOutput);
+        assert.match(observation.output, /tool output truncated by runtime policy/);
+        assert.equal(observation.summary, 'Collected a complete observation.');
+        assert.equal(observation.evidenceCount, 2);
+        assert.equal(requests[1].toolResults?.[0].output, observation.output);
     });
 });
 

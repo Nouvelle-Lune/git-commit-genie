@@ -340,6 +340,10 @@
   --stage-accent: var(--vscode-charts-blue);
 }
 
+.stage-badge-memory {
+  --stage-accent: var(--vscode-charts-purple);
+}
+
 .stage-badge-explore,
 .stage-badge-extract,
 .stage-badge-rag,
@@ -583,6 +587,82 @@ body.vscode-high-contrast .stage-badge {
 .log-content pre code {
   background-color: transparent;
   padding: 0;
+}
+
+/* ── Ephemeral raw-data debugger ── */
+.raw-data-disclosure {
+  margin-top: 9px;
+  padding-top: 7px;
+  border-top: 1px solid var(--vscode-editorWidget-border, var(--vscode-panel-border));
+}
+
+.raw-data-toggle {
+  display: inline-flex;
+  align-items: center;
+  margin: 0;
+  padding: 1px 0;
+  border: 0;
+  background: transparent;
+  color: var(--vscode-textLink-foreground);
+  font-family: var(--vscode-font-family);
+  font-size: 10px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.raw-data-toggle:hover {
+  color: var(--vscode-textLink-activeForeground);
+  text-decoration: underline;
+}
+
+.raw-data-toggle:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+.log-header-expandable:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  outline-offset: -1px;
+}
+
+.raw-data-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  max-height: min(320px, 45vh);
+  margin-top: 7px;
+  padding: 7px;
+  overflow: auto;
+  border: 1px solid var(--vscode-panel-border);
+  background: var(--vscode-editor-background);
+  scrollbar-width: thin;
+}
+
+.raw-data-section {
+  min-width: max-content;
+}
+
+.raw-data-section h5 {
+  margin: 0 0 4px;
+  color: var(--vscode-descriptionForeground);
+  font-family: var(--vscode-font-family);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.log-content .raw-data-section pre {
+  margin: 0;
+  padding: 6px;
+  overflow: visible;
+  background: var(--vscode-textCodeBlock-background);
+  color: var(--vscode-editor-foreground);
+  font-family: var(--vscode-editor-font-family);
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre;
 }
 
 /* ── File content preview ── */

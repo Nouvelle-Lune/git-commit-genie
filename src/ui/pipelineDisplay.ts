@@ -127,6 +127,8 @@ export interface PipelineTextCatalog {
     investigationStartDescription: string;
     investigationStepTitle: string;
     investigationStepDefault: string;
+    memoryStepTitle: string;
+    memoryStepDefault: string;
     investigationCompleteTitle: string;
     investigationCompleteDescription: string;
     investigationSkippedTitle: string;
@@ -323,6 +325,8 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     investigationStartDescription: 'Definitions, callers, callees, types, configuration, and tests are being looked up for the changed symbols.',
     investigationStepTitle: 'Investigation step {0}: {1}',
     investigationStepDefault: 'Repository lookup completed.',
+    memoryStepTitle: 'Memory step {0}: {1}',
+    memoryStepDefault: 'Repository memory lookup completed.',
     investigationCompleteTitle: 'Repository evidence collected',
     investigationCompleteDescription: '{0}',
     investigationSkippedTitle: 'Repository investigation skipped',
@@ -465,6 +469,7 @@ export type PipelineEventDetails =
     | { kind: 'investigationPlanned'; targets: string[]; targetCount: number; questionCount: number }
     | { kind: 'investigationStart'; maxSteps: number }
     | { kind: 'investigationStep'; current: number; total: number; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number }
+    | { kind: 'memoryStep'; current: number; total: number; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number; sourceStatuses?: string[] }
     | { kind: 'investigationComplete'; steps: number; evidenceCount: number; findingCount: number; unresolvedCount?: number; reason: string }
     | { kind: 'investigationSkipped'; reason: string }
     | { kind: 'analysisDegraded'; status: string; issueCount: number; reason: string }
@@ -541,6 +546,7 @@ export type PipelineStageName =
     | 'investigationPlanned'
     | 'investigationStart'
     | 'investigationStep'
+    | 'memoryStep'
     | 'investigationComplete'
     | 'investigationSkipped'
     | 'semanticAnalysisStart'
@@ -589,6 +595,7 @@ export const PIPELINE_STAGE_BADGES: Record<PipelineStageName, PipelineStageBadge
     investigationPlanned: { label: 'PLAN', className: 'stage-badge-plan' },
     investigationStart: { label: 'INVG', className: 'stage-badge-investigate' },
     investigationStep: { label: 'INVG', className: 'stage-badge-investigate' },
+    memoryStep: { label: 'MEM', className: 'stage-badge-memory' },
     investigationComplete: { label: 'INVG', className: 'stage-badge-investigate' },
     investigationSkipped: { label: 'SKIP', className: 'stage-badge-skipped' },
     semanticAnalysisStart: { label: 'SEM', className: 'stage-badge-semantic' },
@@ -840,8 +847,9 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
                 maxSteps: requireNumberField(data, stage, 'maxSteps'),
             };
         case 'investigationStep':
+        case 'memoryStep':
             return {
-                kind: 'investigationStep',
+                kind: stage,
                 current: requireNumberField(data, stage, 'current'),
                 total: requireNumberField(data, stage, 'total'),
                 tool: requireStringField(data, stage, 'tool'),
@@ -849,6 +857,9 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
                 ...(asString(data.reason) ? { reason: asString(data.reason) } : {}),
                 ...(asString(data.summary) ? { summary: asString(data.summary) } : {}),
                 ...(asNumber(data.evidenceCount) !== undefined ? { evidenceCount: asNumber(data.evidenceCount) } : {}),
+                ...(stage === 'memoryStep' && Array.isArray(data.sourceStatuses)
+                    ? { sourceStatuses: asFullStringList(data.sourceStatuses, stage, 'sourceStatuses') }
+                    : {}),
             };
         case 'investigationComplete':
             return {
@@ -1196,6 +1207,24 @@ function presentPipelineEventCore(
                 phase: text.phaseInvestigate,
                 title: formatPipelineText(text.investigationStepTitle, current, tool),
                 description: asString(data.summary) || asString(data.reason) || text.investigationStepDefault,
+                metrics: [
+                    { label: text.metricProgress, value: `${current}/${asNumber(data.total) ?? 0}` },
+                    ...(asNumber(data.evidenceCount)
+                        ? [{ label: text.metricEvidence, value: String(asNumber(data.evidenceCount)), tone: 'summary' as const }]
+                        : []),
+                ],
+                tone: data.ok === false ? 'warning' : 'success',
+                data,
+            };
+        }
+        case 'memoryStep': {
+            const current = asNumber(data.current) ?? 0;
+            const tool = asString(data.tool) || 'memory';
+            return {
+                stage,
+                phase: text.phaseInvestigate,
+                title: formatPipelineText(text.memoryStepTitle, current, tool),
+                description: asString(data.summary) || asString(data.reason) || text.memoryStepDefault,
                 metrics: [
                     { label: text.metricProgress, value: `${current}/${asNumber(data.total) ?? 0}` },
                     ...(asNumber(data.evidenceCount)
@@ -1582,6 +1611,7 @@ export function deriveLatestPipelineSnapshot(
             case 'investigationPlanned':
             case 'investigationStart':
             case 'investigationStep':
+            case 'memoryStep':
                 changeConditioned = true;
                 stepStates.investigate = 'active';
                 break;

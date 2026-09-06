@@ -57,6 +57,67 @@ describe('pipeline display for parallel analysis events', () => {
         assert.equal(pipelineStageBadge('contextCompacted').label, 'CTX');
     });
 
+    it('renders memory tool calls as MEM entries without creating a separate pipeline step', () => {
+        const presentation = presentPipelineEvent({
+            stage: 'memoryStep',
+            data: {
+                current: 1,
+                total: 3,
+                tool: 'searchRepositoryMemory',
+                summary: 'Found 2 historical navigation candidates.',
+                ok: true,
+                evidenceCount: 0,
+            },
+        });
+
+        assert.equal(presentation.details?.kind, 'memoryStep');
+        assert.match(presentation.title, /searchRepositoryMemory/);
+        assert.equal(presentation.description, 'Found 2 historical navigation candidates.');
+        assert.equal(presentation.tone, 'success');
+        assert.deepEqual(pipelineStageBadge('memoryStep'), {
+            label: 'MEM',
+            className: 'stage-badge-memory',
+        });
+
+        const snapshot = deriveLatestPipelineSnapshot([
+            log('generationStart', { generationMode: 'thinking', repoPath: '/tmp/repository' }),
+            stage('investigationStart', { maxSteps: 3 }),
+            stage('memoryStep', {
+                current: 1,
+                total: 3,
+                tool: 'searchRepositoryMemory',
+                summary: 'Found 2 historical navigation candidates.',
+                ok: true,
+                evidenceCount: 0,
+            }),
+        ]);
+
+        assert.ok(snapshot);
+        assert.equal(snapshot?.state, 'running');
+        assert.equal(snapshot?.steps.find(step => step.id === 'investigate')?.state, 'active');
+        assert.equal(snapshot?.steps.some(step => (step.id as string) === 'memory'), false);
+    });
+
+    it('renders a failed memory source validation with the evidence count in its details', () => {
+        const presentation = presentPipelineEvent({
+            stage: 'memoryStep',
+            data: {
+                current: 2,
+                total: 3,
+                tool: 'readMemorySources',
+                summary: 'Revalidated 1 memory source(s) and produced 0 repository evidence item(s).',
+                ok: false,
+                evidenceCount: 0,
+                reason: 'Source no longer exists.',
+            },
+        });
+
+        assert.equal(presentation.details?.kind, 'memoryStep');
+        assert.equal(presentation.tone, 'warning');
+        assert.deepEqual(presentation.metrics, [{ label: 'Progress', value: '2/3' }]);
+        assert.match(presentation.description, /0 repository evidence/);
+    });
+
     it('keeps interleaved RAG and agent events running until done', () => {
         const logs = [
             log('generationStart', { generationMode: 'thinking', repoPath: '/tmp/repository' }),

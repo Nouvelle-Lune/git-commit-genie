@@ -284,6 +284,8 @@
 	"Investigation plan ready": "Investigation plan ready",
 	"Investigating the repository": "Investigating the repository",
 	"Investigation step {0}: {1}": "Investigation step {0}: {1}",
+	"Memory step {0}: {1}": "Memory step {0}: {1}",
+	"Repository memory lookup completed.": "Repository memory lookup completed.",
 	"Repository evidence collected": "Repository evidence collected",
 	"Repository investigation skipped": "Repository investigation skipped",
 	"Analyzing what the change means": "Analyzing what the change means",

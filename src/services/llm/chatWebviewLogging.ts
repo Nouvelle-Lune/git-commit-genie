@@ -84,6 +84,7 @@ export function logCommitStageToWebview(repoPath: string, event: StageEvent): vo
         JSON.stringify(payload),
         'Commit generation stage',
         repoPath,
+        event.rawData,
     ));
 }
 
@@ -97,6 +98,7 @@ export function logSchemaValidationToWebview(
         JSON.stringify(payload),
         reason,
         repoPath,
+        { output: payload },
     ));
 }
 

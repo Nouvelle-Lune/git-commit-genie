@@ -41,10 +41,16 @@ type RawFinal = z.infer<typeof changeAnalysisAgentFinalResponseSchema>;
 export interface InvestigationStepEvent {
     step: number;
     tool: string;
+    source: 'repository' | 'memory';
     reason: string;
     summary: string;
     ok: boolean;
     evidenceCount: number;
+    sourceStatuses?: string[];
+    arguments: Record<string, unknown>;
+    rawOutput: string;
+    modelVisibleOutput: string;
+    outputTruncated: boolean;
 }
 
 export interface ChangeAnalysisAgentInput {
@@ -59,7 +65,6 @@ export interface ChangeAnalysisAgentInput {
     evidence: DraftEvidence[];
     userTemplate?: string;
     maxSteps: number;
-    onStep?: (event: InvestigationStepEvent) => void;
 }
 
 export interface ChangeAnalysisAgentOutput {
@@ -77,7 +82,7 @@ const SYMBOL_PROPERTIES = {
     ...REASON_PROPERTY,
     symbol: { type: 'string', minLength: 1 },
     filePath: nullable({ type: 'string' }),
-    maxResults: nullable({ type: 'integer', minimum: 1 }),
+    maxResults: nullable({ type: 'integer', minimum: 1, maximum: 50 }),
 };
 
 const TOOL_PARAMETERS: Record<InvestigationToolName, Record<string, unknown>> = {
@@ -94,13 +99,13 @@ const TOOL_PARAMETERS: Record<InvestigationToolName, Record<string, unknown>> = 
         dirPath: nullable({ type: 'string' }),
         searchType: nullable({ enum: ['name', 'content'] }),
         useRegex: nullable({ type: 'boolean' }),
-        maxResults: nullable({ type: 'integer', minimum: 1 }),
+        maxResults: nullable({ type: 'integer', minimum: 1, maximum: 50 }),
     }, ['reason', 'query', 'dirPath', 'searchType', 'useRegex', 'maxResults']),
     readFileContent: objectSchema({
         ...REASON_PROPERTY,
         filePath: { type: 'string', minLength: 1 },
         startLine: nullable({ type: 'integer', minimum: 1 }),
-        maxLines: nullable({ type: 'integer', minimum: 1 }),
+        maxLines: nullable({ type: 'integer', minimum: 1, maximum: 400 }),
     }, ['reason', 'filePath', 'startLine', 'maxLines']),
     listDirectory: objectSchema({
         ...REASON_PROPERTY,
@@ -289,23 +294,18 @@ function createExecutableDefinition(
             for (const item of outcome.evidence) {
                 evidenceItems.push(item);
             }
-            input.onStep?.({
-                step: state.steps,
+            const output = buildInvestigationToolResultMessage({
                 tool: toolName,
-                reason: String(args.reason ?? '').trim(),
                 summary: outcome.summary,
-                ok: outcome.ok,
-                evidenceCount: outcome.evidence.length,
-            });
+                evidence: outcome.evidence,
+                remainingSteps: Math.max(0, input.maxSteps - state.steps),
+                openQuestions,
+            }).content;
             return {
                 ok: outcome.ok,
-                output: buildInvestigationToolResultMessage({
-                    tool: toolName,
-                    summary: outcome.summary,
-                    evidence: outcome.evidence,
-                    remainingSteps: Math.max(0, input.maxSteps - state.steps),
-                    openQuestions,
-                }).content,
+                output,
+                summary: outcome.summary,
+                evidenceCount: outcome.evidence.length,
             };
         },
     };
@@ -317,9 +317,19 @@ function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRu
     return [{
         name: 'searchRepositoryMemory', description: 'Find untrusted historical navigation, not evidence. Limited to two calls.',
         parameters: objectSchema({ query: { type: 'string', minLength: 1 } }, ['query']),
-        execute: async (_context, args) => ({ ok: true, output: JSON.stringify(memory.searchRepositoryMemory({
-            paths: input.extraction.changedFiles.map(file => file.path), symbols: input.extraction.changedSymbols.map(symbol => symbol.name), keywords: [String(args.query)],
-        }, 1500)) }),
+        execute: async (_context, args) => {
+            const navigation = memory.searchRepositoryMemory({
+                paths: input.extraction.changedFiles.map(file => file.path),
+                symbols: input.extraction.changedSymbols.map(symbol => symbol.name),
+                keywords: [String(args.query)],
+            }, 1500);
+            return {
+                ok: true,
+                output: JSON.stringify(navigation),
+                summary: `Found ${navigation.length} historical navigation candidate(s).`,
+                evidenceCount: 0,
+            };
+        },
     }, {
         name: 'readMemorySources', description: 'Read at most eight current snapshot source chunks located by historical episode/evidence IDs. Returns fresh E* observations, never old conclusions.',
         parameters: objectSchema({ supports: { type: 'array', minItems: 1, maxItems: 8, items: objectSchema({ episodeId: { type: 'string' }, evidenceId: { type: 'string' } }, ['episodeId', 'evidenceId']) } }, ['supports']),
@@ -332,7 +342,13 @@ function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRu
             input.recorder?.record({ step: state.steps, tool: 'readMemorySources', arguments: args, ok: true,
                 summary: 'Read snapshot sources using historical navigation.', evidence: evidence.map(item => ({ id: item.id, source: item.provenance! })),
                 durationMs: performance.now() - started, truncated: evidence.some(item => item.provenance?.truncated) });
-            return { ok: true, output: JSON.stringify({ statuses: sources.map(item => item.status), evidence }) };
+            return {
+                ok: true,
+                output: JSON.stringify({ statuses: sources.map(item => item.status), evidence }),
+                summary: `Revalidated ${sources.length} memory source(s) and produced ${evidence.length} repository evidence item(s).`,
+                evidenceCount: evidence.length,
+                sourceStatuses: sources.map(item => item.status),
+            };
         },
     }];
 }
@@ -340,14 +356,14 @@ function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRu
 function toolDescription(name: InvestigationToolName): string {
     const descriptions: Record<InvestigationToolName, string> = {
         getChangedSymbols: 'List symbols already grounded in the diff extraction.',
-        findSymbolDefinition: 'Locate and read the most likely definition of a changed symbol.',
-        findSymbolReferences: 'Find repository references to a changed symbol.',
-        findCallers: 'Find call sites of a changed function or method.',
-        findCallees: 'Inspect direct calls made by a changed function or method.',
-        findImplementations: 'Find implementations or consumers of a changed interface or type.',
-        findTypeDefinition: 'Locate and read a changed type definition.',
-        searchCode: 'Search repository file names or contents for a focused query.',
-        readFileContent: 'Read a bounded line range from one repository file.',
+        findSymbolDefinition: 'Locate and read up to 50 likely definitions of a changed symbol.',
+        findSymbolReferences: 'Find up to 50 repository references to a changed symbol.',
+        findCallers: 'Find up to 50 call sites of a changed function or method.',
+        findCallees: 'Inspect up to 50 direct calls made by a changed function or method.',
+        findImplementations: 'Find up to 50 implementations or consumers of a changed interface or type.',
+        findTypeDefinition: 'Locate and read up to 50 matching type definitions.',
+        searchCode: 'Search repository file names or contents for up to 50 focused results.',
+        readFileContent: 'Read at most 400 lines from one repository file.',
         listDirectory: 'List one repository directory at depth one.',
     };
     return descriptions[name];

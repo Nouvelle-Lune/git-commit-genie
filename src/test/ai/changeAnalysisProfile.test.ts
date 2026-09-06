@@ -9,6 +9,77 @@ import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot'
 import { changeAnalysisAgentFinalResponseSchema } from '../../services/llm/providers/schemas/common';
 
 describe('ChangeAnalysisProfile terminal normalization', () => {
+    it('exposes the runtime grant limits in every repository tool schema', () => {
+        const input = makeInput();
+        const profile = createChangeAnalysisProfile(input);
+        const definitions = profile.buildToolDefinitions(input, makeState());
+        const byName = new Map(definitions.map(definition => [definition.name, definition]));
+
+        const readFileParameters = byName.get('readFileContent')?.parameters;
+        const readFileProperties = readFileParameters?.properties as Record<string, any>;
+        assert.equal(readFileProperties.maxLines.anyOf[0].maximum, 400);
+        assert.match(byName.get('readFileContent')?.description ?? '', /400/);
+
+        for (const definition of definitions) {
+            const properties = definition.parameters.properties as Record<string, any> | undefined;
+            if (properties?.maxResults) {
+                assert.equal(properties.maxResults.anyOf[0].maximum, 50, definition.name);
+                assert.match(definition.description, /50/);
+            }
+        }
+    });
+
+    it('returns summaries and evidence counts for both memory tool definitions', async () => {
+        const navigation = [{
+            id: 'M1',
+            targetPaths: ['src/parser.ts'],
+            questions: ['Who calls parse?'],
+            supports: [{ episodeId: 'episode-1', evidenceId: 'E1' }],
+        }];
+        const source = {
+            snapshotId: 'snapshot-1',
+            path: 'src/parser.ts',
+            side: 'after' as const,
+            blobOid: 'blob-1',
+            startLine: 2,
+            endLine: 3,
+            excerpt: 'parse(input)',
+            contentHash: 'hash-1',
+            truncated: false,
+            sourceType: 'text' as const,
+        };
+        const memory = {
+            searchRepositoryMemory: () => navigation,
+            readMemorySources: async () => [{ status: 'source_unchanged' as const, source }],
+        };
+        const input = { ...makeInput(), memory: memory as any };
+        const profile = createChangeAnalysisProfile(input);
+        const definitions = profile.buildToolDefinitions(input, makeState());
+        const search = definitions.find(definition => definition.name === 'searchRepositoryMemory');
+        const read = definitions.find(definition => definition.name === 'readMemorySources');
+        assert.ok(search);
+        assert.ok(read);
+
+        const context = {
+            input,
+            grant: { name: 'searchRepositoryMemory', allowedRoot: '/tmp/repository', excludePatterns: [], allocateEvidence: false },
+            ledger: new EvidenceLedger(),
+            state: makeState(),
+            allocateEvidence: (evidence: Record<string, unknown>) => ({ id: 'E1', ...evidence }),
+        } as any;
+        const searchOutcome = await search!.execute(context, { query: 'parse' });
+        assert.equal(searchOutcome.ok, true);
+        assert.equal(searchOutcome.evidenceCount, 0);
+        assert.match(searchOutcome.summary ?? '', /1 historical navigation/);
+        assert.deepEqual(JSON.parse(searchOutcome.output), navigation);
+
+        const readOutcome = await read!.execute(context, { supports: [{ episodeId: 'episode-1', evidenceId: 'E1' }] });
+        assert.equal(readOutcome.ok, true);
+        assert.equal(readOutcome.evidenceCount, 1);
+        assert.match(readOutcome.summary ?? '', /1 memory source/);
+        assert.deepEqual(JSON.parse(readOutcome.output).statuses, ['source_unchanged']);
+    });
+
     it('omits claims whose references are all invalid and leaves mustExpress empty', () => {
         const input = makeInput();
         const profile = createChangeAnalysisProfile(input);

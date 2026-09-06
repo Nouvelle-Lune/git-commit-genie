@@ -14,6 +14,7 @@ export type StageEventType =
   | 'investigationPlanned'
   | 'investigationStart'
   | 'investigationStep'
+  | 'memoryStep'
   | 'investigationComplete'
   | 'investigationSkipped'
   | 'semanticAnalysisStart'
@@ -69,9 +70,27 @@ export interface StageEventData {
   [extra: string]: unknown;
 }
 
+/** Debug-only domain data attached to a stage without changing its presentation payload. */
+export interface StageRawData {
+  input?: unknown;
+  output?: unknown;
+  toolCall?: {
+    name: string;
+    arguments: Record<string, unknown>;
+  };
+  toolResult?: {
+    ok: boolean;
+    rawOutput: string;
+    modelVisibleOutput: string;
+    truncated: boolean;
+    error?: string;
+  };
+}
+
 export interface StageEvent {
   type: StageEventType;
   data?: StageEventData;
+  rawData?: StageRawData;
 }
 
 /** Names the request an evidence handoff was compacted for. */
@@ -187,6 +206,12 @@ export class StageNotificationManager {
         this.active.updateMessage(t(I18N.stages.investigationStart));
         break;
       case 'investigationStep': {
+        const current = Number(event.data?.current ?? 0);
+        const total = Number(event.data?.total ?? 0);
+        this.active.updateMessage(t(I18N.stages.investigationStep, current, total));
+        break;
+      }
+      case 'memoryStep': {
         const current = Number(event.data?.current ?? 0);
         const total = Number(event.data?.total ?? 0);
         this.active.updateMessage(t(I18N.stages.investigationStep, current, total));

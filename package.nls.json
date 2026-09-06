@@ -52,6 +52,7 @@
   "config.showUsageCost": "Show Usage Cost",
   "config.showUsageCost.desc": "When enabled, a brief notification will displays the estimated total cost for the current generation.",
   "config.ui.stageNotifications.enabled.desc": "Show chain prompting progress in the VS Code status bar.",
+  "config.ui.rawData.enabled.desc": "Show stage inputs, outputs, and tool results in the WebUI for debugging. Raw data can contain repository source code and model inputs; it is kept only for the current Extension Host session.",
   "templates.pickWorkspaceFolder": "Pick a workspace folder",
   "templates.quickPickPlaceholder": "Select / manage templates",
   "templates.createNew": "$(add) Create new template…",

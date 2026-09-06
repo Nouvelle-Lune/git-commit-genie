@@ -55,6 +55,14 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 this._handleRepositoryChange();
             })
         );
+
+        this._disposables.push(
+            vscode.workspace.onDidChangeConfiguration(event => {
+                if (event.affectsConfiguration('gitCommitGenie.ui.rawData.enabled')) {
+                    logger.flushLogsToWebview();
+                }
+            })
+        );
     }
 
     /**

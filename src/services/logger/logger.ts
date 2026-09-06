@@ -5,6 +5,8 @@ import { isCurrentPersistedLogEntry } from '../../ui/persistedLogSchema';
 import { getRequestTypeLabel } from '../llm/providers/utils/requestTypeMaps';
 import type { CostQuote } from '../cost/costTypes';
 import { costQuoteToDisplay, formatCostQuoteLabel } from '../cost/costDisplay';
+import type { StageRawData } from '../../ui/StageNotificationManager';
+import { projectLogForWebview, stripRawData } from '../../ui/rawLogData';
 
 export enum LogLevel {
     Debug = 0,
@@ -90,7 +92,10 @@ export class Logger {
         // Send to active webview if available
         try {
             if (this.webviewProvider) {
-                this.webviewProvider.sendMessage({ type: 'addLog', log });
+                this.webviewProvider.sendMessage({
+                    type: 'addLog',
+                    log: projectLogForWebview(log, this.isRawDataEnabled()),
+                });
             }
         } catch { /* ignore */ }
     }
@@ -101,9 +106,13 @@ export class Logger {
     public flushLogsToWebview(): void {
         if (!this.webviewProvider) { return; }
         try {
+            const rawDataEnabled = this.isRawDataEnabled();
             this.webviewProvider.clearLogs();
             for (const entry of this.logBuffer) {
-                this.webviewProvider.sendMessage({ type: 'addLog', log: entry });
+                this.webviewProvider.sendMessage({
+                    type: 'addLog',
+                    log: projectLogForWebview(entry, rawDataEnabled),
+                });
             }
         } catch { /* ignore */ }
     }
@@ -161,21 +170,24 @@ export class Logger {
         try {
             // Prefer globalState (shared across all workspaces)
             let arr = await this.context?.globalState.get<LogEntry[]>(Logger.LOGS_STATE_KEY);
+            let loadedLegacyLogs = false;
             // Migration: fallback from old workspaceState if global is empty
             if ((!arr || !Array.isArray(arr) || arr.length === 0) && this.context) {
                 const legacy = await this.context.workspaceState.get<LogEntry[]>(Logger.LOGS_STATE_KEY);
                 if (Array.isArray(legacy) && legacy.length) {
                     arr = legacy;
-                    // Write once to global for future use
-                    try { await this.context.globalState.update(Logger.LOGS_STATE_KEY, arr); } catch { /* ignore */ }
+                    loadedLegacyLogs = true;
                 }
             }
             if (Array.isArray(arr)) {
                 const recentLogs = arr.slice(-this.maxLogBuffer);
-                this.logBuffer = recentLogs.filter(isCurrentPersistedLogEntry);
+                const containsRawData = recentLogs.some(entry => entry.rawData !== undefined);
+                this.logBuffer = recentLogs.map(stripRawData).filter(isCurrentPersistedLogEntry);
                 const discardedCount = recentLogs.length - this.logBuffer.length;
-                if (discardedCount > 0) {
+                if (loadedLegacyLogs || containsRawData || discardedCount > 0) {
                     await this.context?.globalState.update(Logger.LOGS_STATE_KEY, this.logBuffer);
+                }
+                if (discardedCount > 0) {
                     this.warn(`Discarded ${discardedCount} incompatible persisted Webview log entries.`);
                 }
             }
@@ -183,7 +195,15 @@ export class Logger {
     }
 
     private async persistLogBuffer(): Promise<void> {
-        try { await this.context?.globalState.update(Logger.LOGS_STATE_KEY, this.logBuffer); } catch { /* ignore */ }
+        const persistedLogs = this.logBuffer.map(stripRawData);
+        try { await this.context?.globalState.update(Logger.LOGS_STATE_KEY, persistedLogs); } catch { /* ignore */ }
+    }
+
+    /** Raw debugging payloads are visible only when explicitly enabled. */
+    private isRawDataEnabled(): boolean {
+        return vscode.workspace
+            .getConfiguration('gitCommitGenie')
+            .get<boolean>('ui.rawData.enabled', false);
     }
 
     /**
@@ -286,7 +306,13 @@ export class Logger {
     /**
      * Log tool call operation
      */
-    public logToolCall(toolName: string, args: string, reason?: string, repoPath?: string): void {
+    public logToolCall(
+        toolName: string,
+        args: string,
+        reason?: string,
+        repoPath?: string,
+        rawData?: StageRawData,
+    ): void {
         // Create a friendly title based on the tool name
         const friendlyTitle = this.getFriendlyToolTitle(toolName, args);
 
@@ -296,7 +322,8 @@ export class Logger {
             type: LogType.ToolCall,
             title: friendlyTitle,
             reason: reason || '',
-            content: args
+            content: args,
+            ...(rawData ? { rawData } : {}),
         };
         if (repoPath) { (log as any).repoPath = repoPath; }
         this.sendLogToWebview(log);

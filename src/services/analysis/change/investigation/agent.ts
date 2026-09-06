@@ -204,6 +204,26 @@ export async function runChangeAnalysisAgent(
         onEvent: event => {
             if (event.type === 'contextCompacted') {
                 params.onContextCompacted?.(event);
+            } else if (event.type === 'toolComplete') {
+                const observation = event.observation;
+                params.onStep?.({
+                    step: observation.step,
+                    tool: observation.tool,
+                    source: observation.tool === 'searchRepositoryMemory' || observation.tool === 'readMemorySources'
+                        ? 'memory'
+                        : 'repository',
+                    reason: String(observation.arguments.reason ?? '').trim(),
+                    summary: observation.summary ?? observation.output,
+                    ok: observation.ok,
+                    evidenceCount: observation.evidenceCount ?? 0,
+                    ...(observation.sourceStatuses !== undefined
+                        ? { sourceStatuses: observation.sourceStatuses }
+                        : {}),
+                    arguments: observation.arguments,
+                    rawOutput: observation.rawOutput,
+                    modelVisibleOutput: observation.output,
+                    outputTruncated: observation.outputTruncated,
+                });
             } else if (event.type === 'schemaRetry') {
                 logSchemaValidationToWebview(
                     params.repositoryPath,
@@ -229,7 +249,6 @@ export async function runChangeAnalysisAgent(
             evidence: params.evidence,
             userTemplate: params.userTemplate,
             maxSteps: params.maxSteps,
-            onStep: params.onStep,
         },
     });
 }

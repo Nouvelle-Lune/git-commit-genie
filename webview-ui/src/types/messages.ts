@@ -3,6 +3,7 @@
  */
 
 import type { PipelineTextCatalog } from '../../../src/ui/pipelineDisplay';
+import type { StageRawData } from '../../../src/ui/StageNotificationManager';
 
 export type CostDisplayStatus =
     | 'amount'
@@ -141,4 +142,6 @@ export interface LogEntry {
     pending?: boolean; // For API requests waiting for response
     requestType?: string;
     cancelled?: boolean; // Mark as cancelled by user
+    /** Available only for the current Extension Host session when enabled. */
+    rawData?: StageRawData;
 }

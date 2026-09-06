@@ -187,6 +187,7 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
         case 'investigationStart':
             return <DetailMetrics items={[{ label: text.detailMaxSteps, value: String(details.maxSteps) }]} />;
         case 'investigationStep':
+        case 'memoryStep':
             return (
                 <DetailFields rows={[
                     { label: text.detailTool, value: <SemanticTag value={details.tool} /> },
@@ -195,6 +196,14 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
                     ...(details.reason ? [{ label: text.detailReason, value: details.reason }] : []),
                     ...(details.summary ? [{ label: text.detailSummary, value: <DetailProse>{details.summary}</DetailProse> }] : []),
                     ...(details.evidenceCount !== undefined ? [{ label: text.detailEvidence, value: String(details.evidenceCount) }] : []),
+                    ...(details.kind === 'memoryStep' && details.sourceStatuses?.length
+                        ? [{ label: text.detailStatus, value: details.sourceStatuses.map((status, index) => (
+                            <React.Fragment key={`${status}-${index}`}>
+                                {index > 0 ? ' ' : null}
+                                <SemanticTag value={status} />
+                            </React.Fragment>
+                        )) }]
+                        : []),
                 ]} />
             );
         case 'investigationComplete':

@@ -68,7 +68,10 @@ export async function runChangeAnalysisPipeline(
         extractChangesDeterministically(diffs),
         params.evidenceLedger,
     );
-    safeRun('Chain.onStage.changeExtractionStart', () => onStage?.({ type: 'changeExtractionStart' }));
+    safeRun('Chain.onStage.changeExtractionStart', () => onStage?.({
+        type: 'changeExtractionStart',
+        rawData: { input: { deterministic, evidence: getEvidence() } },
+    }));
     const changeExtractionMessages = (current: DraftEvidence[]) => buildChangeExtractionMessages({
         deterministic,
         evidencePayload: current,
@@ -89,6 +92,7 @@ export async function runChangeAnalysisPipeline(
             typeCount: changeExtraction.changedTypes.length,
             dependencyCount: changeExtraction.changedDependencies.length,
         },
+        rawData: { output: changeExtraction },
     }));
 
     const settings: InvestigationSettings = {
@@ -118,7 +122,10 @@ export async function runChangeAnalysisPipeline(
     } else if (!isInvestigationWorthwhile(changeExtraction)) {
         repositoryEvidence = emptyRepositoryEvidence('The diff alone determines the meaning of this change.');
     } else {
-        safeRun('Chain.onStage.investigationPlanStart', () => onStage?.({ type: 'investigationPlanStart' }));
+        safeRun('Chain.onStage.investigationPlanStart', () => onStage?.({
+            type: 'investigationPlanStart',
+            rawData: { input: { changeExtraction } },
+        }));
         const memoryQuery = { paths: changeExtraction.changedFiles.map(file => file.path),
             symbols: changeExtraction.changedSymbols.map(symbol => symbol.name), keywords: [...changeExtraction.changedConfigs, ...changeExtraction.changedDependencies] };
         const memory = inputs.loadMemory ? await inputs.loadMemory(memoryQuery) : inputs.memory;
@@ -134,6 +141,10 @@ export async function runChangeAnalysisPipeline(
                 targets: plan.targets.map(target => target.target),
                 questionCount: plan.targets.reduce((total, target) => total + target.questions.length, 0),
             },
+            rawData: {
+                input: { memoryQuery, navigation },
+                output: plan,
+            },
         }));
 
         if (!plan.targets.length) {
@@ -142,6 +153,15 @@ export async function runChangeAnalysisPipeline(
             safeRun('Chain.onStage.investigationStart', () => onStage?.({
                 type: 'investigationStart',
                 data: { maxSteps: settings.maxSteps },
+                rawData: {
+                    input: {
+                        changeExtraction,
+                        plan,
+                        evidence: getEvidence(),
+                        navigation,
+                        maxSteps: settings.maxSteps,
+                    },
+                },
             }));
             if (!inputs.snapshot) { throw new Error('A captured repository snapshot is required for investigation.'); }
             try {
@@ -167,9 +187,10 @@ export async function runChangeAnalysisPipeline(
                     onContextCompacted: event => safeRun('Chain.onStage.contextCompacted', () => onStage?.({
                         type: 'contextCompacted',
                         data: event,
+                        rawData: { output: event },
                     })),
                     onStep: event => safeRun('Chain.onStage.investigationStep', () => onStage?.({
-                        type: 'investigationStep',
+                        type: event.source === 'memory' ? 'memoryStep' : 'investigationStep',
                         data: {
                             current: event.step,
                             total: settings.maxSteps,
@@ -178,6 +199,22 @@ export async function runChangeAnalysisPipeline(
                             summary: event.summary,
                             ok: event.ok,
                             evidenceCount: event.evidenceCount,
+                            ...(event.sourceStatuses !== undefined
+                                ? { sourceStatuses: event.sourceStatuses }
+                                : {}),
+                        },
+                        rawData: {
+                            toolCall: {
+                                name: event.tool,
+                                arguments: event.arguments,
+                            },
+                            toolResult: {
+                                ok: event.ok,
+                                rawOutput: event.rawOutput,
+                                modelVisibleOutput: event.modelVisibleOutput,
+                                truncated: event.outputTruncated,
+                                ...(!event.ok ? { error: event.modelVisibleOutput } : {}),
+                            },
                         },
                     })),
                 });
@@ -211,6 +248,7 @@ export async function runChangeAnalysisPipeline(
         safeRun('Chain.onStage.investigationSkipped', () => onStage?.({
             type: 'investigationSkipped',
             data: { reason: repositoryEvidence.stopReason },
+            rawData: { output: { repositoryEvidence } },
         }));
     } else {
         safeRun('Chain.onStage.investigationComplete', () => onStage?.({
@@ -222,6 +260,7 @@ export async function runChangeAnalysisPipeline(
                 unresolvedCount: repositoryEvidence.unresolvedQuestions.length,
                 reason: repositoryEvidence.stopReason,
             },
+            rawData: { output: { repositoryEvidence } },
         }));
     }
 
@@ -236,10 +275,20 @@ export async function runChangeAnalysisPipeline(
                 reason: analysisIssues.join(' | '),
                 issueCount: analysisIssues.length,
             },
+            rawData: { output: { analysisStatus, analysisIssues } },
         }));
     }
 
-    safeRun('Chain.onStage.semanticAnalysisStart', () => onStage?.({ type: 'semanticAnalysisStart' }));
+    safeRun('Chain.onStage.semanticAnalysisStart', () => onStage?.({
+        type: 'semanticAnalysisStart',
+        rawData: {
+            input: {
+                changeExtraction,
+                investigationPlan,
+                repositoryEvidence,
+            },
+        },
+    }));
     safeRun('Chain.onStage.semanticAnalysisComplete', () => onStage?.({
         type: 'semanticAnalysisComplete',
         data: {
@@ -250,9 +299,21 @@ export async function runChangeAnalysisPipeline(
             factCount: semanticAnalysis.repositoryFacts.length,
             uncertaintyCount: semanticAnalysis.uncertainties.length,
         },
+        rawData: { output: { semanticAnalysis } },
     }));
 
-    safeRun('Chain.onStage.informationSelectionStart', () => onStage?.({ type: 'informationSelectionStart' }));
+    safeRun('Chain.onStage.informationSelectionStart', () => onStage?.({
+        type: 'informationSelectionStart',
+        rawData: {
+            input: {
+                semanticAnalysis,
+                informationSelection,
+                evidence: getEvidence(),
+                analysisStatus,
+                analysisIssues,
+            },
+        },
+    }));
     const selectedInformation = buildSelectedInformation({
         semanticAnalysis,
         selection: informationSelection,
@@ -269,6 +330,7 @@ export async function runChangeAnalysisPipeline(
             suggestedScope: informationSelection.suggestedScope,
             recommendedType: selectedInformation.recommendedType,
         },
+        rawData: { output: { informationSelection, selectedInformation } },
     }));
 
     return {

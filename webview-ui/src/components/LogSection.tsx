@@ -10,6 +10,50 @@ import { isApiRequestLog } from '../../../src/ui/apiLogPolicy';
 // @ts-ignore - react-markdown types
 import ReactMarkdown from 'react-markdown';
 
+function RawDataDisclosure({
+    log,
+    expanded,
+    onToggle,
+}: {
+    log: LogEntry;
+    expanded: boolean;
+    onToggle: () => void;
+}) {
+    if (!log.rawData) {
+        return null;
+    }
+    const sections = [
+        { label: 'Input', value: log.rawData.input },
+        { label: 'Output', value: log.rawData.output },
+        { label: 'Tool call', value: log.rawData.toolCall },
+        { label: 'Tool result', value: log.rawData.toolResult },
+    ].filter(section => section.value !== undefined);
+    const panelId = `raw-data-${log.id}`;
+    return (
+        <section className="raw-data-disclosure">
+            <button
+                type="button"
+                className="raw-data-toggle"
+                aria-expanded={expanded}
+                aria-controls={panelId}
+                onClick={onToggle}
+            >
+                {expanded ? 'hide raw data' : 'show raw data'}
+            </button>
+            {expanded && (
+                <div id={panelId} className="raw-data-panel">
+                    {sections.map(section => (
+                        <section className="raw-data-section" key={section.label}>
+                            <h5>{section.label}</h5>
+                            <pre><code>{JSON.stringify(section.value, null, 2)}</code></pre>
+                        </section>
+                    ))}
+                </div>
+            )}
+        </section>
+    );
+}
+
 /**
  * Log section component
  * Displays logs from repository analysis
@@ -17,6 +61,7 @@ import ReactMarkdown from 'react-markdown';
 export const LogSection: React.FC = () => {
     const { state } = useAppContext();
     const [expandedLog, setExpandedLog] = useState<string | null>(null);
+    const [rawExpandedLog, setRawExpandedLog] = useState<string | null>(null);
     const [autoScroll, setAutoScroll] = useState<boolean>(true);
     const [showNewLogsIndicator, setShowNewLogsIndicator] = useState<boolean>(false);
     const logListRef = useRef<HTMLDivElement>(null);
@@ -143,6 +188,7 @@ export const LogSection: React.FC = () => {
     }, [autoScroll]);
 
     const toggleExpand = (logId: string) => {
+        setRawExpandedLog(null);
         setExpandedLog(expandedLog === logId ? null : logId);
     };
 
@@ -271,10 +317,10 @@ export const LogSection: React.FC = () => {
             return false;
         }
         if (pipeline) {
-            return pipeline.details !== undefined;
+            return pipeline.details !== undefined || log.rawData !== undefined;
         }
         if (validationPresentation) {
-            return validationPresentation.details !== undefined;
+            return validationPresentation.details !== undefined || log.rawData !== undefined;
         }
         if (log.type === LogType.FileRead && log.fileContent) {
             return true;
@@ -458,8 +504,20 @@ export const LogSection: React.FC = () => {
                                             <>
                                                 <div
                                                     className={`log-header${expandable ? ' log-header-expandable' : ''}`}
+                                                    role={expandable ? 'button' : undefined}
+                                                    tabIndex={expandable ? 0 : undefined}
+                                                    aria-expanded={expandable ? expandedLog === log.id : undefined}
                                                     onClick={() => {
                                                         if (!expandable) { return; }
+                                                        if (log.type === LogType.FileRead && log.filePath && !log.fileContent) {
+                                                            handleFileClick(log.filePath);
+                                                            return;
+                                                        }
+                                                        toggleExpand(log.id);
+                                                    }}
+                                                    onKeyDown={event => {
+                                                        if (!expandable || (event.key !== 'Enter' && event.key !== ' ')) { return; }
+                                                        event.preventDefault();
                                                         if (log.type === LogType.FileRead && log.filePath && !log.fileContent) {
                                                             handleFileClick(log.filePath);
                                                             return;
@@ -507,7 +565,7 @@ export const LogSection: React.FC = () => {
                                                     <div className="log-reason-block">{log.content}</div>
                                                 )}
                                                 {expandedLog === log.id && expandable && (
-                                                    <div className={`log-content${semanticDetails ? ' log-content-semantic' : ''}`}>
+                                                    <div className={`log-content${semanticDetails || log.rawData ? ' log-content-semantic' : ''}`}>
                                                         {log.fileContent ? (
                                                             <pre className="file-content-preview">
                                                                 <code>{log.fileContent}</code>
@@ -517,7 +575,7 @@ export const LogSection: React.FC = () => {
                                                                 details={semanticDetails}
                                                                 text={state.i18n.pipeline}
                                                             />
-                                                        ) : log.type === LogType.ToolCall ? (
+                                                        ) : pipeline || validationPresentation ? null : log.type === LogType.ToolCall ? (
                                                             <pre><code>{(() => { try { return JSON.stringify(JSON.parse(log.content!), null, 2); } catch { return String(log.content || ''); } })()}</code></pre>
                                                         ) : (
                                                             <ReactMarkdown>
@@ -527,6 +585,11 @@ export const LogSection: React.FC = () => {
                                                                 }
                                                             </ReactMarkdown>
                                                         )}
+                                                        <RawDataDisclosure
+                                                            log={log}
+                                                            expanded={rawExpandedLog === log.id}
+                                                            onToggle={() => setRawExpandedLog(rawExpandedLog === log.id ? null : log.id)}
+                                                        />
                                                     </div>
                                                 )}
                                             </>

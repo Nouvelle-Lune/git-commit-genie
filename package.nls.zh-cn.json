@@ -52,6 +52,7 @@
   "config.showUsageCost": "显示使用费用",
   "config.showUsageCost.desc": "启用后在生成文本时弹出通知，显示本次生成的估计总费用。",
   "config.ui.stageNotifications.enabled.desc": "在 VS Code 状态栏中显示链式思考进度。",
+  "config.ui.rawData.enabled.desc": "在 WebUI 中显示阶段输入、输出和工具结果以便调试。原始数据可能包含仓库源码和模型输入，仅在当前 Extension Host 会话中保留。",
   "templates.pickWorkspaceFolder": "选择工作区文件夹",
   "templates.quickPickPlaceholder": "选择 / 管理模板",
   "templates.createNew": "$(add) 新建模板…",

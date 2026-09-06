@@ -4,6 +4,7 @@
 
 import type { PipelineTextCatalog } from '../pipelineDisplay';
 import type { CostDisplay } from '../../services/cost/costTypes';
+import type { StageRawData } from '../StageNotificationManager';
 
 // Extension -> Webview Messages
 export interface UpdateRepoMessage {
@@ -106,4 +107,6 @@ export interface LogEntry {
     pending?: boolean; // For API requests waiting for response
     requestType?: string;
     cancelled?: boolean; // Mark as cancelled by user
+    /** Ephemeral debugging data. Logger persistence must remove this field. */
+    rawData?: StageRawData;
 }

@@ -2,7 +2,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
 import * as lockfile from 'proper-lockfile';
-import writeFileAtomic = require('write-file-atomic');
+import writeFileAtomic from 'write-file-atomic';
 import { z } from 'zod';
 import { hashContent } from '../git/repositorySnapshot';
 import { HandbookEntry, handbookEntrySchema, InvestigationEpisode, investigationEpisodeSchema, MemoryQuery } from './types';

@@ -284,6 +284,8 @@
 	"Investigation plan ready": "調查計畫已就緒",
 	"Investigating the repository": "正在調查倉庫",
 	"Investigation step {0}: {1}": "調查第 {0} 步：{1}",
+	"Memory step {0}: {1}": "記憶查詢第 {0} 步：{1}",
+	"Repository memory lookup completed.": "儲存庫記憶查詢已完成。",
 	"Repository evidence collected": "已收集倉庫證據",
 	"Repository investigation skipped": "已略過倉庫調查",
 	"Analyzing what the change means": "正在分析變更語義",
