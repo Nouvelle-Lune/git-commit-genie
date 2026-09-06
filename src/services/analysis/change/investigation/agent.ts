@@ -16,7 +16,6 @@ import {
     InvestigationPlan,
     InvestigationTarget,
     RepositoryEvidence,
-    RepositoryAnalysisContext,
 } from '../types';
 import {
     ChangeAnalysisAgentOutput,
@@ -97,9 +96,9 @@ export function isInvestigationWorthwhile(extraction: ChangeExtraction): boolean
 export async function planInvestigation(
     extraction: ChangeExtraction,
     execution: LLMExecution,
-    repositoryTerminology?: RepositoryAnalysisContext
+    navigation?: import('../../../memory/types').MemoryNavigation[],
 ): Promise<InvestigationPlan> {
-    const messages = buildInvestigationPlanMessages({ changeExtraction: extraction, repositoryTerminology });
+    const messages = buildInvestigationPlanMessages({ changeExtraction: extraction, navigation });
     const session = execution.createSession(messages);
     let requestMessages = messages;
 
@@ -175,6 +174,10 @@ function buildGroundingRetryMessage(
 }
 
 export interface ChangeAnalysisAgentParams {
+    snapshot: import('../../../git/repositorySnapshot').RepositorySnapshotReader;
+    recorder?: import('../../../memory/recorder').EpisodeRecorder;
+    memory?: import('../../../memory/retriever').MemoryRetriever;
+    navigation?: import('../../../memory/types').MemoryNavigation[];
     extraction: ChangeExtraction;
     plan: InvestigationPlan;
     repositoryPath: string;
@@ -183,7 +186,6 @@ export interface ChangeAnalysisAgentParams {
     maxSteps: number;
     evidence: DraftEvidence[];
     evidenceLedger: EvidenceLedger;
-    repositoryTerminology?: RepositoryAnalysisContext;
     userTemplate?: string;
     onStep?: (event: InvestigationStepEvent) => void;
     onContextCompacted?: (event: { epoch: number; estimatedTokens: number; reason: string }) => void;
@@ -216,12 +218,15 @@ export async function runChangeAnalysisAgent(
         ledger: params.evidenceLedger,
         runtime,
         input: {
+            snapshot: params.snapshot,
+            recorder: params.recorder,
+            memory: params.memory,
+            navigation: params.navigation,
             extraction: params.extraction,
             plan: params.plan,
             repositoryPath: params.repositoryPath,
             excludePatterns: params.excludePatterns,
             evidence: params.evidence,
-            repositoryTerminology: params.repositoryTerminology,
             userTemplate: params.userTemplate,
             maxSteps: params.maxSteps,
             onStep: params.onStep,

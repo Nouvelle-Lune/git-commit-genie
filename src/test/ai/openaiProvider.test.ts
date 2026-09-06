@@ -4,11 +4,12 @@ import { z } from 'zod';
 import { OpenAIProvider } from '../../services/llm/providers/openai';
 import { classifyAndDraftResponseSchema } from '../../services/llm/providers/schemas/common';
 
-function createClient(response: unknown, seen: Array<Record<string, unknown>>) {
+function createClient(response: unknown, seen: Array<Record<string, unknown>>, seenOptions: Array<Record<string, unknown>> = []) {
     return {
         responses: {
-            create: async (body: Record<string, unknown>) => {
+            create: async (body: Record<string, unknown>, options: Record<string, unknown> = {}) => {
                 seen.push(body);
+                seenOptions.push(options);
                 return response;
             },
         },
@@ -38,6 +39,21 @@ describe('OpenAI provider response accounting', () => {
         const schema = format.schema as Record<string, unknown>;
         assert.equal(format.type, 'json_schema');
         assert.equal((schema.properties as Record<string, unknown>).commitMessage, undefined);
+    });
+
+    it('maps an explicit transport retry policy to the SDK request options', async () => {
+        const requests: Array<Record<string, unknown>> = [];
+        const options: Array<Record<string, unknown>> = [];
+        const provider = new OpenAIProvider({ apiKey: 'test' }, createClient({
+            id: 'resp_retry', status: 'completed', output_text: '', output: [],
+        }, requests, options));
+        const session = provider.createSession({ model: 'gpt-5.4' });
+
+        await session.run({ messages: [{ role: 'user', content: 'one paid attempt' }], transportRetries: 0 });
+        await session.run({ messages: [{ role: 'user', content: 'ordinary call' }] });
+
+        assert.equal(options[0].maxRetries, 0);
+        assert.equal(options[1].maxRetries, undefined);
     });
 
     it('normalizes reasoning and visible output tokens and max-output termination', async () => {

@@ -1,11 +1,14 @@
 import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
+import sinon = require('sinon');
 import * as vscode from 'vscode';
 import { generateCommitMessageChain } from '../../services/chain/commitMessageChain';
 import { DiffData } from '../../services/git/gitTypes';
+import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
 import { LLMExecution, LLMRunOptions } from '../../services/llm/llmTypes';
 import { AIMessage, AISession } from '../../services/llm/providers';
 import { resolveChainTokenBudget } from '../../services/llm/inputTokenBudget';
+import * as changeAnalysisAgentModule from '../../services/analysis/change/investigation/agent';
 import { ChangeAnalysisAgentOutput } from '../../services/analysis/change/investigation/agent';
 import { RagRetrievalQuery } from '../../services/chain/types';
 
@@ -50,20 +53,21 @@ describe('commit-message chain selection-driven RAG', () => {
                     throw new Error(`Unexpected request type '${requestType}'.`);
             }
         });
-        const repositoryAnalysisService = {
-            runChangeAnalysis: async (): Promise<ChangeAnalysisAgentOutput> => {
+        const snapshot = {} as RepositorySnapshotReader;
+        const agentStub = sinon.stub(changeAnalysisAgentModule, 'runChangeAnalysisAgent').callsFake(
+            async (): Promise<ChangeAnalysisAgentOutput> => {
                 agentCompleted = true;
                 return completeAgentOutput();
             },
-        };
+        );
 
         try {
             const output = await generateCommitMessageChain({
                 diffs: [parserDiff()],
+                snapshot,
                 repositoryPath: '/tmp/repository',
             }, execution, {
                 investigation: { enabled: true, maxSteps: 2, excludePatterns: [] },
-                repositoryAnalysisService,
                 retrieveRagExamples: async query => {
                     assert.equal(agentCompleted, true);
                     observedQuery = query;
@@ -99,6 +103,7 @@ describe('commit-message chain selection-driven RAG', () => {
             assert.ok(output.timings.draftStart <= output.timings.draftReady);
             assert.equal(output.timings.ttdMs, output.timings.draftReady - output.timings.chainStart);
         } finally {
+            agentStub.restore();
             await ragConfig.update('enabled', previousRagEnabled, vscode.ConfigurationTarget.Global);
         }
     });

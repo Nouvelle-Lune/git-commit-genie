@@ -5,6 +5,7 @@ import {
     ChangeAnalysisAgentInput,
     createChangeAnalysisProfile,
 } from '../../services/analysis/change/investigation/changeAnalysisProfile';
+import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
 import { changeAnalysisAgentFinalResponseSchema } from '../../services/llm/providers/schemas/common';
 
 describe('ChangeAnalysisProfile terminal normalization', () => {
@@ -297,6 +298,7 @@ function makeInput(): ChangeAnalysisAgentInput {
             changedDependencies: [],
         },
         plan: { targets: [], notes: null },
+        snapshot: {} as RepositorySnapshotReader,
         repositoryPath: '/tmp/repository',
         excludePatterns: [],
         evidence: [],

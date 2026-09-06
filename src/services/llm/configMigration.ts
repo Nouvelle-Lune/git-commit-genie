@@ -4,7 +4,6 @@ import {
     AI_CONFIG_VERSION_KEY,
     AI_MODELS_KEY,
     GENERATION_MODEL_ID_KEY,
-    REPOSITORY_ANALYSIS_MODEL_ID_KEY,
     AIModelConfig,
     NATIVE_SECRET_KEYS,
     ProviderKind,
@@ -79,17 +78,8 @@ export async function migrateAIConfiguration(context: vscode.ExtensionContext): 
     const migration = currentVersion === 1
         ? await readRemovedV1Configuration(context)
         : await readLegacyConfiguration(context);
-    const repositoryAnalysisModelId = resolveRepositoryAnalysisModelId(
-        await readRemovedRepositoryAnalysisReference(),
-        migration.models,
-        migration.generationModelId,
-    );
-
     await context.globalState.update(AI_MODELS_KEY, migration.models);
     await context.globalState.update(GENERATION_MODEL_ID_KEY, migration.generationModelId);
-    await context.globalState.update(REPOSITORY_ANALYSIS_MODEL_ID_KEY, repositoryAnalysisModelId);
-    await vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis')
-        .update('model', undefined, vscode.ConfigurationTarget.Global);
     await context.globalState.update(AI_CONFIG_VERSION_KEY, AI_CONFIG_VERSION);
 
     for (const key of removedStateKeys()) {
@@ -177,42 +167,6 @@ async function readLegacyConfiguration(
         }
     }
     return { models, generationModelId: '' };
-}
-
-async function readRemovedRepositoryAnalysisReference(): Promise<string> {
-    return vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis')
-        .get<string>('model', 'general')
-        .trim();
-}
-
-function resolveRepositoryAnalysisModelId(
-    reference: string,
-    models: AIModelConfig[],
-    generationModelId: string,
-): string {
-    if (!reference || reference === 'general') {
-        return generationModelId;
-    }
-    if (models.some(model => model.id === reference)) {
-        return reference;
-    }
-    const separator = reference.indexOf(':');
-    if (separator > 0) {
-        const provider = reference.slice(0, separator);
-        const identifier = reference.slice(separator + 1);
-        if (provider === 'custom' && models.some(model => model.id === identifier && model.provider === 'custom')) {
-            return identifier;
-        }
-        const matches = models.filter(model => model.provider === provider && model.model === identifier);
-        if (matches.length === 1) {
-            return matches[0].id;
-        }
-    }
-    const matches = models.filter(model => model.model === reference);
-    if (matches.length !== 1) {
-        throw new Error(`Cannot migrate repository analysis model '${reference}': expected one configured model, found ${matches.length}.`);
-    }
-    return matches[0].id;
 }
 
 function removedStateKeys(): Set<string> {

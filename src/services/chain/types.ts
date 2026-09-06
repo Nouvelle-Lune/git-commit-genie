@@ -2,7 +2,7 @@
 
 import { DiffData } from "../git/gitTypes";
 import { Repository } from "../git/git";
-import { ChangeAnalysisTrace, RepositoryAnalysisContext } from "../analysis/change/types";
+import { ChangeAnalysisTrace } from "../analysis/change/types";
 
 
 export type NormalizedLang =
@@ -13,6 +13,10 @@ export type NormalizedLang =
 
 
 export interface ChainInputs {
+    snapshot?: import('../git/repositorySnapshot').RepositorySnapshotReader;
+    memory?: import('../memory/retriever').MemoryRetriever;
+    loadMemory?: import('../memory/service').MemoryRun['loadMemory'];
+    recorder?: import('../memory/recorder').EpisodeRecorder;
     diffs: DiffData[];
     currentTime?: string;
     userTemplate?: string;
@@ -20,7 +24,6 @@ export interface ChainInputs {
     validationChecklist?: string;
     repositoryPath?: string;
     targetRepo?: Repository;
-    repositoryAnalysis?: RepositoryAnalysisContext;
     ragStyleReferences?: RagStyleReference[];
 }
 

@@ -82,6 +82,7 @@ class AnthropicSession implements AISession {
 
         const response: any = await (this.client.messages.create as any)(body, {
             signal: request.signal,
+            ...(request.transportRetries === 0 ? { maxRetries: 0 } : {}),
         });
         this.lastResponseId = response.id;
         this.messages.push({ role: 'assistant', content: response.content });

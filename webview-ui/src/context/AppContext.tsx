@@ -8,8 +8,6 @@ export interface AppState {
     repositories: RepositoryInfo[];
     i18n: I18nTexts;
     logs: LogEntry[];
-    analysisRunning: boolean;
-    runningRepoLabel?: string;
 }
 
 // Action Types
@@ -18,8 +16,7 @@ type AppAction =
     | { type: 'ADD_LOG'; payload: LogEntry }
     | { type: 'UPDATE_LOG'; payload: LogEntry }
     | { type: 'CLEAR_LOGS' }
-    | { type: 'CANCEL_PENDING_LOGS' }
-    | { type: 'SET_ANALYSIS_RUNNING'; payload: { running: boolean; label?: string } };
+    | { type: 'CANCEL_PENDING_LOGS' };
 
 // Initial State
 const initialState: AppState = {
@@ -30,18 +27,11 @@ const initialState: AppState = {
         noLogsYet: 'No logs yet',
         clearLogs: 'Clear logs',
         analyzing: 'Analyzing {0}…',
-        refreshAnalysis: 'Refresh repository analysis',
-        cancelAnalysis: 'Cancel repository analysis',
-        viewAnalysis: 'View analysis',
-        analysisStatusMissing: 'Analysis missing',
-        analysisStatusAnalyzing: 'Analyzing...',
-        analysisStatusIdle: 'Up to date',
         openSettings: 'Open Settings',
         repairRagEmbeddings: 'Repair missing RAG embeddings',
         pipeline: DEFAULT_PIPELINE_TEXT,
     },
     logs: [],
-    analysisRunning: false
 };
 
 // Reducer
@@ -89,12 +79,6 @@ function appReducer(state: AppState, action: AppAction): AppState {
             return {
                 ...state,
                 logs: state.logs.map(log => log.pending ? { ...log, pending: false, cancelled: true } : log)
-            };
-        case 'SET_ANALYSIS_RUNNING':
-            return {
-                ...state,
-                analysisRunning: action.payload.running,
-                runningRepoLabel: action.payload.label
             };
         default:
             return state;
@@ -179,10 +163,6 @@ export const AppProvider: React.FC<AppProviderProps> = ({ children }) => {
                 });
             } else if (message.type === 'cancelPendingLogs') {
                 dispatch({ type: 'CANCEL_PENDING_LOGS' });
-            } else if (message.type === 'analysisRunning') {
-                const running = (message as any).running === true;
-                const label = (message as any).repoLabel as string | undefined;
-                dispatch({ type: 'SET_ANALYSIS_RUNNING', payload: { running, label } });
             }
         };
 

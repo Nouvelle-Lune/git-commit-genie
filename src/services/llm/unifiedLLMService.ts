@@ -15,7 +15,6 @@ import {
     resolveThinkingConfig,
 } from './providers';
 import { TemplateService } from '../../template/templateService';
-import { IRepositoryAnalysisService } from '../analysis/repository/repositoryAnalysisTypes';
 import { generateCommitMessageChain } from '../chain/commitMessageChain';
 import { DiffData } from '../git/gitTypes';
 import { logger } from '../logger';
@@ -81,10 +80,9 @@ export class UnifiedLLMService extends BaseLLMService {
     constructor(
         context: vscode.ExtensionContext,
         templateService: TemplateService,
-        analysisService: IRepositoryAnalysisService | undefined,
         private readonly options: UnifiedLLMServiceOptions,
     ) {
-        super(context, templateService, analysisService);
+        super(context, templateService);
     }
 
     async refreshFromSettings(): Promise<void> {
@@ -203,8 +201,8 @@ export class UnifiedLLMService extends BaseLLMService {
                 }
                 const costLabel = summary.totalUsd === 0 ? 'Free' : `$${summary.totalUsd.toFixed(6)}`;
                 const cacheLabel = summary.cacheHitPercent.toFixed(2);
-                const messageKey = callType === 'repoAnalysis'
-                    ? 'Repository analysis: ${0} | Cache hit: {1}%'
+                const messageKey = callType === 'memory'
+                    ? 'Repository memory: ${0} | Cache hit: {1}%'
                     : 'Commit message generation: ${0} | Cache hit: {1}%';
                 vscode.window.showInformationMessage(vscode.l10n.t(messageKey, costLabel, cacheLabel));
             },
@@ -391,12 +389,13 @@ export class UnifiedLLMService extends BaseLLMService {
                         targetLanguage: parsedInput?.['target-language'],
                         validationChecklist: this.readRules().checklistText,
                         repositoryPath: repoPath,
+                        snapshot: options?.snapshot,
+                        loadMemory: options?.memoryRun?.loadMemory,
+                        recorder: options?.memoryRun?.recorder,
                         targetRepo: options?.targetRepo,
-                        repositoryAnalysis: parsedInput?.['repository-analysis'],
                     }, execution, {
                         maxParallel: cfg.get<number>('chain.maxParallel', 2),
                         tokenBudget: execution.tokenBudget,
-                        repositoryAnalysisService: this.analysisService,
                         retrieveRagExamples: async context => {
                             if (!options?.ragRetrievalService || !options.targetRepo) {
                                 return [];
@@ -414,6 +413,14 @@ export class UnifiedLLMService extends BaseLLMService {
                     });
                     return {
                         content: out.commitMessage,
+                        memoryUsage: out.changeAnalysis.memoryUsage,
+                        episode: options?.memoryRun?.seal({
+                            changedPaths: out.changeAnalysis.changeExtraction.changedFiles.map(file => file.path),
+                            changedSymbols: out.changeAnalysis.changeExtraction.changedSymbols.map(symbol => symbol.name),
+                            questions: out.changeAnalysis.investigationPlan?.targets.flatMap(target => target.questions) ?? [],
+                            claims: out.changeAnalysis.agentClaims.map(claim => ({ claim: claim.claim, evidenceRefs: claim.evidenceRefs, disposition: claim.disposition })),
+                            status: out.changeAnalysis.analysisStatus,
+                        }),
                         ragMetadata: {
                             fileSummaries: out.fileSummaries,
                             changeSetSummary: out.changeSetSummary,

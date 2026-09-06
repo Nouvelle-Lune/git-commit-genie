@@ -14,8 +14,6 @@ export const L10N_KEYS = {
   },
   manageModels: {
     selectProvider: 'Select a provider…',
-    configureRepoAnalysisModel: 'Configure Repository Analysis Model',
-    configureRepoAnalysisModelDesc: 'For repository analysis feature',
     savedKeyDetected: 'Saved {0} API Key detected',
     reuseSavedKey: 'Reuse saved key ({0})',
     replaceKey: 'Replace key',
@@ -27,9 +25,7 @@ export const L10N_KEYS = {
     validatingKey: 'Validating {0} API Key…',
     noModels: 'No models available.',
     selectModel: 'Select a {0} model…',
-    selectRepoAnalysisModel: 'Select a model for repository analysis…',
     configured: 'Configured {0}: {1}',
-    repoAnalysisConfigured: 'Repository analysis model configured: {0} / {1}',
     currentSuffix: ' (current)',
     currentLabel: 'Current',
     useDefaultModel: 'Use default model',
@@ -124,32 +120,7 @@ export const L10N_KEYS = {
   genieMenu: {
     placeholder: 'Git Commit Genie',
     manageModels: '$(gear) Manage Models',
-    cancelAnalysis: '$(stop-circle) Cancel Analysis',
-    refreshAnalysis: '$(refresh) Refresh Analysis',
-    openMarkdown: '$(go-to-file) Open repository-analysis.md',
     toggleThinking: '$(thinking) Enable / Disable thinking mode',
-  },
-  repoAnalysis: {
-    running: 'Repository analysis in progress…',
-    runningWithRepo: 'Repository analysis in progress for "{0}"…',
-    missing: 'Repository analysis missing. Click to re-analyze.',
-    idle: 'Repository analysis is up to date.',
-    initGitToEnable: 'Initialize a Git repository to enable analysis.',
-    promptInitialize: 'Repository analysis not found. Would you like to initialize it?',
-    initialize: 'Initialize',
-    initializingTitle: 'Initializing repository analysis...',
-    refreshingTitle: 'Refreshing repository analysis...',
-    refreshed: 'Repository analysis refreshed successfully.',
-    mdNotFound: 'repository-analysis.md not found. Use Refresh Analysis to generate it.',
-    missingApiKey: 'LLM API key not set. Configure models to enable repository analysis.',
-    missingModel: 'LLM model not selected. Configure models to enable repository analysis.',
-    clearConfirm: 'This will delete cached JSON repository analysis for this repository. Continue?',
-    clear: 'Clear',
-    cleared: 'Repository analysis cache cleared.',
-    selectRepository: 'Select a repository',
-    resetStepNotification: 'Repository analysis request limit reached, reset request count and continue task?',
-    resetAndContinue: 'Reset and continue',
-    cancel: 'Cancel'
   },
   templates: {
     pickWorkspaceFolder: 'Pick a workspace folder',
@@ -178,7 +149,6 @@ export const L10N_KEYS = {
   },
   costNotification: {
     commitMessageGeneration: 'Commit message generation: ${0} | Cache hit: {1}%',
-    repositoryAnalysis: 'Repository analysis: ${0} | Cache hit: {1}%'
   },
   cost: {
     noCostRecorded: 'No Genie usage cost recorded for this repository yet.',
@@ -202,12 +172,6 @@ export const L10N_KEYS = {
     noLogsYet: 'No logs yet',
     clearLogs: 'Clear logs',
     analyzing: 'Analyzing {0}…',
-    refreshAnalysis: 'Refresh repository analysis',
-    cancelAnalysis: 'Cancel repository analysis',
-    viewAnalysis: 'View analysis',
-    analysisStatusMissing: 'Analysis missing',
-    analysisStatusAnalyzing: 'Analyzing...',
-    analysisStatusIdle: 'Up to date',
     repairRagEmbeddings: 'Repair RAG Embeddings'
   },
   pipeline: DEFAULT_PIPELINE_TEXT,

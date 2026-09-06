@@ -56,6 +56,27 @@ describe('Custom provider response accounting', () => {
         assert.equal(requestBody?.parallel_tool_calls, undefined);
     });
 
+    it('maps an explicit transport retry policy to the SDK request options', async () => {
+        const options: Array<Record<string, unknown>> = [];
+        const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
+            chat: {
+                completions: {
+                    create: async (_body: Record<string, unknown>, requestOptions: Record<string, unknown> = {}) => {
+                        options.push(requestOptions);
+                        return { choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: terminalJson } }] };
+                    },
+                },
+            },
+        } as any);
+        const session = provider.createSession({ model: 'local-model' });
+
+        await session.run({ messages: [{ role: 'user', content: 'one paid attempt' }], transportRetries: 0 });
+        await session.run({ messages: [{ role: 'user', content: 'ordinary call' }] });
+
+        assert.equal(options[0].maxRetries, 0);
+        assert.equal(options[1].maxRetries, undefined);
+    });
+
     it('injects the JSON schema into the prompt when structured output is unsupported', async () => {
         const schema = z.toJSONSchema(classifyAndDraftResponseSchema) as Record<string, unknown>;
         let requestBody: Record<string, unknown> | undefined;

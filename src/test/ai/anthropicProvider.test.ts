@@ -80,6 +80,25 @@ describe('Anthropic provider response accounting', () => {
         assert.equal(result.usage?.visibleOutputTokens, 3);
     });
 
+    it('maps an explicit transport retry policy to the SDK request options', async () => {
+        const options: Array<Record<string, unknown>> = [];
+        const client = {
+            messages: {
+                create: async (_body: Record<string, unknown>, requestOptions: Record<string, unknown> = {}) => {
+                    options.push(requestOptions);
+                    return { id: 'msg_retry', stop_reason: 'end_turn', content: [] };
+                },
+            },
+        } as any;
+        const session = new AnthropicProvider({ apiKey: 'test' }, client).createSession({ model: 'claude-sonnet-4-5' });
+
+        await session.run({ messages: [{ role: 'user', content: 'one paid attempt' }], transportRetries: 0 });
+        await session.run({ messages: [{ role: 'user', content: 'ordinary call' }] });
+
+        assert.equal(options[0].maxRetries, 0);
+        assert.equal(options[1].maxRetries, undefined);
+    });
+
     it('rejects a thinking budget that consumes the entire shared output ceiling', async () => {
         const client = { messages: { create: async () => ({}) } } as any;
         const provider = new AnthropicProvider({ apiKey: 'test' }, client);

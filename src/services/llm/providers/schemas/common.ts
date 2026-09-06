@@ -233,10 +233,3 @@ export const changeAnalysisAgentFinalResponseSchema = z.object({
   selectionNotes: z.string().nullable(),
   uncertainties: z.array(z.string().min(1)).max(12),
 } as const);
-
-export const repoAnalysisResponseSchema = z.object({
-  summary: z.string().min(1).describe("Brief but comprehensive summary of the repository purpose and architecture"),
-  projectType: z.string().min(1).default('Unknown Project').describe("Main project type (e.g., Web App, Library, CLI Tool, etc.)"),
-  technologies: z.array(z.string().min(1)).default([]).describe("Array of main technologies used"),
-  insights: z.array(z.string().min(1)).default([]).describe("Key architectural insights about the project")
-} as const);

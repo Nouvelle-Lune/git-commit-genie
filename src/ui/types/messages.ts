@@ -25,13 +25,7 @@ export interface CancelPendingLogsMessage {
     type: 'cancelPendingLogs';
 }
 
-export interface AnalysisRunningMessage {
-    type: 'analysisRunning';
-    running: boolean;
-    repoLabel?: string;
-}
-
-export type ExtensionMessage = UpdateRepoMessage | AddLogMessage | ClearLogsMessage | CancelPendingLogsMessage | AnalysisRunningMessage;
+export type ExtensionMessage = UpdateRepoMessage | AddLogMessage | ClearLogsMessage | CancelPendingLogsMessage;
 
 // Webview -> Extension Messages
 export interface ReadyMessage {
@@ -47,17 +41,8 @@ export interface OpenFileMessage {
     filePath: string;
 }
 
-export interface RefreshAnalysisMessage {
-    type: 'refreshAnalysis';
-    repoPath: string;
-}
-
 export interface OpenGenieMenuMessage {
     type: 'openGenieMenu';
-}
-
-export interface CancelAnalysisMessage {
-    type: 'cancelAnalysis';
 }
 
 export interface RepairRagEmbeddingsMessage {
@@ -65,7 +50,7 @@ export interface RepairRagEmbeddingsMessage {
     repoPath: string;
 }
 
-export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage | RefreshAnalysisMessage | OpenGenieMenuMessage | CancelAnalysisMessage | RepairRagEmbeddingsMessage;
+export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage | OpenGenieMenuMessage | RepairRagEmbeddingsMessage;
 
 // Data Types
 export interface RepositoryInfo {
@@ -73,8 +58,6 @@ export interface RepositoryInfo {
     path: string;
     /** Structured cost status — replaces bare numeric totals. */
     cost: CostDisplay;
-    analysisStatus: 'missing' | 'analyzing' | 'idle'; // Repository analysis status
-    analysisPath?: string; // Path to analysis markdown file
     ragStatus?: {
         kind: 'disabled' | 'idle' | 'preparing' | 'importing' | 'embedding' | 'ready' | 'error';
         text: string;
@@ -85,12 +68,6 @@ export interface RepositoryInfo {
 
 export interface I18nTexts {
     repositoryList: string;
-    refreshAnalysis: string;
-    cancelAnalysis: string;
-    viewAnalysis: string;
-    analysisStatusMissing: string;
-    analysisStatusAnalyzing: string;
-    analysisStatusIdle: string;
     logs: string;
     noLogsYet: string;
     clearLogs: string;

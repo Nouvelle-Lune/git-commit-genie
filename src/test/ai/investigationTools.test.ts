@@ -1,6 +1,7 @@
 import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
 import { runInvestigationTool, InvestigationToolContext } from '../../services/analysis/change/investigation/tools';
+import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
 
 describe('change investigation tools', () => {
     it('returns changed symbols without allocating repository evidence', async () => {
@@ -37,6 +38,7 @@ describe('change investigation tools', () => {
 function makeContext(onAllocate: () => void): InvestigationToolContext {
     return {
         repositoryPath: '/tmp/repository',
+        snapshot: {} as RepositorySnapshotReader,
         excludePatterns: [],
         changedSymbols: [{
             name: 'parse',

@@ -70,6 +70,7 @@ draft.json
 !src/services/chain/generation/draft.ts
 
 webpack.config.js
+!webpack.config.js
 
 # Scripts
 scripts/*

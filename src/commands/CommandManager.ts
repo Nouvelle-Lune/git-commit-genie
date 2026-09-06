@@ -4,7 +4,7 @@ import { StatusBarManager } from '../ui/StatusBarManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
 import { ModelCommands } from './ModelCommands';
 import { GenerateCommands } from './GenerateCommands';
-import { RepoAnalysisCommands } from './RepoAnalysisCommands';
+import { MemoryCommands } from './MemoryCommands';
 import { MenuCommands } from './MenuCommands';
 import { CostCommands } from './CostCommands';
 import { Repository } from '../services/git/git';
@@ -12,7 +12,7 @@ import { Repository } from '../services/git/git';
 export class CommandManager {
     private modelCommands!: ModelCommands;
     private generateCommands!: GenerateCommands;
-    private repoAnalysisCommands!: RepoAnalysisCommands;
+    private memoryCommands!: MemoryCommands;
     private menuCommands!: MenuCommands;
     private costCommands!: CostCommands;
 
@@ -26,7 +26,7 @@ export class CommandManager {
         // Initialize command modules
         this.modelCommands = new ModelCommands(this.context, this.serviceRegistry, this.statusBarManager);
         this.generateCommands = new GenerateCommands(this.context, this.serviceRegistry, this.statusBarManager);
-        this.repoAnalysisCommands = new RepoAnalysisCommands(this.context, this.serviceRegistry, this.statusBarManager);
+        this.memoryCommands = new MemoryCommands(this.context, this.serviceRegistry);
         this.menuCommands = new MenuCommands(this.context, this.serviceRegistry, this.statusBarManager);
         this.costCommands = new CostCommands(this.context, this.serviceRegistry);
 
@@ -41,7 +41,7 @@ export class CommandManager {
     private async registerAllCommands(): Promise<void> {
         await this.modelCommands.register();
         await this.generateCommands.register();
-        await this.repoAnalysisCommands.register();
+        this.memoryCommands.register();
         await this.menuCommands.register();
         this.costCommands.registerCommands();
 
@@ -223,7 +223,7 @@ export class CommandManager {
             description: repo.rootUri.fsPath,
             repo,
         })), {
-            placeHolder: vscode.l10n.t(I18N.repoAnalysis.selectRepository),
+            placeHolder: vscode.l10n.t('Select repository'),
             matchOnDescription: true,
         });
 

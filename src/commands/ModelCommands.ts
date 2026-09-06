@@ -3,7 +3,6 @@ import * as vscode from 'vscode';
 import {
     AI_MODELS_KEY,
     GENERATION_MODEL_ID_KEY,
-    REPOSITORY_ANALYSIS_MODEL_ID_KEY,
     AIModelConfig,
     AIChatTemplateValue,
     AIThinkingFormat,
@@ -29,7 +28,7 @@ import {
 import type { FlatModelPricing } from '../services/cost/costTypes';
 import type { FlatPricing, ModelPricing } from '../services/cost/pricing';
 
-type ModelPurpose = 'generation' | 'repositoryAnalysis';
+type ModelPurpose = 'generation';
 type MenuExit = 'back' | 'done';
 
 const BACK_VALUE = '__back__';
@@ -80,10 +79,8 @@ export class ModelCommands {
     private async manageModels(): Promise<void> {
         for (;;) {
             const generation = this.modelDescription(this.context.globalState.get<string>(GENERATION_MODEL_ID_KEY, ''));
-            const analysis = this.modelDescription(this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, ''));
             const items: Array<vscode.QuickPickItem & { value: ModelPurpose | ProviderKind }> = [
                 { label: '$(sparkle) Commit message model', description: generation, value: 'generation' },
-                { label: '$(repo) Repository analysis model', description: analysis, value: 'repositoryAnalysis' },
                 { label: '', kind: vscode.QuickPickItemKind.Separator, value: 'generation' },
                 ...(['openai', 'anthropic', 'google', 'custom'] as const).map(value => ({
                     label: PROVIDER_LABELS[value],
@@ -93,7 +90,7 @@ export class ModelCommands {
             ];
             const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Manage models or select a workflow model' });
             if (!picked) { return; }
-            if (picked.value === 'generation' || picked.value === 'repositoryAnalysis') {
+            if (picked.value === 'generation') {
                 const exit = await this.selectWorkflowModel(picked.value);
                 if (exit === 'back') { continue; }
                 return;
@@ -135,7 +132,6 @@ export class ModelCommands {
             const items: Array<vscode.QuickPickItem & { value: string }> = [
                 this.backItem(),
                 { label: 'Use for commit messages', value: 'generation' },
-                { label: 'Use for repository analysis', value: 'repositoryAnalysis' },
                 { label: 'Set thinking level override', value: 'thinking' },
                 ...(model.provider === 'custom' ? [{
                     label: 'Advanced thinking compatibility',
@@ -149,7 +145,7 @@ export class ModelCommands {
             ];
             const picked = await vscode.window.showQuickPick(items, { placeHolder: model.label });
             if (!picked || picked.value === BACK_VALUE) { return 'back'; }
-            if (picked.value === 'generation' || picked.value === 'repositoryAnalysis') {
+            if (picked.value === 'generation') {
                 await this.assignModel(picked.value as ModelPurpose, model.id);
                 return 'done';
             }
@@ -266,9 +262,6 @@ export class ModelCommands {
         if (this.context.globalState.get<string>(GENERATION_MODEL_ID_KEY, '') === model.id) {
             throw new Error('Select another commit message model before deleting this model.');
         }
-        if (this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '') === model.id) {
-            throw new Error('Select another repository analysis model before deleting this model.');
-        }
         const confirmation = await vscode.window.showWarningMessage(
             `Delete model '${model.label}'?`,
             { modal: true },
@@ -287,7 +280,7 @@ export class ModelCommands {
     private async selectWorkflowModel(purpose: ModelPurpose): Promise<MenuExit> {
         for (;;) {
             const models = this.serviceRegistry.getModels();
-            const purposeKey = purpose === 'generation' ? GENERATION_MODEL_ID_KEY : REPOSITORY_ANALYSIS_MODEL_ID_KEY;
+            const purposeKey = GENERATION_MODEL_ID_KEY;
             const picked = await vscode.window.showQuickPick([
                 this.backItem(),
                 ...models.map(model => ({
@@ -298,7 +291,7 @@ export class ModelCommands {
                     detail: model.provider === 'custom' ? `${model.model} · ${model.baseUrl}` : model.model,
                     value: model.id,
                 })),
-            ], { placeHolder: purpose === 'generation' ? 'Select commit message model' : 'Select repository analysis model' });
+            ], { placeHolder: 'Select commit message model' });
             if (!picked || picked.value === BACK_VALUE) { return 'back'; }
             const exit = await this.manageConfiguredModel(this.requireModel(picked.value));
             if (exit === 'back') { continue; }
@@ -308,7 +301,7 @@ export class ModelCommands {
 
     private async assignModel(purpose: ModelPurpose, modelId: string): Promise<void> {
         this.requireModel(modelId);
-        const key = purpose === 'generation' ? GENERATION_MODEL_ID_KEY : REPOSITORY_ANALYSIS_MODEL_ID_KEY;
+        const key = GENERATION_MODEL_ID_KEY;
         await this.context.globalState.update(key, modelId);
         if (purpose === 'generation') {
             this.serviceRegistry.updateCurrentLLMService();
@@ -674,9 +667,6 @@ export class ModelCommands {
         const purposes: string[] = [];
         if (this.context.globalState.get<string>(GENERATION_MODEL_ID_KEY, '') === id) {
             purposes.push('Commit messages');
-        }
-        if (this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '') === id) {
-            purposes.push('Repository analysis');
         }
         return purposes.length ? purposes.join(' · ') : undefined;
     }

@@ -195,6 +195,7 @@ class CustomSession implements AISession {
         applyOpenAICompatibleThinking(body, request.thinking ?? this.thinking);
         return (this.client.chat.completions.create as any)(body, {
             signal: request.signal,
+            ...(request.transportRetries === 0 ? { maxRetries: 0 } : {}),
         });
     }
 

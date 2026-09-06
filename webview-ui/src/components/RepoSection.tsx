@@ -3,7 +3,6 @@ import { useAppContext } from '../context/AppContext';
 import { vscodeApi } from '../utils/vscode';
 import { formatCostDisplayShort } from '../types/messages';
 import './RepoSection.css';
-import { GenieCheckIcon, GenieWarningIcon, GenieKillIcon } from './icons';
 
 /**
  * Repository section component
@@ -16,31 +15,6 @@ export const RepoSection: React.FC = () => {
         return null;
     }
 
-    // Check if any repository is currently being analyzed
-    const isAnyRepoAnalyzing = state.repositories.some(repo => repo.analysisStatus === 'analyzing');
-
-    const handleRefreshAnalysis = (repoPath: string) => {
-        vscodeApi.postMessage({
-            type: 'refreshAnalysis',
-            repoPath
-        });
-    };
-
-    const handleCancelAnalysis = () => {
-        vscodeApi.postMessage({
-            type: 'cancelAnalysis'
-        });
-    };
-
-    const handleViewAnalysis = (analysisPath: string | undefined) => {
-        if (analysisPath) {
-            vscodeApi.postMessage({
-                type: 'openFile',
-                filePath: analysisPath
-            });
-        }
-    };
-
     const handleOpenMenu = () => {
         vscodeApi.postMessage({
             type: 'openGenieMenu'
@@ -52,29 +26,6 @@ export const RepoSection: React.FC = () => {
             type: 'repairRagEmbeddings',
             repoPath
         });
-    };
-
-    const getStatusBadge = (status: 'missing' | 'analyzing' | 'idle') => {
-        switch (status) {
-            case 'analyzing':
-                return (
-                    <span className="status-badge status-analyzing" title={state.i18n.analysisStatusAnalyzing}>
-                        <i className="codicon codicon-loading codicon-modifier-spin"></i>
-                    </span>
-                );
-            case 'missing':
-                return (
-                    <span className="status-badge status-missing" title={state.i18n.analysisStatusMissing}>
-                        <GenieWarningIcon size={12} />
-                    </span>
-                );
-            case 'idle':
-                return (
-                    <span className="status-badge status-idle" title={state.i18n.analysisStatusIdle}>
-                        <GenieCheckIcon size={12} />
-                    </span>
-                );
-        }
     };
 
     const getRagBadge = (repo: typeof state.repositories[number]) => {
@@ -143,12 +94,7 @@ export const RepoSection: React.FC = () => {
                     {state.repositories.map((repo) => (
                         <div key={repo.path} className="repo-item">
                             <div className="repo-info">
-                                {getStatusBadge(repo.analysisStatus)}
-                                <span
-                                    className={`repo-name ${repo.analysisPath ? 'clickable' : ''}`}
-                                    onClick={() => handleViewAnalysis(repo.analysisPath)}
-                                    title={repo.analysisPath ? state.i18n.viewAnalysis : repo.name}
-                                >
+                                <span className="repo-name">
                                     {repo.name}
                                 </span>
                                 {getRagBadge(repo)}
@@ -165,26 +111,6 @@ export const RepoSection: React.FC = () => {
                                         <i className="codicon codicon-tools"></i>
                                     </button>
                                 ) : null}
-                                {repo.analysisStatus === 'analyzing' ? (
-                                    <button
-                                        className="icon-btn repo-cancel-btn"
-                                        onClick={handleCancelAnalysis}
-                                        aria-label={state.i18n.cancelAnalysis}
-                                        title={state.i18n.cancelAnalysis}
-                                    >
-                                        <GenieKillIcon size={12} />
-                                    </button>
-                                ) : (
-                                    <button
-                                        className="icon-btn"
-                                        onClick={() => handleRefreshAnalysis(repo.path)}
-                                        aria-label={state.i18n.refreshAnalysis}
-                                        title={state.i18n.refreshAnalysis}
-                                        disabled={isAnyRepoAnalyzing}
-                                    >
-                                        <i className="codicon codicon-refresh"></i>
-                                    </button>
-                                )}
                             </div>
                         </div>
                     ))}

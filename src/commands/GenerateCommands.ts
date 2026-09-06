@@ -6,6 +6,7 @@ import { Repository } from "../services/git/git";
 import { DiffData } from '../services/git/gitTypes';
 import { PROVIDER_LABELS, modelSecretKey } from '../services/llm/providers';
 import { StatusBarManager } from '../ui/StatusBarManager';
+import { resolveInvestigationSettings } from '../services/analysis/change/investigation/config';
 
 /**
  * This class handles the registration of commands related to generating commit messages.
@@ -63,6 +64,10 @@ export class GenerateCommands {
         }
 
         const cts = new vscode.CancellationTokenSource();
+        const controller = new AbortController();
+        const cancellation = cts.token.onCancellationRequested(() => controller.abort());
+        const memoryService = this.serviceRegistry.getMemoryService();
+        let foregroundStarted = false;
 
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.SourceControl,
@@ -93,11 +98,13 @@ export class GenerateCommands {
                     return;
                 }
                 this.inFlight.set(targetRepoPath, cts);
+                memoryService.beginForeground(); foregroundStarted = true;
 
                 // Indicate generating state for UI (global visibility)
                 await vscode.commands.executeCommand('setContext', 'gitCommitGenie.generating', true);
 
-                const diffs = await this.serviceRegistry.getDiffService().getDiff(targetRepo);
+                const snapshot = await this.serviceRegistry.getDiffService().captureSnapshot(targetRepo, controller.signal);
+                const diffs = await this.serviceRegistry.getDiffService().getDiff(targetRepo, snapshot);
 
                 if (diffs.length === 0) {
                     vscode.window.showInformationMessage(vscode.l10n.t(I18N.generation.noStagedChanges));
@@ -105,19 +112,31 @@ export class GenerateCommands {
                 }
 
                 const llmService = this.serviceRegistry.getCurrentLLMService();
+                const memoryRun = vscode.workspace.getConfiguration('gitCommitGenie.chain').get<boolean>('enabled', true)
+                    ? await memoryService.prepare(snapshot, selectedModel.model, resolveInvestigationSettings().excludePatterns) : undefined;
                 const result = await llmService.generateCommitMessage(diffs, {
+                    snapshot,
+                    memoryRun,
                     token: cts.token,
                     targetRepo,
                     ragRetrievalService: this.serviceRegistry.getRagRetrievalService(),
                 });
 
                 if ('content' in result) {
+                    if (memoryRun && result.episode) { memoryService.publish(memoryRun, result.episode, llmService); }
+                    if (!await snapshot.isCurrent()) {
+                        const document = await vscode.workspace.openTextDocument({ content: result.content, language: 'git-commit' });
+                        await vscode.window.showTextDocument(document);
+                        throw new Error(vscode.l10n.t('Repository inputs changed during generation. The draft was preserved separately; regenerate before filling SCM.'));
+                    }
                     await this.fillCommitMessage(result.content, targetRepo);
                     await this.maybeCachePendingRagDocument(targetRepo, diffs, result);
-                    void this.initializeRepositoryAnalysis(targetRepoPath).catch(error => {
-                        logger.error('[Genie][RepoAnalysis] Failed to initialize after commit message generation', error);
-                    });
                 } else {
+                    if (memoryRun) {
+                        const episode = memoryRun.seal({ changedPaths: diffs.map(diff => diff.fileName), changedSymbols: [], questions: [], claims: [],
+                            status: cts.token.isCancellationRequested ? 'cancelled' : 'error' });
+                        if (episode) { memoryService.publish(memoryRun, episode, llmService); }
+                    }
                     await this.handleError(result);
                 }
             } catch (error: any) {
@@ -134,38 +153,12 @@ export class GenerateCommands {
                     });
                 } catch { /* ignore */ }
                 cts.dispose();
+                cancellation.dispose();
+                if (foregroundStarted) { memoryService.endForeground(); }
                 // Reset UI context only when no other repo is running
                 await vscode.commands.executeCommand('setContext', 'gitCommitGenie.generating', this.inFlight.size > 0);
             }
         });
-    }
-
-    /**
-     * Initializes repository analysis only after the extension has generated a
-     * commit message, so opening a repository never mutates or scans it.
-     *
-     * @param repositoryPath Absolute path of the repository used for generation.
-     */
-    private async initializeRepositoryAnalysis(repositoryPath: string): Promise<void> {
-        const enabled = vscode.workspace
-            .getConfiguration('gitCommitGenie.repositoryAnalysis')
-            .get<boolean>('enabled', true);
-        if (!enabled) {
-            return;
-        }
-
-        const analysisService = this.serviceRegistry.getAnalysisService();
-        const existingAnalysis = await analysisService.getAnalysis(repositoryPath);
-        if (existingAnalysis) {
-            return;
-        }
-
-        this.statusBarManager.setRepoAnalysisRunning(true, repositoryPath);
-        try {
-            await analysisService.initializeRepository(repositoryPath);
-        } finally {
-            this.statusBarManager.setRepoAnalysisRunning(false);
-        }
     }
 
     private async fillCommitMessage(content: string, repo: Repository): Promise<void> {

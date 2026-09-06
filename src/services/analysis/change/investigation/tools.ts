@@ -7,14 +7,13 @@
 // degenerating into a repository tour.
 //
 // No language server is available inside the extension host for arbitrary
-// repositories, so resolution is regex-based over the working tree. Results are
+// repositories, so resolution is regex-based over captured Git blobs. Results are
 // therefore treated as candidate evidence: every item carries a `path:line`
 // citation the model can verify with readFileContent.
 
 import * as path from 'path';
-import { listDirectory } from '../../tools/directory';
-import { readFileContent } from '../../tools/file';
-import { searchFiles } from '../../tools/search';
+import { listSnapshotDirectory, readSnapshotFile, searchSnapshot } from '../../../git/snapshotTools';
+import { RepositorySnapshotReader } from '../../../git/repositorySnapshot';
 import { RepositoryEvidenceItem, RepositoryEvidenceKind } from '../types';
 
 export const CHANGE_ANALYSIS_TOOL_NAMES = [
@@ -33,6 +32,7 @@ export const CHANGE_ANALYSIS_TOOL_NAMES = [
 export type InvestigationToolName = typeof CHANGE_ANALYSIS_TOOL_NAMES[number];
 
 export interface InvestigationToolCall {
+    side?: 'before' | 'after' | null;
     tool: InvestigationToolName;
     symbol?: string | null;
     filePath?: string | null;
@@ -54,6 +54,8 @@ export interface InvestigationToolOutcome {
 }
 
 export interface InvestigationToolContext {
+    side?: 'before' | 'after';
+    snapshot: RepositorySnapshotReader;
     repositoryPath: string;
     excludePatterns: string[];
     /** Changed symbols from Stage 1, surfaced through getChangedSymbols. */
@@ -163,7 +165,7 @@ async function runContentSearch(
     maxResults: number,
     searchPath?: string
 ): Promise<Array<{ filePath: string; line: number; content: string }>> {
-    const result = await searchFiles(context.repositoryPath, regex, {
+    const result = await searchSnapshot(context.snapshot, regex, {
         searchType: 'content',
         useRegex: true,
         searchPath,
@@ -172,10 +174,10 @@ async function runContentSearch(
         excludePatterns: context.excludePatterns,
         maxMatchesPerFile: 3,
         contextLines: 0,
-    });
+    }, context.side);
 
     if (!result.success || !result.data) {
-        return [];
+        throw new Error(result.error ?? 'Snapshot search failed.');
     }
 
     const flattened: Array<{ filePath: string; line: number; content: string }> = [];
@@ -187,18 +189,27 @@ async function runContentSearch(
     return flattened;
 }
 
-function toEvidence(
+async function toEvidence(
     context: InvestigationToolContext,
     kind: RepositoryEvidenceKind,
     target: string,
     matches: Array<{ filePath: string; line: number; content: string }>
-): RepositoryEvidenceItem[] {
-    return matches.slice(0, MAX_EVIDENCE_PER_CALL).map(match => context.allocateEvidence({
+): Promise<RepositoryEvidenceItem[]> {
+    return Promise.all(matches.slice(0, MAX_EVIDENCE_PER_CALL).map(match => allocateObserved(context, {
         kind: classifyPath(match.filePath) ?? kind,
         target,
         ref: `${match.filePath}:${match.line}`,
         excerpt: truncate(match.content.trim()),
-    }));
+    })));
+}
+
+async function allocateObserved(context: InvestigationToolContext, evidence: Omit<RepositoryEvidenceItem, 'id'>): Promise<RepositoryEvidenceItem> {
+    const match = evidence.ref.match(/^([\s\S]+):(\d+)(?:-(\d+))?$/);
+    if (!match) { throw new Error('Evidence requires a snapshot line range.'); }
+    const start = Number(match[2]);
+    const source = await context.snapshot.observe(match[1], start, Number(match[3] ?? match[2]) - start + 1,
+        context.excludePatterns, context.side ?? 'after', Math.max(evidence.excerpt.length, 600));
+    return context.allocateEvidence({ ...evidence, excerpt: source.excerpt, provenance: source });
 }
 
 /**
@@ -239,7 +250,7 @@ async function readDeclarationBody(
     startLine: number
 ): Promise<{ text: string; endLine: number } | null> {
     const absolute = resolveInsideRepository(context.repositoryPath, filePath);
-    const read = await readFileContent(absolute, { startLine, maxLines: MAX_BODY_LINES }, 'Change investigation');
+    const read = await readSnapshotFile(context.snapshot, absolute, { startLine, maxLines: MAX_BODY_LINES }, context.excludePatterns, context.side);
     if (!read.success || !read.data) {
         return null;
     }
@@ -304,7 +315,7 @@ export function resolveInsideRepository(repositoryPath: string, candidate: strin
 }
 
 function toRelative(repositoryPath: string, absolute: string): string {
-    return path.relative(path.resolve(repositoryPath), absolute).replace(/\\/g, '/');
+    return path.relative(path.resolve(repositoryPath), absolute).split(path.sep).join('/');
 }
 
 function requireSymbol(call: InvestigationToolCall): string {
@@ -319,6 +330,7 @@ export async function runInvestigationTool(
     context: InvestigationToolContext,
     call: InvestigationToolCall
 ): Promise<InvestigationToolOutcome> {
+    context = { ...context, side: call.side ?? 'after' };
     try {
         switch (call.tool) {
             case 'getChangedSymbols': {
@@ -346,13 +358,13 @@ export async function runInvestigationTool(
 
                 const best = matches[0];
                 const body = await readDeclarationBody(context, best.filePath, best.line);
-                const primary = context.allocateEvidence({
+                const primary = await allocateObserved(context, {
                     kind: 'definition',
                     target: symbol,
                     ref: body ? `${best.filePath}:${best.line}-${body.endLine}` : `${best.filePath}:${best.line}`,
                     excerpt: truncate(body ? body.text : best.content, 1200),
                 });
-                const others = toEvidence(context, 'definition', symbol, matches.slice(1, 4));
+                const others = await toEvidence(context, 'definition', symbol, matches.slice(1, 4));
                 return {
                     ok: true,
                     summary: `Definition of '${symbol}' at ${primary.ref}${others.length ? ` (${others.length} other candidate definition site(s))` : ''}.`,
@@ -367,7 +379,7 @@ export async function runInvestigationTool(
                     `\\b${escapeRegex(symbol)}\\b`,
                     call.maxResults ?? 20
                 );
-                const evidence = toEvidence(context, 'references', symbol, matches);
+                const evidence = await toEvidence(context, 'references', symbol, matches);
                 return {
                     ok: true,
                     summary: `Found ${matches.length} reference line(s) to '${symbol}' across ${new Set(matches.map(match => match.filePath)).size} file(s).`,
@@ -382,7 +394,7 @@ export async function runInvestigationTool(
                     // A definition line also matches "name(" ; excluding it keeps
                     // callers distinct from the symbol's own declaration.
                     .filter(match => !definitionRegex.test(match.content));
-                const evidence = toEvidence(context, 'callers', symbol, matches);
+                const evidence = await toEvidence(context, 'callers', symbol, matches);
                 return {
                     ok: true,
                     summary: matches.length
@@ -421,7 +433,7 @@ export async function runInvestigationTool(
                         ? `'${symbol}' calls: ${Array.from(callees).slice(0, 25).join(', ')}.`
                         : `'${symbol}' makes no direct calls.`,
                     evidence: [{
-                        ...context.allocateEvidence({
+                        ...await allocateObserved(context, {
                             kind: 'callees',
                             target: symbol,
                             ref: `${best.filePath}:${best.line}-${body.endLine}`,
@@ -443,7 +455,7 @@ export async function runInvestigationTool(
                     summary: matches.length
                         ? `Found ${matches.length} candidate implementation or consumer site(s) of '${symbol}'.`
                         : `No implementations of '${symbol}' were found.`,
-                    evidence: toEvidence(context, 'implementations', symbol, matches),
+                    evidence: await toEvidence(context, 'implementations', symbol, matches),
                 };
             }
 
@@ -462,7 +474,7 @@ export async function runInvestigationTool(
                     ok: true,
                     summary: `Type '${symbol}' is defined at ${best.filePath}:${best.line}.`,
                     evidence: [{
-                        ...context.allocateEvidence({
+                        ...await allocateObserved(context, {
                             kind: 'type',
                             target: symbol,
                             ref: body ? `${best.filePath}:${best.line}-${body.endLine}` : `${best.filePath}:${best.line}`,
@@ -481,7 +493,7 @@ export async function runInvestigationTool(
                 const searchPath = call.dirPath
                     ? resolveInsideRepository(context.repositoryPath, call.dirPath)
                     : undefined;
-                const result = await searchFiles(context.repositoryPath, query, {
+                const result = await searchSnapshot(context.snapshot, query, {
                     searchType,
                     useRegex: call.useRegex === true,
                     searchPath,
@@ -490,7 +502,7 @@ export async function runInvestigationTool(
                     excludePatterns: context.excludePatterns,
                     maxMatchesPerFile: 3,
                     contextLines: 0,
-                });
+                }, context.side);
                 if (!result.success || !result.data) {
                     return { ok: false, summary: 'searchCode failed.', evidence: [], error: result.error };
                 }
@@ -512,7 +524,7 @@ export async function runInvestigationTool(
                 return {
                     ok: true,
                     summary: `Found ${flattened.length} match(es) for '${query}'.`,
-                    evidence: toEvidence(context, 'search', query, flattened),
+                    evidence: await toEvidence(context, 'search', query, flattened),
                 };
             }
 
@@ -524,7 +536,7 @@ export async function runInvestigationTool(
                 const absolute = resolveInsideRepository(context.repositoryPath, filePath);
                 const startLine = call.startLine ?? 1;
                 const maxLines = Math.min(call.maxLines ?? 120, 400);
-                const read = await readFileContent(absolute, { startLine, maxLines }, 'Change investigation');
+                const read = await readSnapshotFile(context.snapshot, absolute, { startLine, maxLines }, context.excludePatterns, context.side);
                 if (!read.success || !read.data) {
                     return { ok: false, summary: `Could not read ${filePath}.`, evidence: [], error: read.error };
                 }
@@ -533,7 +545,7 @@ export async function runInvestigationTool(
                     ok: true,
                     summary: `Read ${relative}:${read.data.startLine}-${read.data.endLine}${read.data.hasMore ? ' (more lines follow)' : ''}.`,
                     evidence: [{
-                        ...context.allocateEvidence({
+                        ...await allocateObserved(context, {
                             kind: classifyPath(relative) ?? 'search',
                             target: relative,
                             ref: `${relative}:${read.data.startLine}-${read.data.endLine}`,
@@ -546,9 +558,9 @@ export async function runInvestigationTool(
             case 'listDirectory': {
                 const dirPath = (call.dirPath || '.').trim();
                 const absolute = resolveInsideRepository(context.repositoryPath, dirPath);
-                const listing = await listDirectory(absolute, { depth: 1, excludePatterns: context.excludePatterns });
+                const listing = listSnapshotDirectory(context.snapshot, absolute, context.excludePatterns, context.side);
                 if (!listing.success || !listing.data) {
-                    return { ok: false, summary: `Could not list ${dirPath}.`, evidence: [], error: listing.error };
+                    throw new Error(`Could not list ${dirPath}.`);
                 }
                 const entries = listing.data.entries
                     .slice(0, 60)

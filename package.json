@@ -208,12 +208,30 @@
             "max": 131072
           },
           "properties": {
-            "minimal": { "type": "integer", "minimum": 1024 },
-            "low": { "type": "integer", "minimum": 1024 },
-            "medium": { "type": "integer", "minimum": 1024 },
-            "high": { "type": "integer", "minimum": 1024 },
-            "xhigh": { "type": "integer", "minimum": 1024 },
-            "max": { "type": "integer", "minimum": 1024 }
+            "minimal": {
+              "type": "integer",
+              "minimum": 1024
+            },
+            "low": {
+              "type": "integer",
+              "minimum": 1024
+            },
+            "medium": {
+              "type": "integer",
+              "minimum": 1024
+            },
+            "high": {
+              "type": "integer",
+              "minimum": 1024
+            },
+            "xhigh": {
+              "type": "integer",
+              "minimum": 1024
+            },
+            "max": {
+              "type": "integer",
+              "minimum": 1024
+            }
           },
           "additionalProperties": false,
           "markdownDescription": "%config.thinkingBudgets.desc%"
@@ -232,29 +250,6 @@
           "minimum": 0,
           "maximum": 2,
           "markdownDescription": "%config.llm.temperature.desc%"
-        },
-        "gitCommitGenie.repositoryAnalysis.enabled": {
-          "order": 11,
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "%config.repositoryAnalysis.enabled.desc%"
-        },
-        "gitCommitGenie.repositoryAnalysis.excludePatterns": {
-          "order": 13,
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "markdownDescription": "%config.repositoryAnalysis.excludePatterns.desc%"
-        },
-        "gitCommitGenie.repositoryAnalysis.updateThreshold": {
-          "order": 14,
-          "type": "number",
-          "default": 10,
-          "minimum": 1,
-          "maximum": 32,
-          "markdownDescription": "%config.repositoryAnalysis.updateThreshold.desc%"
         },
         "gitCommitGenie.ui.stageNotifications.enabled": {
           "order": 10,
@@ -310,34 +305,6 @@
           ],
           "markdownDescription": "%config.rag.embedding.batchSize.desc%"
         },
-        "gitCommitGenie.repositoryAnalysis.MaxCount": {
-          "order": 15,
-          "type": "number",
-          "default": -1,
-          "minimum": -1,
-          "markdownDescription": "%config.repositoryAnalysis.MaxCount.desc%"
-        },
-        "gitCommitGenie.repositoryAnalysis.toolResult.maxContentChars": {
-          "order": 16,
-          "type": "number",
-          "default": 40000,
-          "minimum": 1000,
-          "markdownDescription": "%config.repositoryAnalysis.toolResult.maxContentChars.desc%"
-        },
-        "gitCommitGenie.repositoryAnalysis.toolResult.maxListLines": {
-          "order": 17,
-          "type": "number",
-          "default": 3000,
-          "minimum": 10,
-          "markdownDescription": "%config.repositoryAnalysis.toolResult.maxListLines.desc%"
-        },
-        "gitCommitGenie.repositoryAnalysis.toolResult.maxSnippetChars": {
-          "order": 18,
-          "type": "number",
-          "default": 8000,
-          "minimum": 100,
-          "markdownDescription": "%config.repositoryAnalysis.toolResult.maxSnippetChars.desc%"
-        },
         "gitCommitGenie.commitLanguage": {
           "order": 2,
           "type": "string",
@@ -385,6 +352,38 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "%config.showUsageCost.desc%"
+        },
+        "gitCommitGenie.memory.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "%config.memory.enabled.desc%"
+        },
+        "gitCommitGenie.memory.consolidation.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "%config.memory.consolidation.enabled.desc%"
+        },
+        "gitCommitGenie.memory.consolidation.maxCallsPer24h": {
+          "type": "integer",
+          "default": 2,
+          "minimum": 0,
+          "maximum": 2,
+          "markdownDescription": "%config.memory.consolidation.maxCallsPer24h.desc%"
+        },
+        "gitCommitGenie.memory.maxStorageMiB": {
+          "type": "integer",
+          "default": 256,
+          "minimum": 1,
+          "maximum": 256,
+          "markdownDescription": "%config.memory.maxStorageMiB.desc%"
+        },
+        "gitCommitGenie.memory.excludePatterns": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "%config.memory.excludePatterns.desc%"
         }
       }
     },
@@ -400,16 +399,14 @@
     },
     "commands": [
       {
+        "command": "git-commit-genie.benchmarkMemory",
+        "title": "Run Repository Memory Replay (Paid API Calls)",
+        "category": "%category.title%"
+      },
+      {
         "command": "git-commit-genie.generateCommitMessage",
         "title": "%command.generate%",
         "icon": "$(genie-base)"
-      },
-      {
-        "command": "git-commit-genie.cancelRepositoryAnalysis",
-        "title": "%command.cancelRepositoryAnalysis%",
-        "category": "%category.title%",
-        "icon": "$(stop)",
-        "enablement": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning == true"
       },
       {
         "command": "git-commit-genie.cancelGeneration",
@@ -462,27 +459,6 @@
         "icon": "$(file-text)"
       },
       {
-        "command": "git-commit-genie.viewRepositoryAnalysis",
-        "title": "%command.viewRepositoryAnalysis%",
-        "category": "%category.title%",
-        "icon": "$(search)",
-        "enablement": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true"
-      },
-      {
-        "command": "git-commit-genie.refreshRepositoryAnalysis",
-        "title": "%command.refreshRepositoryAnalysis%",
-        "category": "%category.title%",
-        "icon": "$(refresh)",
-        "enablement": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
-      },
-      {
-        "command": "git-commit-genie.clearRepositoryAnalysisCache",
-        "title": "%command.clearRepositoryAnalysisCache%",
-        "category": "%category.title%",
-        "icon": "$(trash)",
-        "enablement": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
-      },
-      {
         "command": "git-commit-genie.genieMenu",
         "title": "Git Commit Genie: Menu",
         "category": "%category.title%",
@@ -499,6 +475,12 @@
         "title": "%command.resetRepositoryCost%",
         "category": "%category.title%",
         "icon": "$(trash)"
+      },
+      {
+        "command": "git-commit-genie.manageMemory",
+        "title": "%command.manageMemory%",
+        "category": "%category.title%",
+        "icon": "$(database)"
       }
     ],
     "menus": {
@@ -516,33 +498,20 @@
       ],
       "commandPalette": [
         {
-          "command": "git-commit-genie.cancelRepositoryAnalysis",
-          "when": "false"
-        },
-        {
-          "command": "git-commit-genie.refreshRepositoryAnalysis",
-          "when": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
-        },
-        {
-          "command": "git-commit-genie.clearRepositoryAnalysisCache",
-          "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning != true"
-        },
-        {
           "command": "git-commit-genie.startRagIndexing",
           "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true"
         },
         {
           "command": "git-commit-genie.cancelRagIndexing",
           "when": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true && gitCommitGenie.ragIndexing == true"
-        },
-        {
-          "command": "git-commit-genie.cancelRepositoryAnalysis",
-          "when": "gitCommitGenie.repositoryAnalysisEnabled == true && gitCommitGenie.hasGitRepo == true && gitCommitGenie.analysisRunning == true"
         }
       ]
     }
   },
   "scripts": {
+    "test:compile": "tsc --outDir out",
+    "test:memory": "tsc -p tsconfig.memory-tests.json && mocha 'out/test/ai/repositorySnapshot.test.js' 'out/test/ai/repositoryMemory*.test.js'",
+    "test:extension": "npm run test:compile && vscode-test --config vscode-test.config.mjs --skip-extension-dependencies",
     "clean": "rm -rf dist",
     "vscode:prepublish": "npm run package",
     "compile": "webpack --mode development",
@@ -551,16 +520,24 @@
     "lint": "eslint src"
   },
   "devDependencies": {
+    "@types/mocha": "^10.0.10",
     "@types/node": "22.x",
+    "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.2.2",
     "@types/react-dom": "^19.2.2",
+    "@types/sinon": "^17.0.4",
     "@types/vscode": "^1.103.0",
+    "@types/write-file-atomic": "^4.0.3",
     "@typescript-eslint/eslint-plugin": "^8.39.0",
     "@typescript-eslint/parser": "^8.39.0",
+    "@vscode/test-cli": "^0.0.11",
+    "@vscode/test-electron": "^2.5.2",
     "css-loader": "^7.1.2",
     "eslint": "^9.32.0",
+    "mocha": "^11.8.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "sinon": "^21.1.2",
     "style-loader": "^4.0.0",
     "ts-loader": "^9.5.4",
     "typescript": "^5.9.2",
@@ -571,7 +548,9 @@
     "@anthropic-ai/sdk": "^0.63.0",
     "@vscode/codicons": "^0.0.41",
     "openai": "^5.23.0",
+    "proper-lockfile": "^4.1.2",
     "react-markdown": "^10.1.0",
+    "write-file-atomic": "^6.0.0",
     "zod": "^4.1.11"
   },
   "overrides": {

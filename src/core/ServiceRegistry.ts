@@ -7,7 +7,6 @@ import {
 } from '../services/llm/providers';
 import { DiffService } from '../services/git/diff';
 import { TemplateService } from '../template/templateService';
-import { RepositoryAnalysisService } from '../services/analysis/repository/repositoryAnalysisService';
 import { LLMService } from '../services/llm/llmTypes';
 import { UnifiedLLMService } from '../services/llm/unifiedLLMService';
 import { migrateAIConfiguration } from '../services/llm/configMigration';
@@ -17,11 +16,11 @@ import { logger } from '../services/logger';
 import { RagRuntimeService } from '../services/rag/ragRuntimeService';
 import { RagHistoricalIndexService } from '../services/rag/ragHistoricalIndexService';
 import { RagRetrievalService } from '../services/rag/ragRetrievalService';
+import { RepositoryMemoryService } from '../services/memory/service';
 
 export class ServiceRegistry {
     private diffService!: DiffService;
     private templateService!: TemplateService;
-    private analysisService!: RepositoryAnalysisService;
     private readonly llmServices = new Map<string, UnifiedLLMService>();
     private currentLLMService?: UnifiedLLMService;
     private repoService!: RepoService;
@@ -29,6 +28,7 @@ export class ServiceRegistry {
     private ragRuntimeService!: RagRuntimeService;
     private ragHistoricalIndexService!: RagHistoricalIndexService;
     private ragRetrievalService!: RagRetrievalService;
+    private memoryService!: RepositoryMemoryService;
 
     constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -37,6 +37,7 @@ export class ServiceRegistry {
         await migrateAIConfiguration(this.context);
 
         this.repoService = new RepoService();
+        this.memoryService = new RepositoryMemoryService(this.context);
         this.diffService = new DiffService(this.repoService);
         this.templateService = new TemplateService(this.context);
         this.costTrackingService = new CostTrackingService(this.context);
@@ -45,9 +46,7 @@ export class ServiceRegistry {
         this.ragRetrievalService = new RagRetrievalService(this.context, this.repoService);
         this.ragRuntimeService.setBackgroundEnsureCallback(reason => this.ragHistoricalIndexService.ensureAllRepositoriesIndexed(reason));
 
-        this.analysisService = new RepositoryAnalysisService(this.context, this.repoService);
         await this.reloadProviderServices();
-        this.analysisService.setLLMResolver(provider => this.getLLMService(provider));
         this.updateCurrentLLMService();
         if (!this.currentLLMService) {
             logger.warn('No active AI model is configured. Model management remains available.');
@@ -77,7 +76,6 @@ export class ServiceRegistry {
             const service = new UnifiedLLMService(
                 this.context,
                 this.templateService,
-                this.analysisService,
                 { model, costTracker: this.costTrackingService },
             );
             await service.refreshFromSettings();
@@ -86,12 +84,13 @@ export class ServiceRegistry {
     }
 
     async dispose(): Promise<void> {
+        this.memoryService?.dispose();
         await this.ragRuntimeService?.dispose();
     }
 
     getDiffService(): DiffService { return this.diffService; }
+    getMemoryService(): RepositoryMemoryService { return this.memoryService; }
     getTemplateService(): TemplateService { return this.templateService; }
-    getAnalysisService(): RepositoryAnalysisService { return this.analysisService; }
     getCurrentLLMService(): LLMService {
         if (!this.currentLLMService) {
             throw new Error('No active AI model is configured. Select a model with Git Commit Genie: Manage Models.');

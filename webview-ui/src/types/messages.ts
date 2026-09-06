@@ -58,13 +58,7 @@ export interface CancelPendingLogsMessage {
     type: 'cancelPendingLogs';
 }
 
-export interface AnalysisRunningMessage {
-    type: 'analysisRunning';
-    running: boolean;
-    repoLabel?: string;
-}
-
-export type ExtensionMessage = UpdateRepoMessage | AddLogMessage | ClearLogsMessage | CancelPendingLogsMessage | AnalysisRunningMessage;
+export type ExtensionMessage = UpdateRepoMessage | AddLogMessage | ClearLogsMessage | CancelPendingLogsMessage;
 
 // Webview -> Extension Messages
 export interface ReadyMessage {
@@ -84,17 +78,8 @@ export interface RequestFlushLogsMessage {
     type: 'requestFlushLogs';
 }
 
-export interface RefreshAnalysisMessage {
-    type: 'refreshAnalysis';
-    repoPath: string;
-}
-
 export interface OpenGenieMenuMessage {
     type: 'openGenieMenu';
-}
-
-export interface CancelAnalysisMessage {
-    type: 'cancelAnalysis';
 }
 
 export interface RepairRagEmbeddingsMessage {
@@ -102,15 +87,13 @@ export interface RepairRagEmbeddingsMessage {
     repoPath: string;
 }
 
-export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage | RequestFlushLogsMessage | RefreshAnalysisMessage | OpenGenieMenuMessage | CancelAnalysisMessage | RepairRagEmbeddingsMessage;
+export type WebviewMessage = ReadyMessage | ClearLogsRequestMessage | OpenFileMessage | RequestFlushLogsMessage | OpenGenieMenuMessage | RepairRagEmbeddingsMessage;
 
 // Data Types
 export interface RepositoryInfo {
     name: string;
     path: string;
     cost: CostDisplay;
-    analysisStatus: 'missing' | 'analyzing' | 'idle';
-    analysisPath?: string;
     ragStatus?: {
         kind: 'disabled' | 'idle' | 'preparing' | 'importing' | 'embedding' | 'ready' | 'error';
         text: string;
@@ -125,12 +108,6 @@ export interface I18nTexts {
     noLogsYet: string;
     clearLogs: string;
     analyzing: string;
-    refreshAnalysis: string;
-    cancelAnalysis: string;
-    viewAnalysis: string;
-    analysisStatusMissing: string;
-    analysisStatusAnalyzing: string;
-    analysisStatusIdle: string;
     openSettings: string;
     repairRagEmbeddings: string;
     pipeline: PipelineTextCatalog;

@@ -83,6 +83,7 @@ class OpenAISession implements AISession {
 
         const response: any = await (this.client.responses.create as any)(body, {
             signal: request.signal,
+            ...(request.transportRetries === 0 ? { maxRetries: 0 } : {}),
         });
         this.previousResponseId = response.id;
         const text = String(response.output_text ?? '');

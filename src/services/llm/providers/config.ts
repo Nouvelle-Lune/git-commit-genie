@@ -6,7 +6,6 @@ export const AI_CONFIG_VERSION = 2;
 export const AI_CONFIG_VERSION_KEY = 'gitCommitGenie.ai.configVersion';
 export const AI_MODELS_KEY = 'gitCommitGenie.ai.models';
 export const GENERATION_MODEL_ID_KEY = 'gitCommitGenie.ai.generationModelId';
-export const REPOSITORY_ANALYSIS_MODEL_ID_KEY = 'gitCommitGenie.ai.repositoryAnalysisModelId';
 
 export const NATIVE_SECRET_KEYS: Readonly<Record<Exclude<ProviderKind, 'custom'>, string>> = Object.freeze({
     openai: 'gitCommitGenie.secret.ai.openai',

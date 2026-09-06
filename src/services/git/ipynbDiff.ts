@@ -1,8 +1,3 @@
-import * as fs from 'fs/promises';
-import * as path from 'path';
-import { Repository, Status, Change } from '../git/git';
-import { logger } from '../logger';
-
 type NotebookCell = {
   cell_type: 'code' | 'markdown' | string;
   source?: string[] | string;
@@ -18,31 +13,6 @@ function normalizeSource(src: string[] | string | undefined): string[] {
   return String(src).split(/\r?\n/);
 }
 
-async function readHead(repo: Repository, relPath: string): Promise<string | null> {
-  try {
-    return await repo.show('HEAD', relPath);
-  } catch {
-    return null;
-  }
-}
-
-async function readWorkingTree(absPath: string): Promise<string | null> {
-  try {
-    return await fs.readFile(absPath, 'utf8');
-  } catch {
-    return null;
-  }
-}
-
-function parseNotebook(jsonStr: string | null): Notebook | null {
-  if (!jsonStr) { return null; }
-  try {
-    return JSON.parse(jsonStr) as Notebook;
-  } catch {
-    return null;
-  }
-}
-
 function unifiedHeader(aPath: string, bPath: string): string[] {
   return [
     `diff --git a/${aPath} b/${bPath}`,
@@ -51,25 +21,10 @@ function unifiedHeader(aPath: string, bPath: string): string[] {
   ];
 }
 
-export async function buildNotebookSourceOnlyDiff(repo: Repository, change: Change): Promise<string> {
-  try {
-    const repoRoot = repo.rootUri.fsPath;
-    const newRel = path.relative(repoRoot, change.uri.fsPath).replace(/\\/g, '/');
-    const oldRel = change.status === Status.INDEX_RENAMED && change.originalUri
-      ? path.relative(repoRoot, change.originalUri.fsPath).replace(/\\/g, '/')
-      : newRel;
-
-    const [beforeStr, afterStr] = await Promise.all([
-      readHead(repo, oldRel),
-      readWorkingTree(change.uri.fsPath),
-    ]);
-
-    // If we couldn't read anything, bail
-    if (!afterStr && !beforeStr) { return ''; }
-
-    const beforeNb = parseNotebook(beforeStr) || { cells: [] };
-    const afterNb = parseNotebook(afterStr) || { cells: [] };
-
+/** Build source-only notebook evidence from the captured before/after blobs. */
+export function buildNotebookSourceOnlyDiff(beforeStr: string | null, afterStr: string | null, oldRel: string, newRel: string): string {
+    const beforeNb: Notebook = beforeStr === null ? { cells: [] } : JSON.parse(beforeStr);
+    const afterNb: Notebook = afterStr === null ? { cells: [] } : JSON.parse(afterStr);
     const beforeCells = Array.isArray(beforeNb.cells) ? beforeNb.cells : [];
     const afterCells = Array.isArray(afterNb.cells) ? afterNb.cells : [];
 
@@ -146,8 +101,4 @@ export async function buildNotebookSourceOnlyDiff(repo: Repository, change: Chan
     }
 
     return [...header, ...meta, ...body].join('\n');
-  } catch (err) {
-    logger.warn('Failed to build notebook source-only diff:', err);
-    return '';
-  }
 }

@@ -150,6 +150,8 @@ export interface AIContinuation {
 }
 
 export interface AIRunRequest {
+    /** Disable SDK transport retries when every paid attempt requires reservation. */
+    transportRetries?: 0;
     messages?: AIMessage[];
     toolResults?: AIToolResult[];
     tools?: AIFunctionTool[];

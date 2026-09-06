@@ -47,7 +47,7 @@ export interface LLMExecution {
     /** Quotes already recorded for this execution (task-scoped). */
     getRecordedQuotes(): readonly CostQuote[];
     /** Show showUsageCost notification from recorded quotes; does not recompute or re-accumulate. */
-    notifyUsageCostIfEnabled(callType: 'commit' | 'repoAnalysis'): void;
+    notifyUsageCostIfEnabled(callType: 'commit' | 'memory'): void;
 }
 
 export interface RagRetrievalAdapter {
@@ -64,6 +64,8 @@ export interface RagRetrievalAdapter {
  */
 export interface LLMResponse {
     content: string;
+    episode?: import('../memory/types').InvestigationEpisode;
+    memoryUsage?: import('../memory/types').MemoryUsage;
     ragMetadata?: {
         fileSummaries?: FileSummary[];
         changeSetSummary?: ChangeSetSummary;
@@ -81,6 +83,8 @@ export interface LLMError {
 }
 
 export interface GenerateCommitMessageOptions {
+    snapshot?: import('../git/repositorySnapshot').RepositorySnapshotReader;
+    memoryRun?: import('../memory/service').MemoryRun;
     token?: vscode.CancellationToken;
     targetRepo?: Repository;
     ragRetrievalService?: RagRetrievalAdapter;

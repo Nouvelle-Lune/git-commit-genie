@@ -8,16 +8,12 @@
 
 import { DiffData } from '../../git/gitTypes';
 import type { AgentRunMetrics } from '../../../agent/runtime';
-import type { RepositoryAnalysis } from '../repository/repositoryAnalysisTypes';
-
-export type RepositoryAnalysisContext = Partial<Pick<
-    RepositoryAnalysis,
-    'summary' | 'projectType' | 'technologies' | 'insights'
->>;
-
 export interface ChangeAnalysisInputs {
+    snapshot?: import('../../git/repositorySnapshot').RepositorySnapshotReader;
+    memory?: import('../../memory/retriever').MemoryRetriever;
+    loadMemory?: import('../../memory/service').MemoryRun['loadMemory'];
+    recorder?: import('../../memory/recorder').EpisodeRecorder;
     repositoryPath?: string;
-    repositoryAnalysis?: RepositoryAnalysisContext;
     userTemplate?: string;
 }
 
@@ -165,6 +161,7 @@ export interface RepositoryEvidenceItem {
     /** Human-readable citation, e.g. `src/auth/token.ts:42-78`. */
     ref: string;
     excerpt: string;
+    provenance?: import('../../git/repositorySnapshot').SourceObservation;
 }
 
 export interface InvestigationFinding {
@@ -290,6 +287,8 @@ export interface SelectedSemanticInformation {
 }
 
 export interface ChangeAnalysisTrace {
+    snapshotMetrics?: import('../../git/repositorySnapshot').SnapshotReadMetrics;
+    memoryUsage?: import('../../memory/types').MemoryUsage;
     analysisStatus: ChangeAnalysisStatus;
     analysisIssues: string[];
     /** Runtime counters and per-request provider usage for benchmark collection. */

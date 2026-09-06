@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { ConfigurationManager } from '../config/ConfigurationManager';
@@ -10,14 +9,11 @@ import { CostTrackingService } from '../services/cost/costTrackingService';
 import { repositoryCostToDisplay } from '../services/cost/costDisplay';
 import { logger } from '../services/logger';
 import {
-    REPOSITORY_ANALYSIS_MODEL_ID_KEY,
     modelSecretKey,
 } from '../services/llm/providers';
 import {
     ProviderState,
-    AnalysisState,
     GitState,
-    AnalysisIcon,
     PROVIDER_LABELS
 } from './StatusBarTypes';
 
@@ -38,28 +34,11 @@ export class StatusBarManager {
         hasApiKey: false
     };
 
-    private analysisState: AnalysisState = {
-        enabled: false,
-        running: false,
-        missing: false,
-        modelId: '',
-        label: '',
-        provider: null,
-        model: null,
-        hasApiKey: false,
-        runningRepoPath: null,
-        runningRepoLabel: null
-    };
-
     private gitState: GitState = {
         hasRepo: false,
         repoPath: null,
         repoLabel: ''
     };
-
-    // Event: analysis running state changed
-    private readonly _onAnalysisRunningChanged = new vscode.EventEmitter<{ running: boolean; label?: string | null }>();
-    public readonly onAnalysisRunningChanged = this._onAnalysisRunningChanged.event;
 
     constructor(
         private context: vscode.ExtensionContext,
@@ -77,7 +56,6 @@ export class StatusBarManager {
         this.registerEventListeners();
 
         await this.refreshAllStates();
-        await this.validateAnalysisModelApiKey(true);
 
         await this.updateStatusBar();
     }
@@ -90,34 +68,8 @@ export class StatusBarManager {
         await this.updateStatusBar();
     }
 
-    setRepoAnalysisRunning(running: boolean, repoPath?: string): void {
-        this.analysisState.running = running;
-
-        if (running && repoPath) {
-            // Store the repository being analyzed
-            this.analysisState.runningRepoPath = repoPath;
-            this.analysisState.runningRepoLabel = path.basename(repoPath);
-        } else if (!running) {
-            // Clear when analysis finishes
-            this.analysisState.runningRepoPath = null;
-            this.analysisState.runningRepoLabel = null;
-        }
-
-        vscode.commands.executeCommand('setContext', 'gitCommitGenie.analysisRunning', running);
-        this.updateStatusBar();
-        try { this._onAnalysisRunningChanged.fire({ running, label: this.analysisState.runningRepoLabel }); } catch { /* ignore */ }
-    }
-
-    isRepoAnalysisRunning(): boolean {
-        return this.analysisState.running;
-    }
-
     hasGitRepository(): boolean {
         return this.gitState.hasRepo;
-    }
-
-    isRepoAnalysisMissing(): boolean {
-        return this.analysisState.missing;
     }
 
     // ========================================
@@ -161,8 +113,6 @@ export class StatusBarManager {
             }
 
             await this.refreshProviderState();
-            await this.refreshAnalysisState();
-            await this.validateAnalysisModelApiKey(true);
             this.updateStatusBar();
         });
         this.context.subscriptions.push(disposable);
@@ -177,8 +127,7 @@ export class StatusBarManager {
 
     private registerConfigListeners(): void {
         const disposable = vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('gitCommitGenie.repositoryAnalysis.enabled')) {
-                void this.validateAnalysisModelApiKey(true);
+            if (e.affectsConfiguration('gitCommitGenie.memory')) {
                 void this.updateStatusBar();
             }
         });
@@ -228,7 +177,6 @@ export class StatusBarManager {
     private async refreshAllStates(): Promise<void> {
         await this.refreshProviderState();
         await this.refreshGitState();
-        await this.refreshAnalysisState();
     }
 
     private async refreshProviderState(): Promise<void> {
@@ -258,56 +206,6 @@ export class StatusBarManager {
         vscode.commands.executeCommand('setContext', 'gitCommitGenie.hasGitRepo', hasRepo);
     }
 
-    private async refreshAnalysisState(): Promise<void> {
-        const selectedId = this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '');
-        const selected = this.serviceRegistry.getModel(selectedId);
-        const enabled = this.configManager.isRepoAnalysisEnabled();
-        if (selectedId && !selected) {
-            logger.warn(`Repository analysis model '${selectedId}' is not configured.`);
-        }
-        const key = selected ? await this.context.secrets.get(modelSecretKey(selected)) : undefined;
-
-        const hasKey = !!(key && key.trim());
-
-        // Check if analysis file exists
-        const missing = this.checkAnalysisFileMissing();
-
-        this.analysisState = {
-            enabled,
-            running: this.analysisState.running,
-            missing,
-            modelId: selected?.id ?? '',
-            label: selected?.label ?? '',
-            provider: selected?.provider ?? null,
-            model: selected?.model ?? null,
-            hasApiKey: hasKey,
-            runningRepoPath: this.analysisState.runningRepoPath,
-            runningRepoLabel: this.analysisState.runningRepoLabel
-        };
-    }
-
-    private checkAnalysisFileMissing(): boolean {
-        if (!this.configManager.isRepoAnalysisEnabled() || !this.gitState.hasRepo) {
-            return false;
-        }
-
-        try {
-            // Use the current active repository path from gitState
-            const repoPath = this.gitState.repoPath;
-            if (!repoPath) {
-                return false;
-            }
-
-            const mdPath = this.serviceRegistry
-                .getAnalysisService()
-                .getAnalysisMarkdownFilePath(repoPath);
-
-            return !fs.existsSync(mdPath);
-        } catch {
-            return false;
-        }
-    }
-
     // ========================================
     // Status Bar UI Update
     // ========================================
@@ -315,7 +213,6 @@ export class StatusBarManager {
     async updateStatusBar(): Promise<void> {
         await this.refreshProviderState();
         await this.refreshGitState();
-        await this.refreshAnalysisState();
 
         const text = this.buildStatusBarText();
         const tooltip = this.buildStatusBarTooltip();
@@ -333,9 +230,9 @@ export class StatusBarManager {
 
         const chainBadge = chainEnabled ? vscode.l10n.t(I18N.statusBar.chainBadge) : '';
         const modelLabel = this.getModelLabel();
-        const analysisIcon = this.getAnalysisIcon();
+        const memoryIcon = vscode.workspace.getConfiguration('gitCommitGenie.memory').get<boolean>('enabled', false) ? '$(database)' : '';
 
-        return `$(genie-base) Genie: ${modelLabel}${chainBadge} ${analysisIcon}`;
+        return `$(genie-base) Genie: ${modelLabel}${chainBadge} ${memoryIcon}`;
     }
 
     private getModelLabel(): string {
@@ -360,18 +257,6 @@ export class StatusBarManager {
         // Main provider/model info
         lines.push(this.getProviderTooltip());
 
-        // Analysis info
-        const analysisTooltip = this.getAnalysisTooltip();
-        if (analysisTooltip) {
-            lines.push(analysisTooltip);
-        }
-
-        // Repository status
-        const repoTooltip = this.getRepoTooltip();
-        if (repoTooltip) {
-            lines.push(repoTooltip);
-        }
-
         return lines.join('\n');
     }
 
@@ -388,47 +273,6 @@ export class StatusBarManager {
         return vscode.l10n.t(I18N.statusBar.tooltipNeedConfig, label.trim() || PROVIDER_LABELS[provider]);
     }
 
-    private getAnalysisTooltip(): string {
-        const { provider, model } = this.analysisState;
-        if (!provider || !model) {
-            return '';
-        }
-
-        return vscode.l10n.t(I18N.statusBar.analysisModel, this.shortenModelName(model));
-    }
-
-    private getRepoTooltip(): string {
-        if (!this.analysisState.enabled) {
-            return '';
-        }
-
-        if (!this.gitState.hasRepo) {
-            return vscode.l10n.t(I18N.repoAnalysis.initGitToEnable);
-        }
-
-        const okKey = this.analysisState.hasApiKey;
-        const okModel = !!(this.analysisState.model && this.analysisState.model.trim());
-
-        if (!okKey) {
-            return vscode.l10n.t(I18N.repoAnalysis.missingApiKey);
-        }
-        if (!okModel) {
-            return vscode.l10n.t(I18N.repoAnalysis.missingModel);
-        }
-        if (this.analysisState.running) {
-            // Show which repository is being analyzed
-            if (this.analysisState.runningRepoLabel) {
-                return vscode.l10n.t(I18N.repoAnalysis.runningWithRepo, this.analysisState.runningRepoLabel);
-            }
-            return vscode.l10n.t(I18N.repoAnalysis.running);
-        }
-        if (this.analysisState.missing) {
-            return vscode.l10n.t(I18N.repoAnalysis.missing);
-        }
-
-        return vscode.l10n.t(I18N.repoAnalysis.idle);
-    }
-
     private getStatusBarCommand(): string {
         return this.gitState.hasRepo ? 'git-commit-genie.genieMenu' : 'git.init';
     }
@@ -436,33 +280,6 @@ export class StatusBarManager {
     // ========================================
     // Icon and Visual Helpers
     // ========================================
-
-    private getAnalysisIcon(): string {
-        if (!this.analysisState.enabled) {
-            return AnalysisIcon.None;
-        }
-
-        if (!this.gitState.hasRepo) {
-            return AnalysisIcon.NoRepo;
-        }
-
-        const okKey = this.analysisState.hasApiKey;
-        const okModel = !!(this.analysisState.model && this.analysisState.model.trim());
-
-        if (!okKey || !okModel) {
-            return AnalysisIcon.Warning;
-        }
-
-        if (this.analysisState.running) {
-            return AnalysisIcon.Running;
-        }
-
-        if (this.analysisState.missing) {
-            return AnalysisIcon.Refresh;
-        }
-
-        return AnalysisIcon.Complete;
-    }
 
     // ========================================
     // Cost Tracking
@@ -504,47 +321,6 @@ export class StatusBarManager {
     // ========================================
     // Analysis Model Validation
     // ========================================
-
-    private async validateAnalysisModelApiKey(showPrompt: boolean): Promise<void> {
-        const modelId = this.context.globalState.get<string>(REPOSITORY_ANALYSIS_MODEL_ID_KEY, '');
-        const model = this.serviceRegistry.getModel(modelId);
-        if (!model) {
-            return;
-        }
-        const key = await this.context.secrets.get(modelSecretKey(model));
-        if (key?.trim() || !showPrompt) {
-            return;
-        }
-
-        const providerLabel = PROVIDER_LABELS[model.provider];
-        const choice = await vscode.window.showWarningMessage(
-            vscode.l10n.t(I18N.repoAnalysis.missingApiKey),
-            vscode.l10n.t(I18N.actions.enterKey),
-            vscode.l10n.t(I18N.actions.manageModels),
-            vscode.l10n.t(I18N.actions.dismiss)
-        );
-
-        if (choice === vscode.l10n.t(I18N.actions.enterKey)) {
-            const newKey = await vscode.window.showInputBox({
-                title: vscode.l10n.t(I18N.manageModels.enterKeyTitle, providerLabel),
-                prompt: `${providerLabel} API Key`,
-                placeHolder: `${providerLabel} API Key`,
-                password: true,
-                ignoreFocusOut: true,
-            });
-
-            if (newKey?.trim()) {
-                const service = this.serviceRegistry.getLLMService(model.id);
-                if (!service) {
-                    throw new Error(`AI model service '${model.id}' is not configured.`);
-                }
-                await service.setApiKey(newKey.trim());
-                await this.updateStatusBar();
-            }
-        } else if (choice === vscode.l10n.t(I18N.actions.manageModels)) {
-            await vscode.commands.executeCommand('git-commit-genie.manageModels');
-        }
-    }
 
     private shortenModelName(modelName: string): string {
         if (!modelName) {

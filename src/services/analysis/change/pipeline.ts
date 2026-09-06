@@ -1,7 +1,6 @@
 import { DiffData } from '../../git/gitTypes';
 import { LLMExecution } from '../../llm/llmTypes';
 import { AIMessage } from '../../llm/providers';
-import { IRepositoryAnalysisService } from '../repository/repositoryAnalysisTypes';
 import { safeRun } from '../../../utils/safeRun';
 import { StageEvent } from '../../../ui/StageNotificationManager';
 import {
@@ -16,6 +15,7 @@ import {
     emptyRepositoryEvidence,
     isInvestigationWorthwhile,
     planInvestigation,
+    runChangeAnalysisAgent,
 } from './investigation/agent';
 import {
     InvestigationSettings,
@@ -46,7 +46,6 @@ export interface ChangeAnalysisPipelineParams {
         force?: boolean,
     ) => Promise<void>;
     investigationOverrides?: Partial<InvestigationSettings>;
-    repositoryAnalysisService?: Pick<IRepositoryAnalysisService, 'runChangeAnalysis'>;
     evidenceLedger: EvidenceLedger;
     onStage?: (event: StageEvent) => void;
     onAgentMilestone?: (milestone: 'start' | 'terminal', timestamp: number) => void;
@@ -111,6 +110,7 @@ export async function runChangeAnalysisPipeline(
     let agentMetrics: ChangeAnalysisTrace['agentMetrics'];
     let agentClaims: ChangeAnalysisTrace['agentClaims'] = [];
     let investigationPlan: InvestigationPlan | undefined;
+    let memoryUsage: ChangeAnalysisTrace['memoryUsage'];
     if (!settings.enabled) {
         repositoryEvidence = emptyRepositoryEvidence('Repository investigation is disabled by configuration.');
     } else if (!inputs.repositoryPath) {
@@ -119,7 +119,13 @@ export async function runChangeAnalysisPipeline(
         repositoryEvidence = emptyRepositoryEvidence('The diff alone determines the meaning of this change.');
     } else {
         safeRun('Chain.onStage.investigationPlanStart', () => onStage?.({ type: 'investigationPlanStart' }));
-        const plan = await planInvestigation(changeExtraction, execution, inputs.repositoryAnalysis);
+        const memoryQuery = { paths: changeExtraction.changedFiles.map(file => file.path),
+            symbols: changeExtraction.changedSymbols.map(symbol => symbol.name), keywords: [...changeExtraction.changedConfigs, ...changeExtraction.changedDependencies] };
+        const memory = inputs.loadMemory ? await inputs.loadMemory(memoryQuery) : inputs.memory;
+        const navigation = memory?.retrieveNavigation(memoryQuery,
+            Math.min(1500, Math.floor(execution.tokenBudget.hardInputTokens * 0.05))) ?? [];
+        const plan = await planInvestigation(changeExtraction, execution, navigation);
+        if (memory) { memoryUsage = { ...memory.usage }; }
         investigationPlan = plan;
         safeRun('Chain.onStage.investigationPlanned', () => onStage?.({
             type: 'investigationPlanned',
@@ -137,16 +143,18 @@ export async function runChangeAnalysisPipeline(
                 type: 'investigationStart',
                 data: { maxSteps: settings.maxSteps },
             }));
-            if (!params.repositoryAnalysisService) {
-                throw new Error('RepositoryAnalysisService is required for change-conditioned repository analysis.');
-            }
+            if (!inputs.snapshot) { throw new Error('A captured repository snapshot is required for investigation.'); }
             try {
                 await compactFor('semanticAnalysis', current => [{
                     role: 'user',
                     content: JSON.stringify({ changeExtraction, plan, evidence: current }),
                 }]);
                 params.onAgentMilestone?.('start', Date.now());
-                const agentOutput = await params.repositoryAnalysisService.runChangeAnalysis({
+                const agentOutput = await runChangeAnalysisAgent({
+                    snapshot: inputs.snapshot,
+                    recorder: inputs.recorder,
+                    memory,
+                    navigation,
                     extraction: changeExtraction,
                     plan,
                     repositoryPath: inputs.repositoryPath,
@@ -155,7 +163,6 @@ export async function runChangeAnalysisPipeline(
                     maxSteps: settings.maxSteps,
                     evidence: getEvidence(),
                     evidenceLedger: params.evidenceLedger,
-                    repositoryTerminology: inputs.repositoryAnalysis,
                     userTemplate: inputs.userTemplate,
                     onContextCompacted: event => safeRun('Chain.onStage.contextCompacted', () => onStage?.({
                         type: 'contextCompacted',
@@ -181,6 +188,11 @@ export async function runChangeAnalysisPipeline(
                 analysisIssues = agentOutput.issues;
                 agentMetrics = agentOutput.runtimeMetrics;
                 agentClaims = agentOutput.claims;
+                if (memory) {
+                    const adopted = new Set(agentClaims.filter(claim => claim.disposition !== 'omit').flatMap(claim => claim.evidenceRefs));
+                    memory.recordAdoption(repositoryEvidence.items.filter(item => adopted.has(item.id)).flatMap(item => item.provenance ? [item.provenance] : []));
+                    memoryUsage = { ...memory.usage };
+                }
                 params.onAgentMilestone?.('terminal', Date.now());
             } catch (error) {
                 if (!isContextWindowFailure(error)) {
@@ -260,6 +272,8 @@ export async function runChangeAnalysisPipeline(
     }));
 
     return {
+        ...(inputs.snapshot?.metrics ? { snapshotMetrics: { ...inputs.snapshot.metrics } } : {}),
+        ...(memoryUsage ? { memoryUsage } : {}),
         analysisStatus,
         analysisIssues,
         ...(agentMetrics ? { agentMetrics } : {}),

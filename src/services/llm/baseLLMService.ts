@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { DiffData } from '../git/gitTypes';
 import { TemplateService } from '../../template/templateService';
-import { IRepositoryAnalysisService } from '../analysis/repository/repositoryAnalysisTypes';
 import { Repository } from '../git/git';
 import { RepoService } from '../repo/repo';
 import { ProviderError } from './providers/errors/providerError';
@@ -21,13 +20,11 @@ import {
 export abstract class BaseLLMService implements LLMService {
     protected context: vscode.ExtensionContext;
     protected templateService: TemplateService;
-    protected analysisService?: IRepositoryAnalysisService;
     protected repoService: RepoService;
 
-    constructor(context: vscode.ExtensionContext, templateService: TemplateService, analysisService?: IRepositoryAnalysisService) {
+    constructor(context: vscode.ExtensionContext, templateService: TemplateService) {
         this.context = context;
         this.templateService = templateService;
-        this.analysisService = analysisService;
         this.repoService = new RepoService();
     }
 
@@ -124,23 +121,6 @@ export abstract class BaseLLMService implements LLMService {
         const cfg = vscode.workspace.getConfiguration();
         const templatesPath = this.templateService.getActiveTemplate();
 
-        // Get repository analysis
-        let repositoryAnalysis = '';
-        if (this.analysisService) {
-            try {
-                const repositoryPath = this.getRepositoryPath(targetRepo);
-                if (repositoryPath) {
-                    repositoryAnalysis = await this.analysisService.getAnalysisForPrompt(repositoryPath);
-                    if (repositoryAnalysis) {
-                        repositoryAnalysis = JSON.parse(repositoryAnalysis);
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to get repository analysis:', error);
-                repositoryAnalysis = '';
-            }
-        }
-
         let userTemplateContent = '';
         if (templatesPath && typeof templatesPath === 'string' && templatesPath.trim()) {
             try {
@@ -171,7 +151,6 @@ export abstract class BaseLLMService implements LLMService {
                 status: diff.status
             })),
             "current-time": time,
-            "repository-analysis": repositoryAnalysis,
             "user-template": userTemplateContent,
             "target-language": targetLanguage
         };

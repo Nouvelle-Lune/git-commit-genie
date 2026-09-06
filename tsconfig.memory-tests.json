@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "outDir": "out", "rootDir": "src" },
+  "include": ["src/services/memory/**/*.ts", "src/services/git/repositorySnapshot.ts", "src/test/ai/*Memory*.test.ts", "src/test/ai/repositorySnapshot.test.ts"],
+  "exclude": ["node_modules"]
+}

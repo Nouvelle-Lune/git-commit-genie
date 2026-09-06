@@ -1,6 +1,5 @@
 import { LLMExecution } from "../llm/llmTypes";
 import { AIMessage } from "../llm/providers";
-import { IRepositoryAnalysisService } from "../analysis/repository/repositoryAnalysisTypes";
 import { ChainInputs, ChangeSetSummary, ChainOutputs, RagRetrievalQuery, RagStyleReference, RetrievalFeatures } from "./types";
 import { DraftEvidence, SelectedSemanticInformation } from "../analysis/change/types";
 
@@ -36,7 +35,6 @@ export async function generateCommitMessageChain(
 		tokenBudget?: ChainTokenBudget;
 		/** Overrides the configured investigation limits; used by tests and benchmarks. */
 		investigation?: Partial<InvestigationSettings>;
-		repositoryAnalysisService?: Pick<IRepositoryAnalysisService, 'runChangeAnalysis'>;
 		onStage?: (event: import('../../ui/StageNotificationManager').StageEvent) => void;
 		retrieveRagExamples?: (query: RagRetrievalQuery) => Promise<RagStyleReference[]>;
 	}
@@ -168,7 +166,6 @@ export async function generateCommitMessageChain(
 		getEvidence: () => analysisEvidence.current,
 		compactFor,
 		investigationOverrides: options?.investigation,
-		repositoryAnalysisService: options?.repositoryAnalysisService,
 		evidenceLedger,
 		onStage: options?.onStage,
 		onAgentMilestone: (milestone, timestamp) => {

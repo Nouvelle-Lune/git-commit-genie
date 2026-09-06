@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AgentProfile, AgentRuntime, EvidenceLedger } from '../../agent';
 import { createChangeAnalysisProfile } from '../../services/analysis/change/investigation/changeAnalysisProfile';
 import { DiffData } from '../../services/git/gitTypes';
+import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
 import { LLMExecution } from '../../services/llm/llmTypes';
 import { AIRunRequest, AIRunResponse, AISession, CustomProvider } from '../../services/llm/providers';
 import { resolveChainTokenBudget } from '../../services/llm/inputTokenBudget';
@@ -202,6 +203,7 @@ describe('AgentRuntime contracts', () => {
                 changedTypes: [], changedDependencies: [],
             },
             plan: { targets: [], notes: null },
+            snapshot: {} as RepositorySnapshotReader,
             repositoryPath: '/tmp/repository',
             excludePatterns: [],
             evidence: [],

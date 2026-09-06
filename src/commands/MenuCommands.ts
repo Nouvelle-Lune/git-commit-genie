@@ -1,5 +1,4 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
 import { L10N_KEYS as I18N } from '../i18n/keys';
@@ -32,23 +31,7 @@ export class MenuCommands {
             action: 'models'
         });
 
-        if (this.isRepoAnalysisEnabled() && this.statusBarManager.hasGitRepository()) {
-            if (this.statusBarManager.isRepoAnalysisRunning()) {
-                items.push({
-                    label: vscode.l10n.t(I18N.genieMenu.cancelAnalysis),
-                    action: 'cancel'
-                });
-            } else {
-                items.push({
-                    label: vscode.l10n.t(I18N.genieMenu.refreshAnalysis),
-                    action: 'refresh'
-                });
-            }
-            items.push({
-                label: vscode.l10n.t(I18N.genieMenu.openMarkdown),
-                action: 'open'
-            });
-        }
+        items.push({ label: vscode.l10n.t('Repository Memory'), action: 'memory' });
 
         const pick = await vscode.window.showQuickPick(items, {
             placeHolder: vscode.l10n.t(I18N.genieMenu.placeholder)
@@ -67,40 +50,13 @@ export class MenuCommands {
             return;
         }
 
-        const repositoryPath = wf[0].uri.fsPath;
-
         switch (pick.action) {
             case 'toggle':
-                vscode.commands.executeCommand('git-commit-genie.toggleChainMode');
-            case 'cancel':
-                vscode.commands.executeCommand('git-commit-genie.cancelRepositoryAnalysis');
+                await vscode.commands.executeCommand('git-commit-genie.toggleChainMode');
                 break;
-            case 'refresh':
-                vscode.commands.executeCommand('git-commit-genie.refreshRepositoryAnalysis');
+            case 'memory':
+                await vscode.commands.executeCommand('git-commit-genie.manageMemory');
                 break;
-            case 'open':
-                await this.openMarkdown(repositoryPath);
-                break;
-        }
-    }
-
-    private async openMarkdown(repositoryPath: string): Promise<void> {
-        const analysisService = this.serviceRegistry.getAnalysisService();
-        const mdPath = analysisService.getAnalysisMarkdownFilePath(repositoryPath);
-
-        if (fs.existsSync(mdPath)) {
-            const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(mdPath));
-            await vscode.window.showTextDocument(doc);
-        } else {
-            vscode.window.showInformationMessage(vscode.l10n.t(I18N.repoAnalysis.mdNotFound));
-        }
-    }
-
-    private isRepoAnalysisEnabled(): boolean {
-        try {
-            return vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis').get<boolean>('enabled', true);
-        } catch {
-            return true;
         }
     }
 }

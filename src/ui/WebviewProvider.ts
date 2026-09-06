@@ -49,23 +49,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
             })
         );
 
-        // Listen to analysis running state changes
-        if (this._statusBar) {
-            this._disposables.push(
-                this._statusBar.onAnalysisRunningChanged(() => {
-                    this._handleRepositoryChange();
-                })
-            );
-        }
-
-        // Listen to analysis data changes (e.g., clearAnalysis)
-        const analysisService = this._serviceRegistry.getAnalysisService();
         const ragRuntimeService = this._serviceRegistry.getRagRuntimeService();
-        this._disposables.push(
-            analysisService.onAnalysisChanged(() => {
-                this._handleRepositoryChange();
-            })
-        );
         this._disposables.push(
             ragRuntimeService.onDidRepositoryStatusChange(() => {
                 this._handleRepositoryChange();
@@ -168,12 +152,6 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 if (data.type === 'ready') {
                     // Delay initial data send until Git is likely ready to avoid empty repos/logs
                     await this._sendRepositoryDataWithDelay();
-                    // Send current running state
-                    try {
-                        const running = !!this._statusBar?.isRepoAnalysisRunning();
-                        const label = (this._statusBar as any)?.['analysisState']?.runningRepoLabel || undefined;
-                        this.sendMessage({ type: 'analysisRunning', running, repoLabel: label } as any);
-                    } catch { /* ignore */ }
                 } else if (data.type === 'clearLogs') {
                     this.clearLogsAndStorage();
                 } else if (data.type === 'openFile') {
@@ -188,7 +166,7 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                             // File doesn't exist
                             logger.warn(`File does not exist: ${data.filePath}`);
                             vscode.window.showWarningMessage(
-                                vscode.l10n.t(I18N.repoAnalysis.mdNotFound)
+                                vscode.l10n.t('The requested file no longer exists.')
                             );
                         }
                     } catch (error) {
@@ -196,15 +174,9 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                     }
                 } else if ((data as any).type === 'requestFlushLogs') {
                     try { logger.flushLogsToWebview(); } catch { /* ignore */ }
-                } else if (data.type === 'refreshAnalysis') {
-                    // Trigger refresh analysis command for specific repo
-                    vscode.commands.executeCommand('git-commit-genie.refreshRepositoryAnalysis', data.repoPath);
                 } else if (data.type === 'openGenieMenu') {
                     // Open Genie menu
                     vscode.commands.executeCommand('git-commit-genie.genieMenu');
-                } else if (data.type === 'cancelAnalysis') {
-                    // Cancel repository analysis
-                    vscode.commands.executeCommand('git-commit-genie.cancelRepositoryAnalysis');
                 } else if (data.type === 'repairRagEmbeddings') {
                     // Repair missing RAG embeddings for a specific repo. Resolve the repo by path
                     // and forward an arg shape consistent with other repo-targeted commands.
@@ -293,10 +265,6 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
     /**
      * Send analysis running state to webview
      */
-    public sendAnalysisRunning(running: boolean, repoLabel?: string): void {
-        this.sendMessage({ type: 'analysisRunning', running, repoLabel } as any);
-    }
-
     /**
      * Update webview content
      */
@@ -313,13 +281,10 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
     }> {
         const repoService = this._serviceRegistry.getRepoService();
         const costService = this._serviceRegistry.getCostTrackingService();
-        const analysisService = this._serviceRegistry.getAnalysisService();
         const ragRuntimeService = this._serviceRegistry.getRagRuntimeService();
         const repositories = repoService.getRepositories();
 
-        const isRepoAnalysisEnabled = vscode.workspace.getConfiguration('gitCommitGenie.repositoryAnalysis').get<boolean>('enabled', true);
         const isRagEnabled = vscode.workspace.getConfiguration('gitCommitGenie.rag').get<boolean>('enabled', false);
-        const runningRepoPath = this._statusBar?.isRepoAnalysisRunning() ? (this._statusBar as any)?.['analysisState']?.runningRepoPath : null;
 
         const repoCosts: RepositoryInfo[] = [];
         for (const repo of repositories) {
@@ -327,34 +292,10 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
             const repoName = path.basename(repoPath);
             const cost = await costService.getRepositoryCostSnapshot(repoPath);
 
-            // Determine analysis status
-            let analysisStatus: 'missing' | 'analyzing' | 'idle' = 'missing';
-            let analysisPath: string | undefined;
-
-            if (isRepoAnalysisEnabled) {
-                if (runningRepoPath === repoPath) {
-                    analysisStatus = 'analyzing';
-                } else {
-                    try {
-                        const analysis = await analysisService.getAnalysis(repoPath);
-                        if (analysis) {
-                            analysisStatus = 'idle';
-                            analysisPath = path.join(repoPath, '.gitgenie', 'repository-analysis.md');
-                        }
-                    } catch {
-                        analysisStatus = 'missing';
-                    }
-                }
-            } else {
-                analysisStatus = 'idle'; // If disabled, show as idle
-            }
-
             repoCosts.push({
                 name: repoName,
                 path: repoPath,
                 cost: repositoryCostToDisplay(cost),
-                analysisStatus,
-                analysisPath,
                 ragStatus: (() => {
                     if (!isRagEnabled) {
                         return undefined;
@@ -375,12 +316,6 @@ export class WebviewProvider implements vscode.WebviewViewProvider {
                 noLogsYet: vscode.l10n.t(I18N.dashboard.noLogsYet),
                 clearLogs: vscode.l10n.t(I18N.dashboard.clearLogs),
                 analyzing: vscode.l10n.t(I18N.dashboard.analyzing),
-                refreshAnalysis: vscode.l10n.t(I18N.dashboard.refreshAnalysis),
-                cancelAnalysis: vscode.l10n.t(I18N.dashboard.cancelAnalysis),
-                viewAnalysis: vscode.l10n.t(I18N.dashboard.viewAnalysis),
-                analysisStatusMissing: vscode.l10n.t(I18N.dashboard.analysisStatusMissing),
-                analysisStatusAnalyzing: vscode.l10n.t(I18N.dashboard.analysisStatusAnalyzing),
-                analysisStatusIdle: vscode.l10n.t(I18N.dashboard.analysisStatusIdle),
                 openSettings: vscode.l10n.t(I18N.actions.openSettings),
                 repairRagEmbeddings: vscode.l10n.t(I18N.dashboard.repairRagEmbeddings),
                 pipeline: (() => {
