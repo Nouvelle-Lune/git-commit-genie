@@ -63,7 +63,7 @@ export async function runStructuredCompletion<T>(options: StructuredCompletionOp
         const structured = response.structured;
         if (structured === undefined) {
             callbacks?.onMissingStructured?.(attempt + 1, totalAttempts, response);
-            const termination = classifyTermination(response);
+            const termination = classifyStructuredTermination(response);
             if (termination !== undefined) {
                 throw new StructuredOutputTerminatedError(termination, response, label);
             }
@@ -94,7 +94,12 @@ export async function runStructuredCompletion<T>(options: StructuredCompletionOp
     throw new Error(`Structured request for ${label} exited retry loop unexpectedly.`);
 }
 
-function classifyTermination(response: AIRunResponse): StructuredOutputFailureKind | undefined {
+/**
+ * Names the provider-side termination that makes a missing JSON object
+ * unrecoverable. Shared with the Agent Runtime so a truncated terminal is not
+ * reported as a schema problem the model could have avoided.
+ */
+export function classifyStructuredTermination(response: AIRunResponse): StructuredOutputFailureKind | undefined {
     if (response.stopReason === 'context_window') {
         return 'context_exhausted';
     }

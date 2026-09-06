@@ -1,0 +1,295 @@
+import { strict as assert } from 'assert';
+import { describe, it } from 'mocha';
+import { z } from 'zod';
+import {
+    AGENT_TERMINAL_LIMITS,
+    changeAnalysisAgentFinalResponseSchema,
+} from '../../services/llm/providers/schemas/common';
+import { buildTerminalContractLines } from '../../services/analysis/change/investigation/terminalContract';
+import { buildStructuredFieldIssues } from '../../services/llm/structuredFieldIssues';
+
+function minimalTerminal(overrides: Record<string, unknown> = {}) {
+    return {
+        investigation: {
+            findings: [],
+            unresolvedQuestions: [],
+            stopReason: 'Enough evidence.',
+        },
+        changeTargets: [],
+        dependencyContext: {
+            callers: [],
+            callees: [],
+            stateDependencies: [],
+            relatedConfigs: [],
+            relatedTypes: [],
+        },
+        claims: [],
+        behaviorAnalysis: { before: null, after: null, observableEffect: null },
+        capabilityContext: { technicalCapability: null, productCapability: null },
+        intentAnalysis: { primaryIntent: null, supportedBy: [], confidence: 'low' as const },
+        changeClassification: {
+            existingBehaviorCorrected: false,
+            newCapabilityAdded: false,
+            externalBehaviorChanged: false,
+            structuralOnly: true,
+            recommendedType: 'refactor',
+            reason: null,
+        },
+        suggestedScope: null,
+        selectionNotes: null,
+        uncertainties: [],
+        ...overrides,
+    };
+}
+
+describe('structured field issue diagnostics', () => {
+    it('reports intentAnalysis.supportedBy overflow as tooManyItems', () => {
+        const input = minimalTerminal({
+            intentAnalysis: {
+                primaryIntent: 'Improve reliability',
+                supportedBy: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9'],
+                confidence: 'high',
+            },
+        });
+        const parsed = changeAnalysisAgentFinalResponseSchema.safeParse(input);
+        assert.equal(parsed.success, false);
+        if (parsed.success) {
+            return;
+        }
+
+        const issues = buildStructuredFieldIssues(parsed.error, input);
+
+        assert.deepEqual(issues, [{
+            path: 'intentAnalysis.supportedBy',
+            kind: 'tooManyItems',
+            count: 9,
+            limit: 8,
+        }]);
+    });
+
+    it('reports six simultaneous evidence ref overflows with exact paths', () => {
+        const input = minimalTerminal({
+            investigation: {
+                findings: [{
+                    target: 'parse',
+                    question: 'Who calls parse?',
+                    answer: 'The client calls parse.',
+                    evidenceRefs: ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9'],
+                }],
+                unresolvedQuestions: [],
+                stopReason: 'Enough evidence.',
+            },
+            changeTargets: [{
+                symbol: 'parse',
+                file: 'src/parser.ts',
+                role: 'changed function',
+                evidenceRefs: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9'],
+            }],
+            claims: [
+                {
+                    category: 'observed_change',
+                    claim: 'changes branch one',
+                    evidenceRefs: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9'],
+                    disposition: 'must_express',
+                },
+                {
+                    category: 'repository_fact',
+                    claim: 'has callers one',
+                    evidenceRefs: ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9'],
+                    disposition: 'optional',
+                },
+                {
+                    category: 'supported_inference',
+                    claim: 'has callers two',
+                    evidenceRefs: ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9'],
+                    disposition: 'optional',
+                },
+            ],
+            intentAnalysis: {
+                primaryIntent: 'Improve reliability',
+                supportedBy: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9'],
+                confidence: 'high',
+            },
+        });
+        const parsed = changeAnalysisAgentFinalResponseSchema.safeParse(input);
+        assert.equal(parsed.success, false);
+        if (parsed.success) {
+            return;
+        }
+
+        const issues = buildStructuredFieldIssues(parsed.error, input);
+        const tooMany = issues.filter(issue => issue.kind === 'tooManyItems');
+
+        assert.deepEqual(tooMany.map(issue => issue.path), [
+            'investigation.findings[0].evidenceRefs',
+            'changeTargets[0].evidenceRefs',
+            'claims[0].evidenceRefs',
+            'claims[1].evidenceRefs',
+            'claims[2].evidenceRefs',
+            'intentAnalysis.supportedBy',
+        ]);
+        for (const issue of tooMany) {
+            assert.equal(issue.count, 9);
+            assert.equal(issue.limit, 8);
+        }
+    });
+
+    it('reports D-only finding evidence as invalidFormat', () => {
+        const input = minimalTerminal({
+            investigation: {
+                findings: [{
+                    target: 'parse',
+                    question: 'Who calls parse?',
+                    answer: 'The diff mentions parse.',
+                    evidenceRefs: ['D1'],
+                }],
+                unresolvedQuestions: [],
+                stopReason: 'Enough evidence.',
+            },
+        });
+        const parsed = changeAnalysisAgentFinalResponseSchema.safeParse(input);
+        assert.equal(parsed.success, false);
+        if (parsed.success) {
+            return;
+        }
+
+        const issues = buildStructuredFieldIssues(parsed.error, input);
+        const invalid = issues.find(issue => issue.kind === 'invalidFormat');
+
+        assert.ok(invalid);
+        assert.equal(invalid?.path, 'investigation.findings[0].evidenceRefs[0]');
+        assert.match(String(invalid?.expected), /\^E\\d\+\$/);
+        assert.equal(invalid?.actual, '"D1"');
+    });
+});
+
+describe('exported finding evidence schema', () => {
+    it('matches Zod bounds and E* pattern in JSON Schema export', () => {
+        const exported = z.toJSONSchema(changeAnalysisAgentFinalResponseSchema) as {
+            properties: {
+                investigation: {
+                    properties: {
+                        findings: {
+                            items: {
+                                properties: {
+                                    evidenceRefs: {
+                                        minItems: number;
+                                        maxItems: number;
+                                        items: { pattern: string };
+                                    };
+                                };
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        const evidenceRefs = exported.properties.investigation.properties.findings.items.properties.evidenceRefs;
+
+        assert.equal(evidenceRefs.minItems, 1);
+        assert.equal(evidenceRefs.maxItems, 8);
+        assert.equal(evidenceRefs.items.pattern, '^E\\d+$');
+    });
+
+    it('agrees with Zod on legal E*, empty, D-only, mixed, and overflow arrays', () => {
+        const cases = [
+            { refs: ['E1'], valid: true },
+            { refs: [], valid: false },
+            { refs: ['D1'], valid: false },
+            { refs: ['E1', 'D1'], valid: false },
+            { refs: ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9'], valid: false },
+        ];
+        for (const testCase of cases) {
+            const parsed = changeAnalysisAgentFinalResponseSchema.safeParse(minimalTerminal({
+                investigation: {
+                    findings: [{
+                        target: 'parse',
+                        question: 'Who calls parse?',
+                        answer: 'Answer.',
+                        evidenceRefs: testCase.refs,
+                    }],
+                    unresolvedQuestions: [],
+                    stopReason: 'Enough evidence.',
+                },
+            }));
+            assert.equal(parsed.success, testCase.valid, JSON.stringify(testCase.refs));
+        }
+    });
+});
+
+describe('claim category visibility contract', () => {
+    it('exports category and disposition guidance in JSON Schema descriptions', () => {
+        const exported = z.toJSONSchema(changeAnalysisAgentFinalResponseSchema) as {
+            properties: {
+                claims: {
+                    items: {
+                        properties: {
+                            category: { description: string };
+                            disposition: { description: string };
+                        };
+                    };
+                };
+            };
+        };
+        const categoryDescription = exported.properties.claims.items.properties.category.description;
+        const dispositionDescription = exported.properties.claims.items.properties.disposition.description;
+
+        for (const category of [
+            'observed_change',
+            'repository_fact',
+            'supported_inference',
+            'uncertain_inference',
+        ]) {
+            assert.match(categoryDescription, new RegExp(category));
+        }
+        assert.match(categoryDescription, /D\*/);
+        assert.match(categoryDescription, /E\*/);
+
+        assert.match(
+            dispositionDescription,
+            new RegExp(String(AGENT_TERMINAL_LIMITS.maxMustExpressClaims)),
+        );
+        assert.match(
+            dispositionDescription,
+            new RegExp(String(AGENT_TERMINAL_LIMITS.maxOptionalClaims)),
+        );
+    });
+
+    it('repeats the four claim categories in the terminal contract prompt', () => {
+        const contract = buildTerminalContractLines().join('\n');
+
+        for (const category of [
+            'observed_change',
+            'repository_fact',
+            'supported_inference',
+            'uncertain_inference',
+        ]) {
+            assert.match(contract, new RegExp(category));
+        }
+        assert.match(contract, /<evidence_categories>/);
+    });
+
+    it('rejects observed_change without D* locally with an accurate field issue', () => {
+        const input = minimalTerminal({
+            claims: [{
+                category: 'observed_change',
+                claim: 'only repository evidence cited',
+                evidenceRefs: ['E1'],
+                disposition: 'must_express',
+            }],
+        });
+        const parsed = changeAnalysisAgentFinalResponseSchema.safeParse(input);
+
+        assert.equal(parsed.success, false);
+        if (parsed.success) {
+            return;
+        }
+
+        const issues = buildStructuredFieldIssues(parsed.error, input);
+        const evidenceIssue = issues.find(issue => issue.path === 'claims[0].evidenceRefs');
+
+        assert.ok(evidenceIssue);
+        assert.equal(evidenceIssue?.kind, 'custom');
+        assert.match(evidenceIssue?.message ?? '', /requires at least one D\*/);
+    });
+});

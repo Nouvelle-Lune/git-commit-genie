@@ -189,6 +189,22 @@ export async function runChangeAnalysisPipeline(
                         data: event,
                         rawData: { output: event },
                     })),
+                    // Reports the two real requests in order: repository lookups
+                    // have stopped, and the finalization request is now in flight.
+                    // Findings only exist after that request validates, so they
+                    // are reported later by investigationResolved.
+                    onInvestigationClosed: event => safeRun('Chain.onStage.investigationClosed', () => {
+                        onStage?.({
+                            type: 'investigationComplete',
+                            data: { steps: event.toolSteps, evidenceCount: event.evidenceCount },
+                            rawData: { output: event },
+                        });
+                        onStage?.({
+                            type: 'analysisFinalizing',
+                            data: {},
+                            rawData: { output: event },
+                        });
+                    }),
                     onStep: event => safeRun('Chain.onStage.investigationStep', () => onStage?.({
                         type: event.source === 'memory' ? 'memoryStep' : 'investigationStep',
                         data: {
@@ -251,11 +267,9 @@ export async function runChangeAnalysisPipeline(
             rawData: { output: { repositoryEvidence } },
         }));
     } else {
-        safeRun('Chain.onStage.investigationComplete', () => onStage?.({
-            type: 'investigationComplete',
+        safeRun('Chain.onStage.investigationResolved', () => onStage?.({
+            type: 'investigationResolved',
             data: {
-                steps: repositoryEvidence.steps,
-                evidenceCount: repositoryEvidence.items.length,
                 findingCount: repositoryEvidence.findings.length,
                 unresolvedCount: repositoryEvidence.unresolvedQuestions.length,
                 reason: repositoryEvidence.stopReason,
@@ -279,16 +293,9 @@ export async function runChangeAnalysisPipeline(
         }));
     }
 
-    safeRun('Chain.onStage.semanticAnalysisStart', () => onStage?.({
-        type: 'semanticAnalysisStart',
-        rawData: {
-            input: {
-                changeExtraction,
-                investigationPlan,
-                repositoryEvidence,
-            },
-        },
-    }));
+    // Semantic analysis and information selection arrive inside the same
+    // validated finalization response as the findings. Announcing a "start" for
+    // them here would describe a request that was never sent.
     safeRun('Chain.onStage.semanticAnalysisComplete', () => onStage?.({
         type: 'semanticAnalysisComplete',
         data: {
@@ -302,18 +309,6 @@ export async function runChangeAnalysisPipeline(
         rawData: { output: { semanticAnalysis } },
     }));
 
-    safeRun('Chain.onStage.informationSelectionStart', () => onStage?.({
-        type: 'informationSelectionStart',
-        rawData: {
-            input: {
-                semanticAnalysis,
-                informationSelection,
-                evidence: getEvidence(),
-                analysisStatus,
-                analysisIssues,
-            },
-        },
-    }));
     const selectedInformation = buildSelectedInformation({
         semanticAnalysis,
         selection: informationSelection,

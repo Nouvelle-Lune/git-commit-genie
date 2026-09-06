@@ -16,12 +16,12 @@ export type StageEventType =
   | 'investigationStep'
   | 'memoryStep'
   | 'investigationComplete'
+  | 'analysisFinalizing'
+  | 'investigationResolved'
   | 'investigationSkipped'
-  | 'semanticAnalysisStart'
   | 'semanticAnalysisComplete'
   | 'analysisDegraded'
   | 'contextCompacted'
-  | 'informationSelectionStart'
   | 'informationSelected'
   | 'ragDisabled'
   | 'ragPrepared'
@@ -220,10 +220,15 @@ export class StageNotificationManager {
       case 'investigationComplete':
         this.active.updateMessage(t(I18N.stages.investigationComplete));
         break;
+      case 'analysisFinalizing':
+        this.active.updateMessage(t(I18N.stages.analysisFinalizing));
+        break;
+      case 'investigationResolved':
+        this.active.updateMessage(t(I18N.stages.investigationResolved));
+        break;
       case 'investigationSkipped':
         this.active.updateMessage(t(I18N.stages.investigationSkipped));
         break;
-      case 'semanticAnalysisStart':
       case 'semanticAnalysisComplete':
       case 'analysisDegraded':
         this.active.updateMessage(t(I18N.stages.semanticAnalysis));
@@ -231,7 +236,6 @@ export class StageNotificationManager {
       case 'contextCompacted':
         this.active.updateMessage(t(I18N.stages.summarizingStart));
         break;
-      case 'informationSelectionStart':
       case 'informationSelected':
         this.active.updateMessage(t(I18N.stages.informationSelection));
         break;

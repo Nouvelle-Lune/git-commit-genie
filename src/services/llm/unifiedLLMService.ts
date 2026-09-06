@@ -34,12 +34,13 @@ import {
 import { commitMessageSchema } from './providers/schemas/common';
 import { getRequestTypeLabel, getValidationSchemaFor } from './providers/utils/requestTypeMaps';
 import { runStructuredCompletion } from './structuredCompletion';
+import { buildStructuredFieldIssues } from './structuredFieldIssues';
 import {
     ApiRequestLogFailedError,
     completeApiRequestLog,
     failApiRequestLog,
     logCommitStageToWebview,
-    logSchemaValidationToWebview,
+    logStructuredValidationToWebview,
 } from './chatWebviewLogging';
 import type { StageEvent } from '../../ui/StageNotificationManager';
 import type { CostTrackingService } from '../cost/costTrackingService';
@@ -220,7 +221,7 @@ export class UnifiedLLMService extends BaseLLMService {
                 const response = await session.run({
                     messages: runDelta,
                     responseFormat: schema ? {
-                        name: requestType ?? 'structuredResponse',
+                        name: requestType,
                         schema: z.toJSONSchema(schema) as Record<string, unknown>,
                     } : undefined,
                     temperature,
@@ -267,40 +268,34 @@ export class UnifiedLLMService extends BaseLLMService {
                 schema: schema as z.ZodType<T>,
                 initialMessages: delta,
                 maxRetries,
-                label: requestType ?? 'unknown',
+                label: requestType,
                 callbacks: {
                     onMissingStructured: (attempt, attempts, response) => {
-                        const retryPayload = {
+                        if (attempt < attempts) {
+                            logger.warn(`[Genie][${this.getProviderName()}] Provider returned no structured output for ${requestType} (attempt ${attempt}/${attempts}). Retrying...`);
+                        }
+                        logStructuredValidationToWebview(repoPath, {
                             stage: requestType,
+                            failureKind: 'missingOutput',
                             attempt,
                             totalAttempts: attempts,
-                            missingResponse: true,
                             finalFailure: attempt === attempts,
-                        };
-                        if (attempt < attempts) {
-                            logger.warn(`[Genie][${this.getProviderName()}] Provider returned no structured output for ${requestType || 'unknown'} (attempt ${attempt}/${attempts}). Retrying...`);
-                            logSchemaValidationToWebview(repoPath, retryPayload, 'Structured output missing');
-                        } else {
-                            logSchemaValidationToWebview(repoPath, retryPayload, 'Structured output missing');
-                        }
+                        });
                         completeApiRequestLog(currentLogId!, provider, model, undefined, response, requestType, repoPath, lastCostQuote);
                     },
                     onValidationFailed: (attempt, attempts, response, error) => {
                         if (attempt < attempts) {
-                            logger.warn(`[Genie][${this.getProviderName()}] Schema validation failed for ${requestType || 'unknown'} (attempt ${attempt}/${attempts}). Retrying...`);
-                            logSchemaValidationToWebview(repoPath, {
-                                stage: requestType,
-                                attempt,
-                                totalAttempts: attempts,
-                                error: String(error),
-                            }, 'Schema validation failed');
-                        } else {
-                            logSchemaValidationToWebview(repoPath, {
-                                stage: requestType,
-                                finalFailure: true,
-                                error: String(error),
-                            }, 'Schema validation failed');
+                            logger.warn(`[Genie][${this.getProviderName()}] Schema validation failed for ${requestType} (attempt ${attempt}/${attempts}). Retrying...`);
                         }
+                        logStructuredValidationToWebview(repoPath, {
+                            stage: requestType,
+                            failureKind: 'schemaMismatch',
+                            attempt,
+                            totalAttempts: attempts,
+                            finalFailure: attempt === attempts,
+                            fieldIssues: buildStructuredFieldIssues(error, response.structured),
+                            error: String(error.message),
+                        });
                         completeApiRequestLog(currentLogId!, provider, model, response.structured, response, requestType, repoPath, lastCostQuote);
                     },
                 },

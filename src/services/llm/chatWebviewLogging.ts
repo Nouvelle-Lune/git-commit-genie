@@ -1,6 +1,7 @@
 import { logger } from '../logger';
 import { safeRun } from '../../utils/safeRun';
 import type { StageEvent } from '../../ui/StageNotificationManager';
+import type { StructuredFailureKind, StructuredFieldIssue } from '../../ui/pipelineDisplay';
 import type { RequestType } from './llmTypes';
 import type { LLMExecution } from './llmTypes';
 import type { AIRunResponse, AIRunRequest, AISession } from './providers';
@@ -88,17 +89,52 @@ export function logCommitStageToWebview(repoPath: string, event: StageEvent): vo
     ));
 }
 
-export function logSchemaValidationToWebview(
+/**
+ * One rejected structured request, described the same way for every producer.
+ *
+ * Both the agent runtime and the plain structured-completion path write this
+ * shape, so the Webview never has to guess a failure category or fall back to
+ * `unknown`. `stage` and `profile` are both carried because a rejection is only
+ * explicable when the reader knows which request was rejected.
+ */
+export interface StructuredValidationLogPayload {
+    stage: string;
+    profile?: string;
+    failureKind: StructuredFailureKind;
+    attempt: number;
+    totalAttempts: number;
+    finalFailure: boolean;
+    fieldIssues?: StructuredFieldIssue[];
+    error?: string;
+}
+
+/**
+ * The reason is a stable marker rather than a human title: `presentPipelineEvent`
+ * derives the localized, category-specific title from the payload, and this
+ * string only has to keep the log recognizable to `isStructuredValidationLog`.
+ */
+const STRUCTURED_VALIDATION_LOG_REASON = 'Structured output validation';
+
+export function logStructuredValidationToWebview(
     repoPath: string,
-    payload: Record<string, unknown>,
-    reason: string,
+    payload: StructuredValidationLogPayload,
 ): void {
-    safeRun('LLM.logSchemaValidation', () => logger.logToolCall(
+    const content: Record<string, unknown> = {
+        stage: payload.stage,
+        ...(payload.profile ? { profile: payload.profile } : {}),
+        failureKind: payload.failureKind,
+        attempt: payload.attempt,
+        totalAttempts: payload.totalAttempts,
+        finalFailure: payload.finalFailure,
+        ...(payload.fieldIssues?.length ? { fieldIssues: payload.fieldIssues } : {}),
+        ...(payload.error ? { error: payload.error } : {}),
+    };
+    safeRun('LLM.logStructuredValidation', () => logger.logToolCall(
         'schemaValidation',
-        JSON.stringify(payload),
-        reason,
+        JSON.stringify(content),
+        STRUCTURED_VALIDATION_LOG_REASON,
         repoPath,
-        { output: payload },
+        { output: content },
     ));
 }
 

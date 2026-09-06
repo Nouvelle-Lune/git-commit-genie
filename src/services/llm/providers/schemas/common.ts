@@ -131,25 +131,82 @@ export const AGENT_CLAIM_CATEGORIES = [
 
 export const AGENT_CLAIM_DISPOSITIONS = ['must_express', 'optional', 'omit'] as const;
 
+/**
+ * Single source of truth for the compound terminal's size limits.
+ *
+ * The exported JSON Schema, the prompt contract, and local Zod validation all
+ * read these numbers, so a model can never be shown a limit that differs from
+ * the one it is validated against. Observed failures ("nine refs in
+ * intentAnalysis.supportedBy", "six refs in a finding") came from limits that
+ * existed only in Zod and were therefore invisible to the model.
+ */
+export const AGENT_TERMINAL_LIMITS = {
+  /** Applies to every evidence reference array in the terminal. */
+  maxEvidenceRefs: 8,
+  /** A finding without repository evidence is not a finding. */
+  minFindingEvidenceRefs: 1,
+  maxFindings: 12,
+  maxUnresolvedQuestions: 12,
+  maxChangeTargets: 12,
+  maxDependencyEntries: 20,
+  maxClaims: 20,
+  maxUncertainties: 12,
+  maxMustExpressClaims: 3,
+  maxOptionalClaims: 4,
+  /**
+   * Per-disposition counts cannot be expressed in a JSON Schema, so all three
+   * are enforced when the terminal is normalized. The must_express and optional
+   * caps are also stated in the prompt because they shape what the model should
+   * promote; this one is not, since telling a model to cap `omit` would push it
+   * to drop claims outright rather than record them as omitted.
+   */
+  maxOmittedClaims: 8,
+} as const;
+
 const agentEvidenceReferenceSchema = z.string().regex(
   /^[DE]\d+$/,
   'Evidence references must be ledger-owned D* diff ids or E* repository ids.'
 );
 
-const repositoryEvidenceReferenceSchema = z.array(agentEvidenceReferenceSchema).max(8).superRefine((refs, context) => {
-  if (!refs.some(ref => ref.startsWith('E'))) {
-    context.addIssue({
-      code: 'custom',
-      message: 'Repository findings require at least one E* repository evidence reference.',
-    });
-  }
-});
+const repositoryEvidenceIdSchema = z.string().regex(
+  /^E\d+$/,
+  'Investigation findings must cite E* repository evidence ids returned by repository tools.'
+);
+
+/**
+ * Expressed as a plain item pattern plus array bounds so the whole rule
+ * survives `z.toJSONSchema`. The previous `superRefine` version was silently
+ * dropped from the exported schema, which is why models kept answering
+ * findings with D* diff ids only.
+ */
+const findingEvidenceReferenceSchema = z.array(repositoryEvidenceIdSchema)
+  .min(AGENT_TERMINAL_LIMITS.minFindingEvidenceRefs)
+  .max(AGENT_TERMINAL_LIMITS.maxEvidenceRefs)
+  .describe(
+    `${AGENT_TERMINAL_LIMITS.minFindingEvidenceRefs} to ${AGENT_TERMINAL_LIMITS.maxEvidenceRefs} repository evidence ids such as ["E1","E3"]. `
+    + 'Only E* ids are allowed here; a D* diff id, a file path, or a range like "E1-E4" is invalid. '
+    + 'If a question was answered from the diff alone, drop the finding and put the question in unresolvedQuestions.'
+  );
 
 const agentClaimSchema = z.object({
-  category: z.enum(AGENT_CLAIM_CATEGORIES),
+  category: z.enum(AGENT_CLAIM_CATEGORIES).describe(
+    'observed_change: stated by the diff alone, cites only D* ids. '
+    + 'repository_fact: learned from a repository tool result, requires at least one E* id. '
+    + 'supported_inference: a conclusion combining D* and/or E* evidence, requires at least one id. '
+    + 'uncertain_inference: unproven, must use an empty evidenceRefs array and disposition "omit".'
+  ),
   claim: z.string().min(1),
-  evidenceRefs: z.array(agentEvidenceReferenceSchema).max(8),
-  disposition: z.enum(AGENT_CLAIM_DISPOSITIONS),
+  evidenceRefs: z.array(agentEvidenceReferenceSchema)
+    .max(AGENT_TERMINAL_LIMITS.maxEvidenceRefs)
+    .describe(
+      `At most ${AGENT_TERMINAL_LIMITS.maxEvidenceRefs} ledger ids that directly support this claim, such as ["D2","E1"]. `
+      + 'Pick the ids a reader would check first instead of listing everything collected.'
+    ),
+  disposition: z.enum(AGENT_CLAIM_DISPOSITIONS).describe(
+    `must_express: at most ${AGENT_TERMINAL_LIMITS.maxMustExpressClaims} claims that the commit message must state. `
+    + `optional: at most ${AGENT_TERMINAL_LIMITS.maxOptionalClaims} claims worth stating if space allows. `
+    + 'omit: everything else, and mandatory for uncertain_inference.'
+  ),
 } as const).superRefine((claim, context) => {
   if (claim.category === 'observed_change' && !claim.evidenceRefs.some(ref => ref.startsWith('D'))) {
     context.addIssue({
@@ -185,40 +242,49 @@ const agentClaimSchema = z.object({
 export const changeAnalysisAgentFinalResponseSchema = z.object({
   investigation: z.object({
     findings: z.array(z.object({
-      target: z.string().min(1),
+      target: z.string().min(1).describe('An investigation plan target, copied exactly.'),
       question: z.string().min(1),
-      answer: z.string().min(1),
-      evidenceRefs: repositoryEvidenceReferenceSchema,
-    } as const)).max(12),
-    unresolvedQuestions: z.array(z.string().min(1)).max(12),
-    stopReason: z.string().min(1),
+      answer: z.string().min(1).describe('What the repository evidence actually showed, not a restatement of the question.'),
+      evidenceRefs: findingEvidenceReferenceSchema,
+    } as const)).max(AGENT_TERMINAL_LIMITS.maxFindings)
+      .describe('Only questions answered with repository evidence. An empty array is valid.'),
+    unresolvedQuestions: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxUnresolvedQuestions)
+      .describe('Planned questions the repository evidence could not answer. Leave them here instead of guessing.'),
+    stopReason: z.string().min(1).describe('Why the investigation ended, in one sentence.'),
   } as const),
   changeTargets: z.array(z.object({
     symbol: z.string().min(1),
     file: z.string().min(1),
     role: z.string().min(1),
-    evidenceRefs: z.array(agentEvidenceReferenceSchema).max(8),
-  } as const)).max(12),
+    evidenceRefs: z.array(agentEvidenceReferenceSchema)
+      .max(AGENT_TERMINAL_LIMITS.maxEvidenceRefs)
+      .describe(`At most ${AGENT_TERMINAL_LIMITS.maxEvidenceRefs} D* or E* ids showing this symbol's role.`),
+  } as const)).max(AGENT_TERMINAL_LIMITS.maxChangeTargets),
   dependencyContext: z.object({
-    callers: z.array(z.string().min(1)).max(20),
-    callees: z.array(z.string().min(1)).max(20),
-    stateDependencies: z.array(z.string().min(1)).max(20),
-    relatedConfigs: z.array(z.string().min(1)).max(20),
-    relatedTypes: z.array(z.string().min(1)).max(20),
-  } as const),
-  claims: z.array(agentClaimSchema).max(20),
+    callers: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
+    callees: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
+    stateDependencies: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
+    relatedConfigs: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
+    relatedTypes: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
+  } as const).describe('Names observed in evidence. Use empty arrays when nothing was observed.'),
+  claims: z.array(agentClaimSchema).max(AGENT_TERMINAL_LIMITS.maxClaims),
   behaviorAnalysis: z.object({
     before: z.string().nullable(),
     after: z.string().nullable(),
     observableEffect: z.string().nullable(),
-  } as const),
+  } as const).describe('Use null for any part the evidence does not establish.'),
   capabilityContext: z.object({
     technicalCapability: z.string().nullable(),
     productCapability: z.string().nullable(),
-  } as const),
+  } as const).describe('Use null rather than naming a capability the evidence does not connect to this change.'),
   intentAnalysis: z.object({
-    primaryIntent: z.string().nullable(),
-    supportedBy: z.array(agentEvidenceReferenceSchema).max(8),
+    primaryIntent: z.string().nullable().describe('One intent, or null when the evidence supports several equally.'),
+    supportedBy: z.array(agentEvidenceReferenceSchema)
+      .max(AGENT_TERMINAL_LIMITS.maxEvidenceRefs)
+      .describe(
+        `At most ${AGENT_TERMINAL_LIMITS.maxEvidenceRefs} D* or E* ids that establish the primary intent. `
+        + 'Cite the decisive evidence only, and use an empty array when primaryIntent is null.'
+      ),
     confidence: z.enum(['low', 'medium', 'high']),
   } as const),
   changeClassification: z.object({
@@ -226,10 +292,10 @@ export const changeAnalysisAgentFinalResponseSchema = z.object({
     newCapabilityAdded: z.boolean(),
     externalBehaviorChanged: z.boolean(),
     structuralOnly: z.boolean(),
-    recommendedType: z.string().nullable(),
+    recommendedType: z.string().nullable().describe('A Conventional Commit type such as fix, feat, or refactor, or null.'),
     reason: z.string().nullable(),
   } as const),
-  suggestedScope: z.string().nullable(),
+  suggestedScope: z.string().nullable().describe('A short scope token derived from the investigated code path, or null. Never an evidence id.'),
   selectionNotes: z.string().nullable(),
-  uncertainties: z.array(z.string().min(1)).max(12),
+  uncertainties: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxUncertainties),
 } as const);

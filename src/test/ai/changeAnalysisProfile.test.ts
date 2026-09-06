@@ -6,7 +6,10 @@ import {
     createChangeAnalysisProfile,
 } from '../../services/analysis/change/investigation/changeAnalysisProfile';
 import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
-import { changeAnalysisAgentFinalResponseSchema } from '../../services/llm/providers/schemas/common';
+import {
+    AGENT_TERMINAL_LIMITS,
+    changeAnalysisAgentFinalResponseSchema,
+} from '../../services/llm/providers/schemas/common';
 
 describe('ChangeAnalysisProfile terminal normalization', () => {
     it('exposes the runtime grant limits in every repository tool schema', () => {
@@ -259,7 +262,7 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         const profile = createChangeAnalysisProfile(input);
         const state = makeState();
 
-        assert.match(profile.validateTerminal?.(minimalRaw(), state) ?? '', /no E\* repository evidence/);
+        assert.match(profile.validateFinalizationPrecondition?.(state) ?? '', /no E\* repository evidence/);
 
         state.ledger.recordRepositoryEvidence({
             id: 'E1',
@@ -268,13 +271,13 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
             ref: 'src/client.ts:4',
             excerpt: 'parse(input)',
         });
-        assert.equal(profile.validateTerminal?.(minimalRaw(), state), null);
+        assert.equal(profile.validateFinalizationPrecondition?.(state), null);
     });
 
-    it('allows a terminal without repository evidence when the plan is empty', () => {
+    it('allows finalization without repository evidence when the plan is empty', () => {
         const profile = createChangeAnalysisProfile(makeInput());
 
-        assert.equal(profile.validateTerminal?.(minimalRaw(), makeState()), null);
+        assert.equal(profile.validateFinalizationPrecondition?.(makeState()), null);
     });
 
     it('marks invalid references in targets and intent as degraded instead of silently dropping them', () => {
@@ -303,7 +306,7 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         assert.ok(output.issues.some(issue => issue.includes('supportedBy')));
     });
 
-    it('requires findings to cite repository evidence while preserving valid mixed references', () => {
+    it('requires findings to cite repository evidence while preserving valid E* references', () => {
         const input = makeInput();
         const profile = createChangeAnalysisProfile(input);
         const state = makeState();
@@ -322,7 +325,7 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
                     target: 'parse',
                     question: 'Who calls parse?',
                     answer: 'The client calls parse.',
-                    evidenceRefs: ['E1', 'D1'],
+                    evidenceRefs: ['E1'],
                 }],
                 unresolvedQuestions: [],
                 stopReason: 'Enough evidence.',
@@ -348,11 +351,72 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         });
         assert.equal(diffOnlyTerminal.success, false);
 
+        const mixedTerminal = changeAnalysisAgentFinalResponseSchema.safeParse({
+            ...minimalRaw(),
+            investigation: {
+                findings: [{
+                    target: 'parse',
+                    question: 'Who calls parse?',
+                    answer: 'The client calls parse.',
+                    evidenceRefs: ['E1', 'D1'],
+                }],
+                unresolvedQuestions: [],
+                stopReason: 'Enough evidence.',
+            },
+        });
+        assert.equal(mixedTerminal.success, false);
+
         const output = profile.normalizeFinal(terminal.data, state);
 
         assert.deepEqual(output.repositoryEvidence.findings[0].evidenceRefs, ['E1']);
         assert.equal(output.analysisStatus, 'complete');
-        assert.ok(output.issues.some(issue => issue.includes("Investigation finding 'Who calls parse?' used evidence incompatible")));
+    });
+
+    it('trims informationSelection lists using AGENT_TERMINAL_LIMITS', () => {
+        const profile = createChangeAnalysisProfile(makeInput());
+        const limits = AGENT_TERMINAL_LIMITS;
+        const claims = [
+            ...Array.from({ length: limits.maxMustExpressClaims + 1 }, (_, index) => ({
+                category: 'observed_change' as const,
+                claim: `must ${index + 1}`,
+                evidenceRefs: ['D1'],
+                disposition: 'must_express' as const,
+            })),
+            ...Array.from({ length: limits.maxOptionalClaims + 1 }, (_, index) => ({
+                category: 'observed_change' as const,
+                claim: `optional ${index + 1}`,
+                evidenceRefs: ['D1'],
+                disposition: 'optional' as const,
+            })),
+            ...Array.from({ length: limits.maxOmittedClaims + 1 }, (_, index) => ({
+                category: 'observed_change' as const,
+                claim: `omit ${index + 1}`,
+                evidenceRefs: ['D1'],
+                disposition: 'omit' as const,
+            })),
+        ];
+        const raw = changeAnalysisAgentFinalResponseSchema.parse({
+            ...minimalRaw(),
+            claims,
+        });
+
+        const output = profile.normalizeFinal(raw, makeState());
+
+        assert.equal(output.informationSelection.mustExpress.length, limits.maxMustExpressClaims);
+        assert.equal(output.informationSelection.optional.length, limits.maxOptionalClaims);
+        assert.equal(output.informationSelection.omit.length, limits.maxOmittedClaims);
+        assert.deepEqual(
+            output.informationSelection.mustExpress,
+            Array.from({ length: limits.maxMustExpressClaims }, (_, index) => `must ${index + 1}`),
+        );
+        assert.deepEqual(
+            output.informationSelection.optional,
+            Array.from({ length: limits.maxOptionalClaims }, (_, index) => `optional ${index + 1}`),
+        );
+        assert.deepEqual(
+            output.informationSelection.omit,
+            Array.from({ length: limits.maxOmittedClaims }, (_, index) => `omit ${index + 1}`),
+        );
     });
 });
 

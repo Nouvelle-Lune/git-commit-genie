@@ -139,8 +139,14 @@ class CustomSession implements AISession {
             return this.requestCompletion(request, toolLoopMessages, undefined);
         }
 
+        // The schema instruction is injected for the strict attempt as well as
+        // the fallback. A custom endpoint that advertises json_schema support may
+        // still enforce it loosely, and the two requests must not present the
+        // model with different contracts: whichever one the server accepts, the
+        // caller validates the same schema locally.
+        const promptMessages = this.withPromptSchemaInstruction(requestMessages, request.responseFormat);
         try {
-            return await this.requestCompletion(request, requestMessages, {
+            return await this.requestCompletion(request, promptMessages, {
                 type: 'json_schema',
                 json_schema: {
                     name: request.responseFormat.name,
@@ -152,8 +158,7 @@ class CustomSession implements AISession {
             if (!isUnsupportedStructuredOutputError(error)) {
                 throw error;
             }
-            const fallbackMessages = this.withPromptSchemaInstruction(requestMessages, request.responseFormat);
-            return this.requestCompletion(request, fallbackMessages, { type: 'json_object' });
+            return this.requestCompletion(request, promptMessages, { type: 'json_object' });
         }
     }
 

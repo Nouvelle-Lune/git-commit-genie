@@ -77,6 +77,42 @@ describe('Custom provider response accounting', () => {
         assert.equal(options[1].maxRetries, undefined);
     });
 
+    it('injects the JSON schema into the prompt on the strict json_schema request', async () => {
+        const schema = z.toJSONSchema(classifyAndDraftResponseSchema) as Record<string, unknown>;
+        let requestBody: Record<string, unknown> | undefined;
+        const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
+            chat: {
+                completions: {
+                    create: async (body: Record<string, unknown>) => {
+                        requestBody = body;
+                        return {
+                            choices: [{
+                                finish_reason: 'stop',
+                                message: {
+                                    role: 'assistant',
+                                    content: '{"type":"fix","scope":null,"breaking":false,"description":"fix parsing","body":null,"footers":[],"notes":null}',
+                                },
+                            }],
+                        };
+                    },
+                },
+            },
+        } as any);
+
+        await provider.createSession({ model: 'local-model' }).run({
+            messages: [{ role: 'user', content: 'return draft components' }],
+            responseFormat: { name: 'draft', schema },
+            toolChoice: 'none',
+        });
+
+        const format = requestBody?.response_format as { type?: string; json_schema?: { strict?: boolean } };
+        assert.equal(format.type, 'json_schema');
+        assert.equal(format.json_schema?.strict, true);
+        const messages = requestBody?.messages as Array<{ role: string; content: string }>;
+        assert.match(messages[0].content, /"type":\s*"object"/);
+        assert.match(messages[0].content, /Use the exact camelCase keys/);
+    });
+
     it('injects the JSON schema into the prompt when structured output is unsupported', async () => {
         const schema = z.toJSONSchema(classifyAndDraftResponseSchema) as Record<string, unknown>;
         let requestBody: Record<string, unknown> | undefined;

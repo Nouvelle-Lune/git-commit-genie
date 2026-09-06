@@ -61,6 +61,8 @@ describe('AgentRuntime token budgeting', () => {
             }),
             grantTools: () => [],
             buildToolDefinitions: () => [],
+            buildFinalizationRequest: () => [{ role: 'user', content: 'Finalize now.' }],
+            buildCorrectionRequest: (_input, _state, failure) => [{ role: 'user', content: failure.message }],
             normalizeFinal: raw => raw.value,
             preservePartialResult: (_state, error) => String((error as Error).message),
         };

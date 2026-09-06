@@ -103,6 +103,12 @@ export interface PipelineTextCatalog {
     schemaValidationFailedTitle: string;
     structuredOutputRetryTitle: string;
     structuredOutputFailedTitle: string;
+    protocolViolationRetryTitle: string;
+    protocolViolationFailedTitle: string;
+    evidencePreconditionRetryTitle: string;
+    evidencePreconditionFailedTitle: string;
+    outputExhaustedTitle: string;
+    providerErrorTitle: string;
     evidenceReadyTitle: string;
     evidenceReadyDescription: string;
     summarizeStartTitle: string;
@@ -131,16 +137,18 @@ export interface PipelineTextCatalog {
     memoryStepDefault: string;
     investigationCompleteTitle: string;
     investigationCompleteDescription: string;
+    analysisFinalizingTitle: string;
+    analysisFinalizingDescription: string;
+    investigationResolvedTitle: string;
+    investigationResolvedDescription: string;
+    investigationResolvedEmptyDescription: string;
     investigationSkippedTitle: string;
     investigationSkippedDefault: string;
-    semanticAnalysisStartTitle: string;
-    semanticAnalysisStartDescription: string;
     semanticAnalysisCompleteTitle: string;
     semanticAnalysisDegradedTitle: string;
     semanticAnalysisCompleteDescription: string;
     semanticAnalysisNoIntentDescription: string;
-    informationSelectionStartTitle: string;
-    informationSelectionStartDescription: string;
+    informationSelectionEmptyDescription: string;
     informationSelectedTitle: string;
     informationSelectedDescription: string;
     ragDisabledTitle: string;
@@ -187,6 +195,19 @@ export interface PipelineTextCatalog {
     detailTotalAttempts: string;
     detailMissingStructuredOutput: string;
     detailSchemaMismatch: string;
+    detailProtocolViolation: string;
+    detailEvidencePrecondition: string;
+    detailOutputExhausted: string;
+    detailProviderError: string;
+    detailProfile: string;
+    detailFieldIssues: string;
+    fieldIssueTooManyItems: string;
+    fieldIssueTooFewItems: string;
+    fieldIssueInvalidFormat: string;
+    fieldIssueInvalidType: string;
+    fieldIssueMissing: string;
+    fieldIssueNotAllowed: string;
+    fieldIssueCustom: string;
     detailFiles: string;
     detailFile: string;
     detailStatus: string;
@@ -301,6 +322,12 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     schemaValidationFailedTitle: 'Schema validation failed: {0}',
     structuredOutputRetryTitle: 'Empty structured output, retrying: {0}',
     structuredOutputFailedTitle: 'Structured output failed: {0}',
+    protocolViolationRetryTitle: 'Protocol violation, retrying: {0}',
+    protocolViolationFailedTitle: 'Protocol violation: {0}',
+    evidencePreconditionRetryTitle: 'Repository evidence still missing, retrying: {0}',
+    evidencePreconditionFailedTitle: 'Repository evidence precondition unmet: {0}',
+    outputExhaustedTitle: 'Output or context budget exhausted: {0}',
+    providerErrorTitle: 'Provider request failed: {0}',
     evidenceReadyTitle: 'Change evidence collected',
     evidenceReadyDescription: '{0} staged files entered the pipeline as complete raw diffs.',
     summarizeStartTitle: 'Evidence compaction started',
@@ -327,18 +354,20 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     investigationStepDefault: 'Repository lookup completed.',
     memoryStepTitle: 'Memory step {0}: {1}',
     memoryStepDefault: 'Repository memory lookup completed.',
-    investigationCompleteTitle: 'Repository evidence collected',
-    investigationCompleteDescription: '{0}',
+    investigationCompleteTitle: 'Repository evidence collection finished',
+    investigationCompleteDescription: '{0} repository lookup(s) produced {1} evidence item(s).',
+    analysisFinalizingTitle: 'Compiling investigation and change analysis',
+    analysisFinalizingDescription: 'Tools are closed. The collected evidence is being turned into findings, semantic analysis, and message content.',
+    investigationResolvedTitle: 'Investigation answers ready',
+    investigationResolvedDescription: '{0}',
+    investigationResolvedEmptyDescription: 'No planned question could be answered with repository evidence.',
     investigationSkippedTitle: 'Repository investigation skipped',
     investigationSkippedDefault: 'The change was analyzed from the diff alone.',
-    semanticAnalysisStartTitle: 'Analyzing what the change means',
-    semanticAnalysisStartDescription: 'Observed facts, repository facts, before/after behavior, and intent are being separated.',
     semanticAnalysisCompleteTitle: 'Semantic analysis ready',
     semanticAnalysisDegradedTitle: 'Semantic analysis degraded',
     semanticAnalysisCompleteDescription: '{0}',
     semanticAnalysisNoIntentDescription: 'The evidence did not establish a single intent; the observable change will be described instead.',
-    informationSelectionStartTitle: 'Selecting what to express',
-    informationSelectionStartDescription: 'Deciding which conclusions belong in the commit message and which stay out.',
+    informationSelectionEmptyDescription: 'No claim carried enough evidence to be required in the commit message.',
     informationSelectedTitle: 'Message content selected',
     informationSelectedDescription: '{0}',
     ragDisabledTitle: 'RAG skipped',
@@ -385,6 +414,19 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     detailTotalAttempts: 'Total attempts',
     detailMissingStructuredOutput: 'Missing structured output',
     detailSchemaMismatch: 'Schema mismatch',
+    detailProtocolViolation: 'Protocol violation',
+    detailEvidencePrecondition: 'Repository evidence precondition unmet',
+    detailOutputExhausted: 'Output or context budget exhausted',
+    detailProviderError: 'Provider error',
+    detailProfile: 'Profile',
+    detailFieldIssues: 'Field problems',
+    fieldIssueTooManyItems: '{0} has {1} items, at most {2} allowed',
+    fieldIssueTooFewItems: '{0} has {1} items, at least {2} required',
+    fieldIssueInvalidFormat: '{0} is {1}, which does not match the required format {2}',
+    fieldIssueInvalidType: '{0} expected {1} but received {2}',
+    fieldIssueMissing: '{0} is required and was not provided',
+    fieldIssueNotAllowed: '{0} is not part of the schema',
+    fieldIssueCustom: '{0}: {1}',
     detailFiles: 'Files',
     detailFile: 'File',
     detailStatus: 'Status',
@@ -460,6 +502,61 @@ export interface RagReferenceEntry {
 
 export type CommitMessageSource = 'draft' | 'validation' | 'strictFix' | 'languageEnforcement' | 'final';
 
+/**
+ * Why a structured request was rejected. Kept distinct so a truncated
+ * response, a broken tool protocol, and a genuine schema mismatch are not all
+ * reported to the user as "schema retry".
+ */
+export type StructuredFailureKind =
+    | 'protocolViolation'
+    | 'missingOutput'
+    | 'schemaMismatch'
+    | 'evidencePrecondition'
+    | 'outputExhausted'
+    | 'providerError';
+
+export type StructuredFieldIssueKind =
+    | 'tooManyItems'
+    | 'tooFewItems'
+    | 'invalidFormat'
+    | 'invalidType'
+    | 'missing'
+    | 'notAllowed'
+    | 'custom';
+
+/**
+ * One localizable field-level rejection. Producers emit structured numbers and
+ * type names instead of a pre-rendered English sentence so the Webview can
+ * render "intentAnalysis.supportedBy has 9 items, at most 8 allowed" in the
+ * user's language.
+ */
+export interface StructuredFieldIssue {
+    /** Dotted JSON path such as `investigation.findings[0].evidenceRefs`. */
+    path: string;
+    kind: StructuredFieldIssueKind;
+    /** Allowed bound for the item-count kinds. */
+    limit?: number;
+    /** Observed item count for the item-count kinds. */
+    count?: number;
+    /** Required pattern, type, or enum list. */
+    expected?: string;
+    /** Observed type or value. */
+    actual?: string;
+    /** Provider text, used only by the custom kind. */
+    message?: string;
+}
+
+export interface StructuredValidationPayload {
+    stage: string;
+    profile?: string;
+    failureKind: StructuredFailureKind;
+    attempt: number;
+    totalAttempts: number;
+    finalFailure: boolean;
+    fieldIssues?: StructuredFieldIssue[];
+    error?: string;
+}
+
 export type PipelineEventDetails =
     | { kind: 'evidenceReady'; files: EvidenceFileEntry[]; fileCount: number; rawFiles: number; summarizedFiles: number; initialEstimatedInputTokens: number; maxInputTokens: number; contextWindowTokens: number; hardInputTokens: number; compressionTriggerTokens: number; maxOutputTokens: number; safetyTokens?: number }
     | { kind: 'summarizeProgress'; file: string; summary: string; breaking: boolean; current: number; total: number }
@@ -470,7 +567,8 @@ export type PipelineEventDetails =
     | { kind: 'investigationStart'; maxSteps: number }
     | { kind: 'investigationStep'; current: number; total: number; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number }
     | { kind: 'memoryStep'; current: number; total: number; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number; sourceStatuses?: string[] }
-    | { kind: 'investigationComplete'; steps: number; evidenceCount: number; findingCount: number; unresolvedCount?: number; reason: string }
+    | { kind: 'investigationComplete'; steps: number; evidenceCount: number }
+    | { kind: 'investigationResolved'; findingCount: number; unresolvedCount: number; reason: string }
     | { kind: 'investigationSkipped'; reason: string }
     | { kind: 'analysisDegraded'; status: string; issueCount: number; reason: string }
     | { kind: 'contextCompacted'; epoch: number; reason: string; estimatedTokens?: number }
@@ -481,7 +579,17 @@ export type PipelineEventDetails =
     | { kind: 'ragRetrievalSkipped'; error: string }
     | { kind: 'commitMessage'; message: string; source: CommitMessageSource }
     | { kind: 'strictFixStart'; problems: string[] }
-    | { kind: 'structuredValidation'; stage: string; failureKind: 'missingOutput' | 'schemaMismatch'; status: 'retrying' | 'failed'; attempt?: number; totalAttempts?: number; error?: string };
+    | {
+        kind: 'structuredValidation';
+        stage: string;
+        profile?: string;
+        failureKind: StructuredFailureKind;
+        status: 'retrying' | 'failed';
+        attempt: number;
+        totalAttempts: number;
+        fieldIssues: StructuredFieldIssue[];
+        error?: string;
+    };
 
 export interface PipelineEventPresentation {
     stage: string;
@@ -548,12 +656,12 @@ export type PipelineStageName =
     | 'investigationStep'
     | 'memoryStep'
     | 'investigationComplete'
+    | 'analysisFinalizing'
+    | 'investigationResolved'
     | 'investigationSkipped'
-    | 'semanticAnalysisStart'
     | 'semanticAnalysisComplete'
     | 'analysisDegraded'
     | 'contextCompacted'
-    | 'informationSelectionStart'
     | 'informationSelected'
     | 'ragDisabled'
     | 'ragPrepared'
@@ -597,12 +705,12 @@ export const PIPELINE_STAGE_BADGES: Record<PipelineStageName, PipelineStageBadge
     investigationStep: { label: 'INVG', className: 'stage-badge-investigate' },
     memoryStep: { label: 'MEM', className: 'stage-badge-memory' },
     investigationComplete: { label: 'INVG', className: 'stage-badge-investigate' },
+    analysisFinalizing: { label: 'FINL', className: 'stage-badge-semantic' },
+    investigationResolved: { label: 'INVG', className: 'stage-badge-investigate' },
     investigationSkipped: { label: 'SKIP', className: 'stage-badge-skipped' },
-    semanticAnalysisStart: { label: 'SEM', className: 'stage-badge-semantic' },
     semanticAnalysisComplete: { label: 'SEM', className: 'stage-badge-semantic' },
     analysisDegraded: { label: 'WARN', className: 'stage-badge-warning' },
     contextCompacted: { label: 'CTX', className: 'stage-badge-summarize' },
-    informationSelectionStart: { label: 'SEL', className: 'stage-badge-select' },
     informationSelected: { label: 'SEL', className: 'stage-badge-select' },
     ragDisabled: { label: 'RAG', className: 'stage-badge-rag' },
     ragPrepared: { label: 'RAG', className: 'stage-badge-rag' },
@@ -866,9 +974,13 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
                 kind: 'investigationComplete',
                 steps: requireNumberField(data, stage, 'steps'),
                 evidenceCount: requireNumberField(data, stage, 'evidenceCount'),
+            };
+        case 'investigationResolved':
+            return {
+                kind: 'investigationResolved',
                 findingCount: requireNumberField(data, stage, 'findingCount'),
+                unresolvedCount: requireNumberField(data, stage, 'unresolvedCount'),
                 reason: requireStringField(data, stage, 'reason'),
-                ...(asNumber(data.unresolvedCount) !== undefined ? { unresolvedCount: asNumber(data.unresolvedCount) } : {}),
             };
         case 'investigationSkipped':
             return {
@@ -997,6 +1109,140 @@ export function isStructuredValidationLog(log: PipelineLogLike): boolean {
     );
 }
 
+const STRUCTURED_FAILURE_KINDS = new Set<string>([
+    'protocolViolation',
+    'missingOutput',
+    'schemaMismatch',
+    'evidencePrecondition',
+    'outputExhausted',
+    'providerError',
+]);
+
+const STRUCTURED_FIELD_ISSUE_KINDS = new Set<string>([
+    'tooManyItems',
+    'tooFewItems',
+    'invalidFormat',
+    'invalidType',
+    'missing',
+    'notAllowed',
+    'custom',
+]);
+
+/** Names a failure category for the user without exposing internal wording. */
+export function structuredFailureKindLabel(
+    kind: StructuredFailureKind,
+    text: PipelineTextCatalog = DEFAULT_PIPELINE_TEXT,
+): string {
+    switch (kind) {
+        case 'protocolViolation':
+            return text.detailProtocolViolation;
+        case 'missingOutput':
+            return text.detailMissingStructuredOutput;
+        case 'schemaMismatch':
+            return text.detailSchemaMismatch;
+        case 'evidencePrecondition':
+            return text.detailEvidencePrecondition;
+        case 'outputExhausted':
+            return text.detailOutputExhausted;
+        case 'providerError':
+            return text.detailProviderError;
+    }
+}
+
+/**
+ * Title for a structured-request rejection. Shared by the Webview row and the
+ * Extension-side log title so both name the same failure category.
+ */
+export function structuredValidationTitle(
+    payload: Pick<StructuredValidationPayload, 'stage' | 'profile' | 'failureKind' | 'finalFailure'>,
+    text: PipelineTextCatalog = DEFAULT_PIPELINE_TEXT,
+): string {
+    const label = payload.profile ? `${payload.profile} ${payload.stage}` : payload.stage;
+    switch (payload.failureKind) {
+        case 'protocolViolation':
+            return formatPipelineText(
+                payload.finalFailure ? text.protocolViolationFailedTitle : text.protocolViolationRetryTitle,
+                label,
+            );
+        case 'missingOutput':
+            return formatPipelineText(
+                payload.finalFailure ? text.structuredOutputFailedTitle : text.structuredOutputRetryTitle,
+                label,
+            );
+        case 'schemaMismatch':
+            return formatPipelineText(
+                payload.finalFailure ? text.schemaValidationFailedTitle : text.schemaValidationRetryTitle,
+                label,
+            );
+        case 'evidencePrecondition':
+            return formatPipelineText(
+                payload.finalFailure ? text.evidencePreconditionFailedTitle : text.evidencePreconditionRetryTitle,
+                label,
+            );
+        case 'outputExhausted':
+            return formatPipelineText(text.outputExhaustedTitle, label);
+        case 'providerError':
+            return formatPipelineText(text.providerErrorTitle, label);
+    }
+}
+
+/** Renders one field-level rejection, e.g. `intentAnalysis.supportedBy has 9 items, at most 8 allowed`. */
+export function formatStructuredFieldIssue(
+    issue: StructuredFieldIssue,
+    text: PipelineTextCatalog = DEFAULT_PIPELINE_TEXT,
+): string {
+    switch (issue.kind) {
+        case 'tooManyItems':
+            return formatPipelineText(text.fieldIssueTooManyItems, issue.path, issue.count ?? 0, issue.limit ?? 0);
+        case 'tooFewItems':
+            return formatPipelineText(text.fieldIssueTooFewItems, issue.path, issue.count ?? 0, issue.limit ?? 0);
+        case 'invalidFormat':
+            return formatPipelineText(text.fieldIssueInvalidFormat, issue.path, issue.actual ?? '', issue.expected ?? '');
+        case 'invalidType':
+            return formatPipelineText(text.fieldIssueInvalidType, issue.path, issue.expected ?? '', issue.actual ?? '');
+        case 'missing':
+            return formatPipelineText(text.fieldIssueMissing, issue.path);
+        case 'notAllowed':
+            return formatPipelineText(text.fieldIssueNotAllowed, issue.path);
+        case 'custom':
+            return formatPipelineText(text.fieldIssueCustom, issue.path, issue.message ?? '');
+    }
+}
+
+function parseStructuredFieldIssues(value: unknown, logId: string): StructuredFieldIssue[] {
+    if (value === undefined) {
+        return [];
+    }
+    if (!Array.isArray(value)) {
+        throw new Error(`Structured validation log '${logId}' has invalid fieldIssues.`);
+    }
+    return value.map((entry, index) => {
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            throw new Error(`Structured validation log '${logId}' has invalid fieldIssues[${index}].`);
+        }
+        const record = entry as Record<string, unknown>;
+        const kind = asString(record.kind);
+        if (!kind || !STRUCTURED_FIELD_ISSUE_KINDS.has(kind)) {
+            throw new Error(`Structured validation log '${logId}' has an unknown fieldIssues[${index}].kind.`);
+        }
+        // Read `path` directly: the requireStringField helpers use their field
+        // argument as the lookup key, so an indexed label cannot be passed there.
+        const path = asString(record.path);
+        if (!path) {
+            throw new Error(`Structured validation log '${logId}' is missing fieldIssues[${index}].path.`);
+        }
+        return {
+            path,
+            kind: kind as StructuredFieldIssueKind,
+            ...(asNumber(record.limit) !== undefined ? { limit: asNumber(record.limit) } : {}),
+            ...(asNumber(record.count) !== undefined ? { count: asNumber(record.count) } : {}),
+            ...(asString(record.expected) ? { expected: asString(record.expected) } : {}),
+            ...(asString(record.actual) ? { actual: asString(record.actual) } : {}),
+            ...(asString(record.message) ? { message: asString(record.message) } : {}),
+        };
+    });
+}
+
 export function presentStructuredValidationLog(
     log: PipelineLogLike,
     text: PipelineTextCatalog = DEFAULT_PIPELINE_TEXT
@@ -1009,24 +1255,27 @@ export function presentStructuredValidationLog(
     }
     const payload = JSON.parse(log.content) as Record<string, unknown>;
     const stage = requireStringField(payload, 'structuredValidation', 'stage');
-    const missingResponse = payload.missingResponse === true;
-    const finalFailure = payload.finalFailure === true;
-    const failureKind = missingResponse ? 'missingOutput' : 'schemaMismatch';
-    const status = finalFailure ? 'failed' : 'retrying';
-    const template = missingResponse
-        ? (finalFailure ? text.structuredOutputFailedTitle : text.structuredOutputRetryTitle)
-        : (finalFailure ? text.schemaValidationFailedTitle : text.schemaValidationRetryTitle);
-    const title = formatPipelineText(template, stage);
+    const failureKind = requireStringField(payload, 'structuredValidation', 'failureKind');
+    if (!STRUCTURED_FAILURE_KINDS.has(failureKind)) {
+        throw new Error(`Structured validation log '${log.id}' has unknown failureKind '${failureKind}'.`);
+    }
+    const finalFailure = requireBooleanField(payload, 'structuredValidation', 'finalFailure');
+    const profile = asString(payload.profile);
     return {
-        title,
+        title: structuredValidationTitle(
+            { stage, failureKind: failureKind as StructuredFailureKind, finalFailure, ...(profile ? { profile } : {}) },
+            text,
+        ),
         tone: 'warning',
         details: {
             kind: 'structuredValidation',
             stage,
-            failureKind,
-            status,
-            ...(asNumber(payload.attempt) !== undefined ? { attempt: asNumber(payload.attempt) } : {}),
-            ...(asNumber(payload.totalAttempts) !== undefined ? { totalAttempts: asNumber(payload.totalAttempts) } : {}),
+            ...(profile ? { profile } : {}),
+            failureKind: failureKind as StructuredFailureKind,
+            status: finalFailure ? 'failed' : 'retrying',
+            attempt: requireNumberField(payload, 'structuredValidation', 'attempt'),
+            totalAttempts: requireNumberField(payload, 'structuredValidation', 'totalAttempts'),
+            fieldIssues: parseStructuredFieldIssues(payload.fieldIssues, log.id),
             ...(asString(payload.error) ? { error: asString(payload.error) } : {}),
         },
         data: payload,
@@ -1235,19 +1484,43 @@ function presentPipelineEventCore(
                 data,
             };
         }
-        case 'investigationComplete':
+        case 'investigationComplete': {
+            const steps = asNumber(data.steps) ?? 0;
+            const evidenceCount = asNumber(data.evidenceCount) ?? 0;
             return {
                 stage,
                 phase: text.phaseInvestigate,
                 title: text.investigationCompleteTitle,
-                description: formatPipelineText(
-                    text.investigationCompleteDescription,
-                    asString(data.reason) || text.investigationStepDefault
-                ),
+                description: formatPipelineText(text.investigationCompleteDescription, steps, evidenceCount),
                 metrics: [
-                    { label: text.metricSteps, value: String(asNumber(data.steps) ?? 0) },
-                    { label: text.metricEvidence, value: String(asNumber(data.evidenceCount) ?? 0), tone: 'summary' },
-                    { label: text.metricFindings, value: String(asNumber(data.findingCount) ?? 0) },
+                    { label: text.metricSteps, value: String(steps) },
+                    { label: text.metricEvidence, value: String(evidenceCount), tone: 'summary' },
+                ],
+                tone: 'success',
+                data,
+            };
+        }
+        case 'analysisFinalizing':
+            return {
+                stage,
+                phase: text.phaseAnalyze,
+                title: text.analysisFinalizingTitle,
+                description: text.analysisFinalizingDescription,
+                metrics: [],
+                tone: 'active',
+                data,
+            };
+        case 'investigationResolved': {
+            const findingCount = asNumber(data.findingCount) ?? 0;
+            return {
+                stage,
+                phase: text.phaseInvestigate,
+                title: text.investigationResolvedTitle,
+                description: findingCount
+                    ? formatPipelineText(text.investigationResolvedDescription, asString(data.reason) || text.investigationStepDefault)
+                    : text.investigationResolvedEmptyDescription,
+                metrics: [
+                    { label: text.metricFindings, value: String(findingCount) },
                     ...(asNumber(data.unresolvedCount)
                         ? [{ label: text.metricUnresolved, value: String(asNumber(data.unresolvedCount)) }]
                         : []),
@@ -1255,6 +1528,7 @@ function presentPipelineEventCore(
                 tone: 'success',
                 data,
             };
+        }
         case 'investigationSkipped':
             return {
                 stage,
@@ -1263,16 +1537,6 @@ function presentPipelineEventCore(
                 description: asString(data.reason) || text.investigationSkippedDefault,
                 metrics: [],
                 tone: 'neutral',
-                data,
-            };
-        case 'semanticAnalysisStart':
-            return {
-                stage,
-                phase: text.phaseAnalyze,
-                title: text.semanticAnalysisStartTitle,
-                description: text.semanticAnalysisStartDescription,
-                metrics: [],
-                tone: 'active',
                 data,
             };
         case 'semanticAnalysisComplete': {
@@ -1320,16 +1584,6 @@ function presentPipelineEventCore(
                 tone: 'success',
                 data,
             };
-        case 'informationSelectionStart':
-            return {
-                stage,
-                phase: text.phaseSelect,
-                title: text.informationSelectionStartTitle,
-                description: text.informationSelectionStartDescription,
-                metrics: [],
-                tone: 'active',
-                data,
-            };
         case 'informationSelected': {
             const mustExpress = asStringList(data.mustExpress, 3);
             return {
@@ -1338,7 +1592,7 @@ function presentPipelineEventCore(
                 title: text.informationSelectedTitle,
                 description: mustExpress.length
                     ? formatPipelineText(text.informationSelectedDescription, mustExpress.join(' / '))
-                    : text.informationSelectionStartDescription,
+                    : text.informationSelectionEmptyDescription,
                 metrics: [
                     { label: text.metricMustExpress, value: String(mustExpress.length) },
                     ...(asNumber(data.omitCount)
@@ -1616,6 +1870,7 @@ export function deriveLatestPipelineSnapshot(
                 stepStates.investigate = 'active';
                 break;
             case 'investigationComplete':
+            case 'investigationResolved':
                 changeConditioned = true;
                 stepStates.investigate = 'complete';
                 break;
@@ -1623,9 +1878,10 @@ export function deriveLatestPipelineSnapshot(
                 changeConditioned = true;
                 stepStates.investigate = 'skipped';
                 break;
-            case 'semanticAnalysisStart':
+            case 'analysisFinalizing':
                 changeConditioned = true;
                 stepStates.analyze = degraded ? 'warning' : 'active';
+                stepStates.select = degraded ? 'warning' : 'active';
                 break;
             case 'semanticAnalysisComplete':
                 changeConditioned = true;
@@ -1638,10 +1894,6 @@ export function deriveLatestPipelineSnapshot(
                 degraded = true;
                 break;
             case 'contextCompacted':
-                break;
-            case 'informationSelectionStart':
-                changeConditioned = true;
-                stepStates.select = degraded ? 'warning' : 'active';
                 break;
             case 'informationSelected':
                 changeConditioned = true;

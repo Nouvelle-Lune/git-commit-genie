@@ -2,6 +2,7 @@ import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
 import {
     deriveLatestPipelineSnapshot,
+    formatStructuredFieldIssue,
     pipelineStageBadge,
     presentPipelineEvent,
     presentStructuredValidationLog,
@@ -124,7 +125,10 @@ describe('pipeline display for parallel analysis events', () => {
             stage('changeExtractionStart'),
             stage('changeExtracted', changeExtractedData()),
             stage('investigationStart', { maxSteps: 4 }),
-            stage('semanticAnalysisStart'),
+            stage('investigationComplete', { steps: 2, evidenceCount: 3 }),
+            stage('analysisFinalizing', {}),
+            stage('investigationResolved', { findingCount: 1, unresolvedCount: 0, reason: 'Enough evidence.' }),
+            stage('semanticAnalysisComplete', semanticAnalysisCompleteData()),
             stage('ragPrepared', ragPreparedData()),
             stage('informationSelected', informationSelectedData({ omitCount: 1 })),
         ];
@@ -133,6 +137,8 @@ describe('pipeline display for parallel analysis events', () => {
 
         assert.ok(running);
         assert.equal(running.state, 'running');
+        assert.equal(running.steps.find(step => step.id === 'investigate')?.state, 'complete');
+        assert.equal(running.steps.find(step => step.id === 'analyze')?.state, 'complete');
         assert.equal(running.steps.find(step => step.id === 'rag')?.state, 'complete');
         assert.equal(running.steps.find(step => step.id === 'select')?.state, 'complete');
         assert.equal(running.predictedType, 'refactor');
@@ -143,10 +149,10 @@ describe('pipeline display for parallel analysis events', () => {
             stage('changeExtractionStart'),
             stage('changeExtracted', changeExtractedData()),
             stage('investigationStart', { maxSteps: 4 }),
+            stage('investigationComplete', { steps: 1, evidenceCount: 0 }),
+            stage('analysisFinalizing', {}),
             stage('analysisDegraded', { reason: 'partial terminal', issueCount: 1, status: 'unavailable' }),
-            stage('semanticAnalysisStart'),
             stage('semanticAnalysisComplete', semanticAnalysisCompleteData()),
-            stage('informationSelectionStart'),
             stage('informationSelected', informationSelectedData()),
             stage('done', { finalMessage: 'feat(ui): improve pipeline logs\n\nBody' }),
         ]);
@@ -154,6 +160,42 @@ describe('pipeline display for parallel analysis events', () => {
         assert.equal(degraded.state, 'degraded');
         assert.equal(degraded.steps.find(step => step.id === 'analyze')?.state, 'warning');
         assert.equal(degraded.steps.find(step => step.id === 'select')?.state, 'warning');
+    });
+
+    it('maps investigationComplete and analysisFinalizing presentation details', () => {
+        const complete = presentPipelineEvent({
+            stage: 'investigationComplete',
+            data: { steps: 2, evidenceCount: 3 },
+        });
+        const finalizing = presentPipelineEvent({
+            stage: 'analysisFinalizing',
+            data: {},
+        });
+
+        assert.equal(complete.details?.kind, 'investigationComplete');
+        if (complete.details?.kind !== 'investigationComplete') {
+            throw new Error('Expected investigationComplete details');
+        }
+        assert.equal(complete.details.steps, 2);
+        assert.equal(complete.details.evidenceCount, 3);
+        assert.equal(finalizing.details, undefined);
+        assert.equal(finalizing.tone, 'active');
+        assert.match(finalizing.description, /Tools are closed/);
+    });
+
+    it('maps investigationResolved presentation details', () => {
+        const presentation = presentPipelineEvent({
+            stage: 'investigationResolved',
+            data: { findingCount: 2, unresolvedCount: 1, reason: 'Collected enough repository evidence.' },
+        });
+
+        assert.equal(presentation.details?.kind, 'investigationResolved');
+        if (presentation.details?.kind !== 'investigationResolved') {
+            throw new Error('Expected investigationResolved details');
+        }
+        assert.equal(presentation.details.findingCount, 2);
+        assert.equal(presentation.details.unresolvedCount, 1);
+        assert.equal(presentation.details.reason, 'Collected enough repository evidence.');
     });
 });
 
@@ -272,8 +314,6 @@ describe('pipeline event details', () => {
             'summarizeStart',
             'changeExtractionStart',
             'investigationPlanStart',
-            'semanticAnalysisStart',
-            'informationSelectionStart',
             'ragDisabled',
             'ragRetrievalStart',
             'draftStart',
@@ -296,17 +336,19 @@ describe('pipeline event details', () => {
 describe('structured validation presentation', () => {
     it('maps missing output retry and final failure combinations', () => {
         const retry = presentStructuredValidationLog(validationLog({
-            stage: 'changeExtraction',
+            stage: 'finalization',
+            profile: 'change-analysis',
+            failureKind: 'missingOutput',
             attempt: 1,
             totalAttempts: 3,
-            missingResponse: true,
             finalFailure: false,
         }));
         const failed = presentStructuredValidationLog(validationLog({
-            stage: 'changeExtraction',
+            stage: 'finalization',
+            profile: 'change-analysis',
+            failureKind: 'missingOutput',
             attempt: 3,
             totalAttempts: 3,
-            missingResponse: true,
             finalFailure: true,
         }));
 
@@ -315,19 +357,27 @@ describe('structured validation presentation', () => {
         assert.match(retry.title, /retrying/i);
         assert.match(failed.title, /failed/i);
         assert.equal(retry.details.failureKind, 'missingOutput');
+        assert.equal(retry.details.stage, 'finalization');
         assert.equal(retry.details.status, 'retrying');
         assert.equal(failed.details.status, 'failed');
     });
 
     it('maps schema mismatch retry and final failure combinations', () => {
         const retry = presentStructuredValidationLog(validationLog({
-            stage: 'semanticAnalysis',
+            stage: 'finalization',
+            profile: 'change-analysis',
+            failureKind: 'schemaMismatch',
             attempt: 1,
             totalAttempts: 2,
+            finalFailure: false,
             error: 'invalid enum',
         }));
         const failed = presentStructuredValidationLog(validationLog({
-            stage: 'semanticAnalysis',
+            stage: 'finalization',
+            profile: 'change-analysis',
+            failureKind: 'schemaMismatch',
+            attempt: 2,
+            totalAttempts: 2,
             finalFailure: true,
             error: 'invalid enum',
         }));
@@ -339,6 +389,113 @@ describe('structured validation presentation', () => {
         assert.equal(retry.details.status, 'retrying');
         assert.equal(failed.details.status, 'failed');
         assert.equal(failed.details.error, 'invalid enum');
+    });
+
+    it('parses structured validation fieldIssues and renders them for display', () => {
+        const fieldIssues = [{
+            path: 'intentAnalysis.supportedBy',
+            kind: 'tooManyItems' as const,
+            count: 9,
+            limit: 8,
+        }];
+        const presentation = presentStructuredValidationLog(validationLog({
+            stage: 'finalization',
+            profile: 'change-analysis',
+            failureKind: 'schemaMismatch',
+            attempt: 1,
+            totalAttempts: 2,
+            finalFailure: false,
+            fieldIssues,
+        }));
+
+        assert.ok(presentation);
+        assert.deepEqual(presentation.details.fieldIssues, fieldIssues);
+        assert.equal(
+            formatStructuredFieldIssue(fieldIssues[0]),
+            'intentAnalysis.supportedBy has 9 items, at most 8 allowed',
+        );
+    });
+
+    it('parses all six GLM-style fieldIssues without truncation', () => {
+        const fieldIssues = [
+            { path: 'investigation.findings[0].evidenceRefs', kind: 'tooManyItems' as const, count: 9, limit: 8 },
+            { path: 'changeTargets[0].evidenceRefs', kind: 'tooManyItems' as const, count: 9, limit: 8 },
+            { path: 'claims[0].evidenceRefs', kind: 'tooManyItems' as const, count: 9, limit: 8 },
+            { path: 'claims[1].evidenceRefs', kind: 'tooManyItems' as const, count: 9, limit: 8 },
+            { path: 'claims[2].evidenceRefs', kind: 'tooManyItems' as const, count: 9, limit: 8 },
+            { path: 'intentAnalysis.supportedBy', kind: 'tooManyItems' as const, count: 9, limit: 8 },
+        ];
+        const presentation = presentStructuredValidationLog(validationLog({
+            stage: 'finalization',
+            profile: 'change-analysis',
+            failureKind: 'schemaMismatch',
+            attempt: 1,
+            totalAttempts: 2,
+            finalFailure: false,
+            fieldIssues,
+        }));
+
+        assert.ok(presentation);
+        assert.equal(presentation.details.fieldIssues.length, 6);
+        assert.deepEqual(
+            presentation.details.fieldIssues.map(issue => issue.path),
+            fieldIssues.map(issue => issue.path),
+        );
+        for (const [index, issue] of presentation.details.fieldIssues.entries()) {
+            assert.deepEqual(issue, fieldIssues[index]);
+            assert.match(formatStructuredFieldIssue(issue), /has 9 items, at most 8 allowed/);
+        }
+    });
+
+    it('throws when a structured validation fieldIssue is missing path', () => {
+        assert.throws(
+            () => presentStructuredValidationLog({
+                id: 'missing-field-issue-path',
+                timestamp: 3,
+                type: 'toolCall',
+                title: 'Structured output validation',
+                content: JSON.stringify({
+                    stage: 'finalization',
+                    profile: 'change-analysis',
+                    failureKind: 'schemaMismatch',
+                    attempt: 1,
+                    totalAttempts: 2,
+                    finalFailure: false,
+                    fieldIssues: [{
+                        kind: 'tooManyItems',
+                        count: 9,
+                        limit: 8,
+                    }],
+                }),
+            }),
+            /missing fieldIssues\[0\]\.path/,
+        );
+    });
+
+    it('throws for unknown failureKind values', () => {
+        assert.throws(
+            () => presentStructuredValidationLog(validationLog({
+                stage: 'finalization',
+                failureKind: 'unknown',
+                attempt: 1,
+                totalAttempts: 1,
+                finalFailure: true,
+            })),
+            /unknown failureKind/,
+        );
+    });
+
+    it('throws when required structured validation fields are missing', () => {
+        assert.throws(
+            () => presentStructuredValidationLog({
+                id: 'broken-validation',
+                timestamp: 1,
+                type: 'toolCall',
+                title: 'Structured output validation',
+                content: JSON.stringify({ failureKind: 'missingOutput' }),
+            }),
+            /stage/,
+        );
     });
 });
 
@@ -414,7 +571,7 @@ function validationLog(payload: Record<string, unknown>) {
         id: `validation-${JSON.stringify(payload)}`,
         timestamp: 3,
         type: 'toolCall',
-        title: 'Structured output missing',
+        title: 'Structured output validation',
         content: JSON.stringify(payload),
     };
 }

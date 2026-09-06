@@ -1,5 +1,11 @@
 import React from 'react';
-import { PipelineEventDetails, PipelineTextCatalog, CommitMessageSource } from '../../../src/ui/pipelineDisplay';
+import {
+    CommitMessageSource,
+    PipelineEventDetails,
+    PipelineTextCatalog,
+    formatStructuredFieldIssue,
+    structuredFailureKindLabel,
+} from '../../../src/ui/pipelineDisplay';
 import './PipelineLogDetails.css';
 
 export interface PipelineLogDetailsProps {
@@ -207,13 +213,20 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
                 ]} />
             );
         case 'investigationComplete':
+            // Reported when repository lookups stop. Findings do not exist yet at
+            // this point; they arrive with investigationResolved.
+            return (
+                <DetailMetrics items={[
+                    { label: text.detailSteps, value: String(details.steps) },
+                    { label: text.detailEvidence, value: String(details.evidenceCount) },
+                ]} />
+            );
+        case 'investigationResolved':
             return (
                 <>
                     <DetailMetrics items={[
-                        { label: text.detailSteps, value: String(details.steps) },
-                        { label: text.detailEvidence, value: String(details.evidenceCount) },
                         { label: text.detailFindings, value: String(details.findingCount) },
-                        ...(details.unresolvedCount !== undefined ? [{ label: text.detailUnresolved, value: String(details.unresolvedCount) }] : []),
+                        { label: text.detailUnresolved, value: String(details.unresolvedCount) },
                     ]} />
                     <DetailFields rows={[{ label: text.detailReason, value: details.reason }]} />
                 </>
@@ -332,14 +345,32 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
             );
         case 'structuredValidation':
             return (
-                <DetailFields rows={[
-                    { label: text.detailStage, value: details.stage },
-                    { label: text.detailStatus, value: <SemanticTag value={details.status === 'failed' ? text.stateFailed : text.stateRetrying} /> },
-                    { label: text.detailFailureKind, value: <span className="pipeline-details-warning">{details.failureKind === 'missingOutput' ? text.detailMissingStructuredOutput : text.detailSchemaMismatch}</span> },
-                    ...(details.attempt !== undefined ? [{ label: text.detailAttempt, value: String(details.attempt) }] : []),
-                    ...(details.totalAttempts !== undefined ? [{ label: text.detailTotalAttempts, value: String(details.totalAttempts) }] : []),
-                    ...(details.error ? [{ label: text.detailError, value: <span className="pipeline-details-warning">{details.error}</span> }] : []),
-                ]} />
+                <>
+                    <DetailFields rows={[
+                        { label: text.detailStage, value: details.stage },
+                        ...(details.profile ? [{ label: text.detailProfile, value: details.profile }] : []),
+                        { label: text.detailStatus, value: <SemanticTag value={details.status === 'failed' ? text.stateFailed : text.stateRetrying} /> },
+                        {
+                            label: text.detailFailureKind,
+                            value: (
+                                <span className="pipeline-details-warning">
+                                    {structuredFailureKindLabel(details.failureKind, text)}
+                                </span>
+                            ),
+                        },
+                        { label: text.detailAttempt, value: String(details.attempt) },
+                        { label: text.detailTotalAttempts, value: String(details.totalAttempts) },
+                        ...(details.error ? [{ label: text.detailError, value: <span className="pipeline-details-warning">{details.error}</span> }] : []),
+                    ]} />
+                    {details.fieldIssues.length ? (
+                        <DetailSection title={text.detailFieldIssues}>
+                            <StringList
+                                items={details.fieldIssues.map(issue => formatStructuredFieldIssue(issue, text))}
+                                emptyLabel={text.detailEmptyList}
+                            />
+                        </DetailSection>
+                    ) : null}
+                </>
             );
     }
 }

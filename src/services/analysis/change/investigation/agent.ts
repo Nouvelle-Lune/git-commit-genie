@@ -6,7 +6,7 @@
 // keeps this from drifting back into a repository summary.
 
 import { LLMExecution } from '../../../llm/llmTypes';
-import { AgentRuntime, EvidenceLedger } from '../../../../agent';
+import { AgentRuntime, EvidenceLedger, type FinalizationTrigger } from '../../../../agent';
 import {
     buildInvestigationPlanMessages,
 } from '../prompts';
@@ -23,7 +23,7 @@ import {
     runChangeAnalysisProfile,
 } from './changeAnalysisProfile';
 import {
-    logSchemaValidationToWebview,
+    logStructuredValidationToWebview,
     wrapExecutionSessionForWebview,
 } from '../../../llm/chatWebviewLogging';
 
@@ -189,6 +189,17 @@ export interface ChangeAnalysisAgentParams {
     userTemplate?: string;
     onStep?: (event: InvestigationStepEvent) => void;
     onContextCompacted?: (event: { epoch: number; estimatedTokens: number; reason: string }) => void;
+    /**
+     * Fires the moment repository lookups stop, before the finalization request
+     * is sent. The UI needs this to report the real stage instead of announcing
+     * the end of the investigation only once the whole analysis has returned.
+     */
+    onInvestigationClosed?: (event: {
+        trigger: FinalizationTrigger;
+        toolSteps: number;
+        evidenceCount: number;
+        reason: string | null;
+    }) => void;
 }
 
 export async function runChangeAnalysisAgent(
@@ -224,12 +235,24 @@ export async function runChangeAnalysisAgent(
                     modelVisibleOutput: observation.output,
                     outputTruncated: observation.outputTruncated,
                 });
-            } else if (event.type === 'schemaRetry') {
-                logSchemaValidationToWebview(
-                    params.repositoryPath,
-                    { profile: 'change-analysis', attempt: event.attempt, message: event.message },
-                    'Change analysis compound terminal schema retry',
-                );
+            } else if (event.type === 'stageChanged') {
+                params.onInvestigationClosed?.({
+                    trigger: event.trigger,
+                    toolSteps: event.toolSteps,
+                    evidenceCount: event.evidenceCount,
+                    reason: event.reason,
+                });
+            } else if (event.type === 'retry') {
+                logStructuredValidationToWebview(params.repositoryPath, {
+                    stage: event.stage,
+                    profile: event.profile,
+                    failureKind: event.category,
+                    attempt: event.attempt,
+                    totalAttempts: event.totalAttempts,
+                    finalFailure: event.finalFailure,
+                    fieldIssues: event.fieldIssues,
+                    error: event.message,
+                });
             }
         },
     });

@@ -1,7 +1,7 @@
 import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
 import { z } from 'zod';
-import { AgentProfile, AgentRuntime, EvidenceLedger } from '../../agent';
+import { AgentProfile, AgentRuntime, EvidenceLedger, FINISH_INVESTIGATION_TOOL } from '../../agent';
 import { createChangeAnalysisProfile } from '../../services/analysis/change/investigation/changeAnalysisProfile';
 import { DiffData } from '../../services/git/gitTypes';
 import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
@@ -68,6 +68,83 @@ function response(overrides: Partial<AIRunResponse>): AIRunResponse {
     };
 }
 
+type SimpleProfile<Input> = AgentProfile<Input, { value: string }, string>;
+
+function profileRequestHooks<Input>(
+    hooks: Partial<Pick<SimpleProfile<Input>, 'validateFinalizationPrecondition' | 'buildFinalizationRequest' | 'buildCorrectionRequest'>> = {},
+): Pick<SimpleProfile<Input>, 'buildFinalizationRequest' | 'buildCorrectionRequest'>
+    & Partial<Pick<SimpleProfile<Input>, 'validateFinalizationPrecondition'>> {
+    return {
+        buildFinalizationRequest: (_input, _state, reason) => [{
+            role: 'user',
+            content: reason ? `Finalize: ${reason}` : 'Return the terminal JSON object now.',
+        }],
+        buildCorrectionRequest: (_input, _state, failure) => [{
+            role: 'user',
+            content: failure.message,
+        }],
+        ...hooks,
+    };
+}
+
+function finishInvestigationResponse(reason = 'enough evidence'): AIRunResponse {
+    return response({
+        toolCalls: [{
+            id: 'finish-1',
+            name: FINISH_INVESTIGATION_TOOL,
+            arguments: { reason },
+        }],
+        stopReason: 'tool_call',
+    });
+}
+
+function inspectToolResponse(callId: string, reason: string): AIRunResponse {
+    return response({
+        toolCalls: [{
+            id: callId,
+            name: 'inspect',
+            arguments: { reason, filePath: 'src/target.ts' },
+        }],
+        stopReason: 'tool_call',
+    });
+}
+
+function buildInspectProfile(
+    maxSteps: number,
+    execute: () => { output: string },
+): AgentProfile<null, { value: string }, string> {
+    return {
+        id: 'duplicate-tool-call-test',
+        promptVersion: '1',
+        toolsetVersion: '1',
+        requestType: 'investigation',
+        finalName: 'duplicateToolCallTestFinal',
+        finalSchema: z.object({ value: z.string() }),
+        contextPolicy: {
+            maxSteps,
+            maxEpochs: 0,
+            maxObservationChars: 100,
+            buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+        },
+        buildPrompt: () => ({ stable: [{ role: 'system', content: 'protocol' }], opening: [] }),
+        grantTools: () => [{
+            name: 'inspect',
+            allowedRoot: '/tmp/repository',
+            excludePatterns: [],
+            allocateEvidence: false,
+        }],
+        buildToolDefinitions: () => [{
+            name: 'inspect',
+            description: 'Inspect.',
+            parameters: { type: 'object' },
+            execute: async () => execute(),
+        }],
+        ...profileRequestHooks(),
+        normalizeFinal: raw => raw.value,
+        preservePartialResult: () => 'partial',
+    };
+}
+
 describe('AgentRuntime contracts', () => {
     it('keeps cache identity, tools, thinking, and schema stable across turns', async () => {
         const requests: AIRunRequest[] = [];
@@ -78,6 +155,7 @@ describe('AgentRuntime contracts', () => {
                 stopReason: 'tool_call',
                 usage: { inputTokens: 100, cachedInputTokens: 80, outputTokens: 10 },
             }),
+            finishInvestigationResponse('verified'),
             response({
                 structured: { value: 'done' },
                 text: '{"value":"done"}',
@@ -118,6 +196,7 @@ describe('AgentRuntime contracts', () => {
                 },
                 execute: async () => ({ output: 'verified' }),
             }],
+            ...profileRequestHooks(),
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
         };
@@ -126,15 +205,18 @@ describe('AgentRuntime contracts', () => {
 
         assert.equal(result.output, 'done');
         assert.deepEqual(sessionIds, ['agent:runtime-test:7:3:test-model']);
-        assert.equal(requests.length, 2);
-        assert.deepEqual(requests[0].tools, requests[1].tools);
+        assert.equal(requests.length, 3);
+        assert.equal(requests[0].responseFormat, undefined);
+        assert.equal(requests[1].responseFormat, undefined);
+        assert.ok(requests[2].responseFormat);
+        assert.deepEqual(requests[0].tools, requests[2].tools);
         assert.equal('thinking' in requests[0], false);
-        assert.equal('thinking' in requests[1], false);
-        assert.deepEqual(requests[0].responseFormat, requests[1].responseFormat);
-        assert.equal(requests[1].messages?.length, 0);
+        assert.equal('thinking' in requests[2], false);
+        assert.equal(requests[1].toolChoice, 'auto');
+        assert.equal(requests[2].toolChoice, 'none');
         assert.equal(requests[1].toolResults?.[0].output, 'verified');
-        assert.equal(result.metrics.apiCalls, 2);
-        assert.deepEqual(result.metrics.usage.map(usage => usage.cachedInputTokens), [80, 15]);
+        assert.equal(result.metrics.apiCalls, 3);
+        assert.deepEqual(result.metrics.usage.map(usage => usage.cachedInputTokens).filter(value => value !== undefined), [80, 15]);
     });
 
     it('allocates globally unique D ids in diff order', () => {
@@ -282,6 +364,7 @@ describe('AgentRuntime contracts', () => {
             }],
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
+            ...profileRequestHooks(),
         };
 
         const result = await new AgentRuntime().run(execution, profile, null);
@@ -292,6 +375,7 @@ describe('AgentRuntime contracts', () => {
         assert.equal(requests.length, 3);
         assert.equal(requests[1].toolResults?.[0].isError, true);
         assert.match(requests[1].toolResults?.[0].output ?? '', /maxLines.*400/);
+        assert.equal(requests[2].toolChoice, 'none');
         assert.equal(requests[2].toolResults?.[0].output, 'read 400 lines');
         assert.equal(result.state.steps, 2);
         assert.equal(result.state.observations.length, 2);
@@ -356,6 +440,7 @@ describe('AgentRuntime contracts', () => {
             }],
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
+            ...profileRequestHooks(),
         };
 
         const result = await new AgentRuntime().run(execution, profile, null);
@@ -365,6 +450,7 @@ describe('AgentRuntime contracts', () => {
         assert.deepEqual(executedPaths, ['src/inside.ts']);
         assert.equal(requests[1].toolResults?.[0].isError, true);
         assert.match(requests[1].toolResults?.[0].output ?? '', /outside/);
+        assert.equal(requests[2].toolChoice, 'none');
         assert.equal(requests[2].toolResults?.[0].output, 'inside root');
         assert.equal(result.metrics.issues.filter(issue => issue.type === 'tool_rejected').length, 1);
     });
@@ -416,6 +502,7 @@ describe('AgentRuntime contracts', () => {
             }],
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
+            ...profileRequestHooks(),
         };
 
         const result = await new AgentRuntime({
@@ -431,6 +518,7 @@ describe('AgentRuntime contracts', () => {
         assert.deepEqual(events, ['epoch:1']);
         assert.deepEqual(sessionIds, ['agent:epoch-test:2:4:test-model', 'agent:epoch-test:2:4:test-model']);
         assert.deepEqual(ledger.snapshot().map(entry => entry.id), ['D1']);
+        assert.equal(requests[1].toolChoice, 'none');
         assert.equal(requests[1].messages?.[0].content.includes('checkpoint:D1'), true);
         for (const request of requests) {
             assert.equal('thinking' in request, false);
@@ -462,20 +550,23 @@ describe('AgentRuntime contracts', () => {
             buildToolDefinitions: () => [],
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
+            ...profileRequestHooks(),
         };
 
         const result = await new AgentRuntime({
             onEvent: event => {
-                if (event.type === 'schemaRetry') {
-                    events.push(`retry:${event.attempt}`);
+                if (event.type === 'retry') {
+                    events.push(`retry:${event.attempt}:${event.category}`);
                 }
             },
         }).run(execution, profile, null);
 
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'repaired');
-        assert.deepEqual(events, ['retry:1']);
-        assert.deepEqual(requests[0].responseFormat, requests[1].responseFormat);
+        assert.deepEqual(events, ['retry:1:schemaMismatch']);
+        assert.ok(requests[0].responseFormat);
+        assert.ok(requests[1].responseFormat);
+        assert.equal(requests[0].toolChoice, 'none');
         assert.equal(requests[1].toolChoice, 'none');
         assert.equal('thinking' in requests[0], false);
         assert.equal('thinking' in requests[1], false);
@@ -583,6 +674,7 @@ describe('AgentRuntime contracts', () => {
             }],
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
+            ...profileRequestHooks(),
         };
 
         const result = await new AgentRuntime().run(execution, profile, null);
@@ -591,23 +683,23 @@ describe('AgentRuntime contracts', () => {
         assert.equal(result.output, 'repaired');
         assert.equal(requests.length, 3);
         assert.equal(requests[0].response_format, undefined);
-        assert.equal(requests[1].response_format, undefined);
         assert.equal(requests[0].tool_choice, 'auto');
-        assert.equal(requests[1].tool_choice, 'auto');
         assert.equal(requests[0].parallel_tool_calls, false);
-        assert.equal(requests[1].parallel_tool_calls, false);
         assert.ok(Array.isArray(requests[0].tools));
-        assert.ok(Array.isArray(requests[1].tools));
+        assert.equal(requests[1].tool_choice, 'none');
+        assert.equal(requests[1].tools, undefined);
+        assert.equal(requests[1].parallel_tool_calls, undefined);
+        assert.ok(requests[1].response_format);
         assert.equal(requests[2].tool_choice, 'none');
-        assert.equal(requests[2].tools, undefined);
-        assert.equal(requests[2].parallel_tool_calls, undefined);
-        const format = requests[2].response_format as {
+        const format = requests[1].response_format as {
             type: string;
             json_schema: { name: string; strict: boolean };
         };
         assert.equal(format.type, 'json_schema');
         assert.equal(format.json_schema.name, 'customMixedRepairFinal');
         assert.equal(format.json_schema.strict, true);
+        const systemContent = String((requests[1].messages as Array<{ content: string }>)[0].content);
+        assert.match(systemContent, /"type":\s*"object"/);
         for (const body of requests) {
             assert.equal(body.reasoning_effort, 'high');
             assert.equal('thinking' in body, false);
@@ -618,11 +710,12 @@ describe('AgentRuntime contracts', () => {
         const requests: AIRunRequest[] = [];
         const events: string[] = [];
         const execution = createExecution([
-            response({ structured: { value: 'premature' }, text: '{"value":"premature"}' }),
+            finishInvestigationResponse('not enough yet'),
             response({
                 toolCalls: [{ id: 'collect', name: 'inspect', arguments: { reason: 'collect evidence' } }],
                 stopReason: 'tool_call',
             }),
+            finishInvestigationResponse('evidence collected'),
             response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
         ], requests, []);
         const profile: AgentProfile<string, { value: string }, string> = {
@@ -633,7 +726,7 @@ describe('AgentRuntime contracts', () => {
             finalName: 'terminalBoundaryTestFinal',
             finalSchema: z.object({ value: z.string() }),
             contextPolicy: {
-                maxSteps: 1,
+                maxSteps: 2,
                 maxEpochs: 0,
                 maxObservationChars: 1_000,
                 buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
@@ -662,36 +755,41 @@ describe('AgentRuntime contracts', () => {
                     return { output: 'evidence collected' };
                 },
             }],
-            validateTerminal: (_raw, state) => state.ledger.snapshot().some(item => item.source === 'repository')
-                ? null
-                : 'Repository evidence is required.',
+            ...profileRequestHooks({
+                validateFinalizationPrecondition: state => state.ledger.snapshot().some(item => item.source === 'repository')
+                    ? null
+                    : 'Repository evidence is required.',
+            }),
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
         };
 
         const result = await new AgentRuntime({
             onEvent: event => {
-                if (event.type === 'terminalRetry') {
-                    events.push(`retry:${event.attempt}`);
+                if (event.type === 'retry') {
+                    events.push(`retry:${event.attempt}:${event.category}`);
                 }
             },
         }).run(execution, profile, '/tmp/repository');
 
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'done');
-        assert.deepEqual(events, ['retry:1']);
-        assert.equal(requests.length, 3);
-        assert.equal(requests[1].toolChoice, 'auto');
-        assert.match(requests[1].messages?.[0].content ?? '', /Repository evidence is required/);
+        assert.deepEqual(events, ['retry:1:evidencePrecondition']);
+        assert.equal(requests.length, 4);
+        assert.equal(requests[0].toolChoice, 'auto');
+        assert.equal(requests[1].toolResults?.[0].isError, true);
+        assert.match(requests[1].toolResults?.[0].output ?? '', /Repository evidence is required/);
+        assert.equal(requests[3].toolChoice, 'none');
         assert.equal(result.state.ledger.snapshot().some(item => item.id === 'E1'), true);
-        assert.equal(result.metrics.issues.filter(issue => issue.type === 'terminal_retry').length, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'evidence_precondition').length, 1);
+        assert.equal(result.metrics.toolSteps, 1);
     });
 
     it('stops terminal retries at the configured boundary', async () => {
         const requests: AIRunRequest[] = [];
         const execution = createExecution([
-            response({ structured: { value: 'premature-1' } }),
-            response({ structured: { value: 'premature-2' } }),
+            finishInvestigationResponse('missing evidence'),
+            finishInvestigationResponse('still missing'),
         ], requests, []);
         const profile: AgentProfile<null, { value: string }, string> = {
             id: 'terminal-retry-limit-test',
@@ -701,8 +799,6 @@ describe('AgentRuntime contracts', () => {
             finalName: 'terminalRetryLimitTestFinal',
             finalSchema: z.object({ value: z.string() }),
             contextPolicy: {
-                // Keep unused step budget so failure uses profile retry limits,
-                // not the budget-exhaustion path that skips tool-asking retries.
                 maxSteps: 1,
                 maxEpochs: 0,
                 maxObservationChars: 100,
@@ -711,7 +807,9 @@ describe('AgentRuntime contracts', () => {
             buildPrompt: () => ({ stable: [], opening: [] }),
             grantTools: () => [],
             buildToolDefinitions: () => [],
-            validateTerminal: () => 'Evidence remains missing.',
+            ...profileRequestHooks({
+                validateFinalizationPrecondition: () => 'Evidence remains missing.',
+            }),
             normalizeFinal: raw => raw.value,
             preservePartialResult: (_state, error) => String((error as Error).message),
         };
@@ -719,17 +817,20 @@ describe('AgentRuntime contracts', () => {
         const result = await new AgentRuntime().run(execution, profile, null);
 
         assert.equal(result.status, 'partial');
-        assert.match(result.output, /remained invalid after 1 profile retry attempt/);
+        assert.match(result.output, /Evidence remains missing/);
         assert.equal(requests.length, 2);
-        assert.equal(result.metrics.issues.filter(issue => issue.type === 'terminal_retry').length, 1);
-        assert.equal(result.metrics.issues.filter(issue => issue.type === 'terminal_failure').length, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'evidence_precondition').length, 2);
+        assert.equal(result.metrics.toolSteps, 0);
     });
 
     it('soft-rejects over-budget tool calls then completes on forced terminal', async () => {
         const requests: AIRunRequest[] = [];
         const execution = createExecution([
             response({
-                toolCalls: [{ id: 'over-budget', name: 'inspect', arguments: { reason: 'too late' } }],
+                toolCalls: [
+                    { id: 'allowed', name: 'inspect', arguments: { reason: 'one' } },
+                    { id: 'over-budget', name: 'inspect', arguments: { reason: 'too late' } },
+                ],
                 stopReason: 'tool_call',
             }),
             response({ structured: { value: 'forced-done' }, text: '{"value":"forced-done"}' }),
@@ -742,7 +843,7 @@ describe('AgentRuntime contracts', () => {
             finalName: 'maxStepTestFinal',
             finalSchema: z.object({ value: z.string() }),
             contextPolicy: {
-                maxSteps: 0,
+                maxSteps: 1,
                 maxEpochs: 0,
                 maxObservationChars: 100,
                 buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
@@ -753,8 +854,9 @@ describe('AgentRuntime contracts', () => {
                 name: 'inspect',
                 description: 'Inspect.',
                 parameters: { type: 'object' },
-                execute: async () => { throw new Error('execute must not run'); },
+                execute: async () => ({ output: 'executed-once' }),
             }],
+            ...profileRequestHooks(),
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
         };
@@ -763,12 +865,14 @@ describe('AgentRuntime contracts', () => {
 
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'forced-done');
-        assert.equal(result.metrics.issues.filter(issue => issue.type === 'max_steps').length, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'budget_exhausted').length, 1);
         assert.equal(requests.length, 2);
+        assert.equal(requests[0].toolChoice, 'auto');
         assert.equal(requests[1].toolChoice, 'none');
-        assert.equal(requests[1].toolResults?.length, 1);
-        assert.equal(requests[1].toolResults?.[0].isError, true);
-        assert.match(requests[1].toolResults?.[0].output ?? '', /budget_exhausted/);
+        assert.ok(requests[1].responseFormat);
+        assert.equal(requests[1].toolResults?.length, 2);
+        assert.equal(requests[1].toolResults?.[1].isError, true);
+        assert.match(requests[1].toolResults?.[1].output ?? '', /budget_exhausted/);
     });
 
     it('executes the first tool in a batch then soft-rejects the rest before forced terminal', async () => {
@@ -808,6 +912,7 @@ describe('AgentRuntime contracts', () => {
                     return { output: 'executed-once' };
                 },
             }],
+            ...profileRequestHooks(),
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
         };
@@ -817,8 +922,9 @@ describe('AgentRuntime contracts', () => {
         assert.equal(executeCount, 1);
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'after-batch');
-        assert.equal(result.metrics.issues.filter(issue => issue.type === 'max_steps').length, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'budget_exhausted').length, 1);
         assert.equal(requests.length, 2);
+        assert.equal(requests[0].toolChoice, 'auto');
         assert.equal(requests[1].toolChoice, 'none');
         assert.equal(requests[1].toolResults?.length, 2);
         assert.equal(requests[1].toolResults?.[0].output, 'executed-once');
@@ -831,11 +937,11 @@ describe('AgentRuntime contracts', () => {
         const requests: AIRunRequest[] = [];
         const execution = createExecution([
             response({
-                toolCalls: [{ id: 'over-budget', name: 'inspect', arguments: { reason: 'first' } }],
+                toolCalls: [{ id: 'still-tools', name: 'inspect', arguments: { reason: 'second' } }],
                 stopReason: 'tool_call',
             }),
             response({
-                toolCalls: [{ id: 'still-tools', name: 'inspect', arguments: { reason: 'second' } }],
+                toolCalls: [{ id: 'still-tools-2', name: 'inspect', arguments: { reason: 'third' } }],
                 stopReason: 'tool_call',
             }),
         ], requests, []);
@@ -860,6 +966,7 @@ describe('AgentRuntime contracts', () => {
                 parameters: { type: 'object' },
                 execute: async () => { throw new Error('execute must not run'); },
             }],
+            ...profileRequestHooks(),
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
         };
@@ -867,17 +974,15 @@ describe('AgentRuntime contracts', () => {
         const result = await new AgentRuntime().run(execution, profile, null);
 
         assert.equal(result.status, 'partial');
-        assert.equal(result.metrics.issues.filter(issue => issue.type === 'max_steps').length, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'protocol_violation').length, 2);
         assert.equal(requests.length, 2);
+        assert.equal(requests[0].toolChoice, 'none');
+        assert.equal(requests[1].toolChoice, 'none');
     });
 
     it('returns partial on invalid forced terminal without tool-asking retry', async () => {
         const requests: AIRunRequest[] = [];
         const execution = createExecution([
-            response({
-                toolCalls: [{ id: 'over-budget', name: 'inspect', arguments: { reason: 'too late' } }],
-                stopReason: 'tool_call',
-            }),
             response({ structured: { value: 'invalid-terminal' }, text: '{"value":"invalid-terminal"}' }),
         ], requests, []);
         const profile: AgentProfile<null, { value: string }, string> = {
@@ -901,7 +1006,9 @@ describe('AgentRuntime contracts', () => {
                 parameters: { type: 'object' },
                 execute: async () => { throw new Error('execute must not run'); },
             }],
-            validateTerminal: () => 'Evidence remains missing.',
+            ...profileRequestHooks({
+                validateFinalizationPrecondition: () => 'Evidence remains missing.',
+            }),
             normalizeFinal: raw => raw.value,
             preservePartialResult: (_state, error) => String((error as Error).message),
         };
@@ -909,12 +1016,10 @@ describe('AgentRuntime contracts', () => {
         const result = await new AgentRuntime().run(execution, profile, null);
 
         assert.equal(result.status, 'partial');
-        assert.equal(requests.length, 2);
-        const allContent = requests.flatMap(request => request.messages ?? []).map(message => message.content).join('\n');
-        assert.ok(!allContent.includes('terminal_rejected'));
-        assert.ok(!allContent.includes('call the granted repository tools'));
-        assert.ok(result.metrics.issues.some(issue => issue.type === 'terminal_failure'
-            && (/budget exhaustion|Evidence remains missing/.test(issue.message))));
+        assert.equal(requests.length, 0);
+        assert.match(result.output, /Evidence remains missing/);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'evidence_precondition').length, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'terminal_failure').length, 0);
     });
 
     it('does not allow a read-only tool to allocate repository evidence', async () => {
@@ -953,6 +1058,7 @@ describe('AgentRuntime contracts', () => {
                     return { output: 'must not execute' };
                 },
             }],
+            ...profileRequestHooks(),
             normalizeFinal: raw => raw.value,
             preservePartialResult: (_state, error) => String((error as Error).message),
         };
@@ -1001,6 +1107,7 @@ describe('AgentRuntime contracts', () => {
                     evidenceCount: 2,
                 }),
             }],
+            ...profileRequestHooks(),
             normalizeFinal: raw => raw.value,
             preservePartialResult: () => 'partial',
         };
@@ -1009,6 +1116,7 @@ describe('AgentRuntime contracts', () => {
 
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'done');
+        assert.equal(requests[1].toolChoice, 'none');
         assert.equal(result.state.observations.length, 1);
         const observation = result.state.observations[0];
         assert.equal(observation.rawOutput, rawOutput);
@@ -1018,6 +1126,357 @@ describe('AgentRuntime contracts', () => {
         assert.equal(observation.summary, 'Collected a complete observation.');
         assert.equal(observation.evidenceCount, 2);
         assert.equal(requests[1].toolResults?.[0].output, observation.output);
+    });
+
+    it('ends investigation early through finishInvestigation without consuming repository budget', async () => {
+        const requests: AIRunRequest[] = [];
+        const events: Array<Record<string, unknown>> = [];
+        const execution = createExecution([
+            finishInvestigationResponse('planned questions answered'),
+            response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
+        ], requests, []);
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'early-finish-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'earlyFinishTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 3,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [{ role: 'system', content: 'protocol' }], opening: [] }),
+            grantTools: () => [{ name: 'inspect', allowedRoot: '/tmp/repository', excludePatterns: [], allocateEvidence: false }],
+            buildToolDefinitions: () => [{
+                name: 'inspect',
+                description: 'Inspect.',
+                parameters: { type: 'object' },
+                execute: async () => { throw new Error('execute must not run'); },
+            }],
+            ...profileRequestHooks(),
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime({
+            onEvent: event => {
+                if (event.type === 'stageChanged') {
+                    events.push({
+                        stage: event.stage,
+                        trigger: event.trigger,
+                        toolSteps: event.toolSteps,
+                        evidenceCount: event.evidenceCount,
+                        reason: event.reason,
+                    });
+                }
+            },
+        }).run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'done');
+        assert.equal(result.metrics.toolSteps, 0);
+        assert.equal(requests.length, 2);
+        assert.equal(requests[0].toolChoice, 'auto');
+        assert.equal(requests[0].responseFormat, undefined);
+        assert.equal(requests[1].toolChoice, 'none');
+        assert.ok(requests[1].responseFormat);
+        assert.deepEqual(events, [{
+            stage: 'finalization',
+            trigger: 'finishTool',
+            toolSteps: 0,
+            evidenceCount: 0,
+            reason: 'planned questions answered',
+        }]);
+    });
+
+    it('skips investigation entirely when maxSteps is zero', async () => {
+        const requests: AIRunRequest[] = [];
+        const events: string[] = [];
+        const execution = createExecution([
+            response({ structured: { value: 'zero-budget' }, text: '{"value":"zero-budget"}' }),
+        ], requests, []);
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'zero-budget-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'zeroBudgetTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 0,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [{ role: 'system', content: 'protocol' }], opening: [] }),
+            grantTools: () => [],
+            buildToolDefinitions: () => [],
+            ...profileRequestHooks(),
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime({
+            onEvent: event => {
+                if (event.type === 'stageChanged') {
+                    events.push(`${event.stage}:${event.trigger}`);
+                }
+            },
+        }).run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'zero-budget');
+        assert.equal(requests.length, 1);
+        assert.equal(requests[0].toolChoice, 'none');
+        assert.deepEqual(events, ['finalization:noBudget']);
+        assert.equal(result.metrics.toolSteps, 0);
+    });
+
+    it('rejects duplicate finishInvestigation calls in the same batch', async () => {
+        const requests: AIRunRequest[] = [];
+        const execution = createExecution([
+            response({
+                toolCalls: [
+                    { id: 'finish-1', name: FINISH_INVESTIGATION_TOOL, arguments: { reason: 'done' } },
+                    { id: 'finish-2', name: FINISH_INVESTIGATION_TOOL, arguments: { reason: 'again' } },
+                ],
+                stopReason: 'tool_call',
+            }),
+            response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
+        ], requests, []);
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'duplicate-finish-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'duplicateFinishTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 1,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [], opening: [] }),
+            grantTools: () => [],
+            buildToolDefinitions: () => [],
+            ...profileRequestHooks(),
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'tool_rejected').length, 1);
+        assert.equal(requests[1].toolResults?.[1].isError, true);
+        assert.match(requests[1].toolResults?.[1].output ?? '', /already ended/);
+    });
+
+    it('retries protocol violations when investigation returns prose instead of tools', async () => {
+        const requests: AIRunRequest[] = [];
+        const events: string[] = [];
+        const execution = createExecution([
+            response({ text: 'Here is my analysis.', stopReason: 'completed' }),
+            finishInvestigationResponse('corrected'),
+            response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
+        ], requests, []);
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'protocol-violation-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'protocolViolationTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 1,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [], opening: [] }),
+            grantTools: () => [],
+            buildToolDefinitions: () => [],
+            ...profileRequestHooks(),
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime({
+            onEvent: event => {
+                if (event.type === 'retry') {
+                    events.push(`${event.stage}:${event.category}:${event.attempt}`);
+                }
+            },
+        }).run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.deepEqual(events, ['investigation:protocolViolation:1']);
+        assert.match(requests[1].messages?.[0].content ?? '', /without calling a tool/);
+    });
+
+    it('throws reserved finishInvestigation when a profile grants it explicitly', async () => {
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'reserved-tool-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'reservedToolTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 1,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [], opening: [] }),
+            grantTools: () => [{
+                name: FINISH_INVESTIGATION_TOOL,
+                allowedRoot: '/tmp/repository',
+                excludePatterns: [],
+                allocateEvidence: false,
+            }],
+            buildToolDefinitions: () => [{
+                name: FINISH_INVESTIGATION_TOOL,
+                description: 'Reserved duplicate.',
+                parameters: { type: 'object' },
+                execute: async () => ({ output: 'must not run' }),
+            }],
+            ...profileRequestHooks(),
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+        const execution = createExecution([], [], []);
+
+        await assert.rejects(
+            () => new AgentRuntime().run(execution, profile, null),
+            /reserved control tool 'finishInvestigation'/,
+        );
+    });
+
+    it('propagates cancellation without degrading to partial', async () => {
+        const controller = new AbortController();
+        const requests: AIRunRequest[] = [];
+        const tokenBudget = resolveChainTokenBudget({
+            provider: 'custom',
+            model: 'test-model',
+            contextWindowTokens: 128_000,
+        });
+        const execution: LLMExecution = {
+            model: 'test-model',
+            temperature: 0.2,
+            maxOutputTokens: tokenBudget.maxOutputTokens,
+            maxRetries: 1,
+            thinking: { reasoning: false, level: 'off' },
+            tokenBudget,
+            signal: controller.signal,
+            createSession: messages => {
+                const session: AISession = {
+                    provider: 'custom',
+                    model: 'test-model',
+                    run: async () => {
+                        controller.abort();
+                        const error = new Error('The operation was aborted');
+                        error.name = 'AbortError';
+                        throw error;
+                    },
+                    snapshot: () => ({
+                        provider: 'custom',
+                        model: 'test-model',
+                        continuation: { serverManaged: false },
+                        transcript: [...messages],
+                    }),
+                };
+                return session;
+            },
+            run: async () => { throw new Error('not used'); },
+            accountCall: async () => ({ status: 'pricing-not-configured' as const }),
+            getRecordedQuotes: () => [],
+            notifyUsageCostIfEnabled: () => undefined,
+        };
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'cancel-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'cancelTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 0,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [], opening: [] }),
+            grantTools: () => [],
+            buildToolDefinitions: () => [],
+            ...profileRequestHooks(),
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial-never-used',
+        };
+
+        await assert.rejects(
+            () => new AgentRuntime().run(execution, profile, null),
+            (error: unknown) => (error as Error).name === 'AbortError',
+        );
+    });
+
+    it('counts rejected duplicate tool calls toward the step budget and still finalizes', async function () {
+        this.timeout(5_000);
+        const requests: AIRunRequest[] = [];
+        let executeCount = 0;
+        const maxSteps = 3;
+        const execution = createExecution([
+            inspectToolResponse('call-1', 'first attempt'),
+            inspectToolResponse('call-2', 'second attempt'),
+            inspectToolResponse('call-3', 'third attempt'),
+            response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
+        ], requests, []);
+        const profile = buildInspectProfile(maxSteps, () => {
+            executeCount += 1;
+            return { output: 'inspected once' };
+        });
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'done');
+        assert.equal(result.metrics.toolSteps, maxSteps);
+        assert.equal(executeCount, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'duplicate_tool_call').length, 2);
+        assert.equal(requests.length, 4);
+        assert.equal(requests[0].toolChoice, 'auto');
+        assert.equal(requests[0].responseFormat, undefined);
+        assert.equal(requests[3].toolChoice, 'none');
+        assert.ok(requests[3].responseFormat);
+    });
+
+    it('treats duplicate tool calls as identical when only reason differs', async () => {
+        const requests: AIRunRequest[] = [];
+        let executeCount = 0;
+        const execution = createExecution([
+            inspectToolResponse('call-1', 'first reason'),
+            inspectToolResponse('call-2', 'second reason'),
+            response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
+        ], requests, []);
+        const profile = buildInspectProfile(2, () => {
+            executeCount += 1;
+            return { output: 'inspected once' };
+        });
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(executeCount, 1);
+        assert.equal(result.metrics.toolSteps, 2);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'duplicate_tool_call').length, 1);
+        const duplicateResult = requests[2].toolResults?.find(result => result.isError === true);
+        assert.ok(duplicateResult);
+        assert.match(duplicateResult?.output ?? '', /Duplicate tool call/);
+        assert.equal(requests[2].toolChoice, 'none');
     });
 });
 
