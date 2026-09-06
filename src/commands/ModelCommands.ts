@@ -27,6 +27,7 @@ import {
 } from '../services/cost';
 import type { FlatModelPricing } from '../services/cost/costTypes';
 import type { FlatPricing, ModelPricing } from '../services/cost/pricing';
+import { logger } from '../services/logger';
 
 type ModelPurpose = 'generation';
 type MenuExit = 'back' | 'done';
@@ -72,7 +73,17 @@ export class ModelCommands {
 
     async register(): Promise<void> {
         this.context.subscriptions.push(
-            vscode.commands.registerCommand('git-commit-genie.manageModels', () => this.manageModels())
+            vscode.commands.registerCommand('git-commit-genie.manageModels', async () => {
+                try {
+                    await this.manageModels();
+                } catch (error) {
+                    // Surface every failure: callers like genieMenu use executeCommand and must not
+                    // silently drop rejections, otherwise QuickPick appears to vanish with no feedback.
+                    const message = error instanceof Error ? error.message : String(error);
+                    logger.error('Manage Models failed:', error);
+                    await vscode.window.showErrorMessage(`Manage Models failed: ${message}`);
+                }
+            })
         );
     }
 
@@ -191,7 +202,9 @@ export class ModelCommands {
         if (!model) { return 'back'; }
         const apiKey = nativeApiKey ?? await this.resolveApiKeyForNewModel(model);
         if (!apiKey) { return 'back'; }
-        await this.validateModel(model, apiKey);
+        // Persist immediately: OpenAI-compatible /models membership checks reject many valid
+        // custom endpoints (missing catalog, alias ids, pagination). Endpoint/model validity
+        // surfaces when the model is actually used for generation.
         await this.context.globalState.update(AI_MODELS_KEY, [...this.serviceRegistry.getModels(), model]);
         await this.serviceRegistry.reloadProviderServices();
         const service = this.serviceRegistry.getLLMService(model.id);
@@ -219,13 +232,17 @@ export class ModelCommands {
     }
 
     private async editModel(current: AIModelConfig): Promise<void> {
-        const apiKey = await this.context.secrets.get(modelSecretKey(current));
-        if (!apiKey) {
-            throw new Error(`${current.label} has no API key.`);
+        let updated: AIModelConfig | undefined;
+        if (current.provider === 'custom') {
+            updated = await this.promptCustomModel(current);
+        } else {
+            // Native edit still needs the shared provider key to re-list catalog models.
+            const apiKey = await this.context.secrets.get(modelSecretKey(current));
+            if (!apiKey) {
+                throw new Error(`${current.label} has no API key.`);
+            }
+            updated = await this.promptNativeModel(current.provider, apiKey);
         }
-        const updated = current.provider === 'custom'
-            ? await this.promptCustomModel(current)
-            : await this.promptNativeModel(current.provider, apiKey);
         if (!updated) { return; }
         // Preserve pricing override and thinking metadata across label/model/endpoint edits.
         const model: AIModelConfig = {
@@ -236,7 +253,6 @@ export class ModelCommands {
             id: current.id,
             provider: current.provider,
         };
-        await this.validateModel(model, apiKey);
         await this.context.globalState.update(
             AI_MODELS_KEY,
             this.serviceRegistry.getModels().map(candidate => candidate.id === current.id ? model : candidate),
@@ -249,7 +265,6 @@ export class ModelCommands {
     private async replaceApiKey(model: AIModelConfig): Promise<void> {
         const apiKey = await this.promptApiKey(PROVIDER_LABELS[model.provider]);
         if (!apiKey) { return; }
-        await this.validateModel(model, apiKey);
         const service = this.serviceRegistry.getLLMService(model.id);
         if (!service) {
             throw new Error(`AI model service '${model.id}' does not exist.`);
@@ -268,11 +283,13 @@ export class ModelCommands {
             'Delete',
         );
         if (confirmation !== 'Delete') { return; }
-        const remaining = this.serviceRegistry.getModels().filter(candidate => candidate.id !== model.id);
-        await this.context.globalState.update(AI_MODELS_KEY, remaining);
+        // Delete the secret while the model still owns it. ServiceRegistry.secrets.onDidChange
+        // requires an owner in getModels(); reversing this order throws a silent rejection.
         if (model.provider === 'custom') {
             await this.context.secrets.delete(customSecretKey(model.id));
         }
+        const remaining = this.serviceRegistry.getModels().filter(candidate => candidate.id !== model.id);
+        await this.context.globalState.update(AI_MODELS_KEY, remaining);
         await this.serviceRegistry.reloadProviderServices();
         await this.statusBarManager.refreshModelStates();
     }
@@ -460,23 +477,29 @@ export class ModelCommands {
             ?? this.promptApiKey(PROVIDER_LABELS[provider]);
     }
 
-    private async validateModel(model: AIModelConfig, apiKey: string): Promise<void> {
-        const provider = createAIProvider({ kind: model.provider, apiKey, baseUrl: model.baseUrl });
-        const available = await provider.listModels();
-        if (!available.includes(model.model)) {
-            throw new Error(`Model '${model.model}' was not returned by ${PROVIDER_LABELS[model.provider]}.`);
-        }
-    }
-
     private async promptCustomModel(initial: AIModelConfig): Promise<AIModelConfig | undefined> {
         const label = await vscode.window.showInputBox({ title: 'Custom model name', value: initial.label, ignoreFocusOut: true });
         if (!label?.trim()) { return undefined; }
-        const baseUrl = await vscode.window.showInputBox({ title: 'OpenAI-compatible base URL', value: initial.baseUrl, ignoreFocusOut: true });
+        const baseUrl = await vscode.window.showInputBox({
+            title: 'OpenAI-compatible base URL',
+            value: initial.baseUrl,
+            ignoreFocusOut: true,
+            validateInput: value => {
+                if (!value.trim()) {
+                    return 'Base URL is required.';
+                }
+                try {
+                    const parsed = new URL(value.trim());
+                    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+                        return 'Custom model base URL must use HTTP or HTTPS.';
+                    }
+                    return undefined;
+                } catch {
+                    return 'Enter a valid HTTP or HTTPS URL.';
+                }
+            },
+        });
         if (!baseUrl?.trim()) { return undefined; }
-        const parsed = new URL(baseUrl.trim());
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-            throw new Error('Custom model base URL must use HTTP or HTTPS.');
-        }
         const model = await vscode.window.showInputBox({ title: 'Model name', value: initial.model, ignoreFocusOut: true });
         if (!model?.trim()) { return undefined; }
         return {

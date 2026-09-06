@@ -42,7 +42,7 @@ export class MenuCommands {
         }
 
         if (pick.action === 'models') {
-            vscode.commands.executeCommand('git-commit-genie.manageModels');
+            await vscode.commands.executeCommand('git-commit-genie.manageModels');
             return;
         }
 
