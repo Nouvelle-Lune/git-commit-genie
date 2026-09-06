@@ -68,7 +68,7 @@ class GoogleSession implements AISession {
                 max_output_tokens: request.maxOutputTokens,
             },
         };
-        applyGoogleThinking(body, request.thinking ?? this.thinking, this.model);
+        applyGoogleThinking(body, this.thinking, this.model);
         if (request.responseFormat) {
             body.response_format = {
                 type: 'text',

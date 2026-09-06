@@ -92,4 +92,31 @@ describe('Google provider response accounting', () => {
         assert.equal(result.stopReason, 'context_window');
         assert.equal(result.stopReasonRaw, 'context_length');
     });
+
+    it('serializes session-bound thinking into Gemini generation_config', async () => {
+        const requests: RequestInit[] = [];
+        const provider = new GoogleProvider({ apiKey: 'test' }, async (_input, init) => {
+            requests.push(init ?? {});
+            return jsonResponse({
+                id: 'interaction_thinking',
+                status: 'completed',
+                steps: [{ type: 'model_output', content: [{ type: 'text', text: 'ok' }] }],
+            });
+        });
+
+        await provider.createSession({
+            model: 'gemini-3.1-pro-preview',
+            thinking: { reasoning: true, level: 'high', mappedValue: 'high' },
+        }).run({ messages: [{ role: 'user', content: 'high' }] });
+
+        await provider.createSession({
+            model: 'gemini-2.5-flash',
+            thinking: { reasoning: true, level: 'off', mappedValue: '0' },
+        }).run({ messages: [{ role: 'user', content: 'off' }] });
+
+        const highBody = JSON.parse(String(requests[0].body));
+        const offBody = JSON.parse(String(requests[1].body));
+        assert.equal(highBody.generation_config.thinking_level, 'high');
+        assert.equal(offBody.generation_config.thinking_budget, 0);
+    });
 });

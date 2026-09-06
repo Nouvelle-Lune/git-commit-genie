@@ -8,10 +8,10 @@ import {
     applyOpenAICompatibleThinking,
     applyOpenAIResponsesThinking,
     CustomProvider,
-    capThinkingConfig,
     getModelThinkingMetadata,
     getSupportedThinkingLevels,
     resolveThinkingConfig,
+    ThinkingLevel,
 } from '../../services/llm/providers';
 
 function model(
@@ -40,14 +40,33 @@ function settings(
     };
 }
 
+function assertUnsupportedLevel(
+    configured: AIModelConfig,
+    level: string,
+    supported: readonly string[],
+): void {
+    assert.throws(
+        () => resolveThinkingConfig(configured, settings(level)),
+        (error: unknown) => {
+            assert.ok(error instanceof Error);
+            assert.match(error.message, new RegExp(`Model '${configured.provider}/${configured.model}'`));
+            assert.match(error.message, new RegExp(`thinking level '${level}'`));
+            assert.match(error.message, new RegExp(`Supported levels: ${supported.join(', ')}`));
+            return true;
+        },
+    );
+}
+
 describe('unified native thinking configuration', () => {
-    it('keeps an unknown model closed and emits no native parameter', () => {
+    it('keeps an unknown official model closed and fails hard on unsupported levels', () => {
         const configured = model('openai', 'unknown-model');
         const metadata = getModelThinkingMetadata(configured);
-        const thinking = resolveThinkingConfig(configured, settings('high'));
-        const body: Record<string, unknown> = {};
-
         assert.deepEqual(getSupportedThinkingLevels(metadata), ['off']);
+
+        assertUnsupportedLevel(configured, 'high', ['off']);
+
+        const thinking = resolveThinkingConfig(configured, settings('off'));
+        const body: Record<string, unknown> = {};
         assert.equal(thinking.reasoning, false);
         assert.equal(thinking.level, 'off');
         applyOpenAIResponsesThinking(body, thinking);
@@ -116,6 +135,19 @@ describe('unified native thinking configuration', () => {
         assert.deepEqual(body, { temperature: 0.2, reasoning_effort: 'VERY_HIGH' });
     });
 
+    it('preserves custom native overrides without capability probing or rewrite', () => {
+        const configured = model('custom', 'endpoint-model');
+        const thinking = resolveThinkingConfig(configured, settings('low', {
+            'custom/endpoint-model': 'ULTRA',
+        }));
+
+        assert.equal(thinking.nativeValue, 'ULTRA');
+        assert.equal(thinking.level, 'medium');
+        // resolve must not rewrite the native override even when the endpoint would reject it later
+        assert.notEqual(thinking.nativeValue, 'low');
+        assert.notEqual(thinking.level, 'off');
+    });
+
     it('rejects arbitrary thinking values for official models', () => {
         assert.throws(
             () => resolveThinkingConfig(model('openai', 'gpt-5.4'), settings('low', {
@@ -123,6 +155,72 @@ describe('unified native thinking configuration', () => {
             })),
             /Invalid thinking level/,
         );
+    });
+
+    it('fails hard when an official model does not support the selected logical level', () => {
+        assertUnsupportedLevel(model('openai', 'unknown-model'), 'high', ['off']);
+        assertUnsupportedLevel(
+            model('openai', 'o3'),
+            'off',
+            ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
+        );
+        assertUnsupportedLevel(
+            model('google', 'gemini-3.1-pro-preview'),
+            'off',
+            ['minimal', 'low', 'medium', 'high'],
+        );
+        assertUnsupportedLevel(
+            model('google', 'gemini-3.1-pro-preview'),
+            'xhigh',
+            ['minimal', 'low', 'medium', 'high'],
+        );
+        assertUnsupportedLevel(
+            model('google', 'gemini-3.1-pro-preview'),
+            'max',
+            ['minimal', 'low', 'medium', 'high'],
+        );
+        assertUnsupportedLevel(
+            model('google', 'gemini-2.5-pro'),
+            'off',
+            ['low', 'medium', 'high'],
+        );
+    });
+
+    it('resolves every logical level for OpenAI gpt-5.4 and serializes protocol mappings', () => {
+        const configured = model('openai', 'gpt-5.4');
+        const expected: Record<ThinkingLevel, string> = {
+            off: 'none',
+            minimal: 'minimal',
+            low: 'low',
+            medium: 'medium',
+            high: 'high',
+            xhigh: 'xhigh',
+            max: 'xhigh',
+        };
+        for (const level of Object.keys(expected) as ThinkingLevel[]) {
+            const thinking = resolveThinkingConfig(configured, settings(level));
+            assert.equal(thinking.level, level);
+            assert.equal(thinking.mappedValue, expected[level]);
+            const body: Record<string, unknown> = {};
+            applyOpenAIResponsesThinking(body, thinking);
+            assert.deepEqual(body, { reasoning: { effort: expected[level] } });
+        }
+    });
+
+    it('keeps a single-model override exact and never silently raises off', () => {
+        const configured = model('openai', 'gpt-5.4');
+        const overridden = resolveThinkingConfig(configured, settings('off', {
+            'openai/gpt-5.4': 'high',
+        }));
+        assert.equal(overridden.level, 'high');
+        assert.equal(overridden.mappedValue, 'high');
+
+        const off = resolveThinkingConfig(configured, settings('off'));
+        assert.equal(off.level, 'off');
+        assert.equal(off.mappedValue, 'none');
+        const body: Record<string, unknown> = {};
+        applyOpenAIResponsesThinking(body, off);
+        assert.deepEqual(body, { reasoning: { effort: 'none' } });
     });
 
     it('serializes Anthropic budgets and removes incompatible sampling controls', () => {
@@ -139,23 +237,6 @@ describe('unified native thinking configuration', () => {
             () => applyAnthropicThinking({ max_tokens: 4096 }, thinking),
             /must be smaller than the derived output budget/,
         );
-    });
-
-    it('caps thinking per stage without increasing the user setting', () => {
-        const configured = model('openai', 'gpt-5.4');
-        const high = resolveThinkingConfig(configured, settings('high'));
-        const capped = capThinkingConfig(configured, settings('high'), high, 'low');
-        const alreadyLow = resolveThinkingConfig(configured, settings('minimal'));
-
-        assert.equal(capped.level, 'low');
-        assert.equal(capped.mappedValue, 'low');
-        assert.equal(capThinkingConfig(configured, settings('minimal'), alreadyLow, 'medium'), alreadyLow);
-
-        const alwaysThinking = model('google', 'gemini-3.1-pro-preview');
-        const googleHigh = resolveThinkingConfig(alwaysThinking, settings('high'));
-        const minimum = capThinkingConfig(alwaysThinking, settings('high'), googleHigh, 'off');
-        assert.equal(minimum.level, 'minimal');
-        assert.equal(minimum.mappedValue, 'minimal');
     });
 
     it('serializes explicit off values for supported native adapters', () => {
@@ -178,37 +259,32 @@ describe('unified native thinking configuration', () => {
         assert.deepEqual(googleBody, { generation_config: { thinking_budget: 0 } });
     });
 
-    it('uses Pi-style disabled-thinking behavior for models without an off mapping', () => {
+    it('serializes Google budget and level models for supported levels only', () => {
         const legacyConfigured = model('google', 'gemini-2.5-pro');
         const legacyThinking = resolveThinkingConfig(legacyConfigured, settings('medium', {}, { medium: 12345 }));
         const legacyBody: Record<string, unknown> = { generation_config: {} };
         applyGoogleThinking(legacyBody, legacyThinking);
         assert.deepEqual(legacyBody, { generation_config: { thinking_budget: 12345 } });
 
-        const legacyOffThinking = resolveThinkingConfig(legacyConfigured, settings('off'));
-        const legacyOffBody: Record<string, unknown> = { generation_config: {} };
-        applyGoogleThinking(legacyOffBody, legacyOffThinking, legacyConfigured.model);
-        assert.deepEqual(legacyOffBody, { generation_config: { thinking_budget: 0 } });
-
         const levelConfigured = model('google', 'gemini-3.1-pro-preview');
         assert.deepEqual(
             getSupportedThinkingLevels(getModelThinkingMetadata(levelConfigured)),
             ['minimal', 'low', 'medium', 'high'],
         );
-        const levelThinking = resolveThinkingConfig(levelConfigured, settings('off'));
+        const levelThinking = resolveThinkingConfig(levelConfigured, settings('high'));
         const levelBody: Record<string, unknown> = { generation_config: {} };
         applyGoogleThinking(levelBody, levelThinking, levelConfigured.model);
-        assert.deepEqual(levelBody, { generation_config: { thinking_level: 'LOW' } });
+        assert.deepEqual(levelBody, { generation_config: { thinking_level: 'high' } });
 
         const openAIAlwaysOnConfigured = model('openai', 'o3');
         assert.deepEqual(
             getSupportedThinkingLevels(getModelThinkingMetadata(openAIAlwaysOnConfigured)),
             ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'],
         );
-        const openAIAlwaysOnThinking = resolveThinkingConfig(openAIAlwaysOnConfigured, settings('off'));
+        const openAIAlwaysOnThinking = resolveThinkingConfig(openAIAlwaysOnConfigured, settings('high'));
         const openAIAlwaysOnBody: Record<string, unknown> = {};
         applyOpenAIResponsesThinking(openAIAlwaysOnBody, openAIAlwaysOnThinking);
-        assert.deepEqual(openAIAlwaysOnBody, {});
+        assert.deepEqual(openAIAlwaysOnBody, { reasoning: { effort: 'high' } });
     });
 
     it('serializes OpenAI Responses and OpenAI-compatible Chat Completions reasoning', () => {
@@ -379,7 +455,7 @@ describe('unified native thinking configuration', () => {
         assert.equal(response.reasoning, 'local reasoning');
     });
 
-    it('passes the resolved custom off format into the actual chat request', async () => {
+    it('binds session thinking into the chat request and ignores request-level overrides', async () => {
         let requestBody: Record<string, unknown> | undefined;
         const fakeClient = {
             chat: {
@@ -397,7 +473,6 @@ describe('unified native thinking configuration', () => {
 
         await provider.createSession({ model: configured.model, thinking }).run({
             messages: [{ role: 'user', content: 'hello' }],
-            thinking,
         });
 
         assert.deepEqual(requestBody?.chat_template_kwargs, {

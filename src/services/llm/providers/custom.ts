@@ -61,7 +61,7 @@ class CustomSession implements AISession {
             throw new Error('Custom provider returned no assistant message.');
         }
         const reasoning = readReasoning(choice);
-        const thinking = request.thinking ?? this.thinking;
+        const thinking = this.thinking;
         const assistantMessage: CustomMessage = {
             role: 'assistant',
             content: choice.content ?? null,
@@ -192,7 +192,7 @@ class CustomSession implements AISession {
             tool_choice: request.toolChoice,
             parallel_tool_calls: callableTools?.length ? false : undefined,
         };
-        applyOpenAICompatibleThinking(body, request.thinking ?? this.thinking);
+        applyOpenAICompatibleThinking(body, this.thinking);
         return (this.client.chat.completions.create as any)(body, {
             signal: request.signal,
             ...(request.transportRetries === 0 ? { maxRetries: 0 } : {}),

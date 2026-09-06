@@ -65,7 +65,7 @@ class AnthropicSession implements AISession {
             temperature: request.temperature,
             cache_control: { type: 'ephemeral' },
         };
-        applyAnthropicThinking(body, request.thinking ?? this.thinking);
+        applyAnthropicThinking(body, this.thinking);
         if (request.tools?.length) {
             body.tool_choice = request.toolChoice === 'required' ? { type: 'any' }
                 : request.toolChoice === 'none' ? { type: 'none' }

@@ -5,7 +5,6 @@ import {
     AIMessage,
     AIResponseFormat,
     AISession,
-    AIThinkingConfig,
     AIToolCall,
     AIToolResult,
     AIUsage,
@@ -200,7 +199,6 @@ export class AgentRuntime {
             name: profile.finalName,
             schema: z.toJSONSchema(profile.finalSchema) as Record<string, unknown>,
         };
-        const thinking = execution.thinkingFor(profile.requestType);
         const cacheIdentity = this.cacheIdentity(profile, execution.model ?? 'configured-model');
         const stableMessages = [...prompt.stable, ...prompt.opening];
         let session = this.wrapSession(execution.createSession(stableMessages, cacheIdentity));
@@ -245,7 +243,6 @@ export class AgentRuntime {
                     toolChoice: forceFinalize || tools.length === 0 ? 'none' : 'auto',
                     temperature: execution.temperature,
                     maxOutputTokens: execution.maxOutputTokens,
-                    thinking,
                     signal: execution.signal,
                 });
                 if (response.usage) {
@@ -260,7 +257,6 @@ export class AgentRuntime {
                         session,
                         profile,
                         responseFormat,
-                        thinking,
                         execution,
                         state,
                     });
@@ -503,7 +499,6 @@ export class AgentRuntime {
         session: AISession;
         profile: AgentProfile<Input, RawFinal, Output>;
         responseFormat: AIResponseFormat;
-        thinking: AIThinkingConfig;
         execution: LLMExecution;
         state: AgentRunState;
     }): Promise<RawFinal> {
@@ -535,7 +530,6 @@ export class AgentRuntime {
                     toolChoice: 'none',
                     temperature: params.execution.temperature,
                     maxOutputTokens: params.execution.maxOutputTokens,
-                    thinking: params.thinking,
                     signal: params.execution.signal,
                 });
                 if (response.usage) {

@@ -24,9 +24,8 @@ function createExecution(
         temperature: 0.2,
         maxOutputTokens: tokenBudget.maxOutputTokens,
         maxRetries: 1,
-        thinkingLevel: 'low',
+        thinking: { reasoning: true, level: 'low' },
         tokenBudget,
-        thinkingFor: () => ({ reasoning: true, level: 'low' }),
         createSession: (_messages, id) => {
             sessionIds.push(id);
             const transcript: Array<{ role: 'system' | 'developer' | 'user' | 'assistant'; content: string }> = [];
@@ -129,7 +128,8 @@ describe('AgentRuntime contracts', () => {
         assert.deepEqual(sessionIds, ['agent:runtime-test:7:3:test-model']);
         assert.equal(requests.length, 2);
         assert.deepEqual(requests[0].tools, requests[1].tools);
-        assert.deepEqual(requests[0].thinking, requests[1].thinking);
+        assert.equal('thinking' in requests[0], false);
+        assert.equal('thinking' in requests[1], false);
         assert.deepEqual(requests[0].responseFormat, requests[1].responseFormat);
         assert.equal(requests[1].messages?.length, 0);
         assert.equal(requests[1].toolResults?.[0].output, 'verified');
@@ -432,6 +432,9 @@ describe('AgentRuntime contracts', () => {
         assert.deepEqual(sessionIds, ['agent:epoch-test:2:4:test-model', 'agent:epoch-test:2:4:test-model']);
         assert.deepEqual(ledger.snapshot().map(entry => entry.id), ['D1']);
         assert.equal(requests[1].messages?.[0].content.includes('checkpoint:D1'), true);
+        for (const request of requests) {
+            assert.equal('thinking' in request, false);
+        }
     });
 
     it('retries an invalid compound terminal without changing the request contract', async () => {
@@ -474,6 +477,8 @@ describe('AgentRuntime contracts', () => {
         assert.deepEqual(events, ['retry:1']);
         assert.deepEqual(requests[0].responseFormat, requests[1].responseFormat);
         assert.equal(requests[1].toolChoice, 'none');
+        assert.equal('thinking' in requests[0], false);
+        assert.equal('thinking' in requests[1], false);
     });
 
     it('repairs an invalid mixed terminal through a no-tools strict Custom request', async () => {
@@ -524,17 +529,18 @@ describe('AgentRuntime contracts', () => {
             model: 'local-model',
             contextWindowTokens: 128_000,
         });
+        const thinking = { reasoning: true, level: 'high' as const };
         const execution: LLMExecution = {
             model: 'local-model',
             temperature: 0.2,
             maxOutputTokens: tokenBudget.maxOutputTokens,
             maxRetries: 1,
-            thinkingLevel: 'low',
+            thinking,
             tokenBudget,
-            thinkingFor: () => ({ reasoning: true, level: 'low' }),
             createSession: messages => provider.createSession({
                 model: 'local-model',
                 systemInstruction: messages.find(message => message.role === 'system')?.content,
+                thinking,
             }),
             run: async () => { throw new Error('not used'); },
             accountCall: async () => ({ status: 'pricing-not-configured' as const }),
@@ -602,6 +608,10 @@ describe('AgentRuntime contracts', () => {
         assert.equal(format.type, 'json_schema');
         assert.equal(format.json_schema.name, 'customMixedRepairFinal');
         assert.equal(format.json_schema.strict, true);
+        for (const body of requests) {
+            assert.equal(body.reasoning_effort, 'high');
+            assert.equal('thinking' in body, false);
+        }
     });
 
     it('rejects a premature terminal and keeps tools available for profile-required evidence', async () => {

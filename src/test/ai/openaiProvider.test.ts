@@ -103,4 +103,34 @@ describe('OpenAI provider response accounting', () => {
         assert.deepEqual(result.continuation, { nativeId: 'resp_2', serverManaged: true });
         assert.deepEqual(session.snapshot().continuation, result.continuation);
     });
+
+    it('serializes session-bound thinking into Responses reasoning effort', async () => {
+        const requests: Array<Record<string, unknown>> = [];
+        const provider = new OpenAIProvider({ apiKey: 'test' }, createClient({
+            id: 'resp_thinking',
+            status: 'completed',
+            output_text: '',
+            output: [],
+        }, requests));
+
+        await provider.createSession({
+            model: 'gpt-5.4',
+            thinking: { reasoning: true, level: 'high', mappedValue: 'high' },
+        }).run({ messages: [{ role: 'user', content: 'think hard' }] });
+
+        await provider.createSession({
+            model: 'gpt-5.4',
+            thinking: { reasoning: true, level: 'max', mappedValue: 'xhigh' },
+        }).run({ messages: [{ role: 'user', content: 'max effort' }] });
+
+        await provider.createSession({
+            model: 'gpt-5.4',
+            thinking: { reasoning: true, level: 'off', mappedValue: 'none' },
+        }).run({ messages: [{ role: 'user', content: 'no thinking' }] });
+
+        assert.deepEqual(requests[0].reasoning, { effort: 'high' });
+        assert.deepEqual(requests[1].reasoning, { effort: 'xhigh' });
+        assert.deepEqual(requests[2].reasoning, { effort: 'none' });
+        assert.equal('thinking' in requests[0], false);
+    });
 });

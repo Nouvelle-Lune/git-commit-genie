@@ -82,8 +82,8 @@ Git Commit Genie 基于已暂存的 Git diff，使用支持的模型适配器（
 | `gitCommitGenie.chain.enabled`                      | boolean | false   | 启用链式多步提示生成提交信息（使得生成的提交信息更加详准确，且可以更加贴合用户模版，但将增加延迟与 Token 消耗）                                      |
 | `gitCommitGenie.chain.maxParallel`                  | number  | 2       | 链式提示并行 LLM 调用最大数量。谨慎增大以避免触发速率限制。                                                                                          |
 | `gitCommitGenie.chain.contextWindowTokens`          | integer | 128000  | Thinking 模式使用的模型上下文总窗口。内置模型会自动识别并按注册上限收紧；仅 Custom 端点需要手动设置。输入、输出与安全余量均从这一项自动分配。                    |
-| `gitCommitGenie.defaultThinkingLevel`               | enum    | `off`   | 所有支持 thinking 的模型使用的全局思考等级，默认关闭；不支持 thinking 的模型始终关闭。Custom OpenAI-compatible 模型自动继承，只有使用非标准参数的端点才需要“管理模型 → 高级 thinking 兼容”。 |
-| `gitCommitGenie.modelThinkingLevels`                | object  | `{}`    | 可选的单模型覆盖。键使用 `provider/model`，值使用思考等级，例如 `{ "openai/gpt-5.4": "high", "custom/Qwen3.5-9B": "low" }`；没有对应键时继承全局配置。Custom 模型还可填写 `VERY_HIGH` 等非空 provider 原生值。 |
+| `gitCommitGenie.defaultThinkingLevel`               | enum    | `off`   | 所有支持 thinking 的模型在前台与后台调用中统一使用的全局思考等级，默认关闭；不支持 thinking 的模型始终关闭。Custom OpenAI-compatible 模型自动继承，只有使用非标准参数的端点才需要“管理模型 → 高级 thinking 兼容”。官方模型不支持的等级会直接失败，不会被改写。 |
+| `gitCommitGenie.modelThinkingLevels`                | object  | `{}`    | 可选的单模型覆盖。键使用 `provider/model`，值使用思考等级，例如 `{ "openai/gpt-5.4": "high", "custom/Qwen3.5-9B": "low" }`；没有对应键时继承全局配置。一旦创建 execution，该模型解析出的等级会用于所有阶段。Custom 模型还可填写 `VERY_HIGH` 等非空 provider 原生值。 |
 | `gitCommitGenie.thinkingBudgets`                    | object  | 见说明  | 仅用于 Anthropic/Google 数字思考预算，以及明确配置了高级本地引擎预算字段的 Custom 端点；普通 OpenAI-compatible 模型提供商无需配置。默认依次为 `1024/4096/10240/32768/65536/131072`。 |
 | `gitCommitGenie.llm.maxRetries`                     | number  | 2       | API请求失败最大重试次数。                                                                                                                            |
 | `gitCommitGenie.llm.temperature`                    | number  | 1       | Temperature（0–2），默认为 1。部分服务商/模型组合只接受 1；修改该值可能触发 invalid-temperature 错误或导致输出稳定性下降。                                      |
@@ -106,7 +106,7 @@ Git Commit Genie 基于已暂存的 Git diff，使用支持的模型适配器（
 
 Custom OpenAI Chat Completions 端点统一使用一个 adapter，并采用 Pi 风格的 thinking 格式。只有完全不支持 thinking 控制的模型才选择 `Unsupported (no parameter)`；它不会发送任何原生 thinking 参数，也无法阻止服务端自行开启 thinking。默认 `openai` 格式发送 `reasoning_effort`；本地 Qwen/vLLM 可选择 `qwen`（`enable_thinking`）或 `qwen-chat-template`（`chat_template_kwargs.enable_thinking`）；通用本地模板选择 `chat-template`。编辑 Custom 模型时还可选择 DeepSeek、OpenRouter、Together、z.ai、Baseten、string-thinking 和 AntLing 格式。思考等级仍由全局配置或单模型覆盖控制，格式只决定如何序列化到端点请求。
 
-Thinking 模式把用户设置的思考等级视为上限，并在抽取、摘要、重排与修复阶段自动降低等级。只有完整提示超过压缩触发线时才会调用 LLM 摘要原始证据；摘要会被后续阶段复用，二次收紧采用确定性压缩，从而减少重复压缩成本。提供商报告输出长度耗尽时不会误判为输入过长：thinking 用尽输出预算时会提示提高 `chain.contextWindowTokens` 或降低思考等级；Custom 只返回含义不明的 `finish_reason=length` 时则明确停止，不盲目重试。
+Thinking 模式在整个 execution 中只解析一次思考等级：链式各阶段、Agent 轮次、schema 重试、RAG 与仓库 Memory consolidation 都复用同一份 session 绑定配置。官方模型遇到不支持的等级会直接失败，不会自动改写；Custom 端点保持配置原值，若服务端拒绝则直接展示 provider 错误。只有完整提示超过压缩触发线时才会调用 LLM 摘要原始证据；摘要会被后续阶段复用，二次收紧采用确定性压缩，从而减少重复压缩成本。提供商报告输出长度耗尽时不会误判为输入过长：thinking 用尽输出预算时会提示提高 `chain.contextWindowTokens` 或降低思考等级；Custom 只返回含义不明的 `finish_reason=length` 时则明确停止，不盲目重试。
 
 
 

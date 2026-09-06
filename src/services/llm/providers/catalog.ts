@@ -248,28 +248,6 @@ export function getSupportedThinkingLevels(model: AIModelThinkingMetadata): Thin
     });
 }
 
-/**
- * Clamps a requested level using Pi's upward-first search, then downward search.
- * The resolver preserves `off` so adapters can apply provider-specific behavior.
- */
-export function clampThinkingLevel(model: AIModelThinkingMetadata, level: ThinkingLevel): ThinkingLevel {
-    const available = getSupportedThinkingLevels(model);
-    if (!available.length) {
-        throw new Error('Model thinking metadata declares no supported thinking levels.');
-    }
-    if (available.includes(level)) {
-        return level;
-    }
-    const requestedIndex = THINKING_LEVELS.indexOf(level);
-    for (let index = requestedIndex; index < THINKING_LEVELS.length; index += 1) {
-        if (available.includes(THINKING_LEVELS[index])) { return THINKING_LEVELS[index]; }
-    }
-    for (let index = requestedIndex - 1; index >= 0; index -= 1) {
-        if (available.includes(THINKING_LEVELS[index])) { return THINKING_LEVELS[index]; }
-    }
-    return available[0];
-}
-
 export interface ThinkingSettingsValues {
     defaultThinkingLevel: unknown;
     modelThinkingLevels: unknown;
@@ -287,7 +265,11 @@ export function getRequestedThinkingLevel(model: AIModelConfig, settings: Thinki
     return parseThinkingLevel(getRequestedThinkingValue(model, settings));
 }
 
-/** Resolves user settings into the exact thinking payload carried by a session. */
+/**
+ * Resolves user settings into the exact thinking payload bound to one LLMExecution.
+ * Official models with known capabilities fail hard on unsupported levels; custom
+ * models keep the logical level or native override verbatim with no capability probing.
+ */
 export function resolveThinkingConfig(model: AIModelConfig, settings: ThinkingSettingsValues): AIThinkingConfig {
     const metadata = getModelThinkingMetadata(model);
     const modelOverride = getModelThinkingOverride(model, settings);
@@ -305,8 +287,8 @@ export function resolveThinkingConfig(model: AIModelConfig, settings: ThinkingSe
         };
     }
 
-    const requestedLevel = parseThinkingLevel(requestedValue);
-    const level = requestedLevel === 'off' ? 'off' : clampThinkingLevel(metadata, requestedLevel);
+    const level = parseThinkingLevel(requestedValue);
+    assertOfficialThinkingLevelSupported(model, metadata, level);
     const mappedValue = metadata.thinkingLevelMap?.[level];
     return {
         reasoning: metadata.reasoning,
@@ -317,33 +299,26 @@ export function resolveThinkingConfig(model: AIModelConfig, settings: ThinkingSe
     };
 }
 
-/** Applies a stage ceiling without ever increasing the user-selected level. */
-export function capThinkingConfig(
+/**
+ * Official catalog models must use a supported logical level exactly. Custom
+ * endpoints skip this check so unsupported values surface as provider errors.
+ */
+function assertOfficialThinkingLevelSupported(
     model: AIModelConfig,
-    settings: ThinkingSettingsValues,
-    resolved: AIThinkingConfig,
-    ceiling: ThinkingLevel,
-): AIThinkingConfig {
-    const resolvedIndex = THINKING_LEVELS.indexOf(resolved.level);
-    const ceilingIndex = THINKING_LEVELS.indexOf(ceiling);
-    if (resolvedIndex <= ceilingIndex) {
-        return resolved;
+    metadata: AIModelThinkingMetadata,
+    level: ThinkingLevel,
+): void {
+    if (model.provider === 'custom') {
+        return;
     }
-
-    const metadata = getModelThinkingMetadata(model);
     const supported = getSupportedThinkingLevels(metadata);
-    // Some always-thinking models cannot honor off. In that case the lowest
-    // supported level is the only valid implementation of an off/minimum stage.
-    const level = supported
-        .filter(candidate => THINKING_LEVELS.indexOf(candidate) <= ceilingIndex)
-        .at(-1) ?? supported[0];
-    return {
-        reasoning: metadata.reasoning,
-        level,
-        mappedValue: metadata.thinkingLevelMap?.[level],
-        ...thinkingTransport(metadata),
-        budget: resolveThinkingBudget(model, metadata, level, settings),
-    };
+    if (supported.includes(level)) {
+        return;
+    }
+    throw new Error(
+        `Model '${model.provider}/${model.model}' does not support thinking level '${level}'. ` +
+        `Supported levels: ${supported.join(', ') || '(none)'}.`,
+    );
 }
 
 function thinkingTransport(metadata: AIModelThinkingMetadata): Pick<

@@ -430,4 +430,37 @@ describe('Custom provider response accounting', () => {
 
         assert.equal(result.stopReason, 'unknown_length');
     });
+
+    it('serializes session-bound thinking into Chat Completions reasoning_effort', async () => {
+        const bodies: Array<Record<string, unknown>> = [];
+        const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
+            chat: {
+                completions: {
+                    create: async (body: Record<string, unknown>) => {
+                        bodies.push(body);
+                        return { choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: 'ok' } }] };
+                    },
+                },
+            },
+        } as any);
+
+        await provider.createSession({
+            model: 'local-model',
+            thinking: { reasoning: true, level: 'high', mappedValue: 'high', format: 'openai', supportsReasoningEffort: true },
+        }).run({ messages: [{ role: 'user', content: 'high' }] });
+
+        await provider.createSession({
+            model: 'local-model',
+            thinking: { reasoning: true, level: 'max', mappedValue: 'xhigh', format: 'openai', supportsReasoningEffort: true },
+        }).run({ messages: [{ role: 'user', content: 'max' }] });
+
+        await provider.createSession({
+            model: 'local-model',
+            thinking: { reasoning: true, level: 'off', mappedValue: 'none', format: 'openai', supportsReasoningEffort: true },
+        }).run({ messages: [{ role: 'user', content: 'off' }] });
+
+        assert.equal(bodies[0].reasoning_effort, 'high');
+        assert.equal(bodies[1].reasoning_effort, 'xhigh');
+        assert.equal(bodies[2].reasoning_effort, 'none');
+    });
 });

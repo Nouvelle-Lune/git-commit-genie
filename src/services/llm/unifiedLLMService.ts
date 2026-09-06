@@ -7,9 +7,6 @@ import {
     AIProvider,
     AISession,
     AIModelConfig,
-    AIThinkingConfig,
-    ThinkingLevel,
-    capThinkingConfig,
     createAIProvider,
     modelSecretKey,
     resolveThinkingConfig,
@@ -27,7 +24,6 @@ import {
     LLMError,
     LLMResponse,
     LLMRunOptions,
-    RequestType,
 } from './llmTypes';
 import {
     assertChatMessagesWithinTokenBudget,
@@ -55,22 +51,6 @@ import type { AIUsage } from './providers';
 export interface UnifiedLLMServiceOptions {
     model: AIModelConfig;
     costTracker: CostTrackingService;
-}
-
-const STAGE_THINKING_CEILINGS: Partial<Record<RequestType, ThinkingLevel>> = {
-    summary: 'minimal',
-    changeExtraction: 'low',
-    investigationPlan: 'low',
-    investigation: 'medium',
-    ragRerank: 'low',
-    draft: 'medium',
-    fix: 'minimal',
-    strictFix: 'minimal',
-    enforceLanguage: 'off',
-};
-
-function stageThinkingCeiling(requestType: RequestType, userLevel: ThinkingLevel): ThinkingLevel {
-    return STAGE_THINKING_CEILINGS[requestType] ?? userLevel;
 }
 
 /** Coordinates provider-neutral sessions for commit and repository workflows. */
@@ -134,6 +114,8 @@ export class UnifiedLLMService extends BaseLLMService {
             modelThinkingLevels: configuration.get<unknown>('modelThinkingLevels', {}),
             thinkingBudgets: configuration.get<unknown>('thinkingBudgets', {}),
         };
+        // Resolve once per execution: model override → global default. Every
+        // foreground and background call reuses this exact config.
         const thinking = resolveThinkingConfig(this.options.model, thinkingSettings);
         const contextWindowTokens = configuration.get<number>(
             'chain.contextWindowTokens',
@@ -145,12 +127,6 @@ export class UnifiedLLMService extends BaseLLMService {
             contextWindowTokens,
             thinking,
         });
-        const thinkingFor = (requestType: RequestType): AIThinkingConfig => capThinkingConfig(
-            this.options.model,
-            thinkingSettings,
-            thinking,
-            stageThinkingCeiling(requestType, thinking.level),
-        );
         // Snapshot pricing at execution creation so mid-task override edits do not affect in-flight calls.
         const pricing = resolveModelPricing(this.options.model.model, this.options.model.pricingOverride);
         const recordedQuotes: CostQuote[] = [];
@@ -175,10 +151,8 @@ export class UnifiedLLMService extends BaseLLMService {
             temperature,
             maxOutputTokens: tokenBudget.maxOutputTokens,
             maxRetries,
-            thinkingLevel: thinking.level,
-            thinkingBudget: thinking.budget,
+            thinking,
             tokenBudget,
-            thinkingFor,
             createSession: (messages, id) => provider.createSession({
                 id,
                 model: modelName,
@@ -186,7 +160,7 @@ export class UnifiedLLMService extends BaseLLMService {
                 thinking,
             }),
             run: <T>(session: AISession, messages: AIMessage[], runOptions: LLMRunOptions) => (
-                this.runSession<T>(session, messages, runOptions, repoPath, tokenBudget, thinkingFor, signal, accountCall)
+                this.runSession<T>(session, messages, runOptions, repoPath, tokenBudget, signal, accountCall)
             ),
             accountCall,
             getRecordedQuotes: () => recordedQuotes,
@@ -215,7 +189,6 @@ export class UnifiedLLMService extends BaseLLMService {
         runOptions: LLMRunOptions,
         repoPath: string,
         tokenBudget: ChainTokenBudget,
-        thinkingFor: (requestType: RequestType) => AIThinkingConfig,
         signal: AbortSignal | undefined,
         accountCall: (usage: AIUsage | undefined) => Promise<CostQuote>,
     ): Promise<T> {
@@ -243,6 +216,7 @@ export class UnifiedLLMService extends BaseLLMService {
             assertChatMessagesWithinTokenBudget(budgetMessages, tokenBudget, requestType);
             currentLogId = logger.logApiRequest(repoPath || undefined);
             try {
+                // Thinking stays session-bound; do not override per request or stage.
                 const response = await session.run({
                     messages: runDelta,
                     responseFormat: schema ? {
@@ -251,7 +225,6 @@ export class UnifiedLLMService extends BaseLLMService {
                     } : undefined,
                     temperature,
                     maxOutputTokens,
-                    thinking: thinkingFor(requestType),
                     signal,
                 });
                 if (response.text) {

@@ -115,4 +115,27 @@ describe('Anthropic provider response accounting', () => {
             /must be smaller than the derived output budget/,
         );
     });
+
+    it('serializes session-bound off thinking as disabled without request overrides', async () => {
+        let requestBody: Record<string, unknown> | undefined;
+        const provider = new AnthropicProvider({ apiKey: 'test' }, {
+            messages: {
+                create: async (body: Record<string, unknown>) => {
+                    requestBody = body;
+                    return { id: 'msg_off', stop_reason: 'end_turn', content: [] };
+                },
+            },
+        } as any);
+
+        await provider.createSession({
+            model: 'claude-sonnet-4-5',
+            thinking: { reasoning: true, level: 'off', mappedValue: 'disabled' },
+        }).run({
+            messages: [{ role: 'user', content: 'no thinking' }],
+            maxOutputTokens: 1024,
+        });
+
+        assert.deepEqual(requestBody?.thinking, { type: 'disabled' });
+        assert.equal(requestBody?.max_tokens, 1024);
+    });
 });

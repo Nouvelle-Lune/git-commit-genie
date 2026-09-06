@@ -181,12 +181,51 @@ describe('repository memory lifecycle', function () {
             /stopped without a complete response: max_output_tokens/,
         );
         assert.equal(request?.transportRetries, 0);
+        assert.equal('thinking' in (request ?? {}), false);
         assert.equal(accounted, undefined, 'unknown provider usage is passed through for explicit accounting');
+    });
+
+    it('reuses execution-bound thinking for consolidation and never puts thinking on the run request', async () => {
+        const thinking = { reasoning: true, level: 'high' as const };
+        let seenRequest: AIRunRequest | undefined;
+        const execution = makeExecution(16_000, {
+            thinking,
+            createSession: (() => ({
+                run: async (input: AIRunRequest) => {
+                    seenRequest = input;
+                    return {
+                        text: '',
+                        structured: { entries: [] },
+                        toolCalls: [],
+                        usage: { inputTokens: 1, outputTokens: 1 },
+                        stopReason: 'completed' as const,
+                        continuation: { serverManaged: false },
+                        raw: {},
+                    };
+                },
+                provider: 'custom',
+                model: 'memory-test',
+                snapshot: () => ({
+                    provider: 'custom',
+                    model: 'memory-test',
+                    continuation: { serverManaged: false },
+                    transcript: [],
+                }),
+            }) as any),
+            accountCall: async () => ({ status: 'usage-not-reported' as const }),
+        });
+
+        await createConsolidationRunner(execution)('{}', new AbortController().signal);
+
+        assert.equal(execution.thinking, thinking);
+        assert.equal(execution.thinking.level, 'high');
+        assert.equal('thinking' in (seenRequest ?? {}), false);
     });
 });
 
 function makeExecution(hardInputTokens: number, overrides: Partial<LLMExecution> = {}): LLMExecution {
     return {
+        thinking: { reasoning: false, level: 'off' },
         tokenBudget: { hardInputTokens } as LLMExecution['tokenBudget'],
         createSession: () => ({ run: async () => {
             throw new Error('session should not be called');

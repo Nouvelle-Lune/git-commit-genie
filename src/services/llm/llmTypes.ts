@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { DiffData } from '../git/gitTypes';
 import { Repository } from '../git/git';
 import { ChangeSetSummary, FileSummary, RagRetrievalQuery, RagStyleReference, RetrievalFeatures } from '../chain/types';
-import { AIMessage, AISession, AIThinkingConfig, AIUsage, ThinkingLevel } from './providers';
+import { AIMessage, AISession, AIThinkingConfig, AIUsage } from './providers';
 import type { ChainTokenBudget } from './inputTokenBudget';
 import type { CostQuote } from '../cost/costTypes';
 
@@ -33,10 +33,12 @@ export interface LLMExecution {
     readonly temperature: number;
     readonly maxOutputTokens: number;
     readonly maxRetries: number;
-    readonly thinkingLevel: ThinkingLevel;
-    readonly thinkingBudget?: number;
+    /**
+     * Thinking config resolved once at createExecution (model override → global default).
+     * Every session and provider call for this execution must reuse this exact config.
+     */
+    readonly thinking: AIThinkingConfig;
     readonly tokenBudget: ChainTokenBudget;
-    thinkingFor(requestType: RequestType): AIThinkingConfig;
     createSession(messages: AIMessage[], id?: string): AISession;
     run<T>(session: AISession, messages: AIMessage[], options: LLMRunOptions): Promise<T>;
     /**

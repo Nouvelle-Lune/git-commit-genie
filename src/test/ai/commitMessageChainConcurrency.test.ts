@@ -122,9 +122,8 @@ function createExecution(
         temperature: 0,
         maxOutputTokens: tokenBudget.maxOutputTokens,
         maxRetries: 0,
-        thinkingLevel: 'off',
+        thinking: { reasoning: false, level: 'off' },
         tokenBudget,
-        thinkingFor: () => ({ reasoning: false, level: 'off' }),
         createSession: (): AISession => ({
             provider: 'custom',
             model: 'chain-test',

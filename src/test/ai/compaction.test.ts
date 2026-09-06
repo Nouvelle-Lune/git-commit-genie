@@ -31,9 +31,8 @@ function fakeExecution(onCreateSession?: (messages: AIMessage[]) => void): LLMEx
         temperature: 0,
         maxOutputTokens: 128,
         maxRetries: 0,
-        thinkingLevel: 'off',
+        thinking: { reasoning: false, level: 'off' },
         tokenBudget: {} as any,
-        thinkingFor: () => ({ reasoning: false, level: 'off' }),
         createSession: (messages: AIMessage[]) => {
             onCreateSession?.(messages);
             return {

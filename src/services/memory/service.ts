@@ -26,7 +26,7 @@ export function createConsolidationRunner(execution: LLMExecution): Consolidatio
         }
         const session = execution.createSession(messages);
         const response = await session.run({ messages, responseFormat: { name: 'repositoryMemoryConsolidation', schema },
-            transportRetries: 0, maxOutputTokens: 2000, thinking: { level: 'off', reasoning: false }, signal });
+            transportRetries: 0, maxOutputTokens: 2000, signal });
         await execution.accountCall(response.usage);
         if (response.stopReason !== 'completed') { throw new Error(`Consolidation stopped without a complete response: ${response.stopReason}`); }
         return response.structured;

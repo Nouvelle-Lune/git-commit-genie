@@ -37,9 +37,8 @@ function executionForPlans(
         temperature: 0,
         maxOutputTokens: 128,
         maxRetries: plans.length - 1,
-        thinkingLevel: 'off',
+        thinking: { reasoning: false, level: 'off' },
         tokenBudget: {} as LLMExecution['tokenBudget'],
-        thinkingFor: () => ({ reasoning: false, level: 'off' }),
         createSession: (): AISession => ({
             provider: 'custom',
             model: 'test',

@@ -64,7 +64,7 @@ class OpenAISession implements AISession {
             tool_choice: request.toolChoice,
             parallel_tool_calls: false,
         };
-        const thinking = request.thinking ?? this.thinking;
+        const thinking = this.thinking;
         applyOpenAIResponsesThinking(body, thinking);
         if (request.responseFormat) {
             body.text = {

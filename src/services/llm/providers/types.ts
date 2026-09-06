@@ -4,7 +4,7 @@ export type ProviderKind = 'openai' | 'anthropic' | 'google' | 'custom';
 /** User-visible reasoning levels shared by every provider adapter. */
 export type ThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
-/** Stable ordering used by the thinking-level picker and clamping logic. */
+/** Stable ordering used by the thinking-level picker and support checks. */
 export const THINKING_LEVELS: readonly ThinkingLevel[] = Object.freeze([
     'off',
     'minimal',
@@ -159,7 +159,6 @@ export interface AIRunRequest {
     toolChoice?: 'auto' | 'required' | 'none';
     temperature?: number;
     maxOutputTokens?: number;
-    thinking?: AIThinkingConfig;
     signal?: AbortSignal;
 }
 
