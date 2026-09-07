@@ -22,6 +22,13 @@ const repositoryTool = {
 
 const terminalJson = '{"type":"fix","scope":null,"breaking":false,"description":"fix parsing","body":null,"footers":[],"notes":null}';
 
+type SerializedMessage = {
+    role: string;
+    content: string | null;
+    tool_call_id?: string;
+    tool_calls?: unknown[];
+};
+
 describe('Custom provider response accounting', () => {
     it('passes the component-only draft schema to compatible chat endpoints', async () => {
         let requestBody: Record<string, unknown> | undefined;
@@ -323,6 +330,179 @@ describe('Custom provider response accounting', () => {
             content: 'file contents',
             tool_call_id: 'call_read_1',
         });
+    });
+
+    it('serializes a single finalization tool result before the finalization message', async () => {
+        const requests: Array<Record<string, unknown>> = [];
+        let callCount = 0;
+        const toolCall = {
+            id: 'call_read_1',
+            type: 'function',
+            function: { name: repositoryTool.name, arguments: '{"filePath":"src/ui/pipelineDisplay.ts"}' },
+        };
+        const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
+            chat: {
+                completions: {
+                    create: async (body: Record<string, unknown>) => {
+                        requests.push(body);
+                        callCount += 1;
+                        return callCount === 1
+                            ? {
+                                choices: [{
+                                    finish_reason: 'tool_calls',
+                                    message: { role: 'assistant', content: null, tool_calls: [toolCall] },
+                                }],
+                            }
+                            : {
+                                choices: [{
+                                    finish_reason: 'stop',
+                                    message: { role: 'assistant', content: terminalJson },
+                                }],
+                            };
+                    },
+                },
+            },
+        } as any);
+        const session = provider.createSession({ model: 'local-model' });
+
+        await session.run({
+            messages: [{ role: 'user', content: 'inspect the changed file' }],
+            tools: [repositoryTool],
+            toolChoice: 'auto',
+        });
+        await session.run({
+            messages: [{ role: 'user', content: 'Finalize the repository investigation.' }],
+            responseFormat,
+            tools: [repositoryTool],
+            toolChoice: 'none',
+            toolResults: [{
+                callId: 'call_read_1',
+                name: repositoryTool.name,
+                output: 'file contents',
+            }],
+        });
+
+        const messages = requests[1].messages as SerializedMessage[];
+        const assistantIndex = messages.findIndex(message => message.role === 'assistant');
+        const finalizationIndex = messages.findIndex((message, index) => (
+            index > assistantIndex
+            && message.role === 'user'
+            && message.content === 'Finalize the repository investigation.'
+        ));
+        assert.ok(assistantIndex >= 0);
+        assert.ok(finalizationIndex > assistantIndex);
+        assert.deepEqual(messages.slice(assistantIndex, finalizationIndex + 1), [
+            {
+                role: 'assistant',
+                content: null,
+                tool_calls: [toolCall],
+            },
+            {
+                role: 'tool',
+                content: 'file contents',
+                tool_call_id: 'call_read_1',
+            },
+            {
+                role: 'user',
+                content: 'Finalize the repository investigation.',
+            },
+        ]);
+    });
+
+    it('serializes all finalization tool results consecutively before the finalization message', async () => {
+        const requests: Array<Record<string, unknown>> = [];
+        let callCount = 0;
+        const toolCalls = [
+            {
+                id: 'call_read_1',
+                type: 'function',
+                function: { name: repositoryTool.name, arguments: '{"filePath":"src/first.ts"}' },
+            },
+            {
+                id: 'call_read_2',
+                type: 'function',
+                function: { name: repositoryTool.name, arguments: '{"filePath":"src/second.ts"}' },
+            },
+        ];
+        const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
+            chat: {
+                completions: {
+                    create: async (body: Record<string, unknown>) => {
+                        requests.push(body);
+                        callCount += 1;
+                        return callCount === 1
+                            ? {
+                                choices: [{
+                                    finish_reason: 'tool_calls',
+                                    message: { role: 'assistant', content: null, tool_calls: toolCalls },
+                                }],
+                            }
+                            : {
+                                choices: [{
+                                    finish_reason: 'stop',
+                                    message: { role: 'assistant', content: terminalJson },
+                                }],
+                            };
+                    },
+                },
+            },
+        } as any);
+        const session = provider.createSession({ model: 'local-model' });
+
+        await session.run({
+            messages: [{ role: 'user', content: 'inspect both changed files' }],
+            tools: [repositoryTool],
+            toolChoice: 'auto',
+        });
+        await session.run({
+            messages: [{ role: 'user', content: 'Summarize the repository investigation.' }],
+            responseFormat,
+            tools: [repositoryTool],
+            toolChoice: 'none',
+            toolResults: [
+                {
+                    callId: 'call_read_1',
+                    name: repositoryTool.name,
+                    output: 'first file contents',
+                },
+                {
+                    callId: 'call_read_2',
+                    name: repositoryTool.name,
+                    output: 'second file contents',
+                },
+            ],
+        });
+
+        const messages = requests[1].messages as SerializedMessage[];
+        const assistantIndex = messages.findIndex(message => message.role === 'assistant');
+        const finalizationIndex = messages.findIndex((message, index) => (
+            index > assistantIndex
+            && message.role === 'user'
+            && message.content === 'Summarize the repository investigation.'
+        ));
+        assert.ok(assistantIndex >= 0);
+        assert.ok(finalizationIndex > assistantIndex);
+        assert.deepEqual(messages.slice(assistantIndex, finalizationIndex + 1), [
+            {
+                role: 'assistant',
+                content: null,
+                tool_calls: toolCalls,
+            },
+            {
+                role: 'tool',
+                content: 'first file contents',
+                tool_call_id: 'call_read_1',
+            },
+            {
+                role: 'tool',
+                content: 'second file contents',
+                tool_call_id: 'call_read_2',
+            },
+            {
+                role: 'user',
+                content: 'Summarize the repository investigation.',
+            },
+        ]);
     });
 
     it('appends the mixed-mode terminal and single-tool instructions to an existing system prompt', async () => {

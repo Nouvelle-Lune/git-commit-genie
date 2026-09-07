@@ -44,15 +44,19 @@ class CustomSession implements AISession {
     }
 
     async run(request: AIRunRequest): Promise<AIRunResponse> {
+        // Chat Completions requires every assistant tool call to be answered
+        // before a later user message. AgentRuntime can submit the pending tool
+        // results and the next-phase prompt together, so preserve that protocol
+        // order when extending the persistent conversation history.
+        for (const result of request.toolResults ?? []) {
+            this.messages.push({ role: 'tool', content: result.output, tool_call_id: result.callId });
+        }
         for (const message of request.messages ?? []) {
             this.transcript.push(message);
             if (message.role === 'system' || message.role === 'developer') {
                 continue;
             }
             this.messages.push(message);
-        }
-        for (const result of request.toolResults ?? []) {
-            this.messages.push({ role: 'tool', content: result.output, tool_call_id: result.callId });
         }
         const requestMessages: CustomMessage[] = this.messages.map(message => ({ ...message }));
         const response: any = await this.createCompletion(request, requestMessages);
