@@ -81,7 +81,11 @@ export function validateConsolidation(raw: unknown, episodes: InvestigationEpiso
         if (entry.targetPaths.some(target => !paths.has(target))) { throw new Error('Consolidation invented a target path.'); }
         const triggers = new Set(supporting.flatMap(item => [...item.episode.changedPaths, ...item.episode.changedSymbols]));
         if (entry.triggers.some(trigger => !triggers.has(trigger))) { throw new Error('Consolidation invented a trigger.'); }
-        if (entry.kind === 'procedure' && new Set(supporting.filter(item => item.independent).map(item => item.episode.snapshot.id)).size < 3) {
+        const independentSnapshots = new Set(supporting.filter(item => item.independent).map(item => item.episode.snapshot.id));
+        if (entry.concerns.length && independentSnapshots.size < 2) {
+            throw new Error('Historical concerns require two independently investigated snapshots.');
+        }
+        if (entry.kind === 'procedure' && independentSnapshots.size < 3) {
             throw new Error('Procedural memory requires three independently investigated snapshots.');
         }
     }

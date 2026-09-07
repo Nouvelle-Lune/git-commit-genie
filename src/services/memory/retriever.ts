@@ -62,18 +62,22 @@ export class MemoryRetriever {
 
     retrieveNavigation(query: MemoryQuery, maxTokens = this.navigationTokens): MemoryNavigation[] {
         const started = performance.now();
-        const entries: Array<Pick<HandbookEntry, 'triggers' | 'targetPaths' | 'questions' | 'supports'>> = [
+        const representedEpisodes = new Set(this.view.handbook.flatMap(entry => entry.supports.map(support => support.episodeId)));
+        const entries: Array<Pick<HandbookEntry, 'triggers' | 'targetPaths' | 'concerns' | 'supports'>> = [
             ...this.view.handbook,
-            ...this.view.episodes.filter(isEligibleEpisode).map(episode => ({
+            ...this.view.episodes.filter(episode => isEligibleEpisode(episode) && !representedEpisodes.has(episode.id)).map(episode => ({
                 triggers: [...episode.changedPaths, ...episode.changedSymbols],
                 targetPaths: [...new Set(episode.observations.flatMap(observation => observation.evidence.map(evidence => evidence.source.path)))],
-                questions: episode.questions,
+                // Task-bound questions can navigate to source locations, but only
+                // consolidation may promote repeated observations into concerns.
+                concerns: [],
                 supports: episode.observations.flatMap(observation => observation.evidence.map(evidence => ({ episodeId: episode.id, evidenceId: evidence.id }))),
             })),
         ];
         const exact = new Set([...query.paths, ...query.symbols]);
         const words = new Set([...query.keywords, ...query.symbols].flatMap(value => value.toLowerCase().split(/[^\p{L}\p{N}_]+/u)).filter(Boolean));
-        const lexical = bm25Scores(entries.map(entry => [...entry.triggers, ...entry.targetPaths]), [...query.paths, ...query.symbols, ...query.keywords]);
+        const lexical = bm25Scores(entries.map(entry => [...entry.triggers, ...entry.targetPaths, ...entry.concerns]),
+            [...query.paths, ...query.symbols, ...query.keywords]);
         const candidates = entries.map((entry, index) => {
             const targets = entry.targetPaths.filter(target => !this.excluded(target));
             const score = entry.triggers.reduce((total, trigger) => total + (exact.has(trigger) ? 100 : 0), 0)
@@ -83,11 +87,11 @@ export class MemoryRetriever {
             return { entry, targets, score: score + lexical[index] };
         }).filter(candidate => candidate.score > 0 && candidate.targets.length).sort((a, b) => b.score - a.score);
         const result: MemoryNavigation[] = [];
-        const seen = new Set<string>();
+        const seenIdentities = new Set<string>();
         const areaCounts = new Map<string, number>();
         const tokenLimit = Math.min(this.navigationTokens, maxTokens);
         for (const { entry, targets } of candidates) {
-            const filtered = targets.filter(target => !seen.has(target)).slice(0, 8);
+            const filtered = targets.slice(0, 8);
             if (!filtered.length) { continue; }
             const area = path.posix.dirname(filtered[0]);
             if ((areaCounts.get(area) ?? 0) >= 2) { continue; }
@@ -95,13 +99,15 @@ export class MemoryRetriever {
                 .filter((source): source is SourceObservation => !!source && filtered.includes(source.path))
                 .map(source => [memorySourceKey(source), source])).values()].slice(0, 4);
             if (!sources.length) { continue; }
-            const identity = JSON.stringify([filtered, entry.questions.slice(0, 2), sources.map(memorySourceKey)]);
+            const identity = JSON.stringify([filtered, entry.concerns.slice(0, 2), sources.map(memorySourceKey)]);
+            if (seenIdentities.has(identity)) { continue; }
             const id = this.identities.get(identity) ?? `M${this.navigation.size + 1}`;
-            const navigation: MemoryNavigation = { id, targetPaths: filtered, questions: entry.questions.slice(0, 2), sourceCount: sources.length };
+            const navigation: MemoryNavigation = { id, targetPaths: filtered, concerns: entry.concerns.slice(0, 2), sourceCount: sources.length };
             if (estimateTokens(JSON.stringify([...result, navigation])) > tokenLimit) { continue; }
             this.identities.set(identity, id);
             this.navigation.set(id, { value: structuredClone(navigation), sources: structuredClone(sources) });
-            result.push(navigation); filtered.forEach(target => seen.add(target)); areaCounts.set(area, (areaCounts.get(area) ?? 0) + 1);
+            seenIdentities.add(identity);
+            result.push(navigation); areaCounts.set(area, (areaCounts.get(area) ?? 0) + 1);
             if (result.length === 6) { break; }
         }
         this.usage.recalled += result.length;

@@ -11,15 +11,22 @@ import { shouldExclude } from '../analysis/tools/pathFilters';
 import { bm25Scores } from './ranking';
 import { MEMORY_DEFAULTS, MemorySettings } from './settings';
 
+const consolidationAttemptSchema = z.object({ id: z.uuid(), at: z.number(), epoch: z.uuid() }).strict();
+
 const manifestSchema = z.object({
     version: z.literal(1), epoch: z.uuid(), generation: z.number().int().nonnegative(),
     episodes: z.array(z.object({ id: z.uuid(), hash: z.string(), bytes: z.number().int().positive(), createdAt: z.number(),
         paths: z.array(z.string()), symbols: z.array(z.string()), targets: z.array(z.string()), eligible: z.boolean() }).strict()),
     handbook: z.array(handbookEntrySchema),
-    attempts: z.array(z.object({ id: z.uuid(), at: z.number(), epoch: z.uuid() }).strict()),
+    attempts: z.array(consolidationAttemptSchema),
     consolidated: z.array(z.uuid()),
     job: z.object({ id: z.uuid(), expiresAt: z.number() }).strict().nullable(),
 }).strict();
+const clearStateSchema = z.object({
+    generation: z.number().int().nonnegative(),
+    attempts: z.array(consolidationAttemptSchema),
+}).passthrough();
+const episodePayloadName = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/i;
 type Manifest = z.infer<typeof manifestSchema>;
 export interface MemoryView { epoch: string; generation: number; episodes: InvestigationEpisode[]; handbook: HandbookEntry[]; consolidated: string[] }
 export type ConsolidationReservation = { status: 'reserved'; id: string } | { status: 'already-running' } |
@@ -39,20 +46,30 @@ export class MemoryStore {
     }
 
     private locked<T>(action: (state: Manifest, assertOwned: () => void) => Promise<T>): Promise<T> {
-        const result = this.queue.then(() => this.withFileLock(action));
+        return this.queued(() => this.withFileLock(action));
+    }
+
+    private queued<T>(operation: () => Promise<T>): Promise<T> {
+        const result = this.queue.then(operation);
         // Keep the queue usable after a rejected operation; its returned promise
         // still propagates the original error to the caller's visible handler.
         this.queue = result.then(() => undefined, () => undefined);
         return result;
     }
 
-    private async withFileLock<T>(action: (state: Manifest, assertOwned: () => void) => Promise<T>): Promise<T> {
+    private async withDirectoryLock<T>(action: (assertOwned: () => void) => Promise<T>): Promise<T> {
         await fs.mkdir(this.directory, { recursive: true, mode: 0o700 });
         let compromised: Error | undefined;
         const release = await lockfile.lock(this.directory, { stale: 30000, update: 5000,
             retries: { retries: 3, minTimeout: 10, maxTimeout: 40 }, onCompromised: error => { compromised = error; } });
         const assertOwned = () => { if (compromised) { throw compromised; } };
         try {
+            return await action(assertOwned);
+        } finally { if (!compromised) { await release(); } }
+    }
+
+    private async withFileLock<T>(action: (state: Manifest, assertOwned: () => void) => Promise<T>): Promise<T> {
+        return this.withDirectoryLock(async assertOwned => {
             const manifestPath = path.join(this.directory, 'current.json');
             let state: Manifest;
             try {
@@ -66,7 +83,7 @@ export class MemoryStore {
             }
             assertOwned();
             return await action(state, assertOwned);
-        } finally { if (!compromised) { await release(); } }
+        });
     }
 
     private async publish(state: Manifest, assertOwned: () => void, settings: MemorySettings): Promise<void> {
@@ -188,13 +205,25 @@ export class MemoryStore {
     }
 
     async clear(settings = this.settings()): Promise<void> {
-        await this.locked(async (state, assertOwned) => {
-            const removed = state.episodes;
-            state.epoch = randomUUID(); state.episodes = []; state.handbook = []; state.consolidated = []; state.job = null;
-            // Preserve attempts: clearing memory must not reset paid-call limits.
+        await this.queued(() => this.withDirectoryLock(async assertOwned => {
+            const manifestPath = path.join(this.directory, 'current.json');
+            let preserved: z.infer<typeof clearStateSchema> = { generation: 0, attempts: [] };
+            try {
+                // Clear is the recovery operation for incompatible Handbook schemas.
+                // Parse only the accounting fields that must survive the reset.
+                preserved = clearStateSchema.parse(JSON.parse(await fs.readFile(manifestPath, 'utf8')));
+            } catch (error) {
+                if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; }
+            }
+            const state: Manifest = {
+                version: 1, epoch: randomUUID(), generation: preserved.generation,
+                episodes: [], handbook: [], attempts: preserved.attempts,
+                consolidated: [], job: null,
+            };
             await this.publish(state, assertOwned, settings);
-            for (const entry of removed) { assertOwned(); await fs.unlink(path.join(this.directory, `${entry.id}.json`)); }
-        });
+            const payloads = (await fs.readdir(this.directory)).filter(name => episodePayloadName.test(name));
+            for (const name of payloads) { assertOwned(); await fs.unlink(path.join(this.directory, name)); }
+        }));
     }
 
     async reserveConsolidation(expected: MemoryView, maxCalls: number, settings = this.settings()): Promise<ConsolidationReservation> {

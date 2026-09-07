@@ -110,6 +110,102 @@ describe('MemoryStore', function () {
         });
     });
 
+    it('strictly rejects a legacy questions handbook while clear preserves accounting and deletes payloads', async () => {
+        await withTempStorage(async storageRoot => {
+            const repositoryId = 'd'.repeat(64);
+            const store = new MemoryStore(storageRoot, repositoryId);
+            const episode = makeEpisode(repositoryId);
+            await store.recordEpisode(episode, await store.epoch());
+            const expected = await store.inspect();
+            const reservation = await store.reserveConsolidation(expected, 2);
+            assert.equal(reservation.status, 'reserved');
+            if (reservation.status !== 'reserved') { throw new Error('Expected a consolidation reservation.'); }
+
+            const manifestPath = path.join(store.directory, 'current.json');
+            const payloadPath = path.join(store.directory, `${episode.id}.json`);
+            const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as {
+                epoch: string;
+                generation: number;
+                attempts: unknown[];
+                episodes: unknown[];
+                handbook: unknown[];
+                consolidated: unknown[];
+                job: unknown;
+            };
+            const legacyEntry: Record<string, unknown> = { ...makeHandbookEntry(episode.id) };
+            delete legacyEntry.concerns;
+            legacyEntry.questions = ['Legacy task question'];
+            manifest.handbook = [legacyEntry];
+            await fs.writeFile(manifestPath, JSON.stringify(manifest));
+
+            await assert.rejects(
+                () => store.inspect(),
+                /Invalid input|Unrecognized key|expected/i,
+                'normal inspection must not migrate a questions field into concerns',
+            );
+            const beforeClear = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as {
+                generation: number;
+                attempts: unknown[];
+            };
+
+            await store.clear();
+
+            const cleared = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as {
+                generation: number;
+                epoch: string;
+                attempts: unknown[];
+                episodes: unknown[];
+                handbook: unknown[];
+                consolidated: unknown[];
+                job: unknown;
+            };
+            assert.equal(cleared.generation, beforeClear.generation + 1);
+            assert.notEqual(cleared.epoch, manifest.epoch);
+            assert.deepEqual(cleared.attempts, beforeClear.attempts);
+            assert.deepEqual(cleared.episodes, []);
+            assert.deepEqual(cleared.handbook, []);
+            assert.deepEqual(cleared.consolidated, []);
+            assert.equal(cleared.job, null);
+            await assert.rejects(() => fs.access(payloadPath));
+
+            const view = await store.inspect();
+            assert.deepEqual(view.episodes, []);
+            assert.deepEqual(view.handbook, []);
+            assert.deepEqual(view.consolidated, []);
+        });
+    });
+
+    it('fails clear on corrupted attempts without changing the manifest or episode payload', async () => {
+        await withTempStorage(async storageRoot => {
+            const repositoryId = 'e'.repeat(64);
+            const store = new MemoryStore(storageRoot, repositoryId);
+            const episode = makeEpisode(repositoryId);
+            await store.recordEpisode(episode, await store.epoch());
+            const expected = await store.inspect();
+            const reservation = await store.reserveConsolidation(expected, 2);
+            assert.equal(reservation.status, 'reserved');
+            if (reservation.status !== 'reserved') { throw new Error('Expected a consolidation reservation.'); }
+
+            const manifestPath = path.join(store.directory, 'current.json');
+            const payloadPath = path.join(store.directory, `${episode.id}.json`);
+            const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as {
+                attempts: Array<Record<string, unknown>>;
+            };
+            manifest.attempts[0].id = 'not-a-uuid';
+            await fs.writeFile(manifestPath, JSON.stringify(manifest));
+            const manifestBeforeClear = await fs.readFile(manifestPath);
+            const payloadBeforeClear = await fs.readFile(payloadPath);
+
+            await assert.rejects(
+                () => store.clear(),
+                /Invalid UUID|invalid_format|Invalid input|Unrecognized key|expected/i,
+            );
+            assert.deepEqual(await fs.readFile(manifestPath), manifestBeforeClear);
+            assert.deepEqual(await fs.readFile(payloadPath), payloadBeforeClear);
+            await fs.access(payloadPath);
+        });
+    });
+
     it('enforces reservation generation and publication lease, then records consumed episodes', async () => {
         await withTempStorage(async storageRoot => {
             const repositoryId = '6'.repeat(64);
@@ -389,7 +485,7 @@ function makeHandbookEntry(episodeId: string, targetPath = 'src/parser.ts'): Han
         id: randomUUID(),
         triggers: ['parser'],
         targetPaths: [targetPath],
-        questions: ['How should parser changes be investigated?'],
+        concerns: [],
         supports: [{ episodeId, evidenceId: 'E1' }],
         kind: 'navigation',
     };

@@ -39,7 +39,9 @@ export type RecordedObservation = z.infer<typeof recordedObservationSchema>;
 export const handbookEntrySchema = z.object({
     id: z.uuid(), triggers: z.array(z.string().min(1)).min(1).max(20),
     targetPaths: z.array(safePath).min(1).max(8),
-    questions: z.array(z.string().min(1).max(600)).max(6),
+    // Concerns are cross-episode, repository-level behaviors/risks/invariants,
+    // distilled by consolidation; they are never task-specific run questions.
+    concerns: z.array(z.string().min(1).max(600)).max(6),
     supports: z.array(z.object({
         episodeId: z.uuid(), evidenceId: z.string().regex(/^E\d+$/)
     }).strict()).min(1).max(32),
@@ -52,7 +54,7 @@ export const consolidationProposalSchema = z.object({
     entries: z.array(z.object({
         triggerIds: z.array(z.string().regex(/^T\d+$/)).min(1).max(20),
         targetPathIds: z.array(z.string().regex(/^F\d+$/)).min(1).max(8),
-        questions: z.array(z.string().min(1).max(600)).max(6),
+        concerns: z.array(z.string().min(1).max(600)).max(6),
         sourceIds: z.array(z.string().regex(/^S\d+$/)).min(1).max(32),
         kind: z.enum(['navigation', 'procedure']),
     }).strict()).max(30)
@@ -61,7 +63,8 @@ export const consolidationProposalSchema = z.object({
 export interface MemoryNavigation {
     id: string;
     targetPaths: string[];
-    questions: string[];
+    /** Historical concerns, not investigation instructions for the current change. */
+    concerns: string[];
     sourceCount: number;
 }
 

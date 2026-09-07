@@ -37,7 +37,7 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         const navigation = [{
             id: 'M1',
             targetPaths: ['src/parser.ts'],
-            questions: ['Who calls parse?'],
+            concerns: ['Parser callers are concentrated in src/client.ts.'],
             sourceCount: 1,
         }];
         const source = {

@@ -183,7 +183,7 @@ export function createChangeAnalysisProfile(
                     '<context_checkpoint>',
                     'Continue the same change analysis from this deterministic checkpoint.',
                     `Completed tool calls: ${state.steps}`,
-                    `Published memory navigation: ${JSON.stringify(input.memory?.publishedNavigation ?? [])}`,
+                    `Published memory navigation (historical concerns): ${JSON.stringify(input.memory?.publishedNavigation ?? [])}`,
                     `Remaining memory budget: ${JSON.stringify(input.memory?.budget ?? null)}`,
                     `Diff evidence representation: ${JSON.stringify(input.evidence)}`,
                     `Repository evidence ledger: ${JSON.stringify(state.ledger.snapshot()
@@ -212,7 +212,7 @@ export function createChangeAnalysisProfile(
                     `Change extraction: ${JSON.stringify(profileInput.extraction)}`,
                     `Investigation plan: ${JSON.stringify(profileInput.plan)}`,
                     `Diff evidence: ${JSON.stringify(profileInput.evidence)}`,
-                    `Untrusted memory navigation: ${JSON.stringify(profileInput.navigation ?? [])}`,
+                    `Untrusted memory navigation (historical concerns): ${JSON.stringify(profileInput.navigation ?? [])}`,
                     `User template constraints: ${JSON.stringify(profileInput.userTemplate ?? null)}`,
                     '</run_context>',
                     '<investigation_goal>',
@@ -369,7 +369,7 @@ function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRu
         }
     };
     return [{
-        name: 'searchRepositoryMemory', description: `Find historical navigation with short M* IDs. At most ${memory.settings['search.maxCalls']} searches per run.`,
+        name: 'searchRepositoryMemory', description: `Find historical navigation whose concerns were repeatedly observed in a region. Returns short M* IDs. At most ${memory.settings['search.maxCalls']} searches per run.`,
         parameters: objectSchema({ query: { type: 'string', minLength: 1 } }, ['query']),
         execute: guarded('searchRepositoryMemory', async (_context, args) => {
             const started = performance.now();

@@ -36,6 +36,23 @@ describe('memory consolidation validation', () => {
         );
     });
 
+    it('rejects proposals that still carry the legacy per-entry questions key', () => {
+        const episode = makeEpisode();
+        const proposal = makeEntry([episode]);
+        // Positive control: the concerns-keyed proposal parses and validates.
+        assert.equal(validateConsolidation(proposal, [episode]).length, 1);
+
+        // A model returning the retired per-entry key must fail the strict proposal schema.
+        const legacyEntry = { ...proposal.entries[0], questions: proposal.entries[0].concerns };
+        assert.throws(
+            () => validateConsolidation({ entries: [legacyEntry] }, [episode]),
+            (error: unknown) => error instanceof Error
+                && /unrecognized_keys/.test(error.message)
+                && /Unrecognized key/.test(error.message)
+                && error.message.includes('questions'),
+        );
+    });
+
     it('rejects catalog handles that are valid globally but unrelated to selected supports', () => {
         const episodes = makeEpisodes(2, index => ({
             sourcePath: `src/${index === 0 ? 'parser' : 'client'}.ts`,
@@ -60,6 +77,34 @@ describe('memory consolidation validation', () => {
                 triggerIds: [firstTriggerId], targetPathIds: [secondTargetPathId], sourceIds: [firstSourceId],
             }), episodes),
             /invented a target path/,
+        );
+    });
+
+    it('requires two independent snapshots for concerns and rejects memory-only support', () => {
+        const oneSnapshot = makeEpisodes(1, () => ({ snapshotId: '1'.repeat(64) }));
+        assert.throws(
+            () => validateConsolidation(makeEntry(oneSnapshot, { concerns: ['A stable parser invariant.'] }), oneSnapshot),
+            /Historical concerns require two independently investigated snapshots/,
+        );
+
+        const twoSnapshots = makeEpisodes(2, index => ({ snapshotId: `${index + 1}`.repeat(64) }));
+        const accepted = validateConsolidation(
+            makeEntry(twoSnapshots, { concerns: ['A stable parser invariant.'] }),
+            twoSnapshots,
+        );
+        assert.deepEqual(accepted[0].concerns, ['A stable parser invariant.']);
+        assert.equal(new Set(accepted[0].supports.map(item => item.episodeId)).size, 2);
+
+        const memoryOnly = makeEpisodes(2, index => ({
+            snapshotId: `${index + 3}`.repeat(64),
+            includeMemoryObservation: true,
+        }));
+        assert.throws(
+            () => validateConsolidation(
+                makeEntry(memoryOnly, { concerns: ['A stable parser invariant.'], evidenceId: 'E2' }),
+                memoryOnly,
+            ),
+            /Historical concerns require two independently investigated snapshots/,
         );
     });
 
@@ -125,6 +170,21 @@ describe('memory consolidation validation', () => {
         assert.match(systemPrompt, /The top-level object must contain only entries/);
         assert.match(systemPrompt, /do not return the JSON Schema definition itself/);
         assert.doesNotMatch(systemPrompt, /Return the strict JSON schema\./);
+    });
+
+    it('instructs the runner that concerns are cross-change and never task questions', async () => {
+        const requests: AIRunRequest[] = [];
+        const runner = loadConsolidationRunner()(makeConsolidationExecution(requests), MEMORY_DEFAULTS);
+
+        await runner('{"episodes":[]}', new AbortController().signal);
+
+        const systemPrompt = String(requests[0].messages?.find(message => message.role === 'system')?.content ?? '');
+        assert.match(systemPrompt, /Concerns are stable, repository-level behaviors, risks, invariants, or relationships/);
+        assert.match(systemPrompt, /Do not copy or paraphrase task-specific investigation questions into concerns/);
+        assert.match(systemPrompt, /Concerns must remain useful across different future changes to the same region/);
+        assert.match(systemPrompt, /Write "Cancellation may race with delayed result publication\.", not "Does cancellation propagate correctly in this change\?"/);
+        assert.match(systemPrompt, /Do not claim complete callers, passing tests, or unchanged dependencies\./);
+        assert.doesNotMatch(systemPrompt, /Use questions, not assertions/);
     });
 });
 
@@ -396,7 +456,9 @@ function makeConsolidationExecution(requests: AIRunRequest[]): LLMExecution {
                         entries: projected.episodes.map(episode => ({
                             triggerIds: [episode.changedPathTriggerIds[0] ?? episode.changedSymbolTriggerIds[0]],
                             targetPathIds: [episode.sources[0].targetPathId],
-                            questions: [episode.questions[0]],
+                            // The fixture emits no cross-episode concerns unless a test
+                            // explicitly exercises the independent-snapshot rule.
+                            concerns: [],
                             sourceIds: [episode.sources[0].id],
                             kind: 'navigation' as const,
                         })),
@@ -540,13 +602,14 @@ function makeEntry(
         kind?: HandbookEntry['kind'];
         targetPathIds?: string[];
         triggerIds?: string[];
+        concerns?: string[];
         sourceIds?: string[];
         evidenceId?: string;
     } = {},
 ): { entries: Array<{
     triggerIds: string[];
     targetPathIds: string[];
-    questions: string[];
+    concerns: string[];
     sourceIds: string[];
     kind: HandbookEntry['kind'];
 }> } {
@@ -567,7 +630,7 @@ function makeEntry(
     return { entries: [{
         triggerIds,
         targetPathIds,
-        questions: ['How should this change be investigated?'],
+        concerns: options.concerns ?? [],
         sourceIds,
         kind: options.kind ?? 'navigation',
     }] };

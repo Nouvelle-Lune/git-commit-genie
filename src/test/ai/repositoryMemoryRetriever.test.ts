@@ -43,8 +43,112 @@ describe('MemoryRetriever', () => {
         assert.equal(result[0].id, 'M1');
         assert.deepEqual(result[0].targetPaths, ['src/parser.ts']);
         assert.equal(result[0].sourceCount, 1);
-        assert.deepEqual(Object.keys(result[0]).sort(), ['id', 'questions', 'sourceCount', 'targetPaths']);
+        assert.deepEqual(Object.keys(result[0]).sort(), ['concerns', 'id', 'sourceCount', 'targetPaths']);
         assert.equal(result.some(item => item.targetPaths.some(target => target.startsWith('generated/'))), false);
+    });
+
+    it('keeps raw episode concerns empty and exposes only handbook concerns', () => {
+        const episode = makeEpisode({
+            changedPaths: ['src/alpha.ts'],
+            changedSymbols: ['alpha'],
+            sourcePath: 'src/alpha.ts',
+            snapshotId: '1'.repeat(64),
+        });
+        const supported = makeEpisode({
+            changedPaths: ['src/alpha.ts'],
+            changedSymbols: ['alphaHistory'],
+            sourcePath: 'src/alpha.ts',
+            snapshotId: '2'.repeat(64),
+        });
+        const distilled = ['Caching may delay result publication.', 'Invalidation may race with reads.', 'Third stable concern.'];
+        const handbook = { ...makeHandbook(supported, ['src/alpha.ts']), concerns: distilled };
+        const retriever = new MemoryRetriever(
+            makeView([episode, supported], [handbook]),
+            makeSnapshot(),
+            [],
+        );
+
+        const result = retriever.retrieveNavigation({ paths: ['src/alpha.ts'], symbols: [], keywords: [] });
+
+        assert.equal(result.length, 2);
+        for (const item of result) {
+            assert.equal('questions' in item, false, 'M* navigation must not expose a questions key');
+            assert.deepEqual(Object.keys(item).sort(), ['concerns', 'id', 'sourceCount', 'targetPaths']);
+            assert.ok(Array.isArray(item.concerns) && item.concerns.every(concern => typeof concern === 'string'));
+        }
+        const rawEpisodeNavigation = result.filter(item => item.concerns.length === 0);
+        assert.equal(rawEpisodeNavigation.length, 1);
+        assert.deepEqual(rawEpisodeNavigation[0].concerns, []);
+        const handbookNavigation = result.filter(item => item.concerns.length > 0);
+        assert.equal(handbookNavigation.length, 1);
+        assert.deepEqual(handbookNavigation[0].concerns, distilled.slice(0, 2));
+    });
+
+    it('retains same-path distinct concerns, ranks concern matches, and deduplicates identical identities', () => {
+        const episode = makeEpisode({ changedPaths: ['src/shared.ts'], sourcePath: 'src/shared.ts' });
+        const alpha = makeHandbook(episode, ['src/shared.ts']);
+        alpha.triggers = ['shared'];
+        alpha.concerns = ['Alpha cache invariant.'];
+        const beta = makeHandbook(episode, ['src/shared.ts']);
+        beta.triggers = ['shared'];
+        beta.concerns = ['Beta cache invariant.'];
+        const duplicateAlpha = makeHandbook(episode, ['src/shared.ts']);
+        duplicateAlpha.triggers = ['shared'];
+        duplicateAlpha.concerns = ['Alpha cache invariant.'];
+
+        const retriever = new MemoryRetriever(
+            makeView([episode], [alpha, beta, duplicateAlpha]),
+            makeSnapshot(),
+            [],
+        );
+        const query = { paths: ['src/shared.ts'], symbols: [], keywords: ['beta'] };
+        const result = retriever.retrieveNavigation(query);
+
+        assert.equal(result.length, 2, 'distinct concerns survive same-area navigation limits while identical identity is removed');
+        assert.equal(result.some(item => item.concerns.length === 0), false,
+            'an episode represented by Handbook supports must not consume a raw navigation slot');
+        assert.deepEqual(result[0].targetPaths, ['src/shared.ts']);
+        assert.deepEqual(result[0].concerns, ['Beta cache invariant.'], 'a concern keyword ranks its navigation first');
+        assert.deepEqual(result[1].concerns, ['Alpha cache invariant.']);
+
+        const repeated = retriever.retrieveNavigation(query);
+        assert.deepEqual(repeated, result, 'the same full identity keeps its published M* ID');
+    });
+
+    it('omits represented raw episodes while retaining an unrepresented episode in another area', () => {
+        const represented = makeEpisode({
+            changedPaths: ['src/shared.ts'],
+            sourcePath: 'src/shared.ts',
+            snapshotId: '3'.repeat(64),
+        });
+        const unrepresented = makeEpisode({
+            changedPaths: ['lib/other.ts'],
+            sourcePath: 'lib/other.ts',
+            snapshotId: '4'.repeat(64),
+        });
+        const first = makeHandbook(represented, ['src/shared.ts']);
+        first.triggers = ['shared'];
+        first.concerns = ['Shared cache invariant.'];
+        const second = makeHandbook(represented, ['src/shared.ts']);
+        second.triggers = ['shared'];
+        second.concerns = ['Shared invalidation invariant.'];
+
+        const result = new MemoryRetriever(
+            makeView([represented, unrepresented], [first, second]),
+            makeSnapshot(),
+            [],
+        ).retrieveNavigation({
+            paths: ['src/shared.ts', 'lib/other.ts'],
+            symbols: [],
+            keywords: [],
+        });
+
+        const shared = result.filter(item => item.targetPaths.includes('src/shared.ts'));
+        const other = result.filter(item => item.targetPaths.includes('lib/other.ts'));
+        assert.equal(shared.length, 2, 'both distinct Handbook concerns remain visible');
+        assert.equal(shared.some(item => item.concerns.length === 0), false);
+        assert.equal(other.length, 1, 'the unrepresented eligible episode still has a navigation');
+        assert.deepEqual(other[0].concerns, []);
     });
 
     it('orders keyword-only navigation by lexical relevance', () => {
@@ -275,10 +379,10 @@ describe('MemoryRetriever', () => {
         const episode = makeEpisode({ changedPaths: ['src/shared.ts'], sourcePath: 'src/shared.ts' });
         const first = makeHandbook(episode);
         first.triggers = ['alpha'];
-        first.questions = ['What does alpha establish?'];
+        first.concerns = ['Alpha establishes stable parser caching.'];
         const second = makeHandbook(episode);
         second.triggers = ['beta'];
-        second.questions = ['What does beta establish?'];
+        second.concerns = ['Beta establishes stable cache invalidation.'];
         let observeCount = 0;
         const retriever = new MemoryRetriever(
             makeView([episode], [first, second]),
@@ -575,7 +679,8 @@ function makeHandbook(episode: InvestigationEpisode, targetPaths = [episode.chan
         id: randomUUID(),
         triggers: [...episode.changedPaths, ...episode.changedSymbols],
         targetPaths,
-        questions: episode.questions,
+        // Raw episodes never promote task-specific questions into navigation concerns.
+        concerns: [],
         supports: [{ episodeId: episode.id, evidenceId: 'E1' }],
         kind: 'navigation',
     };
