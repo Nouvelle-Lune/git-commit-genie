@@ -31,31 +31,66 @@ describe('MemoryCommands repository maintenance', () => {
         assert.match(describeConsolidationResult({ status: 'automatic-paused' }), /Automatic consolidation is paused/);
     });
 
-    it('describes all eight management actions and enables detail matching', async () => {
-        const store = makeStore();
-        const memory = makeMemoryService(store);
-        const { context } = makeContext();
-        const registry = makeRegistry(store, memory);
-        stubIdentity(sandbox);
-        let seenItems: Array<vscode.QuickPickItem & { id?: string }> = [];
-        let seenOptions: vscode.QuickPickOptions | undefined;
-        sandbox.stub(vscode.window, 'showQuickPick').callsFake((async (
-            items: readonly vscode.QuickPickItem[] | Thenable<readonly vscode.QuickPickItem[]>,
-            options?: vscode.QuickPickOptions,
-        ) => {
-            const resolved = Array.isArray(items) ? items : await items;
-            seenItems = [...resolved] as Array<vscode.QuickPickItem & { id?: string }>;
-            seenOptions = options;
-            return undefined;
-        }) as unknown as typeof vscode.window.showQuickPick);
+    it('describes all eight management actions and enables description matching', async () => {
+        const config = vscode.workspace.getConfiguration('gitCommitGenie.memory');
+        const previousConsolidationEnabled = config.get<boolean>('consolidation.enabled', true);
+        const previousMemoryEnabled = config.get<boolean>('enabled', false);
+        try {
+            await config.update('consolidation.enabled', true, vscode.ConfigurationTarget.Global);
+            await config.update('enabled', false, vscode.ConfigurationTarget.Global);
 
-        await invokeManage(new MemoryCommands(context, registry as never));
+            const store = makeStore();
+            const memory = makeMemoryService(store);
+            const { context } = makeContext();
+            const registry = makeRegistry(store, memory);
+            stubIdentity(sandbox);
+            const seenMenus: Array<Array<vscode.QuickPickItem & { id?: string }>> = [];
+            const seenOptions: Array<vscode.QuickPickOptions | undefined> = [];
+            sandbox.stub(vscode.window, 'showQuickPick').callsFake((async (
+                items: readonly vscode.QuickPickItem[] | Thenable<readonly vscode.QuickPickItem[]>,
+                options?: vscode.QuickPickOptions,
+            ) => {
+                const resolved = Array.isArray(items) ? items : await items;
+                seenMenus.push([...resolved] as Array<vscode.QuickPickItem & { id?: string }>);
+                seenOptions.push(options);
+                return undefined;
+            }) as unknown as typeof vscode.window.showQuickPick);
 
-        assert.deepEqual(seenItems.map(item => item.id), [
-            'inspect', 'delete', 'clear', 'rebuild', 'consolidate', 'cancel', 'pause', 'toggle',
-        ]);
-        assert.equal(seenItems.every(item => typeof item.detail === 'string' && item.detail.length > 0), true);
-        assert.equal(seenOptions?.matchOnDetail, true);
+            await invokeManage(new MemoryCommands(context, registry as never));
+
+            await config.update('consolidation.enabled', false, vscode.ConfigurationTarget.Global);
+            await config.update('enabled', true, vscode.ConfigurationTarget.Global);
+            await invokeManage(new MemoryCommands(context, registry as never));
+
+            assert.equal(seenMenus.length, 2);
+            for (const items of seenMenus) {
+                assert.deepEqual(items.map(item => item.id), [
+                    'inspect', 'delete', 'clear', 'rebuild', 'consolidate', 'cancel', 'pause', 'toggle',
+                ]);
+                assert.equal(items.every(item => typeof item.description === 'string' && item.description.trim().length > 0), true);
+                assert.equal(items.every(item => !Object.prototype.hasOwnProperty.call(item, 'detail')), true);
+            }
+            for (const options of seenOptions) {
+                assert.equal(options?.matchOnDescription, true);
+                assert.equal(options?.matchOnDetail, undefined);
+            }
+
+            const firstPause = seenMenus[0].find(item => item.id === 'pause');
+            const secondPause = seenMenus[1].find(item => item.id === 'pause');
+            const firstToggle = seenMenus[0].find(item => item.id === 'toggle');
+            const secondToggle = seenMenus[1].find(item => item.id === 'toggle');
+            assert.ok(firstPause);
+            assert.ok(secondPause);
+            assert.ok(firstToggle);
+            assert.ok(secondToggle);
+            assert.match(firstPause.label, /^Pause /);
+            assert.match(secondPause.label, /^Resume /);
+            assert.match(firstToggle.label, /^Enable /);
+            assert.match(secondToggle.label, /^Disable /);
+        } finally {
+            await config.update('consolidation.enabled', previousConsolidationEnabled, vscode.ConfigurationTarget.Global);
+            await config.update('enabled', previousMemoryEnabled, vscode.ConfigurationTarget.Global);
+        }
     });
 
     it('opens read-only inspection output and releases its spinner before success notification', async () => {

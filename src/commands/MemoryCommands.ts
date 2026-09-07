@@ -93,16 +93,16 @@ export class MemoryCommands {
         const store = memory.storeFor(identity.repositoryId, selected.rootUri.fsPath);
         const config = vscode.workspace.getConfiguration('gitCommitGenie.memory');
         const actions = [
-            { label: vscode.l10n.t('Inspect episodes and handbook'), id: 'inspect', detail: vscode.l10n.t('Read-only view of this clone\'s episodes and handbook. No model call or API cost; no data changes.') },
-            { label: vscode.l10n.t('Delete selected episodes'), id: 'delete', detail: vscode.l10n.t('Permanently delete selected episodes and dependent handbook entries across this clone\'s shared worktrees. No model call or API cost.') },
-            { label: vscode.l10n.t('Clear repository memory'), id: 'clear', detail: vscode.l10n.t('Permanently delete all episodes and handbook entries for this clone. Source files and the 24-hour call allowance are unchanged. No model call or API cost.') },
-            { label: vscode.l10n.t('Rebuild memory index'), id: 'rebuild', detail: vscode.l10n.t('Rebuild metadata from this clone\'s stored episodes; no repository scan, model call or API cost. Episode contents are preserved.') },
-            { label: vscode.l10n.t('Consolidate pending episodes'), id: 'consolidate', detail: vscode.l10n.t('Manually organize this clone\'s episodes using a model; API charges may apply. Requires five eligible episodes in one area and an available configured 24-hour allowance. Updates the handbook.') },
-            { label: vscode.l10n.t('Cancel background consolidation'), id: 'cancel', detail: vscode.l10n.t('Cancel waiting work or request cancellation of this clone\'s running consolidation. Sent API requests may still be charged; existing memory is preserved.') },
-            { label: config.get<boolean>('consolidation.enabled', true) ? vscode.l10n.t('Pause automatic consolidation') : vscode.l10n.t('Resume automatic consolidation'), id: 'pause', detail: vscode.l10n.t('Global setting. Pausing preserves recording, retrieval and manual consolidation. No immediate model call; automatic consolidation can incur API costs after resuming. Reversible.') },
-            { label: config.get<boolean>('enabled', false) ? vscode.l10n.t('Disable repository memory') : vscode.l10n.t('Enable repository memory'), id: 'toggle', detail: vscode.l10n.t('Global setting. Disabling stops recording, retrieval and consolidation without deleting data. No immediate model call; enabled automatic consolidation may incur API costs. Reversible.') },
+            { label: vscode.l10n.t('View repository memory'), id: 'inspect', description: vscode.l10n.t("View this repository's saved memory.") },
+            { label: vscode.l10n.t('Delete selected records'), id: 'delete', description: vscode.l10n.t('Permanently delete selected memory.') },
+            { label: vscode.l10n.t('Clear repository memory'), id: 'clear', description: vscode.l10n.t('Permanently delete all memory in this repository and its shared worktrees.') },
+            { label: vscode.l10n.t('Rebuild memory index'), id: 'rebuild', description: vscode.l10n.t('Rebuild the search index from saved investigation records.') },
+            { label: vscode.l10n.t('Organize pending records'), id: 'consolidate', description: vscode.l10n.t('Organize pending records and update memory.') },
+            { label: vscode.l10n.t('Cancel background organization'), id: 'cancel', description: vscode.l10n.t('Cancel queued or active memory organization.') },
+            { label: config.get<boolean>('consolidation.enabled', true) ? vscode.l10n.t('Pause automatic organization') : vscode.l10n.t('Resume automatic organization'), id: 'pause', description: config.get<boolean>('consolidation.enabled', true) ? vscode.l10n.t('Pause automatic memory organization.') : vscode.l10n.t('Resume automatic memory organization.') },
+            { label: config.get<boolean>('enabled', false) ? vscode.l10n.t('Disable repository memory') : vscode.l10n.t('Enable repository memory'), id: 'toggle', description: config.get<boolean>('enabled', false) ? vscode.l10n.t('Disable: stop recording, search, and organization; existing memory stays.') : vscode.l10n.t('Enable: resume recording, search, and organization.') },
         ];
-        const action = await vscode.window.showQuickPick(actions, { placeHolder: selected.rootUri.fsPath, matchOnDetail: true });
+        const action = await vscode.window.showQuickPick(actions, { placeHolder: selected.rootUri.fsPath, matchOnDescription: true });
         if (!action) { return; }
         const root = selected.rootUri.fsPath;
         let ids: string[] = [];
