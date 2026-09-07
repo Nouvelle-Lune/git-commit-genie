@@ -404,6 +404,7 @@
 	"Global setting. Disabling stops recording, retrieval and consolidation without deleting data. No immediate model call; enabled automatic consolidation may incur API costs. Reversible.": "Global setting. Disabling stops recording, retrieval and consolidation without deleting data. No immediate model call; enabled automatic consolidation may incur API costs. Reversible.",
 	"No episodes to delete.": "No episodes to delete.",
 	"Consolidating Memory; model API charges may apply.": "Consolidating Memory; model API charges may apply.",
+	"Organizing memory": "Organizing memory",
 	"Opened {0} episodes and {1} handbook entries (read-only).": "Opened {0} episodes and {1} handbook entries (read-only).",
 	"Repository memory permanently cleared. Source files are unchanged; the 24-hour call allowance was not reset.": "Repository memory permanently cleared. Source files are unchanged; the 24-hour call allowance was not reset.",
 	"Permanently deleted {0} episodes and removed their dependent handbook entries.": "Permanently deleted {0} episodes and removed their dependent handbook entries.",

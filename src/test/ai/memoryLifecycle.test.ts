@@ -182,7 +182,7 @@ describe('repository memory lifecycle', function () {
                     assert.deepEqual(await pending, { status: 'cancelled' });
                     assert.equal(service.cancel(repositoryId), 'nothing-to-cancel');
                     assert.equal(createExecution.calledOnce, true);
-                    assert.ok(memoryLogEvents(logToolCall).some(event => event.status === 'cancelled'));
+                    assertConsolidationLifecycle(memoryLogEvents(logToolCall), 'cancelled');
                 } finally {
                     logToolCall.restore();
                     disposeContext(context);
@@ -230,7 +230,7 @@ describe('repository memory lifecycle', function () {
                     assert.deepEqual(view.consolidated, [episodes[0].id]);
                     const events = memoryLogEvents(logToolCall);
                     assert.ok(events.some(event => event.status === 'automatic-paused'));
-                    assert.ok(events.some(event => event.status === 'published'));
+                    assertConsolidationLifecycle(events, 'published');
                 } finally {
                     logToolCall.restore();
                     disposeContext(context);
@@ -276,7 +276,7 @@ describe('repository memory lifecycle', function () {
                     }
                     assert.equal(createExecution.calledOnce, true);
                     assert.equal(sessionRuns, 0);
-                    assert.ok(memoryLogEvents(logToolCall).some(event => event.status === 'budget-exhausted'));
+                    assertConsolidationLifecycle(memoryLogEvents(logToolCall), 'budget-exhausted');
                 } finally {
                     logToolCall.restore();
                     disposeContext(context);
@@ -315,6 +315,7 @@ describe('repository memory lifecycle', function () {
                     assert.ok(failed);
                     assert.equal(failed?.ok, false);
                     assert.match(String(failed?.summary), /provider unavailable/);
+                    assertConsolidationLifecycle(events, 'failed');
                     assert.equal(service.cancel(repositoryId), 'nothing-to-cancel');
                 } finally {
                     logToolCall.restore();
@@ -573,9 +574,9 @@ function successfulConsolidationResponse(): any {
         text: '',
         structured: {
             entries: [{
-                triggers: ['value'],
-                targetPaths: ['src/safe.ts'],
-                questions: ['How is this value used?'],
+                triggerIds: ['T1', 'T2'],
+                targetPathIds: ['F1'],
+                concerns: [],
                 sourceIds: ['S1'],
                 kind: 'navigation',
             }],
@@ -594,6 +595,22 @@ function memoryLogEvents(logToolCall: sinon.SinonStub): Array<Record<string, unk
         const payload = JSON.parse(String(call.args[1])) as { stage?: string; data?: Record<string, unknown> };
         return payload.stage === 'memoryStep' ? payload.data ?? {} : undefined;
     }).filter((event): event is Record<string, unknown> => event !== undefined);
+}
+
+function assertConsolidationLifecycle(events: Array<Record<string, unknown>>, terminalStatus: string): void {
+    const running = events.find(event => event.tool === 'consolidate' && event.status === 'running');
+    const terminal = events.find(event => event.tool === 'consolidate' && event.status === terminalStatus);
+    assert.ok(running, `Expected a running consolidation event before ${terminalStatus}.`);
+    assert.ok(terminal, `Expected a ${terminalStatus} consolidation event.`);
+    assert.equal(typeof running?.operationId, 'string');
+    assert.ok(String(running?.operationId ?? '').length > 0);
+    assert.equal(terminal?.operationId, running?.operationId);
+    assert.equal(typeof terminal?.operationId, 'string');
+    assert.ok(String(terminal?.operationId ?? '').length > 0);
+    if (terminalStatus === 'published' || terminalStatus === 'budget-exhausted') {
+        assert.equal(running?.label, 'Organizing memory');
+        assert.equal(running?.summary, 'Organizing memory');
+    }
 }
 
 function makeContext(storageRoot: string): vscode.ExtensionContext {

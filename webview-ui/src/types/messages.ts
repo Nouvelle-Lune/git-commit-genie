@@ -142,6 +142,7 @@ export interface LogEntry {
     pending?: boolean; // For API requests waiting for response
     requestType?: string;
     cancelled?: boolean; // Mark as cancelled by user
+    restoredFromPreviousSession?: boolean;
     /** Available only for the current Extension Host session when enabled. */
     rawData?: StageRawData;
 }

@@ -30,6 +30,7 @@ export interface PipelineLogLike {
     content?: string;
     repoPath?: string;
     generationMode?: 'default' | 'thinking';
+    restoredFromPreviousSession?: boolean;
 }
 
 export interface PipelineTextCatalog {

@@ -7,6 +7,7 @@ import type { CostQuote } from '../cost/costTypes';
 import { costQuoteToDisplay, formatCostQuoteLabel } from '../cost/costDisplay';
 import type { StageRawData } from '../../ui/StageNotificationManager';
 import { projectLogForWebview, stripRawData } from '../../ui/rawLogData';
+import { isRunningMemoryConsolidation } from '../../ui/memoryWebviewPolicy';
 
 export enum LogLevel {
     Debug = 0,
@@ -182,7 +183,13 @@ export class Logger {
             if (Array.isArray(arr)) {
                 const recentLogs = arr.slice(-this.maxLogBuffer);
                 const containsRawData = recentLogs.some(entry => entry.rawData !== undefined);
-                this.logBuffer = recentLogs.map(stripRawData).filter(isCurrentPersistedLogEntry);
+                // A consolidation cannot remain active across an extension-host restart.
+                // Preserve the diagnostic event while preventing it from reopening a spinner.
+                this.logBuffer = recentLogs.map(stripRawData)
+                    .filter(isCurrentPersistedLogEntry)
+                    .map(entry => isRunningMemoryConsolidation(entry)
+                        ? { ...entry, restoredFromPreviousSession: true }
+                        : entry);
                 const discardedCount = recentLogs.length - this.logBuffer.length;
                 if (loadedLegacyLogs || containsRawData || discardedCount > 0) {
                     await this.context?.globalState.update(Logger.LOGS_STATE_KEY, this.logBuffer);

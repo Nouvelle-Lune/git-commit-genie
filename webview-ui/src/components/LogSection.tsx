@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useLayoutEffect } from 'react';
+import React, { useState, useEffect, useRef, useLayoutEffect, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { LogEntry, LogType, formatCostDisplayShort } from '../types/messages';
 import { vscodeApi } from '../utils/vscode';
@@ -7,6 +7,7 @@ import { GenieCheckIcon, GenieCloudIcon, GenieReadIcon, GenieReasonIcon, GenieTo
 import { formatPipelineText, parseCommitStageLog, pipelineStageBadge, presentPipelineEvent, presentStructuredValidationLog } from '../../../src/ui/pipelineDisplay';
 import { PipelineLogDetails } from './PipelineLogDetails';
 import { isApiRequestLog } from '../../../src/ui/apiLogPolicy';
+import { filterMemoryLogsForWebview, isRunningMemoryConsolidation } from '../../../src/ui/memoryWebviewPolicy';
 // @ts-ignore - react-markdown types
 import ReactMarkdown from 'react-markdown';
 
@@ -60,6 +61,7 @@ function RawDataDisclosure({
  */
 export const LogSection: React.FC = () => {
     const { state } = useAppContext();
+    const visibleLogs = useMemo(() => filterMemoryLogsForWebview(state.logs), [state.logs]);
     const [expandedLog, setExpandedLog] = useState<string | null>(null);
     const [rawExpandedLog, setRawExpandedLog] = useState<string | null>(null);
     const [autoScroll, setAutoScroll] = useState<boolean>(true);
@@ -98,7 +100,7 @@ export const LogSection: React.FC = () => {
         if (!el) return;
 
         const prevCount = lastLogCountRef.current;
-        const currCount = state.logs.length;
+        const currCount = visibleLogs.length;
         const hasNewItems = currCount > prevCount;
 
         if (autoScroll) {
@@ -119,7 +121,7 @@ export const LogSection: React.FC = () => {
         // Update count after handling
         lastLogCountRef.current = currCount;
         lastScrollHeightRef.current = el.scrollHeight;
-    }, [state.logs, autoScroll, showNewLogsIndicator]);
+    }, [visibleLogs, autoScroll, showNewLogsIndicator]);
 
     // mark that initial mount has occurred so we don't animate initial batch
     useEffect(() => {
@@ -305,6 +307,9 @@ export const LogSection: React.FC = () => {
         pipeline: ReturnType<typeof getPipelinePresentation>,
         validationPresentation: ReturnType<typeof getValidationPresentation>,
     ) => {
+        if (isRunningMemoryConsolidation(log)) {
+            return false;
+        }
         // API rows represent transport activity in the log stream. Keeping them
         // closed prevents response-schema differences from changing row behavior.
         if (isApiRequestLog(log)) {
@@ -472,7 +477,7 @@ export const LogSection: React.FC = () => {
                 </button>
             </div>
             <div className="panel-box log-panel">
-                {state.logs.length === 0 ? (
+                {visibleLogs.length === 0 ? (
                     <div className="log-empty">
                         <div className="log-empty-icon">
                             <i className="codicon codicon-output"></i>
@@ -482,7 +487,7 @@ export const LogSection: React.FC = () => {
                 ) : (
                     <>
                         <div className={`log-list ${autoScroll ? 'auto-scroll' : ''}`} ref={logListRef} onScroll={handleScroll}>
-                            {state.logs.map((log: LogEntry, idx: number) => {
+                            {visibleLogs.map((log: LogEntry, idx: number) => {
                                 const isNew = hasMountedRef.current && idx >= lastLogCountRef.current;
                                 const success = isSuccessLog(log);
                                 const failure = isFailureLog(log);
@@ -492,6 +497,7 @@ export const LogSection: React.FC = () => {
                                 const displayTitle = pipeline?.title || validationPresentation?.title || log.title;
                                 const displayDescription = pipeline?.description;
                                 const semanticDetails = pipeline?.details || validationPresentation?.details;
+                                const isPending = log.pending === true || isRunningMemoryConsolidation(log);
                                 return (
                                     <div key={log.id} className={`log-item ${(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? 'log-divider' : ''} ${failure ? 'log-error' : ''} ${success ? 'log-success' : ''} ${isNew ? 'log-item-new' : ''}`}>
                                         {(log.type === LogType.AnalysisStart || log.type === LogType.GenerationStart) ? (
@@ -538,7 +544,7 @@ export const LogSection: React.FC = () => {
                                                         {log.costDisplay && !log.cancelled && (
                                                             <span className="log-cost">{formatCostDisplayShort(log.costDisplay, 6)}</span>
                                                         )}
-                                                        {log.pending === true ? (
+                                                        {isPending ? (
                                                             <span className="log-loading">
                                                                 <span className="codicon codicon-loading codicon-modifier-spin"></span>
                                                             </span>
@@ -553,11 +559,11 @@ export const LogSection: React.FC = () => {
                                                         )}
                                                     </div>
                                                 </div>
-                                                {displayDescription && (
+                                                {displayDescription && !isRunningMemoryConsolidation(log) && (
                                                     <div className="log-pipeline-description">{displayDescription}</div>
                                                 )}
                                                 {/* Submeta: timestamp small under header (no icon) */}
-                                                {!log.pending && (
+                                                {!isPending && (
                                                     <div className="log-submeta">{formatTime(log.timestamp)}</div>
                                                 )}
                                                 {/* Reason inline content (no expand icon) */}

@@ -107,6 +107,7 @@ export interface LogEntry {
     pending?: boolean; // For API requests waiting for response
     requestType?: string;
     cancelled?: boolean; // Mark as cancelled by user
+    restoredFromPreviousSession?: boolean;
     /** Ephemeral debugging data. Logger persistence must remove this field. */
     rawData?: StageRawData;
 }

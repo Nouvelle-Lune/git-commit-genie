@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { RepositorySnapshotReader } from '../git/repositorySnapshot';
 import { LLMExecution, LLMService } from '../llm/llmTypes';
@@ -36,7 +37,8 @@ export function describeConsolidationResult(result: ConsolidationResult): string
 }
 
 /** Operations share the Webview's memory lane, including manual and automatic maintenance. */
-export function logMemoryOperation(root: string, operation: string, trigger: MemoryTrigger, status: string, summary: string, details: unknown = {}): void {
+export function logMemoryOperation(root: string, operation: string, trigger: MemoryTrigger, status: string, summary: string,
+    details: unknown = {}, operationId?: string): void {
     const labels: Record<string, string> = {
         inspect: vscode.l10n.t('Inspect episodes and handbook'), delete: vscode.l10n.t('Delete selected episodes'),
         clear: vscode.l10n.t('Clear repository memory'), rebuild: vscode.l10n.t('Rebuild memory index'), consolidate: vscode.l10n.t('Consolidate pending episodes'),
@@ -46,7 +48,11 @@ export function logMemoryOperation(root: string, operation: string, trigger: Mem
     logCommitStageToWebview(root, {
         type: 'memoryStep', data: {
             current: 0, tool: operation, trigger, status,
-            summary, ok: status !== 'failed', label: vscode.l10n.t('Repository Memory: {0}', labels[operation])
+            summary, ok: status !== 'failed',
+            label: operation === 'consolidate' && status === 'running'
+                ? summary
+                : vscode.l10n.t('Repository Memory: {0}', labels[operation]),
+            ...(operationId ? { operationId } : {}),
         },
         rawData: { input: { operation, trigger }, output: { status, details } }
     });
@@ -214,8 +220,9 @@ export class RepositoryMemoryService implements vscode.Disposable {
         const config = vscode.workspace.getConfiguration('gitCommitGenie.memory');
         const root = this.roots.get(id);
         if (!root) { throw new Error('Memory consolidation has no repository cost attribution.'); }
+        let operationId: string | undefined;
         const finish = (result: ConsolidationResult) => {
-            logMemoryOperation(root, 'consolidate', trigger, result.status, describeConsolidationResult(result), result);
+            logMemoryOperation(root, 'consolidate', trigger, result.status, describeConsolidationResult(result), result, operationId);
             return result;
         };
         if (this.disposed) { return finish({ status: 'cancelled' }); }
@@ -226,23 +233,24 @@ export class RepositoryMemoryService implements vscode.Disposable {
         if (item.controller) { return finish({ status: 'already-running' }); }
         if (item.timer) { clearTimeout(item.timer); item.timer = undefined; }
         const controller = new AbortController(); item.controller = controller; this.scheduled.set(id, item);
+        operationId = randomUUID();
         const timeoutError = new Error('Consolidation exceeded its nine-minute execution lease.');
         const deadline = setTimeout(() => controller.abort(timeoutError), 9 * 60000);
         try {
             const settings = readMemorySettings();
-            logMemoryOperation(root, 'consolidate', trigger, 'running', vscode.l10n.t('Consolidating Memory; model API charges may apply.'), { settings });
+            logMemoryOperation(root, 'consolidate', trigger, 'running', vscode.l10n.t('Organizing memory'), { settings }, operationId);
             await this.storeFor(id).purgeExcluded(this.exclusions(), settings);
             controller.signal.throwIfAborted();
 
             const runner = createConsolidationRunner(model.createExecution(root), settings);
 
             logMemoryOperation(root, 'consolidation-budget', trigger, 'ready', vscode.l10n.t('Memory consolidation input budget: {0} tokens.', runner.maxInputTokens),
-                { configuredInputTokens: settings['consolidation.maxInputTokens'], effectiveInputTokens: runner.maxInputTokens });
+                { configuredInputTokens: settings['consolidation.maxInputTokens'], effectiveInputTokens: runner.maxInputTokens }, operationId);
             return finish(await consolidatePending(this.storeFor(id), runner, controller.signal, settings));
         } catch (error) {
             if (controller.signal.aborted && controller.signal.reason !== timeoutError &&
                 (error === controller.signal.reason || (error instanceof Error && error.name === 'AbortError'))) { return finish({ status: 'cancelled' }); }
-            logMemoryOperation(root, 'consolidate', trigger, 'failed', String(error));
+            logMemoryOperation(root, 'consolidate', trigger, 'failed', String(error), {}, operationId);
             throw error;
         } finally { clearTimeout(deadline); item.controller = undefined; if (!item.timer) { this.scheduled.delete(id); } }
     }

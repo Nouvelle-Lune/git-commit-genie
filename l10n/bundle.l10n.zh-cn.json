@@ -404,6 +404,7 @@
 	"Global setting. Disabling stops recording, retrieval and consolidation without deleting data. No immediate model call; enabled automatic consolidation may incur API costs. Reversible.": "全局设置。关闭后停止记录、检索和整理，但保留数据；不会立即调用模型，启用后自动整理可能收费；可随时切换。",
 	"No episodes to delete.": "没有可删除的调查记录。",
 	"Consolidating Memory; model API charges may apply.": "正在整理记忆，模型 API 调用可能产生费用。",
+	"Organizing memory": "正在整理记忆",
 	"Opened {0} episodes and {1} handbook entries (read-only).": "已只读打开 {0} 条调查记录和 {1} 条手册条目。",
 	"Repository memory permanently cleared. Source files are unchanged; the 24-hour call allowance was not reset.": "仓库记忆已永久清空；源码未修改，24 小时调用额度未重置。",
 	"Permanently deleted {0} episodes and removed their dependent handbook entries.": "已永久删除 {0} 条调查记录，并同步移除依赖的手册条目。",
