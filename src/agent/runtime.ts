@@ -95,6 +95,8 @@ export interface AgentToolDefinition<Input = unknown> {
     name: string;
     description: string;
     parameters: Record<string, unknown>;
+    /** Idempotent lookups may reuse prior results while still consuming an agent step. */
+    repeatable?: boolean;
     execute(
         context: ToolExecutionContext<Input>,
         args: Record<string, unknown>,
@@ -103,6 +105,8 @@ export interface AgentToolDefinition<Input = unknown> {
 
 export interface AgentToolOutcome {
     output: string;
+    /** Structured results have already been bounded by the tool; slicing would corrupt their protocol. */
+    preserveOutput?: boolean;
     ok?: boolean;
     summary?: string;
     evidenceCount?: number;
@@ -243,7 +247,7 @@ export interface AgentRuntimeOptions {
     wrapSession?: (session: AISession) => AISession;
 }
 
-type ExecutableTool = AIFunctionTool & { execute(args: Record<string, unknown>): Promise<string> };
+type ExecutableTool = AIFunctionTool & { repeatable?: boolean; execute(args: Record<string, unknown>): Promise<{ output: string; isError: boolean }> };
 
 interface FinalizationTransition {
     trigger: FinalizationTrigger;
@@ -454,7 +458,7 @@ export class AgentRuntime {
                     // keeps re-issuing the same lookup instead of progressing.
                     state.steps += 1;
                     const callKey = canonicalToolCallKey(call);
-                    if (seenCalls.has(callKey)) {
+                    if (seenCalls.has(callKey) && !toolsByName.get(call.name)?.repeatable) {
                         const message = `Duplicate tool call '${call.name}' was rejected.`;
                         state.issues.push({ type: 'duplicate_tool_call', message, step: state.steps });
                         toolResults.push({ callId: call.id, name: call.name, output: message, isError: true });
@@ -718,6 +722,7 @@ export class AgentRuntime {
             }
             return {
                 name: definition.name,
+                repeatable: definition.repeatable,
                 description: definition.description,
                 parameters: definition.parameters,
                 execute: async (args: Record<string, unknown>) => {
@@ -736,7 +741,7 @@ export class AgentRuntime {
                         },
                     }, args);
                     const rawOutput = outcome.output;
-                    const output = truncateObservation(rawOutput, maxObservationChars);
+                    const output = outcome.preserveOutput ? rawOutput : truncateObservation(rawOutput, maxObservationChars);
                     const observation: AgentObservation = {
                         step: state.steps,
                         tool: definition.name,
@@ -751,7 +756,7 @@ export class AgentRuntime {
                     };
                     state.observations.push(observation);
                     this.options.onEvent?.({ type: 'toolComplete', observation });
-                    return output;
+                    return { output, isError: outcome.ok === false };
                 },
             };
         });
@@ -836,7 +841,7 @@ export class AgentRuntime {
             throw new Error(message);
         }
         try {
-            return { callId: call.id, name: call.name, output: await tool.execute(call.arguments) };
+            return { callId: call.id, name: call.name, ...await tool.execute(call.arguments) };
         } catch (error) {
             if (!(error instanceof ToolGrantViolationError)) {
                 throw error;

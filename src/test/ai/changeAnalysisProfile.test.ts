@@ -10,6 +10,7 @@ import {
     AGENT_TERMINAL_LIMITS,
     changeAnalysisAgentFinalResponseSchema,
 } from '../../services/llm/providers/schemas/common';
+import { MEMORY_DEFAULTS, MemoryRequestError } from '../../services/memory/settings';
 
 describe('ChangeAnalysisProfile terminal normalization', () => {
     it('exposes the runtime grant limits in every repository tool schema', () => {
@@ -37,7 +38,7 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
             id: 'M1',
             targetPaths: ['src/parser.ts'],
             questions: ['Who calls parse?'],
-            supports: [{ episodeId: 'episode-1', evidenceId: 'E1' }],
+            sourceCount: 1,
         }];
         const source = {
             snapshotId: 'snapshot-1',
@@ -52,8 +53,14 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
             sourceType: 'text' as const,
         };
         const memory = {
+            settings: MEMORY_DEFAULTS,
+            budget: { used: 0, remaining: 16, limit: 16, searchesUsed: 1, searchesRemaining: 2, navigationTokens: 1500, resultTokens: 4096 },
             searchRepositoryMemory: () => navigation,
-            readMemorySources: async () => [{ status: 'source_unchanged' as const, source }],
+            readMemorySources: async (memoryIds: string[]) => {
+                assert.deepEqual(memoryIds, ['M1']);
+                return [{ key: 'source-key', status: 'source_unchanged' as const, source }];
+            },
+            assertResultBudget: () => undefined,
         };
         const input = { ...makeInput(), memory: memory as any };
         const profile = createChangeAnalysisProfile(input);
@@ -74,13 +81,193 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         assert.equal(searchOutcome.ok, true);
         assert.equal(searchOutcome.evidenceCount, 0);
         assert.match(searchOutcome.summary ?? '', /1 historical navigation/);
-        assert.deepEqual(JSON.parse(searchOutcome.output), navigation);
+        assert.deepEqual(JSON.parse(searchOutcome.output).navigation, navigation);
 
-        const readOutcome = await read!.execute(context, { supports: [{ episodeId: 'episode-1', evidenceId: 'E1' }] });
+        const readOutcome = await read!.execute(context, { memoryIds: ['M1'] });
         assert.equal(readOutcome.ok, true);
         assert.equal(readOutcome.evidenceCount, 1);
-        assert.match(readOutcome.summary ?? '', /1 memory source/);
+        assert.match(readOutcome.summary ?? '', /1\/1 source/);
         assert.deepEqual(JSON.parse(readOutcome.output).statuses, ['source_unchanged']);
+    });
+
+    it('records a rejected memory request and returns an in-band structured tool error', async () => {
+        const records: Array<Record<string, unknown>> = [];
+        const memory = {
+            settings: MEMORY_DEFAULTS,
+            budget: { used: 0, remaining: 16, limit: 16, searchesUsed: 0, searchesRemaining: 3, navigationTokens: 1500, resultTokens: 4096 },
+            reject: (code: MemoryRequestError['code'], message: string): never => {
+                throw new MemoryRequestError(code, message, { used: 0, remaining: 16, limit: 16 });
+            },
+            readMemorySources: async (): Promise<never> => {
+                throw new MemoryRequestError('unknown_memory_id', 'Unknown Memory navigation ID: M404.', { memoryId: 'M404' });
+            },
+        };
+        const input = {
+            ...makeInput(),
+            memory: memory as any,
+            recorder: { record: (observation: Record<string, unknown>) => records.push(observation) } as any,
+        };
+        const profile = createChangeAnalysisProfile(input);
+        const read = profile.buildToolDefinitions(input, makeState()).find(definition => definition.name === 'readMemorySources');
+        assert.ok(read);
+
+        const outcome = await read!.execute({
+            input,
+            grant: { name: 'readMemorySources', allowedRoot: '/tmp/repository', excludePatterns: [], allocateEvidence: true },
+            ledger: new EvidenceLedger(),
+            state: makeState(),
+            allocateEvidence: () => { throw new Error('Memory evidence must be ledger-owned.'); },
+        } as any, { memoryIds: ['M404'] });
+
+        assert.equal(outcome.ok, false);
+        assert.equal(outcome.preserveOutput, true);
+        assert.equal(JSON.parse(outcome.output).error.code, 'unknown_memory_id');
+        assert.equal(records.length, 1);
+        assert.equal(records[0].ok, false);
+        assert.equal(records[0].tool, 'readMemorySources');
+    });
+
+    it('rejects the legacy supports argument through the memory tool schema', async () => {
+        const records: Array<Record<string, unknown>> = [];
+        const memory = {
+            settings: MEMORY_DEFAULTS,
+            budget: { used: 0, remaining: 16, limit: 16, searchesUsed: 0, searchesRemaining: 3, navigationTokens: 1500, resultTokens: 4096 },
+            reject: (code: MemoryRequestError['code'], message: string): never => {
+                throw new MemoryRequestError(code, message, { used: 0, remaining: 16, limit: 16 });
+            },
+            readMemorySources: async (): Promise<never> => { throw new Error('legacy supports must not reach the retriever'); },
+        };
+        const input = {
+            ...makeInput(),
+            memory: memory as any,
+            recorder: { record: (observation: Record<string, unknown>) => records.push(observation) } as any,
+        };
+        const profile = createChangeAnalysisProfile(input);
+        const read = profile.buildToolDefinitions(input, makeState()).find(definition => definition.name === 'readMemorySources');
+        assert.ok(read);
+
+        const outcome = await read!.execute({
+            input,
+            grant: { name: 'readMemorySources', allowedRoot: '/tmp/repository', excludePatterns: [], allocateEvidence: true },
+            ledger: new EvidenceLedger(),
+            state: makeState(),
+            allocateEvidence: () => { throw new Error('Memory evidence must be ledger-owned.'); },
+        } as any, { supports: [{ episodeId: 'uuid', evidenceId: 'E1' }] });
+
+        assert.equal(outcome.ok, false);
+        assert.equal(JSON.parse(outcome.output).error.code, 'invalid_arguments');
+        assert.equal(records.length, 1);
+        assert.equal(records[0].ok, false);
+    });
+
+    it('reuses the same E id when a repeatable memory source is read again', async () => {
+        const source = {
+            snapshotId: 'snapshot-1',
+            path: 'src/parser.ts',
+            side: 'after' as const,
+            blobOid: 'blob-1',
+            startLine: 2,
+            endLine: 3,
+            excerpt: 'parse(input)',
+            contentHash: 'hash-1',
+            truncated: false,
+            sourceType: 'text' as const,
+        };
+        const records: Array<Record<string, any>> = [];
+        let calls = 0;
+        const memory = {
+            settings: MEMORY_DEFAULTS,
+            budget: { used: 1, remaining: 15, limit: 16, searchesUsed: 0, searchesRemaining: 3, navigationTokens: 1500, resultTokens: 4096 },
+            readMemorySources: async () => { calls += 1; return [{ key: 'same-source', status: 'source_unchanged' as const, source }]; },
+            assertResultBudget: () => undefined,
+        };
+        const input = {
+            ...makeInput(),
+            memory: memory as any,
+            recorder: { record: (observation: Record<string, unknown>) => records.push(observation) } as any,
+        };
+        const profile = createChangeAnalysisProfile(input);
+        const read = profile.buildToolDefinitions(input, makeState()).find(definition => definition.name === 'readMemorySources');
+        assert.ok(read);
+        const context = {
+            input,
+            grant: { name: 'readMemorySources', allowedRoot: '/tmp/repository', excludePatterns: [], allocateEvidence: true },
+            ledger: new EvidenceLedger(),
+            state: makeState(),
+            allocateEvidence: () => { throw new Error('Memory evidence must be ledger-owned.'); },
+        } as any;
+
+        const first = await read!.execute(context, { memoryIds: ['M1'] });
+        const second = await read!.execute(context, { memoryIds: ['M1'] });
+        assert.equal(calls, 2);
+        assert.equal(first.evidenceCount, 1);
+        assert.equal(second.evidenceCount, 1);
+        assert.equal(JSON.parse(first.output).evidence[0].id, 'E1');
+        assert.equal(JSON.parse(second.output).evidence[0].id, 'E1');
+        assert.equal(records.length, 2);
+        assert.equal(records[0].evidence[0].id, 'E1');
+        assert.deepEqual(records[1].evidence, []);
+    });
+
+    it('returns an explicit result-budget error without publishing any E ledger evidence', async () => {
+        const source = {
+            snapshotId: 'snapshot-1',
+            path: 'src/parser.ts',
+            side: 'after' as const,
+            blobOid: 'blob-1',
+            startLine: 2,
+            endLine: 3,
+            excerpt: 'parse(input)',
+            contentHash: 'hash-1',
+            truncated: false,
+            sourceType: 'text' as const,
+        };
+        const records: Array<Record<string, any>> = [];
+        let serializedResult = '';
+        const memory = {
+            settings: MEMORY_DEFAULTS,
+            budget: { used: 1, remaining: 15, limit: 16, searchesUsed: 0, searchesRemaining: 3, navigationTokens: 1500, resultTokens: 1 },
+            readMemorySources: async () => [{ key: 'oversized-source', status: 'source_unchanged' as const, source }],
+            assertResultBudget: (output: string): never => {
+                serializedResult = output;
+                throw new MemoryRequestError('result_budget_exceeded', 'Memory result exceeds its token budget; request fewer memoryIds.', {
+                    requested: 20,
+                    limit: 1,
+                });
+            },
+        };
+        const input = {
+            ...makeInput(),
+            memory: memory as any,
+            recorder: { record: (observation: Record<string, unknown>) => records.push(observation) } as any,
+        };
+        const profile = createChangeAnalysisProfile(input);
+        const read = profile.buildToolDefinitions(input, makeState()).find(definition => definition.name === 'readMemorySources');
+        assert.ok(read);
+        const ledger = new EvidenceLedger();
+
+        const outcome = await read!.execute({
+            input,
+            grant: { name: 'readMemorySources', allowedRoot: '/tmp/repository', excludePatterns: [], allocateEvidence: true },
+            ledger,
+            state: makeState(),
+            allocateEvidence: () => { throw new Error('Memory evidence must not be allocated before the result budget passes.'); },
+        } as any, { memoryIds: ['M1'] });
+
+        assert.equal(serializedResult.length > 0, true);
+        assert.equal(outcome.ok, false);
+        assert.equal(outcome.preserveOutput, true);
+        const output = JSON.parse(outcome.output) as { error: Record<string, unknown>; budget: Record<string, unknown> };
+        assert.deepEqual(output.error, {
+            code: 'result_budget_exceeded',
+            message: 'Memory result exceeds its token budget; request fewer memoryIds.',
+            requested: 20,
+            limit: 1,
+        });
+        assert.deepEqual(ledger.snapshot().filter(entry => entry.source === 'repository'), []);
+        assert.equal(records.length, 1);
+        assert.equal(records[0].ok, false);
+        assert.deepEqual(records[0].evidence, []);
     });
 
     it('omits claims whose references are all invalid and leaves mustExpress empty', () => {

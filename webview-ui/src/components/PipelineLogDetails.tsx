@@ -197,7 +197,11 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
             return (
                 <DetailFields rows={[
                     { label: text.detailTool, value: <SemanticTag value={details.tool} /> },
-                    { label: text.detailProgress, value: `${details.current}/${details.total}` },
+                    ...(details.total !== undefined ? [{ label: text.detailProgress, value: `${details.current}/${details.total}` }] : []),
+                    ...(details.kind === 'memoryStep' && details.trigger ? [
+                        { label: text.metricTrigger, value: <SemanticTag value={details.trigger} /> },
+                        { label: text.detailStatus, value: <SemanticTag value={details.status!} /> },
+                    ] : []),
                     { label: text.detailSuccess, value: details.ok ? text.detailYes : text.detailNo },
                     ...(details.reason ? [{ label: text.detailReason, value: details.reason }] : []),
                     ...(details.summary ? [{ label: text.detailSummary, value: <DetailProse>{details.summary}</DetailProse> }] : []),

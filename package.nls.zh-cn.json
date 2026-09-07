@@ -78,7 +78,18 @@
   "command.manageMemory": "管理仓库记忆",
   "config.memory.enabled.desc": "启用基于真实调查记录的本地仓库导航记忆（默认关闭）。",
   "config.memory.consolidation.enabled.desc": "空闲时使用当前生成模型整理记录；不会等待后台整理再返回提交消息。",
-  "config.memory.consolidation.maxCallsPer24h.desc": "每个克隆的后台整理调用上限（滚动24小时，失败也计次）。",
-  "config.memory.maxStorageMiB.desc": "每个克隆的本地 Episode 存储上限（MiB）。",
-  "config.memory.excludePatterns.desc": "不记录、不检索、不发送给后台整理的额外路径模式。"
+  "config.memory.consolidation.maxCallsPer24h.desc": "每个 clone 滚动 24 小时内允许的付费整理尝试次数（正整数）；失败及取消的已发请求也计次。 数值预算修改在下一次操作生效。",
+  "config.memory.maxStorageMiB.desc": "每个 clone 的 Episode 存储预算，单位 MiB；下次发布时执行保留策略，修改设置不会立即删除数据。 数值预算修改在下一次操作生效。",
+  "config.memory.excludePatterns.desc": "不记录、不检索、不发送给后台整理的额外路径模式。",
+  "config.memory.navigation.maxTokens.desc": "导航输入的估算 token 预算，同时受输入占比限制。 数值预算修改在下一次操作生效。",
+  "config.memory.navigation.maxInputPercent.desc": "导航最多占模型输入额度的百分比（1–100）。 数值预算修改在下一次操作生效。",
+  "config.memory.search.maxCalls.desc": "每次生成允许追加的记忆搜索次数；0 禁止追加搜索。 数值预算修改在下一次操作生效。",
+  "config.memory.sources.maxChunks.desc": "每次生成的唯一记忆来源校验次数；无效 ID 不扣此预算。 数值预算修改在下一次操作生效。",
+  "config.memory.sources.timeoutMs.desc": "每次记忆来源展开调用的超时，单位毫秒。 数值预算修改在下一次操作生效。",
+  "config.memory.sources.maxResultTokens.desc": "完整记忆工具结果的估算 token 上限；超限会明确拒绝。 数值预算修改在下一次操作生效。",
+  "config.memory.consolidation.maxInputTokens.desc": "整理输入的估算 token 预算，含提示词和 schema，并受模型上下文限制。 数值预算修改在下一次操作生效。",
+  "config.memory.consolidation.maxOutputTokens.desc": "整理输出 token 上限，受模型输出额度限制；提高可能增加 API 费用。 数值预算修改在下一次操作生效。",
+  "config.memory.storage.maxEpisodes.desc": "每个 clone 保留的 Episode 数量上限，下次发布时执行。 数值预算修改在下一次操作生效。",
+  "config.memory.storage.maxEpisodeKiB.desc": "新发布 Episode 的大小上限，单位 KiB；已有较大记录仍可读取。 数值预算修改在下一次操作生效。",
+  "config.memory.storage.maxManifestMiB.desc": "新发布 manifest 的大小上限，单位 MiB；降低不会将现有数据判为损坏。 数值预算修改在下一次操作生效。"
 }

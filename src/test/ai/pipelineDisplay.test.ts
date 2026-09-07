@@ -3,6 +3,7 @@ import { describe, it } from 'mocha';
 import {
     deriveLatestPipelineSnapshot,
     formatStructuredFieldIssue,
+    parseCommitStageLog,
     pipelineStageBadge,
     presentPipelineEvent,
     presentStructuredValidationLog,
@@ -99,6 +100,92 @@ describe('pipeline display for parallel analysis events', () => {
         assert.equal(snapshot?.steps.some(step => (step.id as string) === 'memory'), false);
     });
 
+    it('renders maintenance memory operations without requiring a tool-budget total', () => {
+        const presentation = presentPipelineEvent({
+            stage: 'memoryStep',
+            data: {
+                current: 0,
+                trigger: 'manual',
+                status: 'running',
+                tool: 'consolidateMemory',
+                summary: 'Consolidating eligible repository memory.',
+                ok: true,
+            },
+        });
+
+        assert.equal(presentation.details?.kind, 'memoryStep');
+        if (presentation.details?.kind !== 'memoryStep') {
+            throw new Error('Expected memoryStep details');
+        }
+        assert.equal(presentation.details.trigger, 'manual');
+        assert.equal(presentation.details.status, 'running');
+        assert.equal(presentation.details.total, undefined);
+        assert.deepEqual(presentation.metrics, []);
+        assert.equal(presentation.tone, 'active');
+    });
+
+    it('parses maintenance memory events with trigger and status while preserving the agent total contract', () => {
+        const maintenance = parseCommitStageLog(stage('memoryStep', {
+            current: 0,
+            trigger: 'manual',
+            status: 'published',
+            tool: 'consolidateMemory',
+            summary: 'Published one handbook entry.',
+            ok: true,
+        }));
+        if (!maintenance) {
+            throw new Error('Expected a maintenance memory stage payload');
+        }
+        const presentation = presentPipelineEvent(maintenance);
+        assert.equal(presentation.details?.kind, 'memoryStep');
+        if (presentation.details?.kind !== 'memoryStep') {
+            throw new Error('Expected maintenance memory details');
+        }
+        assert.equal(presentation.details.trigger, 'manual');
+        assert.equal(presentation.details.status, 'published');
+        assert.equal(presentation.details.total, undefined);
+
+        const missingStatus = parseCommitStageLog(stage('memoryStep', {
+            current: 0, trigger: 'manual', tool: 'consolidateMemory', ok: true,
+        }));
+        if (!missingStatus) {
+            throw new Error('Expected a memory stage payload');
+        }
+        assert.throws(() => presentPipelineEvent(missingStatus), /missing required field 'status'/);
+
+        const missingTotal = parseCommitStageLog(stage('memoryStep', {
+            current: 1, tool: 'searchRepositoryMemory', ok: true,
+        }));
+        if (!missingTotal) {
+            throw new Error('Expected an agent memory stage payload');
+        }
+        assert.throws(() => presentPipelineEvent(missingTotal), /missing required field 'total'/);
+    });
+
+    it('renders failed maintenance memory status as a warning without inventing progress totals', () => {
+        const presentation = presentPipelineEvent({
+            stage: 'memoryStep',
+            data: {
+                current: 0,
+                trigger: 'automatic',
+                status: 'failed',
+                tool: 'consolidateMemory',
+                summary: 'Provider unavailable.',
+                ok: false,
+            },
+        });
+
+        assert.equal(presentation.tone, 'warning');
+        assert.deepEqual(presentation.metrics, []);
+        if (presentation.details?.kind !== 'memoryStep') {
+            throw new Error('Expected failed maintenance memory details');
+        }
+        assert.equal(presentation.details.trigger, 'automatic');
+        assert.equal(presentation.details.status, 'failed');
+        assert.equal(presentation.details.total, undefined);
+        assert.match(presentation.description, /Provider unavailable/);
+    });
+
     it('renders a failed memory source validation with the evidence count in its details', () => {
         const presentation = presentPipelineEvent({
             stage: 'memoryStep',
@@ -160,6 +247,51 @@ describe('pipeline display for parallel analysis events', () => {
         assert.equal(degraded.state, 'degraded');
         assert.equal(degraded.steps.find(step => step.id === 'analyze')?.state, 'warning');
         assert.equal(degraded.steps.find(step => step.id === 'select')?.state, 'warning');
+    });
+
+    it('does not reactivate a completed investigation for maintenance memory events', () => {
+        const snapshot = deriveLatestPipelineSnapshot([
+            log('generationStart', { generationMode: 'thinking', repoPath: '/tmp/repository' }),
+            stage('investigationStart', { maxSteps: 4 }),
+            stage('investigationComplete', { steps: 2, evidenceCount: 3 }),
+            stage('investigationResolved', { findingCount: 1, unresolvedCount: 0, reason: 'Enough evidence.' }),
+            stage('memoryStep', {
+                current: 0,
+                trigger: 'automatic',
+                status: 'completed',
+                tool: 'consolidateMemory',
+                summary: 'Consolidation completed.',
+                ok: true,
+            }),
+        ]);
+
+        assert.ok(snapshot);
+        assert.equal(snapshot?.steps.find(step => step.id === 'investigate')?.state, 'complete');
+        assert.equal(snapshot?.latest.stage, 'investigationResolved');
+    });
+
+    it('keeps a completed generation ready when a later maintenance event is appended', () => {
+        const snapshot = deriveLatestPipelineSnapshot([
+            log('generationStart', { generationMode: 'thinking', repoPath: '/tmp/repository' }),
+            stage('changeExtractionStart'),
+            stage('changeExtracted', changeExtractedData()),
+            stage('investigationStart', { maxSteps: 4 }),
+            stage('investigationResolved', { findingCount: 1, unresolvedCount: 0, reason: 'Enough evidence.' }),
+            stage('done', { finalMessage: 'feat(memory): publish handbook entry' }),
+            stage('memoryStep', {
+                current: 0,
+                trigger: 'automatic',
+                status: 'published',
+                tool: 'consolidateMemory',
+                summary: 'Consolidation completed.',
+                ok: true,
+            }),
+        ]);
+
+        assert.ok(snapshot);
+        assert.equal(snapshot?.state, 'ready');
+        assert.equal(snapshot?.latest.stage, 'done');
+        assert.equal(snapshot?.steps.some(step => step.state === 'active'), false);
     });
 
     it('maps investigationComplete and analysisFinalizing presentation details', () => {

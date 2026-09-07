@@ -212,6 +212,10 @@ export class StageNotificationManager {
         break;
       }
       case 'memoryStep': {
+        if (event.data?.trigger) {
+          this.active.updateMessage(String(event.data.summary));
+          break;
+        }
         const current = Number(event.data?.current ?? 0);
         const total = Number(event.data?.total ?? 0);
         this.active.updateMessage(t(I18N.stages.investigationStep, current, total));

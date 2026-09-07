@@ -4,10 +4,19 @@ import { z } from 'zod';
 import { AgentProfile, AgentRuntime, EvidenceLedger, FINISH_INVESTIGATION_TOOL } from '../../agent';
 import { createChangeAnalysisProfile } from '../../services/analysis/change/investigation/changeAnalysisProfile';
 import { DiffData } from '../../services/git/gitTypes';
-import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
+import {
+    hashContent,
+    RepositorySnapshotReader,
+    SnapshotEntry,
+    SnapshotIdentity,
+    SourceObservation,
+} from '../../services/git/repositorySnapshot';
 import { LLMExecution } from '../../services/llm/llmTypes';
 import { AIRunRequest, AIRunResponse, AISession, CustomProvider } from '../../services/llm/providers';
 import { resolveChainTokenBudget } from '../../services/llm/inputTokenBudget';
+import { EpisodeRecorder } from '../../services/memory/recorder';
+import { MemoryRetriever } from '../../services/memory/retriever';
+import { InvestigationEpisode } from '../../services/memory/types';
 
 function createExecution(
     responses: AIRunResponse[],
@@ -1478,7 +1487,297 @@ describe('AgentRuntime contracts', () => {
         assert.match(duplicateResult?.output ?? '', /Duplicate tool call/);
         assert.equal(requests[2].toolChoice, 'none');
     });
+
+    it('keeps ten repository evidence items and continues after an in-band memory rejection', async () => {
+        const requests: AIRunRequest[] = [];
+        const snapshot = makeIncidentSnapshot();
+        const memory = new MemoryRetriever({
+            epoch: 'epoch', generation: 1, episodes: [], handbook: [], consolidated: [],
+        }, snapshot, []);
+        const recorder = new EpisodeRecorder(snapshot.identity, 'test-model');
+        const execution = createExecution([
+            response({
+                toolCalls: [{ id: 'repo-1', name: 'searchCode', arguments: {
+                    reason: 'collect repository evidence', query: 'parse', dirPath: null,
+                    searchType: 'content', useRegex: false, maxResults: 8, side: null,
+                } }],
+                stopReason: 'tool_call',
+            }),
+            response({
+                toolCalls: [{ id: 'repo-2', name: 'searchCode', arguments: {
+                    reason: 'collect the remaining repository evidence', query: 'secondary', dirPath: null,
+                    searchType: 'content', useRegex: false, maxResults: 10, side: null,
+                } }],
+                stopReason: 'tool_call',
+            }),
+            response({
+                toolCalls: [{ id: 'memory-1', name: 'readMemorySources', arguments: { memoryIds: ['M404'] } }],
+                stopReason: 'tool_call',
+            }),
+            finishInvestigationResponse('the repository evidence is sufficient'),
+            response({ structured: incidentTerminal(), text: JSON.stringify(incidentTerminal()) }),
+        ], requests, []);
+        const input = {
+            snapshot,
+            recorder,
+            memory,
+            extraction: {
+                changedFiles: [{ path: 'src/parser.ts', changeType: 'modified' as const }],
+                changedSymbols: [],
+                introducedSymbols: [],
+                removedSymbols: [],
+                changedCalls: [],
+                changedConfigs: [],
+                changedTypes: [],
+                changedDependencies: [],
+            },
+            plan: {
+                targets: [{ target: 'parse', kind: 'symbol' as const, file: 'src/parser.ts', questions: ['Where is parse used?'] }],
+                notes: null,
+            },
+            repositoryPath: '/tmp/repository',
+            excludePatterns: [],
+            evidence: [],
+            maxSteps: 4,
+        };
+        const events: Array<{ type: string; observation?: { tool: string; ok: boolean; output: string } }> = [];
+        const result = await new AgentRuntime({ onEvent: event => {
+            if (event.type === 'toolComplete') {
+                events.push({ type: event.type, observation: event.observation });
+            }
+        } }).run(execution, createChangeAnalysisProfile(input), input, new EvidenceLedger());
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output.analysisStatus, 'complete');
+        assert.equal(result.metrics.toolSteps, 3);
+        assert.deepEqual(result.state.observations.map(item => ({ tool: item.tool, ok: item.ok })), [
+            { tool: 'searchCode', ok: true },
+            { tool: 'searchCode', ok: true },
+            { tool: 'readMemorySources', ok: false },
+        ]);
+        assert.deepEqual(result.state.ledger.snapshot()
+            .filter(item => item.source === 'repository')
+            .map(item => item.id), Array.from({ length: 10 }, (_, index) => `E${index + 1}`));
+        const memoryEvent = events.find(event => event.observation?.tool === 'readMemorySources');
+        assert.equal(memoryEvent?.observation?.ok, false);
+        assert.equal(requests[3].toolResults?.[0].isError, true);
+        const rejectedOutput = requests[3].toolResults?.[0].output ?? '';
+        assert.deepEqual(JSON.parse(rejectedOutput).error, {
+            code: 'unknown_memory_id',
+            message: 'Unknown Memory navigation ID: M404.',
+            memoryId: 'M404',
+            used: 0,
+            remaining: 16,
+            limit: 16,
+            searchesUsed: 0,
+            searchesRemaining: 3,
+            navigationTokens: 1500,
+            resultTokens: 4096,
+        });
+        assert.equal(result.state.observations[2].output, rejectedOutput);
+        assert.equal(result.state.observations[2].outputTruncated, false);
+        assert.equal(requests[3].toolChoice, 'auto');
+        assert.equal(requests[4].toolChoice, 'none');
+
+        const episode = recorder.seal({
+            changedPaths: ['src/parser.ts'], changedSymbols: ['parse'], questions: ['Where is parse used?'],
+            claims: [], status: 'complete',
+        });
+        assert.deepEqual(episode.observations.map(observation => ({ tool: observation.tool, ok: observation.ok })), [
+            { tool: 'searchCode', ok: true },
+            { tool: 'searchCode', ok: true },
+            { tool: 'readMemorySources', ok: false },
+        ]);
+        assert.deepEqual(episode.observations.slice(0, 2).flatMap(observation => observation.evidence.map(item => item.id)),
+            Array.from({ length: 10 }, (_, index) => `E${index + 1}`));
+        assert.deepEqual(episode.observations[2].evidence, []);
+    });
+
+    it('preserves published M ids in a checkpoint and restarts navigation at M1 per run', async () => {
+        const requests: AIRunRequest[] = [];
+        const snapshot = makeIncidentSnapshot();
+        const view = {
+            epoch: 'epoch',
+            generation: 1,
+            episodes: [makeCheckpointEpisode(snapshot)],
+            handbook: [],
+            consolidated: [],
+        };
+        const memory = new MemoryRetriever(view, snapshot, []);
+        let published: ReturnType<typeof memory.searchRepositoryMemory> = [];
+        const execution = createExecution([
+            response({
+                toolCalls: [{ id: 'memory-search', name: 'searchMemory', arguments: {} }],
+                stopReason: 'tool_call',
+            }),
+            response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
+        ], requests, []);
+        execution.tokenBudget.compressionTriggerTokens = 21;
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'memory-checkpoint-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'memoryCheckpointTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 1,
+                maxEpochs: 1,
+                maxObservationChars: 1_000,
+                buildCheckpoint: () => ({ role: 'user', content: `checkpoint:${published.map(item => item.id).join(',')}` }),
+            },
+            buildPrompt: () => ({
+                stable: [{ role: 'system', content: 'protocol' }],
+                opening: [{ role: 'user', content: 'search memory' }],
+            }),
+            grantTools: () => [{
+                name: 'searchMemory',
+                allowedRoot: '/tmp/repository',
+                excludePatterns: [],
+                allocateEvidence: false,
+            }],
+            buildToolDefinitions: () => [{
+                name: 'searchMemory',
+                description: 'Search historical navigation.',
+                parameters: { type: 'object' },
+                execute: async () => {
+                    published = memory.searchRepositoryMemory({ paths: ['src/parser.ts'], symbols: [], keywords: ['parse'] });
+                    return { output: JSON.stringify(published), preserveOutput: true };
+                },
+            }],
+            ...profileRequestHooks(),
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'done');
+        assert.deepEqual(published.map(item => item.id), ['M1']);
+        assert.equal(requests.length, 2);
+        assert.equal(requests[1].messages?.[0].content, 'checkpoint:M1');
+        assert.equal(requests[1].toolChoice, 'none');
+
+        const nextRun = new MemoryRetriever(view, snapshot, []);
+        assert.deepEqual(
+            nextRun.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: ['parse'] }).map(item => item.id),
+            ['M1'],
+        );
+    });
 });
+
+function incidentTerminal() {
+    return {
+        investigation: {
+            findings: [],
+            unresolvedQuestions: [],
+            stopReason: 'The repository evidence was collected.',
+        },
+        changeTargets: [],
+        dependencyContext: {
+            callers: [],
+            callees: [],
+            stateDependencies: [],
+            relatedConfigs: [],
+            relatedTypes: [],
+        },
+        claims: [],
+        behaviorAnalysis: { before: null, after: null, observableEffect: null },
+        capabilityContext: { technicalCapability: null, productCapability: null },
+        intentAnalysis: { primaryIntent: null, supportedBy: [], confidence: 'low' },
+        changeClassification: {
+            existingBehaviorCorrected: false,
+            newCapabilityAdded: false,
+            externalBehaviorChanged: false,
+            structuralOnly: true,
+            recommendedType: null,
+            reason: null,
+        },
+        suggestedScope: null,
+        selectionNotes: null,
+        uncertainties: [],
+    };
+}
+
+function makeIncidentSnapshot(): RepositorySnapshotReader {
+    const identity: SnapshotIdentity = {
+        id: '1'.repeat(64), repositoryId: '2'.repeat(64), worktreeId: '3'.repeat(64), head: '4'.repeat(40),
+        beforeTree: '5'.repeat(40), afterTree: '6'.repeat(40), indexFingerprint: '7'.repeat(64), autoStaged: false,
+    };
+    const contents = new Map<string, string>();
+    const entries: SnapshotEntry[] = [];
+    for (let index = 0; index < 10; index += 1) {
+        const filePath = `src/memory-fixture-${index}.ts`;
+        const content = index < 2 ? 'parse call secondary' : 'parse call';
+        const oid = index.toString(16).padStart(40, '0');
+        contents.set(filePath, content);
+        entries.push({ path: filePath, mode: '100644', oid });
+    }
+    const snapshot = {
+        root: '/tmp/repository',
+        identity,
+        metrics: { gitObjectCalls: 0, blobBytes: 0, sourceReads: 0, searchCalls: 0, filesSearched: 0 },
+        entries: () => entries.map(entry => ({ ...entry })),
+        readBatch: async (batch: SnapshotEntry[]) => new Map(batch.map(entry => [entry.oid, contents.get(entry.path) ?? ''])),
+        observe: async (filePath: string, startLine: number, _maxLines: number, _excludes: string[] = [], side: 'before' | 'after' = 'after', maxChars = 2000): Promise<SourceObservation> => {
+            const excerpt = (contents.get(filePath) ?? '').split('\n').slice(startLine - 1, startLine).join('\n').slice(0, maxChars);
+            const entry = entries.find(candidate => candidate.path === filePath);
+            return {
+                snapshotId: identity.id,
+                path: filePath,
+                side,
+                blobOid: entry?.oid ?? '8'.repeat(40),
+                startLine,
+                endLine: startLine,
+                excerpt,
+                contentHash: hashContent(excerpt),
+                truncated: false,
+                sourceType: 'text',
+            };
+        },
+    };
+    return snapshot as unknown as RepositorySnapshotReader;
+}
+
+function makeCheckpointEpisode(snapshot: RepositorySnapshotReader): InvestigationEpisode {
+    const source = {
+        snapshotId: snapshot.identity.id,
+        path: 'src/memory-fixture-0.ts',
+        side: 'after' as const,
+        blobOid: '0'.repeat(40),
+        startLine: 1,
+        endLine: 1,
+        excerpt: 'parse call secondary',
+        contentHash: hashContent('parse call secondary'),
+        truncated: false,
+        sourceType: 'text' as const,
+    };
+    return {
+        version: 1,
+        id: '00000000-0000-4000-8000-000000000001',
+        createdAt: 1,
+        snapshot: snapshot.identity,
+        changedPaths: ['src/parser.ts'],
+        changedSymbols: ['parse'],
+        questions: ['Where is parse used?'],
+        observations: [{
+            step: 0,
+            tool: 'readFileContent',
+            arguments: { filePath: source.path, startLine: 1, maxLines: 1 },
+            ok: true,
+            summary: 'read source',
+            evidence: [{ id: 'E1', source }],
+            durationMs: 1,
+            truncated: false,
+        }],
+        claims: [{ claim: 'The parser source was inspected.', evidenceRefs: ['E1'], disposition: 'must_express' }],
+        status: 'complete',
+        model: 'checkpoint-test',
+        promptVersion: 'memory-2',
+        toolsetVersion: 'snapshot-memory-handles-3',
+    };
+}
 
 function makeDiff(fileName: string, headers: string[]): DiffData {
     return {

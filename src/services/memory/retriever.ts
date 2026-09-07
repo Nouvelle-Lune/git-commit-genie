@@ -5,19 +5,62 @@ import { isEligibleEpisode } from './recorder';
 import { MemoryView } from './store';
 import { HandbookEntry, MemoryNavigation, MemoryQuery, MemoryUsage } from './types';
 import { bm25Scores } from './ranking';
+import { SourceObservation } from '../git/repositorySnapshot';
+import { estimateTokens } from '../analysis/tools/modelContext';
+import { MEMORY_DEFAULTS, MemoryRequestError, MemorySettings } from './settings';
+
+export interface MemorySourceResult {
+    key: string;
+    status: 'source_unchanged' | 'source_relocated' | 'needs_revalidation' | 'unavailable';
+    source?: SourceObservation;
+}
+
+export function memorySourceKey(source: SourceObservation): string {
+    return JSON.stringify([source.path, source.side, source.blobOid, source.startLine, source.endLine, source.contentHash]);
+}
 
 /** Memory IDs identify navigation, never current-run evidence or facts. */
 export class MemoryRetriever {
-    readonly usage: MemoryUsage = { recalled: 0, expanded: 0, adopted: 0, unavailable: 0, retrievalMs: 0 };
+    readonly usage: MemoryUsage = { recalled: 0, expanded: 0, adopted: 0, unavailable: 0, retrievalMs: 0,
+        sourceAttempts: 0, invalidReferences: 0, budgetRejections: 0 };
     private searches = 0;
     private reads = 0;
     private readonly expandedSources = new Set<string>();
+    private readonly navigation = new Map<string, { value: MemoryNavigation; sources: SourceObservation[] }>();
+    private readonly identities = new Map<string, string>();
+    private readonly cache = new Map<string, MemorySourceResult>();
+    private navigationTokens: number;
     constructor(readonly view: MemoryView, private readonly snapshot: RepositorySnapshotReader, private readonly excludes: string[],
-        private readonly currentExcludes: () => string[] = () => []) {}
+        private readonly currentExcludes: () => string[] = () => [], readonly settings: MemorySettings = MEMORY_DEFAULTS) {
+        this.navigationTokens = settings['navigation.maxTokens'];
+    }
+
+    setInputBudget(hardInputTokens: number): void {
+        this.navigationTokens = Math.min(this.settings['navigation.maxTokens'], Math.floor(hardInputTokens * this.settings['navigation.maxInputPercent'] / 100));
+    }
+
+    get publishedNavigation(): MemoryNavigation[] { return [...this.navigation.values()].map(item => structuredClone(item.value)); }
+    get budget() { return { used: this.reads, remaining: this.settings['sources.maxChunks'] - this.reads, limit: this.settings['sources.maxChunks'],
+        searchesUsed: this.searches, searchesRemaining: this.settings['search.maxCalls'] - this.searches,
+        navigationTokens: this.navigationTokens, resultTokens: this.settings['sources.maxResultTokens'] }; }
+
+    reject(code: MemoryRequestError['code'], message: string, details: Record<string, unknown> = {}): never {
+        if (code === 'invalid_arguments' || code === 'unknown_memory_id') { this.usage.invalidReferences += 1; }
+        else { this.usage.budgetRejections += 1; }
+        throw new MemoryRequestError(code, message, { ...this.budget, ...details });
+    }
+
+    assertResultBudget(output: string): void {
+        const requested = Math.ceil(estimateTokens(output));
+        if (requested > this.settings['sources.maxResultTokens']) {
+            this.reject('result_budget_exceeded', 'Memory result exceeds its token budget; request fewer memoryIds.',
+                { requested, limit: this.settings['sources.maxResultTokens'] });
+        }
+    }
 
     private excluded(file: string): boolean { return shouldExclude(file, [...this.excludes, ...this.currentExcludes()]); }
 
-    retrieveNavigation(query: MemoryQuery, maxTokens = 1500): MemoryNavigation[] {
+    retrieveNavigation(query: MemoryQuery, maxTokens = this.navigationTokens): MemoryNavigation[] {
         const started = performance.now();
         const entries: Array<Pick<HandbookEntry, 'triggers' | 'targetPaths' | 'questions' | 'supports'>> = [
             ...this.view.handbook,
@@ -42,20 +85,22 @@ export class MemoryRetriever {
         const result: MemoryNavigation[] = [];
         const seen = new Set<string>();
         const areaCounts = new Map<string, number>();
-        // UTF-8 bytes are a conservative token upper bound, including non-Latin text.
-        const maxBytes = Math.min(1500, Math.max(0, maxTokens));
+        const tokenLimit = Math.min(this.navigationTokens, maxTokens);
         for (const { entry, targets } of candidates) {
             const filtered = targets.filter(target => !seen.has(target)).slice(0, 8);
             if (!filtered.length) { continue; }
             const area = path.posix.dirname(filtered[0]);
             if ((areaCounts.get(area) ?? 0) >= 2) { continue; }
-            const navigation: MemoryNavigation = { id: `M${result.length + 1}`, targetPaths: filtered,
-                questions: entry.questions.slice(0, 2), supports: entry.supports.filter(support => {
-                    const source = this.sourceFor(support);
-                    return source && filtered.includes(source.path);
-                }).slice(0, 4) };
-            if (!navigation.supports.length) { continue; }
-            if (Buffer.byteLength(JSON.stringify([...result, navigation])) > maxBytes) { continue; }
+            const sources = [...new Map(entry.supports.map(support => this.sourceFor(support))
+                .filter((source): source is SourceObservation => !!source && filtered.includes(source.path))
+                .map(source => [memorySourceKey(source), source])).values()].slice(0, 4);
+            if (!sources.length) { continue; }
+            const identity = JSON.stringify([filtered, entry.questions.slice(0, 2), sources.map(memorySourceKey)]);
+            const id = this.identities.get(identity) ?? `M${this.navigation.size + 1}`;
+            const navigation: MemoryNavigation = { id, targetPaths: filtered, questions: entry.questions.slice(0, 2), sourceCount: sources.length };
+            if (estimateTokens(JSON.stringify([...result, navigation])) > tokenLimit) { continue; }
+            this.identities.set(identity, id);
+            this.navigation.set(id, { value: structuredClone(navigation), sources: structuredClone(sources) });
             result.push(navigation); filtered.forEach(target => seen.add(target)); areaCounts.set(area, (areaCounts.get(area) ?? 0) + 1);
             if (result.length === 6) { break; }
         }
@@ -64,9 +109,9 @@ export class MemoryRetriever {
         return result;
     }
 
-    searchRepositoryMemory(query: MemoryQuery, maxTokens: number): MemoryNavigation[] {
+    searchRepositoryMemory(query: MemoryQuery, maxTokens = this.navigationTokens): MemoryNavigation[] {
+        if (this.searches >= this.settings['search.maxCalls']) { this.reject('search_budget_exceeded', 'Memory search budget exhausted.'); }
         this.searches += 1;
-        if (this.searches > 2) { throw new Error('Memory search budget exhausted (2 calls).'); }
         return this.retrieveNavigation(query, maxTokens);
     }
 
@@ -75,48 +120,78 @@ export class MemoryRetriever {
             .flatMap(observation => observation.evidence).find(evidence => evidence.id === support.evidenceId)?.source;
     }
 
-    async readMemorySources(supports: HandbookEntry['supports']): Promise<Array<{ status: 'source_unchanged' | 'source_relocated' | 'needs_revalidation' | 'unavailable'; source?: Awaited<ReturnType<RepositorySnapshotReader['observe']>> }>> {
-        if (this.reads + supports.length > 8) { throw new Error('Memory source budget exhausted (8 chunks).'); }
-        this.reads += supports.length;
+    async readMemorySources(memoryIds: string[], signal?: AbortSignal): Promise<MemorySourceResult[]> {
+        if (!Array.isArray(memoryIds) || !memoryIds.length || memoryIds.some(id => typeof id !== 'string' || !/^M\d+$/.test(id))) {
+            this.reject('invalid_arguments', 'Provide a non-empty memoryIds array containing published M* navigation IDs.');
+        }
+        const sources = new Map<string, SourceObservation>();
+        for (const id of memoryIds) {
+            const navigation = this.navigation.get(id);
+            if (!navigation) { this.reject('unknown_memory_id', `Unknown Memory navigation ID: ${id}.`, { memoryId: id }); }
+            for (const source of navigation.sources) { sources.set(memorySourceKey(source), source); }
+        }
+        const pending = [...sources.entries()].filter(([key]) => !this.cache.has(key));
+        if (this.reads + pending.length > this.settings['sources.maxChunks']) {
+            this.reject('source_budget_exceeded', 'Memory source request exceeds the remaining budget; request fewer memoryIds.', { requested: pending.length });
+        }
+        signal?.throwIfAborted();
         const started = performance.now();
+        const controller = new AbortController();
+        let rejectAbort: (reason: unknown) => void;
+        const aborted = new Promise<never>((_resolve, reject) => { rejectAbort = reject; });
+        const abort = () => { controller.abort(signal?.reason); rejectAbort(controller.signal.reason); };
+        signal?.addEventListener('abort', abort, { once: true });
         let timer: ReturnType<typeof setTimeout> | undefined;
+        const timeoutMs = this.settings['sources.timeoutMs'];
         try {
-            const result = await Promise.race([this.expandSources(supports), new Promise<never>((_resolve, reject) => {
-                timer = setTimeout(() => reject(new Error('Memory source validation exceeded 250 ms.')), 250);
-            })]);
-            if (performance.now() - started > 250) { throw new Error('Memory source validation exceeded 250 ms.'); }
+            const expanded = await Promise.race([this.expandSources(pending, controller.signal, () => {
+                this.reads += 1; this.usage.sourceAttempts += 1;
+            }), new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(() => { const error = new Error(`Memory source validation exceeded ${timeoutMs} ms.`); controller.abort(error); reject(error); }, timeoutMs);
+            }), aborted]);
+            controller.signal.throwIfAborted();
+            if (performance.now() - started > timeoutMs) { throw new Error(`Memory source validation exceeded ${timeoutMs} ms.`); }
+            const merged = new Map([...this.cache, ...expanded.map(item => [item.key, item] as const)]);
+            const result = [...sources].map(([key, source]) => this.excluded(source.path)
+                ? { key, status: 'unavailable' as const } : merged.get(key)!);
+            this.assertResultBudget(JSON.stringify(result));
+            for (const item of expanded) {
+                this.cache.set(item.key, item);
+                if (item.source) { this.usage.expanded += 1; this.expandedSources.add(memorySourceKey(item.source)); }
+                if (item.status === 'unavailable') { this.usage.unavailable += 1; }
+            }
             return result;
-        } finally { if (timer) { clearTimeout(timer); } }
+        } finally { controller.abort(); signal?.removeEventListener('abort', abort); if (timer) { clearTimeout(timer); } }
     }
 
-    private async expandSources(supports: HandbookEntry['supports']): Promise<Array<{ status: 'source_unchanged' | 'source_relocated' | 'needs_revalidation' | 'unavailable'; source?: Awaited<ReturnType<RepositorySnapshotReader['observe']>> }>> {
-        const result: Array<{ status: 'source_unchanged' | 'source_relocated' | 'needs_revalidation' | 'unavailable'; source?: Awaited<ReturnType<RepositorySnapshotReader['observe']>> }> = [];
-        for (const support of supports) {
-            const old = this.sourceFor(support);
-            if (!old || this.excluded(old.path) || !this.snapshot.entry(old.path, old.side)) {
-                this.usage.unavailable += 1; result.push({ status: 'unavailable' }); continue;
+    private async expandSources(sources: Array<[string, SourceObservation]>, signal: AbortSignal, onAttempt: () => void): Promise<MemorySourceResult[]> {
+        const result: MemorySourceResult[] = [];
+        for (const [key, old] of sources) {
+            signal.throwIfAborted(); onAttempt();
+            if (this.excluded(old.path) || !this.snapshot.entry(old.path, old.side)) {
+                result.push({ key, status: 'unavailable' }); continue;
             }
             const entry = this.snapshot.entry(old.path, old.side)!;
-            if (!['100644', '100755'].includes(entry.mode)) { result.push({ status: 'unavailable' }); continue; }
+            if (!['100644', '100755'].includes(entry.mode)) { result.push({ key, status: 'unavailable' }); continue; }
             let start = old.startLine;
             const unchanged = entry.oid === old.blobOid;
             if (!unchanged) {
                 const current = await this.snapshot.read(old.path, old.side, this.excludes);
+                signal.throwIfAborted();
                 const index = current.indexOf(old.excerpt);
                 if (!old.excerpt || index < 0 || current.indexOf(old.excerpt, index + 1) >= 0 || (index > 0 && current[index - 1] !== '\n')) {
-                    result.push({ status: 'needs_revalidation' }); continue;
+                    result.push({ key, status: 'needs_revalidation' }); continue;
                 }
                 start = current.slice(0, index).split('\n').length;
             }
             const source = await this.snapshot.observe(old.path, start, old.endLine - old.startLine + 1, this.excludes, old.side, old.excerpt.length);
-            this.usage.expanded += 1;
-            this.expandedSources.add(`${source.path}\0${source.blobOid}\0${source.startLine}\0${source.contentHash}`);
-            result.push({ status: unchanged ? 'source_unchanged' : 'source_relocated', source });
+            signal.throwIfAborted();
+            result.push(this.excluded(old.path) ? { key, status: 'unavailable' } : { key, status: unchanged ? 'source_unchanged' : 'source_relocated', source });
         }
         return result;
     }
 
     recordAdoption(sources: Array<import('../git/repositorySnapshot').SourceObservation>): void {
-        this.usage.adopted = sources.filter(source => this.expandedSources.has(`${source.path}\0${source.blobOid}\0${source.startLine}\0${source.contentHash}`)).length;
+        this.usage.adopted = sources.filter(source => this.expandedSources.has(memorySourceKey(source))).length;
     }
 }

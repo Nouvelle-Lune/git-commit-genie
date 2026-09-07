@@ -372,15 +372,15 @@
         "gitCommitGenie.memory.consolidation.maxCallsPer24h": {
           "type": "integer",
           "default": 2,
-          "minimum": 0,
-          "maximum": 2,
+          "minimum": 1,
+          "scope": "window",
           "markdownDescription": "%config.memory.consolidation.maxCallsPer24h.desc%"
         },
         "gitCommitGenie.memory.maxStorageMiB": {
           "type": "integer",
           "default": 256,
           "minimum": 1,
-          "maximum": 256,
+          "scope": "window",
           "markdownDescription": "%config.memory.maxStorageMiB.desc%"
         },
         "gitCommitGenie.memory.excludePatterns": {
@@ -390,6 +390,85 @@
           },
           "default": [],
           "markdownDescription": "%config.memory.excludePatterns.desc%"
+        },
+        "gitCommitGenie.memory.navigation.maxTokens": {
+          "type": "integer",
+          "default": 1500,
+          "minimum": 1,
+          "scope": "window",
+          "markdownDescription": "%config.memory.navigation.maxTokens.desc%"
+        },
+        "gitCommitGenie.memory.navigation.maxInputPercent": {
+          "type": "integer",
+          "default": 5,
+          "minimum": 1,
+          "scope": "window",
+          "markdownDescription": "%config.memory.navigation.maxInputPercent.desc%",
+          "maximum": 100
+        },
+        "gitCommitGenie.memory.search.maxCalls": {
+          "type": "integer",
+          "default": 3,
+          "minimum": 0,
+          "scope": "window",
+          "markdownDescription": "%config.memory.search.maxCalls.desc%"
+        },
+        "gitCommitGenie.memory.sources.maxChunks": {
+          "type": "integer",
+          "default": 16,
+          "minimum": 1,
+          "scope": "window",
+          "markdownDescription": "%config.memory.sources.maxChunks.desc%"
+        },
+        "gitCommitGenie.memory.sources.timeoutMs": {
+          "type": "integer",
+          "default": 1500,
+          "minimum": 1,
+          "scope": "window",
+          "markdownDescription": "%config.memory.sources.timeoutMs.desc%",
+          "maximum": 2147483647
+        },
+        "gitCommitGenie.memory.sources.maxResultTokens": {
+          "type": "integer",
+          "default": 4096,
+          "minimum": 1,
+          "scope": "window",
+          "markdownDescription": "%config.memory.sources.maxResultTokens.desc%"
+        },
+        "gitCommitGenie.memory.consolidation.maxInputTokens": {
+          "type": "integer",
+          "default": 16000,
+          "minimum": 1,
+          "scope": "window",
+          "markdownDescription": "%config.memory.consolidation.maxInputTokens.desc%"
+        },
+        "gitCommitGenie.memory.consolidation.maxOutputTokens": {
+          "type": "integer",
+          "default": 4000,
+          "minimum": 1,
+          "scope": "window",
+          "markdownDescription": "%config.memory.consolidation.maxOutputTokens.desc%"
+        },
+        "gitCommitGenie.memory.storage.maxEpisodes": {
+          "type": "integer",
+          "default": 2000,
+          "minimum": 1,
+          "scope": "window",
+          "markdownDescription": "%config.memory.storage.maxEpisodes.desc%"
+        },
+        "gitCommitGenie.memory.storage.maxEpisodeKiB": {
+          "type": "integer",
+          "default": 256,
+          "minimum": 1,
+          "scope": "window",
+          "markdownDescription": "%config.memory.storage.maxEpisodeKiB.desc%"
+        },
+        "gitCommitGenie.memory.storage.maxManifestMiB": {
+          "type": "integer",
+          "default": 8,
+          "minimum": 1,
+          "scope": "window",
+          "markdownDescription": "%config.memory.storage.maxManifestMiB.desc%"
         }
       }
     },

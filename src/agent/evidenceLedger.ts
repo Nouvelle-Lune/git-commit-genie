@@ -88,6 +88,15 @@ export class EvidenceLedger {
         return entry;
     }
 
+    /** Preview without reserving IDs; callers validate a whole tool result before publishing it. */
+    previewRepositoryEvidence(evidence: Array<Omit<RepositoryEvidenceItem, 'id'>>): RepositoryEvidenceItem[] {
+        let index = this.nextRepositoryIndex;
+        return evidence.map(item => {
+            while (this.entriesById.has(`E${index}`)) { index += 1; }
+            return { ...item, id: `E${index++}` };
+        });
+    }
+
     nextRepositoryEvidenceId(): string {
         let id: string;
         do {

@@ -8,7 +8,9 @@ import { describe, it } from 'mocha';
 import { RepositorySnapshotReader, SnapshotIdentity, hashContent } from '../../services/git/repositorySnapshot';
 import { LLMExecution, LLMService } from '../../services/llm/llmTypes';
 import { AIRunRequest } from '../../services/llm/providers';
+import { logger } from '../../services/logger';
 import { createConsolidationRunner, MemoryRun, RepositoryMemoryService } from '../../services/memory/service';
+import { MemoryStore } from '../../services/memory/store';
 import { InvestigationEpisode } from '../../services/memory/types';
 
 describe('repository memory lifecycle', function () {
@@ -22,6 +24,7 @@ describe('repository memory lifecycle', function () {
                 const clock = sinon.useFakeTimers();
                 const model = {} as LLMService;
                 try {
+                    service.storeFor('d'.repeat(64), storageRoot);
                     service.beginForeground();
                     service.schedule('d'.repeat(64), model);
                     assert.equal((service as any).scheduled.get('d'.repeat(64)).timer, undefined);
@@ -41,6 +44,280 @@ describe('repository memory lifecycle', function () {
                     assert.equal((service as any).scheduled.get('d'.repeat(64))?.timer, undefined);
                 } finally {
                     clock.restore();
+                    disposeContext(context);
+                    service.dispose();
+                }
+            });
+        });
+    });
+
+    it('returns distinct cancellation states and keeps a running slot until the job releases it', async () => {
+        await withTempStorage(async storageRoot => {
+            await withMemorySettings({ enabled: true }, async () => {
+                const context = makeContext(storageRoot);
+                const service = new RepositoryMemoryService(context);
+                const repositoryId = 'c'.repeat(64);
+                const model = makeMemoryModel();
+                try {
+                    service.storeFor(repositoryId, '/tmp/memory-cancel-repository');
+                    assert.equal(service.cancel(repositoryId), 'nothing-to-cancel');
+
+                    const waitingTimer = setTimeout(() => undefined, 60_000);
+                    (service as any).scheduled.set(repositoryId, { model, timer: waitingTimer });
+                    assert.equal(service.cancel(repositoryId), 'scheduled-cancelled');
+                    assert.equal((service as any).scheduled.has(repositoryId), false);
+
+                    const controller = new AbortController();
+                    (service as any).scheduled.set(repositoryId, { model, controller });
+                    assert.equal(service.cancel(repositoryId), 'running-cancel-requested');
+                    assert.equal(controller.signal.aborted, true);
+                    assert.equal((service as any).scheduled.has(repositoryId), true);
+
+                    (service as any).scheduled.delete(repositoryId);
+                    assert.equal(service.cancel(repositoryId), 'nothing-to-cancel');
+                } finally {
+                    disposeContext(context);
+                    service.dispose();
+                }
+            });
+        });
+    });
+
+    it('separates automatic pause from manual consolidation and reports lifecycle outcomes', async () => {
+        await withTempStorage(async storageRoot => {
+            const repositoryId = 'd'.repeat(64);
+            const model = makeMemoryModel();
+
+            await withMemorySettings({ enabled: true, consolidationEnabled: false }, async () => {
+                const context = makeContext(storageRoot);
+                const service = new RepositoryMemoryService(context);
+                try {
+                    service.storeFor(repositoryId, '/tmp/memory-status-repository');
+                    assert.deepEqual(await service.consolidate(repositoryId, model, 'automatic'), { status: 'automatic-paused' });
+                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), {
+                        status: 'not-ready', pendingCount: 0, threshold: 5,
+                    });
+                } finally {
+                    disposeContext(context);
+                    service.dispose();
+                }
+            });
+
+            await withMemorySettings({ enabled: false, consolidationEnabled: true }, async () => {
+                const context = makeContext(storageRoot);
+                const service = new RepositoryMemoryService(context);
+                try {
+                    service.storeFor(repositoryId, '/tmp/memory-status-repository');
+                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), { status: 'memory-disabled' });
+                } finally {
+                    disposeContext(context);
+                    service.dispose();
+                }
+            });
+
+            await withMemorySettings({ enabled: true, consolidationEnabled: true }, async () => {
+                const context = makeContext(storageRoot);
+                const service = new RepositoryMemoryService(context);
+                try {
+                    service.storeFor(repositoryId, '/tmp/memory-status-repository');
+                    service.beginForeground();
+                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), { status: 'foreground-busy' });
+                    service.endForeground();
+                    const waiting = (service as any).scheduled.get(repositoryId);
+                    if (waiting?.timer) { clearTimeout(waiting.timer); }
+                    (service as any).scheduled.delete(repositoryId);
+
+                    const controller = new AbortController();
+                    (service as any).scheduled.set(repositoryId, { model, controller });
+                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), { status: 'already-running' });
+                    controller.abort();
+                    (service as any).scheduled.delete(repositoryId);
+
+                    service.dispose();
+                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), { status: 'cancelled' });
+                } finally {
+                    disposeContext(context);
+                    service.dispose();
+                }
+            });
+        });
+    });
+
+    it('cancels an actual delayed consolidation through public APIs and releases its running slot in finally', async () => {
+        await withTempStorage(async storageRoot => {
+            await withMemorySettings({ enabled: true, consolidationEnabled: true }, async () => {
+                const repositoryId = '8'.repeat(64);
+                const context = makeContext(storageRoot);
+                const service = new RepositoryMemoryService(context);
+                const store = service.storeFor(repositoryId, storageRoot);
+                const episodes = makeEligibleEpisodes(repositoryId, 5);
+                await recordEpisodes(store, episodes);
+                let resolveStarted!: () => void;
+                const started = new Promise<void>(resolve => { resolveStarted = resolve; });
+                const execution = makeExecution(16_000, {
+                    createSession: () => ({
+                        provider: 'custom',
+                        model: 'memory-test',
+                        snapshot: () => ({ provider: 'custom', model: 'memory-test', continuation: { serverManaged: false }, transcript: [] }),
+                        run: async (request: AIRunRequest) => {
+                            resolveStarted();
+                            const signal = request.signal;
+                            if (!signal) { throw new Error('Consolidation request did not carry an abort signal.'); }
+                            return new Promise<never>((_resolve, reject) => {
+                                if (signal.aborted) { reject(signal.reason); return; }
+                                signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+                            });
+                        },
+                    }) as any,
+                });
+                const createExecution = sinon.stub().returns(execution);
+                const model = { createExecution } as unknown as LLMService;
+                const logToolCall = sinon.stub(logger, 'logToolCall');
+                try {
+                    const pending = service.consolidate(repositoryId, model, 'manual');
+                    await started;
+                    assert.equal(service.cancel(repositoryId), 'running-cancel-requested');
+                    assert.equal(service.cancel(repositoryId), 'running-cancel-requested',
+                        'the running slot remains registered until the consolidation finally block releases it');
+                    assert.deepEqual(await pending, { status: 'cancelled' });
+                    assert.equal(service.cancel(repositoryId), 'nothing-to-cancel');
+                    assert.equal(createExecution.calledOnce, true);
+                    assert.ok(memoryLogEvents(logToolCall).some(event => event.status === 'cancelled'));
+                } finally {
+                    logToolCall.restore();
+                    disposeContext(context);
+                    service.dispose();
+                }
+            });
+        });
+    });
+
+    it('runs a real manual consolidation while automatic consolidation is paused and logs the published result', async () => {
+        await withTempStorage(async storageRoot => {
+            await withMemorySettings({ enabled: true, consolidationEnabled: false }, async () => {
+                const repositoryId = '9'.repeat(64);
+                const context = makeContext(storageRoot);
+                const service = new RepositoryMemoryService(context);
+                const store = service.storeFor(repositoryId, storageRoot);
+                const episodes = makeEligibleEpisodes(repositoryId, 5);
+                await recordEpisodes(store, episodes);
+                let sessionRuns = 0;
+                const execution = makeExecution(16_000, {
+                    createSession: () => ({
+                        provider: 'custom',
+                        model: 'memory-test',
+                        snapshot: () => ({ provider: 'custom', model: 'memory-test', continuation: { serverManaged: false }, transcript: [] }),
+                        run: async (_request: AIRunRequest) => {
+                            sessionRuns += 1;
+                            return successfulConsolidationResponse();
+                        },
+                    }) as any,
+                });
+                const createExecution = sinon.stub().returns(execution);
+                const model = { createExecution } as unknown as LLMService;
+                const logToolCall = sinon.stub(logger, 'logToolCall');
+                try {
+                    assert.deepEqual(await service.consolidate(repositoryId, model, 'automatic'), { status: 'automatic-paused' });
+                    assert.equal(createExecution.called, false);
+
+                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), {
+                        status: 'published', episodeCount: 1, handbookCount: 1, skippedEpisodes: 0,
+                    });
+                    assert.equal(createExecution.calledOnce, true);
+                    assert.equal(sessionRuns, 1);
+                    const view = await store.inspect();
+                    assert.equal(view.handbook.length, 1);
+                    assert.deepEqual(view.consolidated, [episodes[0].id]);
+                    const events = memoryLogEvents(logToolCall);
+                    assert.ok(events.some(event => event.status === 'automatic-paused'));
+                    assert.ok(events.some(event => event.status === 'published'));
+                } finally {
+                    logToolCall.restore();
+                    disposeContext(context);
+                    service.dispose();
+                }
+            });
+        });
+    });
+
+    it('returns a real budget-exhausted result without invoking the consolidation runner and logs the reason', async () => {
+        await withTempStorage(async storageRoot => {
+            await withMemorySettings({ enabled: true, consolidationEnabled: true, maxCalls: 1 }, async () => {
+                const repositoryId = 'a'.repeat(64);
+                const context = makeContext(storageRoot);
+                const service = new RepositoryMemoryService(context);
+                const store = service.storeFor(repositoryId, storageRoot);
+                await recordEpisodes(store, makeEligibleEpisodes(repositoryId, 5));
+                const reserved = await store.reserveConsolidation(await store.inspect(), 1);
+                assert.equal(reserved.status, 'reserved');
+                if (reserved.status !== 'reserved') { throw new Error('Expected an initial consolidation reservation.'); }
+                await store.releaseJob(reserved.id);
+                let sessionRuns = 0;
+                const execution = makeExecution(16_000, {
+                    createSession: () => ({
+                        provider: 'custom',
+                        model: 'memory-test',
+                        snapshot: () => ({ provider: 'custom', model: 'memory-test', continuation: { serverManaged: false }, transcript: [] }),
+                        run: async (_request: AIRunRequest) => {
+                            sessionRuns += 1;
+                            return successfulConsolidationResponse();
+                        },
+                    }) as any,
+                });
+                const createExecution = sinon.stub().returns(execution);
+                const model = { createExecution } as unknown as LLMService;
+                const logToolCall = sinon.stub(logger, 'logToolCall');
+                try {
+                    const result = await service.consolidate(repositoryId, model, 'manual');
+                    assert.equal(result.status, 'budget-exhausted');
+                    if (result.status === 'budget-exhausted') {
+                        assert.equal(result.limit, 1);
+                        assert.ok(result.resumesAt > Date.now());
+                    }
+                    assert.equal(createExecution.calledOnce, true);
+                    assert.equal(sessionRuns, 0);
+                    assert.ok(memoryLogEvents(logToolCall).some(event => event.status === 'budget-exhausted'));
+                } finally {
+                    logToolCall.restore();
+                    disposeContext(context);
+                    service.dispose();
+                }
+            });
+        });
+    });
+
+    it('rethrows a real model exception after logging a failed Webview memory event and releasing the job', async () => {
+        await withTempStorage(async storageRoot => {
+            await withMemorySettings({ enabled: true, consolidationEnabled: true }, async () => {
+                const repositoryId = 'b'.repeat(64);
+                const context = makeContext(storageRoot);
+                const service = new RepositoryMemoryService(context);
+                const store = service.storeFor(repositoryId, storageRoot);
+                await recordEpisodes(store, makeEligibleEpisodes(repositoryId, 5));
+                const execution = makeExecution(16_000, {
+                    createSession: () => ({
+                        provider: 'custom',
+                        model: 'memory-test',
+                        snapshot: () => ({ provider: 'custom', model: 'memory-test', continuation: { serverManaged: false }, transcript: [] }),
+                        run: async (_request: AIRunRequest) => { throw new Error('provider unavailable'); },
+                    }) as any,
+                });
+                const model = { createExecution: sinon.stub().returns(execution) } as unknown as LLMService;
+                const logToolCall = sinon.stub(logger, 'logToolCall');
+                try {
+                    await assert.rejects(
+                        () => service.consolidate(repositoryId, model, 'manual'),
+                        /provider unavailable/,
+                    );
+                    assert.equal((await store.inspect()).handbook.length, 0);
+                    const events = memoryLogEvents(logToolCall);
+                    const failed = events.find(event => event.status === 'failed');
+                    assert.ok(failed);
+                    assert.equal(failed?.ok, false);
+                    assert.match(String(failed?.summary), /provider unavailable/);
+                    assert.equal(service.cancel(repositoryId), 'nothing-to-cancel');
+                } finally {
+                    logToolCall.restore();
                     disposeContext(context);
                     service.dispose();
                 }
@@ -82,6 +359,33 @@ describe('repository memory lifecycle', function () {
                     assert.equal(schedule.calledOnce, true);
                 } finally {
                     schedule.restore();
+                    disposeContext(context);
+                    service.dispose();
+                }
+            });
+        });
+    });
+
+    it('freezes a run budget while applying changed settings to the next preparation', async () => {
+        await withTempStorage(async storageRoot => {
+            await withMemorySettings({ enabled: true, sourceMaxChunks: 1 }, async () => {
+                const context = makeContext(storageRoot);
+                const service = new RepositoryMemoryService(context);
+                try {
+                    const snapshot = makeSnapshot('9'.repeat(64), storageRoot);
+                    const first = await service.prepare(snapshot, 'model', []);
+                    assert.ok(first);
+                    assert.equal(first!.settings['sources.maxChunks'], 1);
+
+                    const config = vscode.workspace.getConfiguration('gitCommitGenie.memory');
+                    await config.update('sources.maxChunks', 2, vscode.ConfigurationTarget.Global);
+                    const retriever = await first!.loadMemory({ paths: [], symbols: [], keywords: [] });
+                    assert.equal(retriever?.settings['sources.maxChunks'], 1);
+
+                    const second = await service.prepare(snapshot, 'model', []);
+                    assert.ok(second);
+                    assert.equal(second!.settings['sources.maxChunks'], 2);
+                } finally {
                     disposeContext(context);
                     service.dispose();
                 }
@@ -156,6 +460,8 @@ describe('repository memory lifecycle', function () {
     it('bounds consolidation prompt input, sends transportRetries zero, accounts unknown usage, and rejects incomplete output', async () => {
         const oversized = makeExecution(100);
         const oversizedRunner = createConsolidationRunner(oversized);
+        assert.equal(oversizedRunner.maxInputTokens, 100);
+        assert.ok(oversizedRunner.estimateInputTokens('{}') > 0);
         await assert.rejects(
             () => oversizedRunner('x'.repeat(20_000), new AbortController().signal),
             /exceed the reserved input budget/,
@@ -226,13 +532,68 @@ describe('repository memory lifecycle', function () {
 function makeExecution(hardInputTokens: number, overrides: Partial<LLMExecution> = {}): LLMExecution {
     return {
         thinking: { reasoning: false, level: 'off' },
-        tokenBudget: { hardInputTokens } as LLMExecution['tokenBudget'],
+        maxOutputTokens: 4_000,
+        tokenBudget: {
+            hardInputTokens,
+            effectiveContextTokens: 128_000,
+            safetyTokens: 0,
+            estimatedThinkingTokens: 0,
+        } as LLMExecution['tokenBudget'],
         createSession: () => ({ run: async () => {
             throw new Error('session should not be called');
         } }) as any,
         accountCall: async () => ({ status: 'usage-not-reported' as const }),
         ...overrides,
     } as LLMExecution;
+}
+
+function makeMemoryModel(): LLMService {
+    return {
+        createExecution: () => makeExecution(16_000),
+    } as unknown as LLMService;
+}
+
+async function recordEpisodes(store: MemoryStore, episodes: InvestigationEpisode[]): Promise<void> {
+    const epoch = await store.epoch();
+    for (const episode of episodes) {
+        await store.recordEpisode(episode, epoch);
+    }
+}
+
+function makeEligibleEpisodes(repositoryId: string, count: number): InvestigationEpisode[] {
+    return Array.from({ length: count }, (_, index) => ({
+        ...makeEpisode(repositoryId),
+        id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+        createdAt: Date.now() + index,
+    }));
+}
+
+function successfulConsolidationResponse(): any {
+    return {
+        text: '',
+        structured: {
+            entries: [{
+                triggers: ['value'],
+                targetPaths: ['src/safe.ts'],
+                questions: ['How is this value used?'],
+                sourceIds: ['S1'],
+                kind: 'navigation',
+            }],
+        },
+        toolCalls: [],
+        usage: { inputTokens: 1, outputTokens: 1 },
+        stopReason: 'completed',
+        continuation: { serverManaged: false },
+        raw: {},
+    };
+}
+
+function memoryLogEvents(logToolCall: sinon.SinonStub): Array<Record<string, unknown>> {
+    return logToolCall.getCalls().map(call => {
+        assert.equal(call.args[0], 'commitStage');
+        const payload = JSON.parse(String(call.args[1])) as { stage?: string; data?: Record<string, unknown> };
+        return payload.stage === 'memoryStep' ? payload.data ?? {} : undefined;
+    }).filter((event): event is Record<string, unknown> => event !== undefined);
 }
 
 function makeContext(storageRoot: string): vscode.ExtensionContext {
@@ -249,7 +610,7 @@ function disposeContext(context: vscode.ExtensionContext): void {
 }
 
 async function withMemorySettings<T>(settings: {
-    enabled: boolean; excludePatterns?: string[]; consolidationEnabled?: boolean; maxCalls?: number;
+    enabled: boolean; excludePatterns?: string[]; consolidationEnabled?: boolean; maxCalls?: number; sourceMaxChunks?: number;
 }, action: () => Promise<T>): Promise<T> {
     const memory = vscode.workspace.getConfiguration('gitCommitGenie.memory');
     const previous = {
@@ -257,6 +618,7 @@ async function withMemorySettings<T>(settings: {
         excludePatterns: memory.get<string[]>('excludePatterns', []),
         consolidationEnabled: memory.get<boolean>('consolidation.enabled', true),
         maxCalls: memory.get<number>('consolidation.maxCallsPer24h', 2),
+        sourceMaxChunks: memory.get<number>('sources.maxChunks', 16),
     };
     await memory.update('enabled', settings.enabled, vscode.ConfigurationTarget.Global);
     if (settings.excludePatterns !== undefined) {
@@ -268,6 +630,9 @@ async function withMemorySettings<T>(settings: {
     if (settings.maxCalls !== undefined) {
         await memory.update('consolidation.maxCallsPer24h', settings.maxCalls, vscode.ConfigurationTarget.Global);
     }
+    if (settings.sourceMaxChunks !== undefined) {
+        await memory.update('sources.maxChunks', settings.sourceMaxChunks, vscode.ConfigurationTarget.Global);
+    }
     try {
         return await action();
     } finally {
@@ -275,6 +640,7 @@ async function withMemorySettings<T>(settings: {
         await memory.update('excludePatterns', previous.excludePatterns, vscode.ConfigurationTarget.Global);
         await memory.update('consolidation.enabled', previous.consolidationEnabled, vscode.ConfigurationTarget.Global);
         await memory.update('consolidation.maxCallsPer24h', previous.maxCalls, vscode.ConfigurationTarget.Global);
+        await memory.update('sources.maxChunks', previous.sourceMaxChunks, vscode.ConfigurationTarget.Global);
     }
 }
 

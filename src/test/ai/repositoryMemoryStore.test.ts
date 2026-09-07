@@ -86,8 +86,10 @@ describe('MemoryStore', function () {
             const episode = makeEpisode(repositoryId);
             await store.recordEpisode(episode, initialEpoch);
             const beforeReserve = await store.inspect();
-            const jobId = await store.reserveConsolidation(beforeReserve, 1);
-            assert.match(jobId ?? '', /^[0-9a-f-]{36}$/);
+            const reservation = await store.reserveConsolidation(beforeReserve, 1);
+            assert.equal(reservation.status, 'reserved');
+            if (reservation.status !== 'reserved') { throw new Error('Expected a consolidation reservation.'); }
+            assert.match(reservation.id, /^[0-9a-f-]{36}$/);
 
             await store.clear();
             const afterClear = await store.inspect();
@@ -99,7 +101,12 @@ describe('MemoryStore', function () {
                 () => store.recordEpisode(makeEpisode(repositoryId), initialEpoch),
                 /Memory was cleared during generation/,
             );
-            assert.equal(await store.reserveConsolidation(afterClear, 1), null);
+            const afterClearReservation = await store.reserveConsolidation(afterClear, 1);
+            assert.equal(afterClearReservation.status, 'budget-exhausted');
+            if (afterClearReservation.status === 'budget-exhausted') {
+                assert.equal(afterClearReservation.limit, 1);
+                assert.ok(afterClearReservation.resumesAt > Date.now());
+            }
         });
     });
 
@@ -110,30 +117,40 @@ describe('MemoryStore', function () {
             const episode = makeEpisode(repositoryId);
             await store.recordEpisode(episode, await store.epoch());
             const expected = await store.inspect();
-            const jobId = await store.reserveConsolidation(expected, 2);
-            assert.ok(jobId);
+            const reservation = await store.reserveConsolidation(expected, 2);
+            assert.equal(reservation.status, 'reserved');
+            if (reservation.status !== 'reserved') { throw new Error('Expected a consolidation reservation.'); }
+            const jobId = reservation.id;
             const reserved = await store.inspect();
             assert.equal(reserved.generation, expected.generation + 1);
 
+            const staleWhileRunning = await store.reserveConsolidation(expected, 2);
+            assert.equal(staleWhileRunning.status, 'already-running');
+            const duplicateReservation = await store.reserveConsolidation(reserved, 2);
+            assert.equal(duplicateReservation.status, 'already-running');
+            await store.releaseJob(jobId);
             await assert.rejects(
                 () => store.reserveConsolidation(expected, 2),
                 /Memory changed before consolidation reservation/,
             );
-            assert.equal(await store.reserveConsolidation(reserved, 2), null);
+            const released = await store.inspect();
+            const secondReservation = await store.reserveConsolidation(released, 2);
+            assert.equal(secondReservation.status, 'reserved');
+            if (secondReservation.status !== 'reserved') { throw new Error('Expected a second consolidation reservation.'); }
 
             const entry = makeHandbookEntry(episode.id);
             await assert.rejects(
-                () => store.publishHandbook(expected, randomUUID(), [entry], []),
+                () => store.publishHandbook(released, randomUUID(), [entry], []),
                 /lost its publication lease/,
             );
-            await store.publishHandbook(expected, jobId, [entry], [episode.id, episode.id]);
+            await store.publishHandbook(released, secondReservation.id, [entry], [episode.id, episode.id]);
 
             const published = await store.inspect();
-            assert.equal(published.generation, reserved.generation + 1);
+            assert.equal(published.generation, released.generation + 2);
             assert.deepEqual(published.handbook, [entry]);
             assert.deepEqual(published.consolidated, [episode.id]);
             await assert.rejects(
-                () => store.publishHandbook(expected, jobId, [entry], []),
+                () => store.publishHandbook(released, secondReservation.id, [entry], []),
                 /lost its publication lease/,
             );
         });
@@ -152,8 +169,10 @@ describe('MemoryStore', function () {
             const episode = makeEpisode(repositoryId);
             await store.recordEpisode(episode, epoch);
             const view = await store.inspect();
-            const jobId = await store.reserveConsolidation(view, 2);
-            assert.ok(jobId);
+            const reservation = await store.reserveConsolidation(view, 2);
+            assert.equal(reservation.status, 'reserved');
+            if (reservation.status !== 'reserved') { throw new Error('Expected a consolidation reservation.'); }
+            const jobId = reservation.id;
             const invalidEntry = { ...makeHandbookEntry(episode.id), id: 'not-a-uuid' } as HandbookEntry;
             await assert.rejects(
                 () => store.publishHandbook(view, jobId, [invalidEntry], []),
@@ -172,8 +191,10 @@ describe('MemoryStore', function () {
             const episode = makeEpisode(repositoryId);
             await store.recordEpisode(episode, await store.epoch());
             const expected = await store.inspect();
-            const jobId = await store.reserveConsolidation(expected, 2);
-            assert.ok(jobId);
+            const reservation = await store.reserveConsolidation(expected, 2);
+            assert.equal(reservation.status, 'reserved');
+            if (reservation.status !== 'reserved') { throw new Error('Expected a consolidation reservation.'); }
+            const jobId = reservation.id;
             await store.publishHandbook(expected, jobId, [makeHandbookEntry(episode.id)], [episode.id]);
             const payloadPath = path.join(store.directory, `${episode.id}.json`);
             await fs.access(payloadPath);
@@ -264,8 +285,10 @@ describe('MemoryStore', function () {
             await store.recordEpisode(secret, epoch);
             await store.recordEpisode(safe, epoch);
             const expected = await store.inspect();
-            const jobId = await store.reserveConsolidation(expected, 2);
-            assert.ok(jobId);
+            const reservation = await store.reserveConsolidation(expected, 2);
+            assert.equal(reservation.status, 'reserved');
+            if (reservation.status !== 'reserved') { throw new Error('Expected a consolidation reservation.'); }
+            const jobId = reservation.id;
             await store.publishHandbook(expected, jobId, [
                 makeHandbookEntry(secret.id, 'secrets/token.ts'),
                 makeHandbookEntry(safe.id, 'src/safe.ts'),

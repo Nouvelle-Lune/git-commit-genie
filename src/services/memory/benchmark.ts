@@ -13,6 +13,7 @@ import type { CostQuote } from '../cost/costTypes';
 import { MemoryStore } from './store';
 import { EpisodeRecorder } from './recorder';
 import { MemoryRetriever } from './retriever';
+import { MemorySettings } from './settings';
 import { consolidatePending, ConsolidationRunner } from './consolidator';
 
 export const replayManifestSchema = z.object({
@@ -126,7 +127,8 @@ export function createPipelineReplayAdapter(params: {
     gitPath: string; diffs: DiffService; repository: (root: string) => Repository;
     execution: (model: string, root: string, signal: AbortSignal) => LLMExecution;
     runChain: typeof import('../chain/commitMessageChain').generateCommitMessageChain;
-    consolidation: (execution: LLMExecution) => ConsolidationRunner;
+    consolidation: (execution: LLMExecution, settings: MemorySettings) => ConsolidationRunner;
+    settings: MemorySettings;
     excludes: string[];
 }): ReplayAdapter {
     return { run: async (input, storageRoot, signal) => {
@@ -137,13 +139,13 @@ export function createPipelineReplayAdapter(params: {
             const diffs = await params.diffs.getDiff(params.repository(input.repository), snapshot);
             // Only the date is read; the target message is deliberately hidden from the chain.
             const currentTime = (await snapshotGit(params.gitPath, input.repository, ['show', '-s', '--format=%cI', input.commit], { signal })).toString().trim();
-            const store = new MemoryStore(storageRoot, snapshot.identity.repositoryId);
+            const store = new MemoryStore(storageRoot, snapshot.identity.repositoryId, () => params.settings);
             const recorder = input.group === 'A' ? undefined : new EpisodeRecorder(snapshot.identity, input.model);
             const output = await params.runChain({ diffs, currentTime, repositoryPath: input.repository, snapshot, recorder,
                 loadMemory: input.group === 'A' ? undefined : async query => {
                     const view = await store.loadNavigation(query);
                     if (input.group === 'B') { view.handbook = []; }
-                    return new MemoryRetriever(view, snapshot, params.excludes);
+                    return new MemoryRetriever(view, snapshot, params.excludes, () => [], params.settings);
                 },
             }, execution, { investigation: { excludePatterns: params.excludes } });
             if (recorder) {
@@ -153,7 +155,7 @@ export function createPipelineReplayAdapter(params: {
                     questions: trace.investigationPlan?.targets.flatMap(target => target.questions) ?? [], status: trace.analysisStatus,
                     claims: trace.agentClaims.map(claim => ({ claim: claim.claim, evidenceRefs: claim.evidenceRefs, disposition: claim.disposition })) });
                 await store.recordEpisode(episode, await store.epoch());
-                if (input.group === 'C') { await consolidatePending(store, params.consolidation(maintenance), signal); }
+                if (input.group === 'C') { await consolidatePending(store, params.consolidation(maintenance, params.settings), signal, params.settings); }
             }
             return { status: 'complete', output, costs: [...execution.getRecordedQuotes()], maintenanceCosts: [...maintenance.getRecordedQuotes()] };
         } catch (error) {

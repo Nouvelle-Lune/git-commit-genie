@@ -26,6 +26,8 @@ describe('EpisodeRecorder', () => {
 
         assert.deepEqual(episode.snapshot, snapshot);
         assert.equal(episode.model, 'test-model');
+        assert.equal(episode.promptVersion, 'memory-2');
+        assert.equal(episode.toolsetVersion, 'snapshot-memory-handles-3');
         assert.equal(episode.observations[0].summary, 'read source');
         assert.equal(episode.observations[0].evidence[0].source.excerpt, 'const value = 1;');
         assert.equal(episode.observations[0].evidence[0].source.contentHash, hashContent('const value = 1;'));

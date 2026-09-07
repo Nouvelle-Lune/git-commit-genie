@@ -9,10 +9,11 @@ import { HandbookEntry, handbookEntrySchema, InvestigationEpisode, investigation
 import { isEligibleEpisode, validateEpisodeSources } from './recorder';
 import { shouldExclude } from '../analysis/tools/pathFilters';
 import { bm25Scores } from './ranking';
+import { MEMORY_DEFAULTS, MemorySettings } from './settings';
 
 const manifestSchema = z.object({
     version: z.literal(1), epoch: z.uuid(), generation: z.number().int().nonnegative(),
-    episodes: z.array(z.object({ id: z.uuid(), hash: z.string(), bytes: z.number().int().positive().max(256 * 1024), createdAt: z.number(),
+    episodes: z.array(z.object({ id: z.uuid(), hash: z.string(), bytes: z.number().int().positive(), createdAt: z.number(),
         paths: z.array(z.string()), symbols: z.array(z.string()), targets: z.array(z.string()), eligible: z.boolean() }).strict()),
     handbook: z.array(handbookEntrySchema),
     attempts: z.array(z.object({ id: z.uuid(), at: z.number(), epoch: z.uuid() }).strict()),
@@ -21,6 +22,8 @@ const manifestSchema = z.object({
 }).strict();
 type Manifest = z.infer<typeof manifestSchema>;
 export interface MemoryView { epoch: string; generation: number; episodes: InvestigationEpisode[]; handbook: HandbookEntry[]; consolidated: string[] }
+export type ConsolidationReservation = { status: 'reserved'; id: string } | { status: 'already-running' } |
+    { status: 'budget-exhausted'; limit: number; resumesAt: number };
 
 /**
  * One local extension host filesystem per store; no network filesystem support.
@@ -30,7 +33,7 @@ export interface MemoryView { epoch: string; generation: number; episodes: Inves
 export class MemoryStore {
     readonly directory: string;
     private queue: Promise<void> = Promise.resolve();
-    constructor(storageRoot: string, readonly repositoryId: string, private readonly maxBytes = 256 * 1024 * 1024) {
+    constructor(storageRoot: string, readonly repositoryId: string, private readonly settings: () => MemorySettings = () => MEMORY_DEFAULTS) {
         if (!/^[a-f0-9]{64}$/.test(repositoryId)) { throw new Error('Invalid memory repository identity.'); }
         this.directory = path.join(storageRoot, 'repository-memory', repositoryId);
     }
@@ -53,7 +56,6 @@ export class MemoryStore {
             const manifestPath = path.join(this.directory, 'current.json');
             let state: Manifest;
             try {
-                if ((await fs.stat(manifestPath)).size > 8 * 1024 * 1024) { throw new Error('Memory manifest exceeds 8 MiB.'); }
                 state = manifestSchema.parse(JSON.parse(await fs.readFile(manifestPath, 'utf8')));
             }
             catch (error) {
@@ -67,10 +69,10 @@ export class MemoryStore {
         } finally { if (!compromised) { await release(); } }
     }
 
-    private async publish(state: Manifest, assertOwned: () => void): Promise<void> {
+    private async publish(state: Manifest, assertOwned: () => void, settings: MemorySettings): Promise<void> {
         state.generation += 1;
         const data = JSON.stringify(manifestSchema.parse(state));
-        if (Buffer.byteLength(data) > 8 * 1024 * 1024) { throw new Error('Memory manifest exceeds 8 MiB; publication cancelled.'); }
+        if (Buffer.byteLength(data) > settings['storage.maxManifestMiB'] * 1048576) { throw new Error(`Memory manifest exceeds ${settings['storage.maxManifestMiB']} MiB; publication cancelled.`); }
         assertOwned();
         await writeFileAtomic(path.join(this.directory, 'current.json'), data, { fsync: true });
         assertOwned();
@@ -122,12 +124,12 @@ export class MemoryStore {
 
     async epoch(): Promise<string> { return this.locked(async state => state.epoch); }
 
-    async recordEpisode(input: InvestigationEpisode, expectedEpoch: string): Promise<void> {
+    async recordEpisode(input: InvestigationEpisode, expectedEpoch: string, settings = this.settings()): Promise<void> {
         const episode = investigationEpisodeSchema.parse(input);
         validateEpisodeSources(episode);
         if (episode.snapshot.repositoryId !== this.repositoryId) { throw new Error('Episode belongs to a different repository.'); }
         const bytes = Buffer.from(JSON.stringify(episode));
-        if (bytes.length > 256 * 1024) { throw new Error('Episode exceeds 256 KiB; it was not persisted.'); }
+        if (bytes.length > settings['storage.maxEpisodeKiB'] * 1024) { throw new Error(`Episode exceeds ${settings['storage.maxEpisodeKiB']} KiB; it was not persisted.`); }
         await this.locked(async (state, assertOwned) => {
             if (state.epoch !== expectedEpoch) { throw new Error('Memory was cleared during generation; episode publication cancelled.'); }
             if (state.episodes.some(entry => entry.id === episode.id)) { throw new Error('Episode has already been published.'); }
@@ -140,13 +142,13 @@ export class MemoryStore {
             let retained = state.episodes.filter(entry => !removed.has(entry.id));
             let total = retained.reduce((sum, entry) => sum + entry.bytes, 0);
             for (const entry of [...retained].sort((a, b) => a.createdAt - b.createdAt)) {
-                if (retained.length <= 2000 && total <= this.maxBytes) { break; }
+                if (retained.length <= settings['storage.maxEpisodes'] && total <= settings.maxStorageMiB * 1048576) { break; }
                 removed.add(entry.id); total -= entry.bytes; retained = retained.filter(item => item.id !== entry.id);
             }
             state.episodes = retained;
             state.handbook = state.handbook.filter(entry => entry.supports.every(support => !removed.has(support.episodeId)));
             state.consolidated = state.consolidated.filter(id => !removed.has(id));
-            await this.publish(state, assertOwned);
+            await this.publish(state, assertOwned, settings);
             for (const id of removed) { assertOwned(); await fs.unlink(path.join(this.directory, `${id}.json`)); }
         });
     }
@@ -157,58 +159,64 @@ export class MemoryStore {
             targets: [...new Set(episode.observations.flatMap(item => item.evidence.map(evidence => evidence.source.path)))], eligible: isEligibleEpisode(episode) };
     }
 
-    async rebuildIndex(): Promise<void> {
-        await this.locked(async (state, assertOwned) => {
+    async rebuildIndex(settings = this.settings()): Promise<number> {
+        return this.locked(async (state, assertOwned) => {
             // Only manifest-committed payloads are authoritative; orphans are never imported.
             const episodes = await this.readEpisodes(state);
             state.episodes = episodes.map(episode => this.indexEpisode(episode, Buffer.from(JSON.stringify(episode))));
-            await this.publish(state, assertOwned);
+            await this.publish(state, assertOwned, settings);
+            return episodes.length;
         });
     }
 
-    async purgeExcluded(excludes: string[]): Promise<void> {
+    async purgeExcluded(excludes: string[], settings = this.settings()): Promise<void> {
         const ids = await this.locked(async state => state.episodes.filter(entry => [...entry.paths, ...entry.targets].some(file => shouldExclude(file, excludes))).map(entry => entry.id));
-        if (ids.length) { await this.deleteEpisodes(ids); }
+        if (ids.length) { await this.deleteEpisodes(ids, settings); }
     }
 
-    async deleteEpisodes(ids: string[]): Promise<void> {
-        await this.locked(async (state, assertOwned) => {
+    async deleteEpisodes(ids: string[], settings = this.settings()): Promise<number> {
+        return this.locked(async (state, assertOwned) => {
             const removed = state.episodes.filter(entry => ids.includes(entry.id));
             state.episodes = state.episodes.filter(entry => !ids.includes(entry.id));
             state.handbook = state.handbook.filter(entry => entry.supports.every(ref => !ids.includes(ref.episodeId)));
             state.consolidated = state.consolidated.filter(id => !ids.includes(id));
             state.epoch = randomUUID(); state.job = null;
-            await this.publish(state, assertOwned);
+            await this.publish(state, assertOwned, settings);
             for (const entry of removed) { assertOwned(); await fs.unlink(path.join(this.directory, `${entry.id}.json`)); }
+            return removed.length;
         });
     }
 
-    async clear(): Promise<void> {
+    async clear(settings = this.settings()): Promise<void> {
         await this.locked(async (state, assertOwned) => {
             const removed = state.episodes;
             state.epoch = randomUUID(); state.episodes = []; state.handbook = []; state.consolidated = []; state.job = null;
             // Preserve attempts: clearing memory must not reset paid-call limits.
-            await this.publish(state, assertOwned);
+            await this.publish(state, assertOwned, settings);
             for (const entry of removed) { assertOwned(); await fs.unlink(path.join(this.directory, `${entry.id}.json`)); }
         });
     }
 
-    async reserveConsolidation(expected: MemoryView, maxCalls: number): Promise<string | null> {
-        if (!Number.isInteger(maxCalls) || maxCalls < 0 || maxCalls > 2) { throw new Error('Invalid consolidation call budget (0–2).'); }
+    async reserveConsolidation(expected: MemoryView, maxCalls: number, settings = this.settings()): Promise<ConsolidationReservation> {
+        if (!Number.isSafeInteger(maxCalls) || maxCalls < 1) { throw new Error('Invalid consolidation call budget; expected a positive integer.'); }
         return this.locked(async (state, assertOwned) => {
             const now = Date.now();
+            if (state.job && state.job.expiresAt > now) { return { status: 'already-running' }; }
             if (state.epoch !== expected.epoch || state.generation !== expected.generation) { throw new Error('Memory changed before consolidation reservation.'); }
             state.attempts = state.attempts.filter(attempt => now - attempt.at < 86400000);
-            if (state.attempts.length >= maxCalls || (state.job && state.job.expiresAt > now)) { return null; }
+            if (state.attempts.length >= maxCalls) {
+                const attempts = state.attempts.map(item => item.at).sort((a, b) => a - b);
+                return { status: 'budget-exhausted', limit: maxCalls, resumesAt: attempts[attempts.length - maxCalls] + 86400000 };
+            }
             const id = randomUUID();
             state.attempts.push({ id, at: now, epoch: state.epoch });
             state.job = { id, expiresAt: now + 10 * 60000 };
-            await this.publish(state, assertOwned);
-            return id;
+            await this.publish(state, assertOwned, settings);
+            return { status: 'reserved', id };
         });
     }
 
-    async publishHandbook(expected: MemoryView, jobId: string, entries: HandbookEntry[], consumed: string[], signal?: AbortSignal): Promise<void> {
+    async publishHandbook(expected: MemoryView, jobId: string, entries: HandbookEntry[], consumed: string[], signal?: AbortSignal, settings = this.settings()): Promise<void> {
         await this.locked(async (state, assertOwned) => {
             signal?.throwIfAborted();
             if (state.epoch !== expected.epoch || state.generation !== expected.generation + 1 || state.job?.id !== jobId || state.job.expiresAt <= Date.now()) {
@@ -222,14 +230,14 @@ export class MemoryStore {
             state.handbook = entries.map(entry => handbookEntrySchema.parse(entry));
             state.consolidated = [...new Set([...state.consolidated, ...consumed])]; state.job = null;
             signal?.throwIfAborted();
-            await this.publish(state, assertOwned);
+            await this.publish(state, assertOwned, settings);
         });
     }
 
-    async releaseJob(jobId: string): Promise<void> {
+    async releaseJob(jobId: string, settings = this.settings()): Promise<void> {
         await this.locked(async (state, assertOwned) => {
             if (state.job?.id !== jobId) { return; }
-            state.job = null; await this.publish(state, assertOwned);
+            state.job = null; await this.publish(state, assertOwned, settings);
         });
     }
 }

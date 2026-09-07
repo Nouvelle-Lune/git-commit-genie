@@ -3,6 +3,7 @@ import { RepositorySnapshotReader } from '../../../git/repositorySnapshot';
 import { EpisodeRecorder } from '../../../memory/recorder';
 import { MemoryRetriever } from '../../../memory/retriever';
 import { MemoryNavigation } from '../../../memory/types';
+import { MemoryRequestError } from '../../../memory/settings';
 import {
     AgentProfile,
     type AgentRunMetrics,
@@ -166,10 +167,9 @@ export function createChangeAnalysisProfile(
 
     return {
         id: 'change-analysis',
-        // Bumped together with the two-phase protocol: a cached identity from
-        // the previous single-turn contract must not be reused.
-        promptVersion: '4',
-        toolsetVersion: 'snapshot-2',
+        // Cached prompt identities must not reuse the former UUID-based Memory contract.
+        promptVersion: '5',
+        toolsetVersion: 'snapshot-memory-handles-3',
         requestType: 'investigation',
         finalName: 'changeAnalysisCompoundTerminal',
         finalSchema: changeAnalysisAgentFinalResponseSchema,
@@ -183,6 +183,8 @@ export function createChangeAnalysisProfile(
                     '<context_checkpoint>',
                     'Continue the same change analysis from this deterministic checkpoint.',
                     `Completed tool calls: ${state.steps}`,
+                    `Published memory navigation: ${JSON.stringify(input.memory?.publishedNavigation ?? [])}`,
+                    `Remaining memory budget: ${JSON.stringify(input.memory?.budget ?? null)}`,
                     `Diff evidence representation: ${JSON.stringify(input.evidence)}`,
                     `Repository evidence ledger: ${JSON.stringify(state.ledger.snapshot()
                         .filter(item => item.source === 'repository'))}`,
@@ -351,42 +353,81 @@ function createExecutableDefinition(
 function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRunState, evidenceItems: RepositoryEvidenceItem[]): AgentToolDefinition<ChangeAnalysisAgentInput>[] {
     const memory = input.memory;
     if (!memory) { return []; }
+    const cachedEvidence = new Map<string, RepositoryEvidenceItem>();
+    const searchSchema = z.object({ query: z.string().trim().min(1) }).strict();
+    const readSchema = z.object({ memoryIds: z.array(z.string().regex(/^M\d+$/)).min(1) }).strict();
+    const guarded = (name: string, execute: AgentToolDefinition<ChangeAnalysisAgentInput>['execute']): AgentToolDefinition<ChangeAnalysisAgentInput>['execute'] => async (context, args) => {
+        const started = performance.now();
+        try { return await execute(context, args); }
+        catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            input.recorder?.record({ step: state.steps, tool: name, arguments: args, ok: false, summary: message,
+                evidence: [], durationMs: performance.now() - started, truncated: false });
+            if (!(error instanceof MemoryRequestError)) { throw error; }
+            return { ok: false, preserveOutput: true, summary: message, evidenceCount: 0,
+                output: JSON.stringify({ error: { code: error.code, message, ...error.details }, budget: memory.budget }) };
+        }
+    };
     return [{
-        name: 'searchRepositoryMemory', description: 'Find untrusted historical navigation, not evidence. Limited to two calls.',
+        name: 'searchRepositoryMemory', description: `Find historical navigation with short M* IDs. At most ${memory.settings['search.maxCalls']} searches per run.`,
         parameters: objectSchema({ query: { type: 'string', minLength: 1 } }, ['query']),
-        execute: async (_context, args) => {
+        execute: guarded('searchRepositoryMemory', async (_context, args) => {
+            const started = performance.now();
+            const parsed = searchSchema.safeParse(args);
+            if (!parsed.success) { return memory.reject('invalid_arguments', parsed.error.message); }
             const navigation = memory.searchRepositoryMemory({
                 paths: input.extraction.changedFiles.map(file => file.path),
                 symbols: input.extraction.changedSymbols.map(symbol => symbol.name),
-                keywords: [String(args.query)],
-            }, 1500);
+                keywords: [parsed.data.query],
+            });
+            input.recorder?.record({ step: state.steps, tool: 'searchRepositoryMemory', arguments: args, ok: true,
+                summary: `Found ${navigation.length} historical navigation candidate(s).`, evidence: [],
+                durationMs: performance.now() - started, truncated: false });
             return {
                 ok: true,
-                output: JSON.stringify(navigation),
+                preserveOutput: true,
+                output: JSON.stringify({ navigation, budget: memory.budget }),
                 summary: `Found ${navigation.length} historical navigation candidate(s).`,
                 evidenceCount: 0,
             };
-        },
+        }),
     }, {
-        name: 'readMemorySources', description: 'Read at most eight current snapshot source chunks located by historical episode/evidence IDs. Returns fresh E* observations, never old conclusions.',
-        parameters: objectSchema({ supports: { type: 'array', minItems: 1, maxItems: 8, items: objectSchema({ episodeId: { type: 'string' }, evidenceId: { type: 'string' } }, ['episodeId', 'evidenceId']) } }, ['supports']),
-        execute: async (context, args) => {
+        name: 'readMemorySources', description: `Expand published navigation IDs, for example {"memoryIds":["M1"]}. Each ID expands all its sources. At most ${memory.settings['sources.maxChunks']} unique source attempts per run. Never pass D*, E*, step IDs or UUIDs. Returns current E* evidence.`,
+        repeatable: true,
+        parameters: z.toJSONSchema(readSchema) as Record<string, unknown>,
+        execute: guarded('readMemorySources', async (context, args) => {
             const started = performance.now();
-            const sources = await memory.readMemorySources(args.supports as Array<{ episodeId: string; evidenceId: string }>);
-            const evidence = sources.flatMap(item => item.source ? [context.allocateEvidence({ kind: 'search', target: item.source.path,
-                ref: `${item.source.path}:${item.source.startLine}-${item.source.endLine}`, excerpt: item.source.excerpt, provenance: item.source })] : []);
-            evidenceItems.push(...evidence);
+            const parsed = readSchema.safeParse(args);
+            if (!parsed.success) { return memory.reject('invalid_arguments', parsed.error.message); }
+            const before = memory.budget;
+            const sources = await memory.readMemorySources(parsed.data.memoryIds, context.signal);
+            const fresh = sources.filter(item => item.source && !cachedEvidence.has(item.key));
+            const previews = context.ledger.previewRepositoryEvidence(fresh.map(item => ({ kind: 'search', target: item.source!.path,
+                ref: `${item.source!.path}:${item.source!.startLine}-${item.source!.endLine}`, excerpt: item.source!.excerpt, provenance: item.source! })));
+            const candidates = new Map([...cachedEvidence, ...fresh.map((item, index) => [item.key, previews[index]] as const)]);
+            const evidence = sources.flatMap(item => item.source ? [candidates.get(item.key)!] : []);
+            const output = JSON.stringify({ statuses: sources.map(item => item.status), evidence, budgetBefore: before, budget: memory.budget });
+            memory.assertResultBudget(output);
+            context.signal?.throwIfAborted();
+            // No ledger mutation happens until the complete serialized result fits.
+            for (let index = 0; index < fresh.length; index++) {
+                const item = previews[index];
+                context.ledger.recordRepositoryEvidence(item);
+                cachedEvidence.set(fresh[index].key, item);
+                evidenceItems.push(item);
+            }
             input.recorder?.record({ step: state.steps, tool: 'readMemorySources', arguments: args, ok: true,
-                summary: 'Read snapshot sources using historical navigation.', evidence: evidence.map(item => ({ id: item.id, source: item.provenance! })),
+                summary: `Memory statuses: ${sources.map(item => item.status).join(', ')}.`, evidence: previews.map(item => ({ id: item.id, source: item.provenance! })),
                 durationMs: performance.now() - started, truncated: evidence.some(item => item.provenance?.truncated) });
             return {
                 ok: true,
-                output: JSON.stringify({ statuses: sources.map(item => item.status), evidence }),
-                summary: `Revalidated ${sources.length} memory source(s) and produced ${evidence.length} repository evidence item(s).`,
+                preserveOutput: true,
+                output,
+                summary: `Memory ${parsed.data.memoryIds.join(', ')}: ${evidence.length}/${sources.length} source(s) available; ${memory.budget.used}/${memory.budget.limit} source attempts used.`,
                 evidenceCount: evidence.length,
                 sourceStatuses: sources.map(item => item.status),
             };
-        },
+        }),
     }];
 }
 

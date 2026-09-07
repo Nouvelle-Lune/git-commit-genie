@@ -78,7 +78,18 @@
   "command.manageMemory": "Manage Repository Memory",
   "config.memory.enabled.desc": "Enable local navigation memory from actual investigations (off by default).",
   "config.memory.consolidation.enabled.desc": "Consolidate episodes with the generation model while idle; message delivery never waits for this work.",
-  "config.memory.consolidation.maxCallsPer24h.desc": "Maximum consolidation attempts per clone in a rolling 24-hour window, including failures.",
-  "config.memory.maxStorageMiB.desc": "Local episode storage limit per clone in MiB.",
-  "config.memory.excludePatterns.desc": "Additional path patterns excluded from recording, retrieval, and consolidation."
+  "config.memory.consolidation.maxCallsPer24h.desc": "Paid consolidation attempts per clone in a rolling 24-hour window (positive integer). Failed and cancelled requests count. Numeric budget changes apply to the next operation.",
+  "config.memory.maxStorageMiB.desc": "Per-clone episode storage budget in MiB. Retention is enforced on the next publication, not immediately when Settings change. Numeric budget changes apply to the next operation.",
+  "config.memory.excludePatterns.desc": "Additional path patterns excluded from recording, retrieval, and consolidation.",
+  "config.memory.navigation.maxTokens.desc": "Navigation input budget in estimated tokens. Also limited by the input percentage. Numeric budget changes apply to the next operation.",
+  "config.memory.navigation.maxInputPercent.desc": "Maximum percentage of model input reserved for navigation (1–100). Numeric budget changes apply to the next operation.",
+  "config.memory.search.maxCalls.desc": "Additional Memory searches per generation; 0 disables additional searches. Numeric budget changes apply to the next operation.",
+  "config.memory.sources.maxChunks.desc": "Unique Memory source validation attempts per generation. Invalid IDs do not consume this budget. Numeric budget changes apply to the next operation.",
+  "config.memory.sources.timeoutMs.desc": "Timeout in milliseconds for each Memory source expansion call. Numeric budget changes apply to the next operation.",
+  "config.memory.sources.maxResultTokens.desc": "Maximum estimated tokens in a complete Memory tool result; oversized results are explicitly rejected. Numeric budget changes apply to the next operation.",
+  "config.memory.consolidation.maxInputTokens.desc": "Consolidation input budget in estimated tokens, including prompt and schema; constrained by the model context. Numeric budget changes apply to the next operation.",
+  "config.memory.consolidation.maxOutputTokens.desc": "Consolidation output token limit; constrained by the configured model output budget. Higher limits may increase API costs. Numeric budget changes apply to the next operation.",
+  "config.memory.storage.maxEpisodes.desc": "Maximum retained episodes per clone; enforced on the next publication. Numeric budget changes apply to the next operation.",
+  "config.memory.storage.maxEpisodeKiB.desc": "Maximum size in KiB for a newly published episode. Existing larger episodes remain readable. Numeric budget changes apply to the next operation.",
+  "config.memory.storage.maxManifestMiB.desc": "Maximum newly published manifest size in MiB. Lowering this does not mark existing data as corrupt. Numeric budget changes apply to the next operation."
 }

@@ -15,7 +15,8 @@ export class EpisodeRecorder {
     seal(input: Pick<InvestigationEpisode, 'changedPaths' | 'changedSymbols' | 'questions' | 'claims' | 'status'>): InvestigationEpisode {
         const episode = investigationEpisodeSchema.parse({
             ...input, version: 1, id: randomUUID(), createdAt: Date.now(), snapshot: this.snapshot,
-            model: this.model, promptVersion: 'memory-1', toolsetVersion: 'snapshot-1', observations: this.observations,
+            // Identify the short-handle protocol without migrating older immutable episodes.
+            model: this.model, promptVersion: 'memory-2', toolsetVersion: 'snapshot-memory-handles-3', observations: this.observations,
         });
         validateEpisodeSources(episode);
         return episode;

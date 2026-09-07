@@ -129,8 +129,13 @@ export async function runChangeAnalysisPipeline(
         const memoryQuery = { paths: changeExtraction.changedFiles.map(file => file.path),
             symbols: changeExtraction.changedSymbols.map(symbol => symbol.name), keywords: [...changeExtraction.changedConfigs, ...changeExtraction.changedDependencies] };
         const memory = inputs.loadMemory ? await inputs.loadMemory(memoryQuery) : inputs.memory;
-        const navigation = memory?.retrieveNavigation(memoryQuery,
-            Math.min(1500, Math.floor(execution.tokenBudget.hardInputTokens * 0.05))) ?? [];
+        memory?.setInputBudget(execution.tokenBudget.hardInputTokens);
+        const navigation = memory?.retrieveNavigation(memoryQuery) ?? [];
+        if (memory) {
+            safeRun('Chain.onStage.memoryNavigation', () => onStage?.({ type: 'memoryStep',
+                data: { current: 0, tool: 'retrieveNavigation', trigger: 'agent', status: 'completed', summary: `Found ${navigation.length} historical navigation candidate(s).`, ok: true, budget: memory.budget },
+                rawData: { input: memoryQuery, output: { navigation, budget: memory.budget, settings: memory.settings } } }));
+        }
         const plan = await planInvestigation(changeExtraction, execution, navigation);
         if (memory) { memoryUsage = { ...memory.usage }; }
         investigationPlan = plan;
@@ -256,6 +261,8 @@ export async function runChangeAnalysisPipeline(
                 );
                 semanticAnalysis = normalizeSemanticAnalysis({}, repositoryEvidence, params.evidenceLedger);
                 analysisIssues = [repositoryEvidence.stopReason];
+            } finally {
+                if (memory) { memoryUsage = { ...memory.usage }; }
             }
         }
     }

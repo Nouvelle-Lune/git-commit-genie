@@ -28,7 +28,9 @@ export const investigationEpisodeSchema = z.object({
     observations: z.array(recordedObservationSchema),
     claims: z.array(z.object({ claim: z.string(), evidenceRefs: z.array(z.string()), disposition: z.enum(['must_express', 'optional', 'omit']) }).strict()),
     status: z.enum(['complete', 'degraded', 'unavailable', 'cancelled', 'error']),
-    model: z.string(), promptVersion: z.literal('memory-1'), toolsetVersion: z.literal('snapshot-1'),
+    // These are historical provenance labels, not model-call protocol negotiation.
+    // Immutable episodes retain their original labels after the active tool contract changes.
+    model: z.string(), promptVersion: z.enum(['memory-1', 'memory-2']), toolsetVersion: z.enum(['snapshot-1', 'snapshot-memory-handles-3']),
 }).strict();
 
 export type InvestigationEpisode = z.infer<typeof investigationEpisodeSchema>;
@@ -36,22 +38,36 @@ export type RecordedObservation = z.infer<typeof recordedObservationSchema>;
 
 export const handbookEntrySchema = z.object({
     id: z.uuid(), triggers: z.array(z.string().min(1)).min(1).max(20),
-    targetPaths: z.array(safePath).min(1).max(8), questions: z.array(z.string().min(1).max(600)).max(6),
-    supports: z.array(z.object({ episodeId: z.uuid(), evidenceId: z.string().regex(/^E\d+$/) }).strict()).min(1).max(32),
+    targetPaths: z.array(safePath).min(1).max(8),
+    questions: z.array(z.string().min(1).max(600)).max(6),
+    supports: z.array(z.object({
+        episodeId: z.uuid(), evidenceId: z.string().regex(/^E\d+$/)
+    }).strict()).min(1).max(32),
     kind: z.enum(['navigation', 'procedure']),
 }).strict();
+
 export type HandbookEntry = z.infer<typeof handbookEntrySchema>;
-export const consolidationProposalSchema = z.object({ entries: z.array(handbookEntrySchema).max(30) }).strict();
+
+export const consolidationProposalSchema = z.object({
+    entries: z.array(z.object({
+        triggerIds: z.array(z.string().regex(/^T\d+$/)).min(1).max(20),
+        targetPathIds: z.array(z.string().regex(/^F\d+$/)).min(1).max(8),
+        questions: z.array(z.string().min(1).max(600)).max(6),
+        sourceIds: z.array(z.string().regex(/^S\d+$/)).min(1).max(32),
+        kind: z.enum(['navigation', 'procedure']),
+    }).strict()).max(30)
+}).strict();
 
 export interface MemoryNavigation {
     id: string;
-    targetPaths: string[]
+    targetPaths: string[];
     questions: string[];
-    supports: HandbookEntry['supports'];
+    sourceCount: number;
 }
 
 export interface MemoryUsage {
     recalled: number; expanded: number; adopted: number; unavailable: number; retrievalMs: number;
+    sourceAttempts: number; invalidReferences: number; budgetRejections: number;
 }
 
 export interface MemoryQuery { paths: string[]; symbols: string[]; keywords: string[] }

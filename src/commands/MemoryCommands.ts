@@ -4,7 +4,7 @@ import { RepositorySnapshotReader } from '../services/git/repositorySnapshot';
 import { createHash } from 'crypto';
 import { createPipelineReplayAdapter, replayManifestSchema, runSequentialReplay, validateReplayHistory } from '../services/memory/benchmark';
 import { generateCommitMessageChain } from '../services/chain/commitMessageChain';
-import { createConsolidationRunner } from '../services/memory/service';
+import { createConsolidationRunner, describeConsolidationResult, logMemoryOperation, readMemorySettings } from '../services/memory/service';
 import { resolveInvestigationSettings } from '../services/analysis/change/investigation/config';
 
 /** Read-only inspection plus explicit repository-scoped maintenance commands. */
@@ -17,7 +17,11 @@ export class MemoryCommands {
             provideTextDocumentContent: uri => this.documents.get(uri.toString()) ?? '',
         }));
         this.context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.manageMemory', async () => {
-            try { await this.manage(); } catch (error) { this.services.getMemoryService().warn(error); }
+            try { await this.manage(); } catch (error) {
+                const message = vscode.l10n.t('Memory operation failed: {0}', error instanceof Error ? error.message : String(error));
+                vscode.window.setStatusBarMessage(message, 5000);
+                await vscode.window.showErrorMessage(message);
+            }
         }));
         this.context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.benchmarkMemory', async () => {
             try { await this.replay(); } catch (error) { this.services.getMemoryService().warn(error); }
@@ -62,7 +66,7 @@ export class MemoryCommands {
                             if (!service) { throw new Error(`Replay model disappeared: ${id}`); }
                             return service.createExecution(root, { token: cancellation.token });
                         },
-                        runChain: generateCommitMessageChain, consolidation: createConsolidationRunner,
+                        runChain: generateCommitMessageChain, consolidation: createConsolidationRunner, settings: readMemorySettings(),
                         excludes: [...resolveInvestigationSettings().excludePatterns, ...vscode.workspace.getConfiguration('gitCommitGenie.memory').get<string[]>('excludePatterns', [])],
                     });
                     const output = await runSequentialReplay({ manifest, outputRoot: vscode.Uri.joinPath(this.context.globalStorageUri, 'memory-replays').fsPath,
@@ -89,45 +93,93 @@ export class MemoryCommands {
         const store = memory.storeFor(identity.repositoryId, selected.rootUri.fsPath);
         const config = vscode.workspace.getConfiguration('gitCommitGenie.memory');
         const actions = [
-            { label: vscode.l10n.t('Inspect episodes and handbook'), id: 'inspect' },
-            { label: vscode.l10n.t('Delete selected episodes'), id: 'delete' },
-            { label: vscode.l10n.t('Clear repository memory'), id: 'clear' },
-            { label: vscode.l10n.t('Rebuild memory index'), id: 'rebuild' },
-            { label: vscode.l10n.t('Consolidate pending episodes'), id: 'consolidate' },
-            { label: vscode.l10n.t('Cancel background consolidation'), id: 'cancel' },
-            { label: config.get<boolean>('consolidation.enabled', true) ? vscode.l10n.t('Pause automatic consolidation') : vscode.l10n.t('Resume automatic consolidation'), id: 'pause' },
-            { label: config.get<boolean>('enabled', false) ? vscode.l10n.t('Disable repository memory') : vscode.l10n.t('Enable repository memory'), id: 'toggle' },
+            { label: vscode.l10n.t('Inspect episodes and handbook'), id: 'inspect', detail: vscode.l10n.t('Read-only view of this clone\'s episodes and handbook. No model call or API cost; no data changes.') },
+            { label: vscode.l10n.t('Delete selected episodes'), id: 'delete', detail: vscode.l10n.t('Permanently delete selected episodes and dependent handbook entries across this clone\'s shared worktrees. No model call or API cost.') },
+            { label: vscode.l10n.t('Clear repository memory'), id: 'clear', detail: vscode.l10n.t('Permanently delete all episodes and handbook entries for this clone. Source files and the 24-hour call allowance are unchanged. No model call or API cost.') },
+            { label: vscode.l10n.t('Rebuild memory index'), id: 'rebuild', detail: vscode.l10n.t('Rebuild metadata from this clone\'s stored episodes; no repository scan, model call or API cost. Episode contents are preserved.') },
+            { label: vscode.l10n.t('Consolidate pending episodes'), id: 'consolidate', detail: vscode.l10n.t('Manually organize this clone\'s episodes using a model; API charges may apply. Requires five eligible episodes in one area and an available configured 24-hour allowance. Updates the handbook.') },
+            { label: vscode.l10n.t('Cancel background consolidation'), id: 'cancel', detail: vscode.l10n.t('Cancel waiting work or request cancellation of this clone\'s running consolidation. Sent API requests may still be charged; existing memory is preserved.') },
+            { label: config.get<boolean>('consolidation.enabled', true) ? vscode.l10n.t('Pause automatic consolidation') : vscode.l10n.t('Resume automatic consolidation'), id: 'pause', detail: vscode.l10n.t('Global setting. Pausing preserves recording, retrieval and manual consolidation. No immediate model call; automatic consolidation can incur API costs after resuming. Reversible.') },
+            { label: config.get<boolean>('enabled', false) ? vscode.l10n.t('Disable repository memory') : vscode.l10n.t('Enable repository memory'), id: 'toggle', detail: vscode.l10n.t('Global setting. Disabling stops recording, retrieval and consolidation without deleting data. No immediate model call; enabled automatic consolidation may incur API costs. Reversible.') },
         ];
-        const action = await vscode.window.showQuickPick(actions, { placeHolder: selected.rootUri.fsPath });
+        const action = await vscode.window.showQuickPick(actions, { placeHolder: selected.rootUri.fsPath, matchOnDetail: true });
         if (!action) { return; }
-        if (action.id === 'inspect') {
-            const view = await store.inspect();
-            const uri = vscode.Uri.parse(`genie-memory:/${identity.repositoryId}/${view.generation}.json`);
-            this.documents.clear(); this.documents.set(uri.toString(), JSON.stringify(view, null, 2));
-            await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
-        } else if (action.id === 'clear') {
+        const root = selected.rootUri.fsPath;
+        let ids: string[] = [];
+        if (action.id === 'clear') {
             const confirm = vscode.l10n.t('Clear memory');
             if (await vscode.window.showWarningMessage(vscode.l10n.t('Delete all memory for this clone, including shared worktrees? This cannot be undone.'), { modal: true }, confirm) !== confirm) { return; }
-            memory.cancel(store.repositoryId); await store.clear();
-            void vscode.window.showInformationMessage(vscode.l10n.t('Repository memory cleared. Source files were not changed.'));
-        } else if (action.id === 'delete') {
-            const view = await store.inspect();
+        }
+        if (action.id === 'delete') {
+            const loading = vscode.window.setStatusBarMessage(`$(sync~spin) ${action.label}`);
+            let view;
+            try { view = await store.inspect(); }
+            catch (error) { logMemoryOperation(root, action.id, 'manual', 'failed', String(error)); throw error; }
+            finally { loading.dispose(); }
+            if (!view.episodes.length) {
+                const message = vscode.l10n.t('No episodes to delete.');
+                logMemoryOperation(root, action.id, 'manual', 'not-ready', message);
+                vscode.window.setStatusBarMessage(message, 5000);
+                await vscode.window.showInformationMessage(message);
+                return;
+            }
             const picked = await vscode.window.showQuickPick(view.episodes.map(episode => ({
                 label: new Date(episode.createdAt).toISOString(), description: episode.changedPaths.join(', '), detail: `${episode.status} · ${episode.snapshot.id}`, id: episode.id,
-            })), { canPickMany: true, placeHolder: vscode.l10n.t('Select episodes to delete permanently') });
-            if (picked?.length) { memory.cancel(store.repositoryId); await store.deleteEpisodes(picked.map(item => item.id)); }
-        } else if (action.id === 'consolidate') {
-            await memory.consolidate(store.repositoryId, this.services.getCurrentLLMService());
-        } else if (action.id === 'rebuild') {
-            await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: vscode.l10n.t('Rebuilding repository memory index') }, () => store.rebuildIndex());
-        } else if (action.id === 'cancel') {
-            memory.cancel(store.repositoryId);
-        } else if (action.id === 'pause') {
-            memory.cancel(store.repositoryId);
-            await config.update('consolidation.enabled', !config.get<boolean>('consolidation.enabled', true), vscode.ConfigurationTarget.Global);
-        } else if (action.id === 'toggle') {
-            memory.cancel(store.repositoryId);
-            await config.update('enabled', !config.get<boolean>('enabled', false), vscode.ConfigurationTarget.Global);
+            })), { canPickMany: true, matchOnDetail: true, placeHolder: vscode.l10n.t('Select episodes to delete permanently') });
+            if (!picked?.length) { return; }
+            ids = picked.map(item => item.id);
+            const confirm = vscode.l10n.t('Delete selected episodes');
+            if (await vscode.window.showWarningMessage(vscode.l10n.t('Permanently delete {0} selected episodes and their dependent handbook entries for this clone? This cannot be undone.', ids.length),
+                { modal: true }, confirm) !== confirm) { return; }
         }
+        const running = action.id === 'consolidate' ? vscode.l10n.t('Consolidating Memory; model API charges may apply.') : action.label;
+        const statusBar = vscode.window.setStatusBarMessage(`$(sync~spin) ${running}`);
+        if (action.id !== 'consolidate') { logMemoryOperation(root, action.id, 'manual', 'running', running); }
+        let message: string;
+        let status = 'completed';
+        try {
+            if (action.id === 'inspect') {
+                const view = await store.inspect();
+                const uri = vscode.Uri.parse(`genie-memory:/${identity.repositoryId}/${view.generation}.json`);
+                this.documents.clear(); this.documents.set(uri.toString(), JSON.stringify(view, null, 2));
+                await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
+                message = vscode.l10n.t('Opened {0} episodes and {1} handbook entries (read-only).', view.episodes.length, view.handbook.length);
+            } else if (action.id === 'clear') {
+                memory.cancel(store.repositoryId); await store.clear();
+                message = vscode.l10n.t('Repository memory permanently cleared. Source files are unchanged; the 24-hour call allowance was not reset.');
+            } else if (action.id === 'delete') {
+                memory.cancel(store.repositoryId);
+                const count = await store.deleteEpisodes(ids);
+                message = vscode.l10n.t('Permanently deleted {0} episodes and removed their dependent handbook entries.', count);
+            } else if (action.id === 'consolidate') {
+                const result = await memory.consolidate(store.repositoryId, this.services.getCurrentLLMService(), 'manual');
+                status = result.status;
+                message = describeConsolidationResult(result);
+            } else if (action.id === 'rebuild') {
+                message = vscode.l10n.t('Rebuilt the index from {0} stored episodes.', await store.rebuildIndex());
+            } else if (action.id === 'cancel') {
+                status = memory.cancel(store.repositoryId);
+                message = status === 'nothing-to-cancel' ? vscode.l10n.t('No consolidation task to cancel.') : status === 'scheduled-cancelled'
+                    ? vscode.l10n.t('Cancelled the waiting consolidation task.') : vscode.l10n.t('Cancellation requested for running consolidation. Sent API requests may still be charged.');
+            } else if (action.id === 'pause') {
+                const enabled = !config.get<boolean>('consolidation.enabled', true);
+                memory.cancel();
+                await config.update('consolidation.enabled', enabled, vscode.ConfigurationTarget.Global);
+                message = enabled ? vscode.l10n.t('Automatic consolidation resumed globally. Existing memory is preserved.')
+                    : vscode.l10n.t('Automatic consolidation paused globally. Recording, retrieval and manual consolidation remain available; existing memory is preserved.');
+            } else if (action.id === 'toggle') {
+                const enabled = !config.get<boolean>('enabled', false);
+                memory.cancel();
+                await config.update('enabled', enabled, vscode.ConfigurationTarget.Global);
+                message = enabled ? vscode.l10n.t('Repository Memory enabled globally. Existing data is preserved.')
+                    : vscode.l10n.t('Repository Memory disabled globally. Recording, retrieval and consolidation stopped; existing data is preserved.');
+            } else { throw new Error(`Unknown Memory operation: ${action.id}`); }
+            if (action.id !== 'consolidate') { logMemoryOperation(root, action.id, 'manual', status, message); }
+        } catch (error) {
+            if (action.id !== 'consolidate') { logMemoryOperation(root, action.id, 'manual', 'failed', String(error)); }
+            throw error;
+        } finally { statusBar.dispose(); }
+        vscode.window.setStatusBarMessage(message, 5000);
+        await vscode.window.showInformationMessage(message);
     }
 }

@@ -566,7 +566,7 @@ export type PipelineEventDetails =
     | { kind: 'investigationPlanned'; targets: string[]; targetCount: number; questionCount: number }
     | { kind: 'investigationStart'; maxSteps: number }
     | { kind: 'investigationStep'; current: number; total: number; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number }
-    | { kind: 'memoryStep'; current: number; total: number; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number; sourceStatuses?: string[] }
+    | { kind: 'memoryStep'; current: number; total?: number; trigger?: string; status?: string; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number; sourceStatuses?: string[] }
     | { kind: 'investigationComplete'; steps: number; evidenceCount: number }
     | { kind: 'investigationResolved'; findingCount: number; unresolvedCount: number; reason: string }
     | { kind: 'investigationSkipped'; reason: string }
@@ -955,7 +955,6 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
                 maxSteps: requireNumberField(data, stage, 'maxSteps'),
             };
         case 'investigationStep':
-        case 'memoryStep':
             return {
                 kind: stage,
                 current: requireNumberField(data, stage, 'current'),
@@ -965,9 +964,20 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
                 ...(asString(data.reason) ? { reason: asString(data.reason) } : {}),
                 ...(asString(data.summary) ? { summary: asString(data.summary) } : {}),
                 ...(asNumber(data.evidenceCount) !== undefined ? { evidenceCount: asNumber(data.evidenceCount) } : {}),
-                ...(stage === 'memoryStep' && Array.isArray(data.sourceStatuses)
-                    ? { sourceStatuses: asFullStringList(data.sourceStatuses, stage, 'sourceStatuses') }
-                    : {}),
+            };
+        case 'memoryStep':
+            return {
+                kind: stage,
+                current: requireNumberField(data, stage, 'current'),
+                // Maintenance events are operations, not steps in the generation's tool budget.
+                ...(data.trigger ? { trigger: requireStringField(data, stage, 'trigger'), status: requireStringField(data, stage, 'status') }
+                    : { total: requireNumberField(data, stage, 'total') }),
+                tool: requireStringField(data, stage, 'tool'),
+                ok: requireBooleanField(data, stage, 'ok'),
+                ...(asString(data.reason) ? { reason: asString(data.reason) } : {}),
+                ...(asString(data.summary) ? { summary: asString(data.summary) } : {}),
+                ...(asNumber(data.evidenceCount) !== undefined ? { evidenceCount: asNumber(data.evidenceCount) } : {}),
+                ...(Array.isArray(data.sourceStatuses) ? { sourceStatuses: asFullStringList(data.sourceStatuses, stage, 'sourceStatuses') } : {}),
             };
         case 'investigationComplete':
             return {
@@ -1472,15 +1482,16 @@ function presentPipelineEventCore(
             return {
                 stage,
                 phase: text.phaseInvestigate,
-                title: formatPipelineText(text.memoryStepTitle, current, tool),
+                title: asString(data.label) || formatPipelineText(text.memoryStepTitle, current, tool),
                 description: asString(data.summary) || asString(data.reason) || text.memoryStepDefault,
                 metrics: [
-                    { label: text.metricProgress, value: `${current}/${asNumber(data.total) ?? 0}` },
+                    ...(data.trigger ? [] : [{ label: text.metricProgress, value: `${current}/${asNumber(data.total) ?? 0}` }]),
                     ...(asNumber(data.evidenceCount)
                         ? [{ label: text.metricEvidence, value: String(asNumber(data.evidenceCount)), tone: 'summary' as const }]
                         : []),
                 ],
-                tone: data.ok === false ? 'warning' : 'success',
+                tone: data.ok === false ? 'warning' : data.status === 'running' ? 'active'
+                    : data.trigger && !['completed', 'published'].includes(asString(data.status) ?? '') ? 'neutral' : 'success',
                 data,
             };
         }
@@ -1793,7 +1804,9 @@ export function deriveLatestPipelineSnapshot(
         .filter(log => !generationStart.repoPath || log.repoPath === generationStart.repoPath);
     const events = runLogs
         .map(parseCommitStageLog)
-        .filter((payload): payload is CommitStagePayload => payload !== null);
+        .filter((payload): payload is CommitStagePayload => payload !== null)
+        // Maintenance remains visible in the log list, but belongs to no commit generation.
+        .filter(payload => payload.stage !== 'memoryStep' || !['manual', 'automatic'].includes(asString(payload.data.trigger) ?? ''));
     if (!events.length) {
         return null;
     }

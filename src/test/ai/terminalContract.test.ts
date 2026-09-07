@@ -11,7 +11,7 @@ describe('terminal contract regression', () => {
         assert.equal(parsed.success, true);
     });
 
-    it('uses the two-phase profile version and cache identity', () => {
+    it('uses the two-phase short-memory-ID profile version and cache identity', () => {
         const input = {
             extraction: {
                 changedFiles: [{ path: 'src/parser.ts', changeType: 'modified' as const }],
@@ -32,11 +32,11 @@ describe('terminal contract regression', () => {
         };
         const profile = createChangeAnalysisProfile(input);
 
-        assert.equal(profile.promptVersion, '4');
-        assert.equal(profile.toolsetVersion, 'snapshot-2');
+        assert.equal(profile.promptVersion, '5');
+        assert.equal(profile.toolsetVersion, 'snapshot-memory-handles-3');
         assert.match(
             `agent:${profile.id}:${profile.promptVersion}:${profile.toolsetVersion}:gpt-5`,
-            /^agent:change-analysis:4:snapshot-2:/,
+            /^agent:change-analysis:5:snapshot-memory-handles-3:/,
         );
     });
 
