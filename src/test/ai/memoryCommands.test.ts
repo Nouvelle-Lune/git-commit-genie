@@ -165,19 +165,34 @@ describe('MemoryCommands repository maintenance', () => {
         assert.equal(statuses[0].disposed, true);
     });
 
-    it('requires modal confirmation before rechecking organized evidence and passes the recheck trigger', async () => {
+    it('uses a multi-select QuickPick with canonical group items and passes selected paths after confirmation', async () => {
+        // The recheck picker exposes each anchor path, both evidence counts, and a details button before confirmation, then sends the selected paths to manual recheck.
         const store = makeStore();
         const episodes = makeRecheckEpisodes();
-        const organizedFingerprint = buildConsolidationGroups(episodes as any, [])[0].fingerprint;
-        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: [organizedFingerprint] });
+        const groups = buildConsolidationGroups(episodes as any, []);
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: groups.map(group => group.fingerprint) });
         const memory = makeMemoryService(store);
         memory.consolidate.resolves({
-            status: 'no-findings', groupCount: 1, skippedGroups: 0, deferredPaths: [], retryCount: 0,
-            groupOutcomes: [{ path: 'src/parser.ts', status: 'no-findings' }],
+            status: 'no-findings', groupCount: 2, skippedGroups: 0, deferredPaths: [], retryCount: 0,
+            groupOutcomes: [
+                { path: 'src/parser.ts', status: 'no-findings' },
+                { path: 'src/unorganized.ts', status: 'no-findings' },
+            ],
         });
         const { context } = makeContext();
         stubIdentity(sandbox);
-        stubRecheckSelection(sandbox);
+        stubAction(sandbox, 'recheck');
+        const picker = stubRecheckSelection(sandbox, items => {
+            assert.deepEqual(items.map(item => item.label), ['src/parser.ts', 'src/unorganized.ts']);
+            assert.deepEqual(items.map(item => item.path), ['src/parser.ts', 'src/unorganized.ts']);
+            assert.deepEqual(items.map(item => item.description), ['2 historical versions · 2 saved evidence records', '2 historical versions · 2 saved evidence records']);
+            assert.equal(items.every(item => item.buttons?.length === 1), true);
+            assert.equal(items.every(item => item.buttons?.[0].tooltip === 'Understand this evidence group'), true);
+            assert.equal(picker.quickPick.canSelectMany, true);
+            assert.equal(picker.quickPick.matchOnDescription, true);
+            assert.equal(picker.quickPick.title, 'Recheck historical evidence');
+            assert.equal(picker.quickPick.placeholder, 'Select evidence groups to recheck; use the info button to view details.');
+        }, ['src/parser.ts', 'src/unorganized.ts']);
         const statuses = stubStatusBar(sandbox);
         const information = stubInformation(sandbox);
         const warning = sandbox.stub(vscode.window, 'showWarningMessage').resolves('Recheck organized evidence' as never);
@@ -188,12 +203,13 @@ describe('MemoryCommands repository maintenance', () => {
         assert.equal(warning.calledOnce, true);
         assert.deepEqual(warning.firstCall.args[1], { modal: true });
         assert.equal(warning.firstCall.args[2], 'Recheck organized evidence');
-        assert.deepEqual(memory.consolidate.firstCall.args, ['r'.repeat(64), model, 'manual-recheck', ['src/parser.ts']]);
+        assert.deepEqual(memory.consolidate.firstCall.args, ['r'.repeat(64), model, 'manual-recheck', ['src/parser.ts', 'src/unorganized.ts']]);
         assert.equal(information.length, 1);
         assertSpinnersReleased(statuses);
     });
 
     it('does not call consolidation when the recheck cost confirmation is cancelled', async () => {
+        // Cancelling the paid recheck confirmation leaves the selected evidence groups untouched and does not start consolidation.
         const store = makeStore();
         const episodes = makeRecheckEpisodes();
         const organizedFingerprint = buildConsolidationGroups(episodes as any, [])[0].fingerprint;
@@ -201,6 +217,7 @@ describe('MemoryCommands repository maintenance', () => {
         const memory = makeMemoryService(store);
         const { context } = makeContext();
         stubIdentity(sandbox);
+        stubAction(sandbox, 'recheck');
         stubRecheckSelection(sandbox);
         const warning = sandbox.stub(vscode.window, 'showWarningMessage').resolves(undefined);
         const information = stubInformation(sandbox);
@@ -212,6 +229,161 @@ describe('MemoryCommands repository maintenance', () => {
         assert.equal(memory.consolidate.called, false);
         assert.deepEqual(information, []);
         assert.deepEqual(statuses, []);
+    });
+
+    it('opens a read-only evidence webview from an item button without changing selection or confirming cost', async () => {
+        // An item-button click opens historical evidence details only; it preserves selection and defers confirmation and model calls until acceptance.
+        const store = makeStore();
+        const episodes = makeRecheckEpisodes();
+        const groups = buildConsolidationGroups(episodes as any, []);
+        store.inspect.resolves({
+            epoch: 'epoch', generation: 1, episodes, handbook: makeRecheckHandbook(episodes),
+            consolidated: groups.map(group => group.fingerprint),
+        });
+        const memory = makeMemoryService(store);
+        memory.consolidate.resolves({
+            status: 'no-findings', groupCount: 1, skippedGroups: 0, deferredPaths: [], retryCount: 0,
+            groupOutcomes: [{ path: 'src/unorganized.ts', status: 'no-findings' }],
+        });
+        const { context } = makeContext();
+        stubIdentity(sandbox);
+        stubAction(sandbox, 'recheck');
+        const picker = makeRecheckQuickPick();
+        sandbox.stub(vscode.window, 'createQuickPick').returns(picker.quickPick as never);
+        const warning = sandbox.stub(vscode.window, 'showWarningMessage').resolves('Recheck organized evidence' as never);
+        const information = stubInformation(sandbox);
+        const webview = stubRecheckWebview(sandbox);
+        stubCommandRegistration(sandbox);
+        const commands = new MemoryCommands(context, makeRegistry(store, memory) as never);
+        commands.register();
+
+        const pending = invokeManage(commands);
+        await flushAsync();
+        const parserItem = picker.quickPick.items.find(item => item.label === 'src/parser.ts');
+        const selectedItem = picker.quickPick.items.find(item => item.label === 'src/unorganized.ts');
+        assert.ok(parserItem);
+        assert.ok(selectedItem);
+        picker.quickPick.selectedItems = [selectedItem];
+
+        picker.triggerItemButton(parserItem);
+        await flushAsync();
+
+        assert.equal(warning.called, false);
+        assert.equal(memory.consolidate.called, false);
+        assert.deepEqual(picker.quickPick.selectedItems, [selectedItem]);
+        assert.equal(webview.create.calledOnce, true);
+        assert.equal(webview.create.firstCall.args[0], 'gitCommitGenie.memoryEvidence');
+        assert.equal(webview.create.firstCall.args[1], 'Historical evidence for src/parser.ts');
+        assert.equal((webview.create.firstCall.args[2] as { viewColumn?: vscode.ViewColumn }).viewColumn, vscode.ViewColumn.Beside);
+        assert.equal((webview.create.firstCall.args[2] as { preserveFocus?: boolean }).preserveFocus, true);
+        assert.equal((webview.create.firstCall.args[3] as vscode.WebviewOptions).enableScripts, false);
+
+        picker.triggerItemButton(parserItem);
+        await flushAsync();
+
+        assert.equal(webview.create.calledOnce, true);
+        assert.equal(webview.reveal.calledOnce, true);
+        assert.deepEqual(webview.reveal.firstCall.args, [vscode.ViewColumn.Beside, true]);
+        assert.deepEqual(picker.quickPick.selectedItems, [selectedItem]);
+        assert.equal(warning.called, false);
+        assert.equal(memory.consolidate.called, false);
+
+        const report = webview.html();
+        assert.match(report, /Historical evidence preview/);
+        assert.match(report, /This page shows saved records from earlier repository versions, not the file as it is now\./);
+        assert.match(report, /What Repository Memory learned/);
+        assert.match(report, /2<\/strong><span>Versions observed<\/span><p>2 repository snapshots contained evidence for this path\./);
+        assert.match(report, /2<\/strong><span>Saved evidence<\/span><p>2 different evidence records remain after identical sources are counted once\./);
+        assert.match(report, /Why the numbers differ/);
+        assert.match(report, /One repository version can contain several observations\./);
+        assert.match(report, /All saved evidence in this group/);
+        assert.match(report, /Some may not support any current long-term memory\./);
+        assert.match(report, /Where to look/);
+        assert.match(report, /When this memory may be recalled/);
+        assert.match(report, /Remembered conclusion/);
+        assert.match(report, /Parser handbook conclusion/);
+        assert.equal((episodes[0] as any).observations[0].evidence.length, 2);
+        assert.match(report, /3 historical records support this conclusion/);
+        assert.match(report, /Why this was remembered/);
+        assertHtmlSupportTrace(report, episodes[0].id as string, 'E1', episodes[0].createdAt as number, 'readFileContent', 'src/parser.ts', 10, 12, '1'.repeat(64));
+        assertHtmlSupportTrace(report, episodes[1].id as string, 'E1', episodes[1].createdAt as number, 'searchCode', 'src/parser.ts', 20, 22, '2'.repeat(64));
+        assert.match(report, /A supporting record could not be found\./);
+        assert.match(report, /This memory points to investigation unresolved-episode, evidence E99, but that saved record is unavailable\./);
+        assert.match(report, /Recorded before the change/);
+        assert.match(report, /Recorded after the change/);
+        assert.match(report, /Saved excerpt/);
+        assert.match(report, /before parser excerpt/);
+        assert.match(report, /after parser excerpt/);
+        assert.match(report, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/);
+        assert.doesNotMatch(report, /<script>alert/);
+        assert.match(report, /This excerpt was already truncated when the record was created\./);
+        assert.match(report, /Technical information/);
+        assert.match(report, /Investigation ID/);
+        assert.match(report, /Evidence ID/);
+        assert.match(report, /Repository snapshot/);
+        assert.match(report, /Investigation status/);
+        assert.match(report, /Collection tool/);
+
+        picker.accept();
+        await pending;
+
+        assert.equal(warning.calledOnce, true);
+        assert.deepEqual(memory.consolidate.firstCall.args, ['r'.repeat(64), { model: 'memory-model' }, 'manual-recheck', ['src/unorganized.ts']]);
+        assert.equal(information.length, 1);
+    });
+
+    it('reports when an evidence group has no related Handbook entry', async () => {
+        // A details report without a matching Handbook target explicitly states that no related Handbook entry exists.
+        const report = await readRecheckDetailsHtml(sandbox, makeRecheckEpisodes(), []);
+
+        assert.match(report, /No long-term memory was created from this evidence group\./);
+        assert.match(report, /A recheck asks the model to review this saved history again/);
+    });
+
+    it('reports when a recorded evidence excerpt is empty', async () => {
+        // An empty saved excerpt is represented explicitly while the report still uses the recorded evidence source.
+        const episodes = makeRecheckEpisodes();
+        const parserAfter = (episodes[1] as any).observations[0].evidence[0].source;
+        parserAfter.excerpt = '';
+
+        const report = await readRecheckDetailsHtml(sandbox, episodes, makeRecheckHandbook(episodes));
+
+        assert.match(report, /No excerpt was saved for this record\./);
+    });
+
+    it('reports when an investigation note is empty', async () => {
+        // An empty observation summary is represented explicitly instead of leaving the evidence record unlabeled.
+        const episodes = makeRecheckEpisodes();
+        (episodes[0] as any).observations[0].summary = '';
+
+        const report = await readRecheckDetailsHtml(sandbox, episodes, makeRecheckHandbook(episodes));
+
+        assert.match(report, /No investigation note was saved for this record\./);
+    });
+
+    it('cancels recheck without consolidation when the createQuickPick is hidden', async () => {
+        // Hiding the recheck QuickPick resolves as cancellation and prevents both the paid confirmation and consolidation call.
+        const store = makeStore();
+        const episodes = makeRecheckEpisodes();
+        const groups = buildConsolidationGroups(episodes as any, []);
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: groups.map(group => group.fingerprint) });
+        const memory = makeMemoryService(store);
+        const { context } = makeContext();
+        stubIdentity(sandbox);
+        stubAction(sandbox, 'recheck');
+        const picker = makeRecheckQuickPick();
+        sandbox.stub(vscode.window, 'createQuickPick').returns(picker.quickPick as never);
+        const warning = sandbox.stub(vscode.window, 'showWarningMessage').resolves(undefined);
+        const information = stubInformation(sandbox);
+        const pending = invokeManage(new MemoryCommands(context, makeRegistry(store, memory) as never));
+
+        await flushAsync();
+        picker.hide();
+        await pending;
+
+        assert.equal(warning.called, false);
+        assert.equal(memory.consolidate.called, false);
+        assert.deepEqual(information, []);
     });
 
     it('deletes selected episodes after the exact destructive confirmation and reports the dependent cleanup', async () => {
@@ -619,19 +791,174 @@ function stubAction(sandbox: sinon.SinonSandbox, id: string): void {
     }) as unknown as typeof vscode.window.showQuickPick);
 }
 
-function stubRecheckSelection(sandbox: sinon.SinonSandbox, onGroups?: (items: Array<vscode.QuickPickItem & { id?: string }>) => void): void {
-    let quickPickCall = 0;
-    sandbox.stub(vscode.window, 'showQuickPick').callsFake((async (
-        items: readonly vscode.QuickPickItem[] | Thenable<readonly vscode.QuickPickItem[]>,
-    ) => {
-        quickPickCall += 1;
-        const resolved = Array.isArray(items) ? items : await items;
-        if (quickPickCall === 1) {
-            return (resolved as Array<vscode.QuickPickItem & { id?: string }>).find(item => item.id === 'recheck') as never;
-        }
-        onGroups?.(resolved as Array<vscode.QuickPickItem & { id?: string }>);
-        return [resolved[0]] as never;
-    }) as unknown as typeof vscode.window.showQuickPick);
+type RecheckTestItem = vscode.QuickPickItem & { path?: string; group?: unknown };
+
+interface RecheckQuickPickHarness {
+    quickPick: vscode.QuickPick<RecheckTestItem>;
+    accept(): void;
+    hide(): void;
+    triggerItemButton(item: RecheckTestItem): void;
+}
+
+function makeRecheckQuickPick(): RecheckQuickPickHarness {
+    const acceptEmitter = new vscode.EventEmitter<void>();
+    const hideEmitter = new vscode.EventEmitter<void>();
+    const itemButtonEmitter = new vscode.EventEmitter<vscode.QuickPickItemButtonEvent<RecheckTestItem>>();
+    const quickPick = {
+        items: [] as readonly RecheckTestItem[],
+        selectedItems: [] as readonly RecheckTestItem[],
+        canSelectMany: false,
+        matchOnDescription: false,
+        matchOnDetail: false,
+        placeholder: undefined,
+        onDidAccept: acceptEmitter.event,
+        onDidHide: hideEmitter.event,
+        onDidTriggerItemButton: itemButtonEmitter.event,
+        show: () => undefined,
+        hide: () => undefined,
+        dispose: () => undefined,
+    } as unknown as vscode.QuickPick<RecheckTestItem>;
+    return {
+        quickPick,
+        accept: () => acceptEmitter.fire(),
+        hide: () => hideEmitter.fire(),
+        triggerItemButton: item => itemButtonEmitter.fire({
+            item,
+            button: item.buttons?.[0] ?? { iconPath: new vscode.ThemeIcon('info') },
+        }),
+    };
+}
+
+function stubRecheckSelection(
+    sandbox: sinon.SinonSandbox,
+    onGroups?: (items: RecheckTestItem[]) => void,
+    selectedLabels: string[] = [],
+): RecheckQuickPickHarness {
+    const picker = makeRecheckQuickPick();
+    sandbox.stub(vscode.window, 'createQuickPick').returns(picker.quickPick as never);
+    picker.quickPick.show = () => {
+        const items = [...picker.quickPick.items] as RecheckTestItem[];
+        onGroups?.(items);
+        picker.quickPick.selectedItems = selectedLabels.length
+            ? items.filter(item => selectedLabels.includes(item.label))
+            : items.slice(0, 1);
+        picker.accept();
+    };
+    return picker;
+}
+
+function stubRecheckWebview(sandbox: sinon.SinonSandbox): {
+    panel: vscode.WebviewPanel;
+    create: sinon.SinonStub;
+    reveal: sinon.SinonStub;
+    html(): string;
+} {
+    const disposeEmitter = new vscode.EventEmitter<void>();
+    const messageEmitter = new vscode.EventEmitter<unknown>();
+    const webview = {
+        html: '',
+        options: { enableScripts: false, retainContextWhenHidden: false },
+        cspSource: 'vscode-webview:',
+        asWebviewUri: (uri: vscode.Uri) => uri,
+        postMessage: async () => true,
+        onDidReceiveMessage: messageEmitter.event,
+    } as unknown as vscode.Webview;
+    const reveal = sandbox.stub();
+    const panel = {
+        viewType: 'gitCommitGenie.memoryEvidence',
+        title: '',
+        webview,
+        viewColumn: vscode.ViewColumn.Beside,
+        active: true,
+        visible: true,
+        onDidDispose: disposeEmitter.event,
+        reveal,
+        dispose: () => disposeEmitter.fire(),
+    } as unknown as vscode.WebviewPanel;
+    sandbox.stub(vscode.workspace, 'registerTextDocumentContentProvider').returns({ dispose() { /* no-op */ } } as never);
+    const create = sandbox.stub(vscode.window, 'createWebviewPanel').returns(panel);
+    return {
+        panel,
+        create,
+        reveal,
+        html: () => panel.webview.html,
+    };
+}
+
+function stubCommandRegistration(sandbox: sinon.SinonSandbox): void {
+    sandbox.stub(vscode.commands, 'registerCommand').callsFake((() => ({ dispose() { /* no-op */ } })) as unknown as typeof vscode.commands.registerCommand);
+}
+
+async function flushAsync(): Promise<void> {
+    await new Promise<void>(resolve => setImmediate(resolve));
+}
+
+function assertHtmlSupportTrace(
+    report: string,
+    episodeId: string,
+    evidenceId: string,
+    createdAt: number,
+    tool: string,
+    sourcePath: string,
+    startLine: number,
+    endLine: number,
+    snapshotId: string,
+): void {
+    const episodeMarker = `<dd><code>${episodeId}</code></dd>`;
+    const markerIndex = report.indexOf(episodeMarker);
+    assert.ok(markerIndex >= 0, `Missing support episode '${episodeId}'.`);
+    const recordStart = report.lastIndexOf('<details class="evidence-record">', markerIndex);
+    const nextRecord = report.indexOf('<details class="evidence-record">', markerIndex);
+    const block = report.slice(recordStart, nextRecord >= 0 ? nextRecord : undefined);
+    assert.match(block, new RegExp(escapeRegExp(formatTestRecordedAt(createdAt))));
+    assert.match(block, new RegExp(escapeRegExp(`<dd><code>${evidenceId}</code></dd>`)));
+    assert.match(block, new RegExp(escapeRegExp(tool)));
+    assert.match(block, new RegExp(escapeRegExp(`${sourcePath}`)));
+    assert.match(block, new RegExp(escapeRegExp(`lines ${startLine}-${endLine}`)));
+    assert.match(block, new RegExp(escapeRegExp(snapshotId)));
+}
+
+async function readRecheckDetailsHtml(
+    sandbox: sinon.SinonSandbox,
+    episodes: Array<Record<string, unknown>>,
+    handbook: Array<Record<string, unknown>>,
+): Promise<string> {
+    const store = makeStore();
+    const groups = buildConsolidationGroups(episodes as any, []);
+    store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook, consolidated: groups.map(group => group.fingerprint) });
+    const memory = makeMemoryService(store);
+    const { context } = makeContext();
+    stubIdentity(sandbox);
+    stubAction(sandbox, 'recheck');
+    const picker = makeRecheckQuickPick();
+    sandbox.stub(vscode.window, 'createQuickPick').returns(picker.quickPick as never);
+    const warning = sandbox.stub(vscode.window, 'showWarningMessage').resolves(undefined);
+    const webview = stubRecheckWebview(sandbox);
+    stubCommandRegistration(sandbox);
+    const commands = new MemoryCommands(context, makeRegistry(store, memory) as never);
+    commands.register();
+
+    const pending = invokeManage(commands);
+    await flushAsync();
+    const parserItem = picker.quickPick.items.find(item => item.label === 'src/parser.ts');
+    assert.ok(parserItem);
+    picker.triggerItemButton(parserItem);
+    await flushAsync();
+    const report = webview.html();
+    picker.hide();
+    await pending;
+
+    assert.equal(warning.called, false);
+    assert.equal(memory.consolidate.called, false);
+    return report;
+}
+
+function formatTestRecordedAt(createdAt: number): string {
+    return new Intl.DateTimeFormat(vscode.env.language, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(createdAt));
+}
+
+function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function stubStatusBar(sandbox: sinon.SinonSandbox): Array<{ message: string; disposed: boolean }> {
@@ -684,21 +1011,68 @@ function makeMemoryService(store: any): any {
 }
 
 function makeRecheckEpisodes(): Array<Record<string, unknown>> {
-    return [
-        ['src/parser.ts', 1], ['src/parser.ts', 2],
-        ['src/unorganized.ts', 3], ['src/unorganized.ts', 4],
-    ].map(([sourcePath, index]) => ({
+    const records: Array<{
+        sourcePath: string;
+        index: number;
+        side: 'before' | 'after';
+        tool: string;
+        startLine: number;
+        endLine: number;
+        excerpt: string;
+        truncated: boolean;
+    }> = [
+        { sourcePath: 'src/parser.ts', index: 1, side: 'before', tool: 'readFileContent', startLine: 10, endLine: 12, excerpt: 'before parser excerpt <script>alert("x")</script>', truncated: true },
+        { sourcePath: 'src/parser.ts', index: 2, side: 'after', tool: 'searchCode', startLine: 20, endLine: 22, excerpt: 'after parser excerpt', truncated: false },
+        { sourcePath: 'src/unorganized.ts', index: 3, side: 'before', tool: 'readFileContent', startLine: 30, endLine: 32, excerpt: 'before unorganized excerpt', truncated: false },
+        { sourcePath: 'src/unorganized.ts', index: 4, side: 'after', tool: 'searchCode', startLine: 40, endLine: 42, excerpt: 'after unorganized excerpt', truncated: false },
+    ];
+    return records.map(({ sourcePath, index, side, tool, startLine, endLine, excerpt, truncated }) => ({
         version: 1,
         id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
         createdAt: index,
         status: 'complete',
         snapshot: { id: String(index).repeat(64) },
         observations: [{
+            step: 0,
+            tool,
+            arguments: { filePath: sourcePath },
             ok: true,
-            tool: 'readFileContent',
-            evidence: [{ id: 'E1', source: { path: sourcePath } }],
+            summary: 'recorded evidence',
+            durationMs: 1,
+            truncated: false,
+            evidence: [{ id: 'E1', source: {
+                snapshotId: String(index).repeat(64), path: sourcePath, side,
+                blobOid: String(index).repeat(40), startLine, endLine, excerpt,
+                contentHash: 'c'.repeat(64), truncated, sourceType: 'text',
+            } }, ...(index === 1 ? [{ id: 'E2', source: {
+                snapshotId: String(index).repeat(64), path: sourcePath, side,
+                blobOid: String(index).repeat(40), startLine, endLine, excerpt,
+                contentHash: 'c'.repeat(64), truncated, sourceType: 'text',
+            } }] : [])],
         }],
+        changedPaths: [sourcePath],
+        changedSymbols: [],
+        questions: [],
+        claims: [],
+        model: 'memory-test-model',
+        promptVersion: 'memory-2',
+        toolsetVersion: 'snapshot-memory-handles-3',
     }));
+}
+
+function makeRecheckHandbook(episodes: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+    return [{
+        id: '10000000-0000-4000-8000-000000000001',
+        triggers: ['src/parser.ts'],
+        targetPaths: ['src/parser.ts'],
+        concerns: ['Parser handbook conclusion'],
+        supports: [
+            { episodeId: episodes[0].id, evidenceId: 'E1' },
+            { episodeId: episodes[1].id, evidenceId: 'E1' },
+            { episodeId: 'unresolved-episode', evidenceId: 'E99' },
+        ],
+        kind: 'navigation',
+    }];
 }
 
 function makeRegistry(store: any, memory: any, model: unknown = { model: 'memory-model' }): any {
