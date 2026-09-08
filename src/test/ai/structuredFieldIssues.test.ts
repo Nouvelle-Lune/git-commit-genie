@@ -44,6 +44,7 @@ function minimalTerminal(overrides: Record<string, unknown> = {}) {
 
 describe('structured field issue diagnostics', () => {
     it('reports intentAnalysis.supportedBy overflow as tooManyItems', () => {
+        // An intent evidence array above the shared limit must produce one structured overflow diagnostic.
         const input = minimalTerminal({
             intentAnalysis: {
                 primaryIntent: 'Improve reliability',
@@ -68,6 +69,7 @@ describe('structured field issue diagnostics', () => {
     });
 
     it('reports six simultaneous evidence ref overflows with exact paths', () => {
+        // Every evidence-bearing terminal field must report its own overflow path without truncating diagnostics.
         const input = minimalTerminal({
             investigation: {
                 findings: [{
@@ -135,6 +137,7 @@ describe('structured field issue diagnostics', () => {
     });
 
     it('reports D-only finding evidence as invalidFormat', () => {
+        // A finding that cites a diff id must expose the repository-only E* format violation.
         const input = minimalTerminal({
             investigation: {
                 findings: [{
@@ -165,6 +168,7 @@ describe('structured field issue diagnostics', () => {
 
 describe('exported finding evidence schema', () => {
     it('matches Zod bounds and E* pattern in JSON Schema export', () => {
+        // The exported finding schema must expose the same one-to-eight E* bounds enforced by local Zod validation.
         const exported = z.toJSONSchema(changeAnalysisAgentFinalResponseSchema) as {
             properties: {
                 investigation: {
@@ -186,14 +190,16 @@ describe('exported finding evidence schema', () => {
         };
         const evidenceRefs = exported.properties.investigation.properties.findings.items.properties.evidenceRefs;
 
-        assert.equal(evidenceRefs.minItems, 1);
-        assert.equal(evidenceRefs.maxItems, 8);
+        assert.equal(evidenceRefs.minItems, AGENT_TERMINAL_LIMITS.minFindingEvidenceRefs);
+        assert.equal(evidenceRefs.maxItems, AGENT_TERMINAL_LIMITS.maxEvidenceRefs);
         assert.equal(evidenceRefs.items.pattern, '^E\\d+$');
     });
 
     it('agrees with Zod on legal E*, empty, D-only, mixed, and overflow arrays', () => {
+        // Local validation must accept only bounded non-empty E* finding references and reject every other namespace shape.
         const cases = [
             { refs: ['E1'], valid: true },
+            { refs: ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8'], valid: true },
             { refs: [], valid: false },
             { refs: ['D1'], valid: false },
             { refs: ['E1', 'D1'], valid: false },
@@ -219,12 +225,17 @@ describe('exported finding evidence schema', () => {
 
 describe('claim category visibility contract', () => {
     it('exports category and disposition guidance in JSON Schema descriptions', () => {
+        // The existing single claims object must expose generic D*/E* syntax plus category-specific routing guidance.
         const exported = z.toJSONSchema(changeAnalysisAgentFinalResponseSchema) as {
             properties: {
                 claims: {
                     items: {
                         properties: {
                             category: { description: string };
+                            evidenceRefs: {
+                                maxItems: number;
+                                items: { pattern: string };
+                            };
                             disposition: { description: string };
                         };
                     };
@@ -232,7 +243,11 @@ describe('claim category visibility contract', () => {
             };
         };
         const categoryDescription = exported.properties.claims.items.properties.category.description;
+        const claimEvidenceRefs = exported.properties.claims.items.properties.evidenceRefs;
         const dispositionDescription = exported.properties.claims.items.properties.disposition.description;
+
+        assert.equal(claimEvidenceRefs.maxItems, AGENT_TERMINAL_LIMITS.maxEvidenceRefs);
+        assert.equal(claimEvidenceRefs.items.pattern, '^[DE]\\d+$');
 
         for (const category of [
             'observed_change',
@@ -242,8 +257,10 @@ describe('claim category visibility contract', () => {
         ]) {
             assert.match(categoryDescription, new RegExp(category));
         }
-        assert.match(categoryDescription, /D\*/);
-        assert.match(categoryDescription, /E\*/);
+        assert.match(categoryDescription, /observed_change:[^.]*diff alone[^.]*only D\*/);
+        assert.match(categoryDescription, /repository_fact:[^.]*repository tool result[^.]*(?:only E\*|E\*[^.]*only)/i);
+        assert.match(categoryDescription, /supported_inference:[^.]*D\* and\/or E\*[^.]*(?:requires|requiring) at least one/i);
+        assert.match(categoryDescription, /uncertain_inference:[^.]*empty evidenceRefs array[^.]*disposition "omit"/);
 
         assert.match(
             dispositionDescription,
@@ -256,6 +273,7 @@ describe('claim category visibility contract', () => {
     });
 
     it('repeats the four claim categories in the terminal contract prompt', () => {
+        // The terminal contract prompt must name every claim category before the model assembles the JSON object.
         const contract = buildTerminalContractLines().join('\n');
 
         for (const category of [
@@ -270,6 +288,7 @@ describe('claim category visibility contract', () => {
     });
 
     it('rejects observed_change without D* locally with an accurate field issue', () => {
+        // An observed change supported only by repository evidence must be rejected with the category-specific rule.
         const input = minimalTerminal({
             claims: [{
                 category: 'observed_change',

@@ -168,7 +168,7 @@ export function createChangeAnalysisProfile(
     return {
         id: 'change-analysis',
         // Cached prompt identities must not reuse the former UUID-based Memory contract.
-        promptVersion: '5',
+        promptVersion: '6',
         toolsetVersion: 'snapshot-memory-handles-3',
         requestType: 'investigation',
         finalName: 'changeAnalysisCompoundTerminal',

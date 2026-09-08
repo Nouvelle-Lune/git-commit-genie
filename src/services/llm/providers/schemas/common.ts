@@ -190,9 +190,9 @@ const findingEvidenceReferenceSchema = z.array(repositoryEvidenceIdSchema)
 
 const agentClaimSchema = z.object({
   category: z.enum(AGENT_CLAIM_CATEGORIES).describe(
-    'observed_change: stated by the diff alone, cites only D* ids. '
-    + 'repository_fact: learned from a repository tool result, requires at least one E* id. '
-    + 'supported_inference: a conclusion combining D* and/or E* evidence, requires at least one id. '
+    'observed_change: stated by the diff alone, cites only D* ids and no E* ids. '
+    + 'repository_fact: learned from a repository tool result, cites E* ids only and no D* ids. '
+    + 'supported_inference: a conclusion supported by one or more D* and/or E* evidence ids, requiring at least one id. '
     + 'uncertain_inference: unproven, must use an empty evidenceRefs array and disposition "omit".'
   ),
   claim: z.string().min(1),
@@ -243,11 +243,11 @@ export const changeAnalysisAgentFinalResponseSchema = z.object({
   investigation: z.object({
     findings: z.array(z.object({
       target: z.string().min(1).describe('An investigation plan target, copied exactly.'),
-      question: z.string().min(1),
-      answer: z.string().min(1).describe('What the repository evidence actually showed, not a restatement of the question.'),
+      question: z.string().min(1).describe('A planned question answered by a repository tool, not by the diff alone.'),
+      answer: z.string().min(1).describe('What the repository evidence actually showed, not a restatement of the question or a diff-only fact.'),
       evidenceRefs: findingEvidenceReferenceSchema,
     } as const)).max(AGENT_TERMINAL_LIMITS.maxFindings)
-      .describe('Only questions answered with repository evidence. An empty array is valid.'),
+      .describe('Only questions answered with repository evidence. Each finding requires 1 to 8 real E* ids; diff-only questions belong in unresolvedQuestions.'),
     unresolvedQuestions: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxUnresolvedQuestions)
       .describe('Planned questions the repository evidence could not answer. Leave them here instead of guessing.'),
     stopReason: z.string().min(1).describe('Why the investigation ended, in one sentence.'),
@@ -267,7 +267,8 @@ export const changeAnalysisAgentFinalResponseSchema = z.object({
     relatedConfigs: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
     relatedTypes: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
   } as const).describe('Names observed in evidence. Use empty arrays when nothing was observed.'),
-  claims: z.array(agentClaimSchema).max(AGENT_TERMINAL_LIMITS.maxClaims),
+  claims: z.array(agentClaimSchema).max(AGENT_TERMINAL_LIMITS.maxClaims)
+    .describe('Route evidenceRefs by category: observed_change=D* only, repository_fact=E* only, supported_inference=D*/E*, uncertain_inference=[] with disposition omit.'),
   behaviorAnalysis: z.object({
     before: z.string().nullable(),
     after: z.string().nullable(),
