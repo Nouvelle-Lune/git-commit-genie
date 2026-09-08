@@ -7,7 +7,7 @@ import type { CostQuote } from '../cost/costTypes';
 import { costQuoteToDisplay, formatCostQuoteLabel } from '../cost/costDisplay';
 import type { StageRawData } from '../../ui/StageNotificationManager';
 import { projectLogForWebview, stripRawData } from '../../ui/rawLogData';
-import { isRunningMemoryConsolidation } from '../../ui/memoryWebviewPolicy';
+import { isMemoryConsolidationLifecycleLog } from '../../ui/memoryWebviewPolicy';
 
 export enum LogLevel {
     Debug = 0,
@@ -183,11 +183,11 @@ export class Logger {
             if (Array.isArray(arr)) {
                 const recentLogs = arr.slice(-this.maxLogBuffer);
                 const containsRawData = recentLogs.some(entry => entry.rawData !== undefined);
-                // A consolidation cannot remain active across an extension-host restart.
-                // Preserve the diagnostic event while preventing it from reopening a spinner.
+                // Consolidation lifecycle rows belong to the previous host session.
+                // Preserve their diagnostics while preventing them from reopening current-session UI state.
                 this.logBuffer = recentLogs.map(stripRawData)
                     .filter(isCurrentPersistedLogEntry)
-                    .map(entry => isRunningMemoryConsolidation(entry)
+                    .map(entry => isMemoryConsolidationLifecycleLog(entry)
                         ? { ...entry, restoredFromPreviousSession: true }
                         : entry);
                 const discardedCount = recentLogs.length - this.logBuffer.length;

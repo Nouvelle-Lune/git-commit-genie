@@ -186,6 +186,41 @@ describe('pipeline display for parallel analysis events', () => {
         assert.match(presentation.description, /Provider unavailable/);
     });
 
+    it('parses consolidation retry attempt metadata and exposes every validation issue in details', () => {
+        // A retry memoryStep keeps its attempt bounds and complete issue list available for the expanded pipeline details view.
+        const payload = parseCommitStageLog(stage('memoryStep', {
+            current: 0,
+            trigger: 'manual',
+            status: 'validation-failed',
+            tool: 'consolidation-attempt',
+            operationId: 'operation-retry',
+            attempt: 1,
+            totalAttempts: 3,
+            issues: ['groups.0: result is missing.', 'groups.1.sourceIds: source is not supported.'],
+            summary: 'Memory consolidation attempt 1/3: 2 validation issues.',
+            ok: false,
+        }));
+        if (!payload) {
+            throw new Error('Expected a consolidation retry stage payload');
+        }
+
+        const presentation = presentPipelineEvent(payload);
+        assert.equal(presentation.tone, 'warning');
+        assert.deepEqual(presentation.metrics, []);
+        assert.equal(presentation.details?.kind, 'memoryStep');
+        if (presentation.details?.kind !== 'memoryStep') {
+            throw new Error('Expected memoryStep retry details');
+        }
+        assert.equal(presentation.details.attempt, 1);
+        assert.equal(presentation.details.totalAttempts, 3);
+        assert.deepEqual(presentation.details.issues, [
+            'groups.0: result is missing.',
+            'groups.1.sourceIds: source is not supported.',
+        ]);
+        assert.equal(presentation.details.trigger, 'manual');
+        assert.equal(presentation.details.status, 'validation-failed');
+    });
+
     it('renders a failed memory source validation with the evidence count in its details', () => {
         const presentation = presentPipelineEvent({
             stage: 'memoryStep',

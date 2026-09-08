@@ -1,7 +1,11 @@
 import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
 import { parseCommitStageLog, PipelineLogLike, presentPipelineEvent } from '../../ui/pipelineDisplay';
-import { filterMemoryLogsForWebview, isRunningMemoryConsolidation } from '../../ui/memoryWebviewPolicy';
+import {
+    filterMemoryLogsForWebview,
+    isRetryingMemoryConsolidation,
+    isRunningMemoryConsolidation,
+} from '../../ui/memoryWebviewPolicy';
 
 describe('Memory Webview log policy', () => {
     it('keeps active consolidation alongside non-Memory logs and preserves their order', () => {
@@ -81,7 +85,8 @@ describe('Memory Webview log policy', () => {
         assert.equal(isRunningMemoryConsolidation(running), true);
     });
 
-    it('removes an active row after its matching terminal event without removing unrelated logs', () => {
+    it('replaces an active row with its matching published terminal event without removing unrelated logs', () => {
+        // The current contract keeps the published terminal row in original order and hides only its matching running row.
         const running = stage('running', 'memoryStep', {
             current: 0,
             tool: 'consolidate',
@@ -127,13 +132,80 @@ describe('Memory Webview log policy', () => {
         ];
 
         assert.deepEqual(filterMemoryLogsForWebview(afterTerminal).map(log => log.id), [
-            'before', 'between', 'after',
+            'before', 'between', 'other-terminal', 'matching-terminal', 'after',
         ]);
         assert.equal(isRunningMemoryConsolidation(afterTerminal[1]), true);
         assert.equal(isRunningMemoryConsolidation(matchingTerminal), false);
     });
 
-    it('does not close a running operation for a budget event or another operation terminal', () => {
+    it('replaces a running operation with a matching failed terminal event', () => {
+        // A failed terminal status is visible for the current session and replaces only the running row with the same operationId.
+        const logs = [
+            ordinary('before'),
+            stage('running', 'memoryStep', {
+                current: 0,
+                tool: 'consolidate',
+                trigger: 'manual',
+                status: 'running',
+                operationId: 'operation-failed',
+                label: 'Organizing memory',
+                summary: 'Organizing memory',
+                ok: true,
+            }),
+            stage('failed', 'memoryStep', {
+                current: 0,
+                tool: 'consolidate',
+                trigger: 'manual',
+                status: 'failed',
+                operationId: 'operation-failed',
+                summary: 'Provider unavailable.',
+                ok: false,
+            }),
+            ordinary('after'),
+        ];
+
+        assert.deepEqual(filterMemoryLogsForWebview(logs).map(log => log.id), [
+            'before', 'failed', 'after',
+        ]);
+        assert.equal(isRunningMemoryConsolidation(logs[1]), true);
+        assert.equal(isRunningMemoryConsolidation(logs[2]), false);
+    });
+
+    it('replaces a running operation with a matching cancelled terminal event', () => {
+        // A cancelled terminal status remains visible for the current session while its matching running row is hidden.
+        const logs = [
+            ordinary('before'),
+            stage('running', 'memoryStep', {
+                current: 0,
+                tool: 'consolidate',
+                trigger: 'manual',
+                status: 'running',
+                operationId: 'operation-cancelled',
+                label: 'Organizing memory',
+                summary: 'Organizing memory',
+                ok: true,
+            }),
+            stage('cancelled', 'memoryStep', {
+                current: 0,
+                tool: 'consolidate',
+                trigger: 'manual',
+                status: 'cancelled',
+                operationId: 'operation-cancelled',
+                summary: 'Consolidation cancelled.',
+                ok: true,
+            }),
+            ordinary('after'),
+        ];
+
+        assert.deepEqual(filterMemoryLogsForWebview(logs).map(log => log.id), [
+            'before', 'cancelled', 'after',
+        ]);
+        assert.equal(isRunningMemoryConsolidation(logs[1]), true);
+        assert.equal(isRunningMemoryConsolidation(logs[2]), false);
+    });
+
+    it('keeps a running operation open for hidden preflight data and a different operation terminal', () => {
+        // Only a published, failed, or cancelled terminal with the same operationId may close the running row.
         const running = stage('running', 'memoryStep', {
             current: 0,
             tool: 'consolidate',
@@ -166,10 +238,11 @@ describe('Memory Webview log policy', () => {
             }),
         ];
 
-        assert.deepEqual(filterMemoryLogsForWebview(logs).map(log => log.id), ['running']);
+        assert.deepEqual(filterMemoryLogsForWebview(logs).map(log => log.id), ['running', 'other-terminal']);
     });
 
-    it('hides preflight outcomes and other Memory operations without a task operationId', () => {
+    it('hides preflight outcomes, non-terminal consolidation results, and other Memory operations', () => {
+        // Low-level maintenance and preflight states remain hidden even when they carry an operationId or use a familiar result status.
         const logs = [
             ordinary('first'),
             stage('running-without-id', 'memoryStep', {
@@ -188,6 +261,19 @@ describe('Memory Webview log policy', () => {
             stage('memory-disabled', 'memoryStep', {
                 current: 0, tool: 'consolidate', trigger: 'manual', status: 'memory-disabled', ok: true,
             }),
+            stage('partial', 'memoryStep', {
+                current: 0, tool: 'consolidate', trigger: 'manual', status: 'partial', operationId: 'hidden-partial', ok: true,
+            }),
+            stage('no-findings', 'memoryStep', {
+                current: 0, tool: 'consolidate', trigger: 'manual', status: 'no-findings', operationId: 'hidden-no-findings', ok: true,
+            }),
+            stage('budget-exhausted', 'memoryStep', {
+                current: 0, tool: 'consolidate', trigger: 'manual', status: 'budget-exhausted', operationId: 'hidden-budget', ok: true,
+            }),
+            stage('validated', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validated', operationId: 'hidden-validated',
+                attempt: 1, totalAttempts: 1, issues: [], ok: true,
+            }),
             stage('management', 'memoryStep', {
                 current: 0, tool: 'clear', trigger: 'manual', status: 'completed', ok: true,
             }),
@@ -198,6 +284,113 @@ describe('Memory Webview log policy', () => {
         for (const log of logs.slice(1, -1)) {
             assert.equal(isRunningMemoryConsolidation(log), false);
         }
+    });
+
+    it('keeps a validation-failed consolidation attempt only when another request is scheduled', () => {
+        // A validation failure with complete identity and attempt metadata is the only consolidation-attempt row exposed as a retry.
+        const retry = stage('retry', 'memoryStep', {
+            current: 0,
+            tool: 'consolidation-attempt',
+            trigger: 'manual',
+            status: 'validation-failed',
+            operationId: 'operation-retry',
+            attempt: 1,
+            totalAttempts: 2,
+            issues: ['groups.0: result is missing.'],
+            ok: false,
+        });
+
+        assert.equal(isRetryingMemoryConsolidation(retry), true);
+        assert.deepEqual(filterMemoryLogsForWebview([ordinary('before'), retry, ordinary('after')]).map(log => log.id), [
+            'before', 'retry', 'after',
+        ]);
+        assert.equal(isRunningMemoryConsolidation(retry), false);
+    });
+
+    it('hides final, validated, incomplete, and incomplete-metadata consolidation attempts from retry display', () => {
+        // Final validation failures, non-retry statuses, and incomplete operation or issue metadata must never appear as retry rows.
+        const attempts = [
+            stage('final-validation-failed', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validation-failed', operationId: 'final',
+                attempt: 2, totalAttempts: 2, issues: ['final issue'], ok: false,
+            }),
+            stage('validated', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validated', operationId: 'validated',
+                attempt: 1, totalAttempts: 2, issues: [], ok: true,
+            }),
+            stage('response-incomplete', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'response-incomplete', operationId: 'incomplete',
+                attempt: 1, totalAttempts: 2, issues: ['Response stopped without completing.'], ok: false,
+            }),
+            stage('missing-operation-id', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validation-failed',
+                attempt: 1, totalAttempts: 2, issues: ['missing operation'], ok: false,
+            }),
+            stage('missing-attempt', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validation-failed', operationId: 'missing-attempt',
+                totalAttempts: 2, issues: ['missing attempt'], ok: false,
+            }),
+            stage('missing-total-attempts', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validation-failed', operationId: 'missing-total',
+                attempt: 1, issues: ['missing total attempts'], ok: false,
+            }),
+            stage('empty-operation-id', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validation-failed', operationId: '',
+                attempt: 1, totalAttempts: 2, issues: ['empty operation'], ok: false,
+            }),
+            stage('blank-operation-id', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validation-failed', operationId: '   ',
+                attempt: 1, totalAttempts: 2, issues: ['blank operation'], ok: false,
+            }),
+            stage('missing-issues', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validation-failed', operationId: 'missing-issues',
+                attempt: 1, totalAttempts: 2, ok: false,
+            }),
+            stage('empty-issues', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validation-failed', operationId: 'empty-issues',
+                attempt: 1, totalAttempts: 2, issues: [], ok: false,
+            }),
+            stage('invalid-issues', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validation-failed', operationId: 'invalid-issues',
+                attempt: 1, totalAttempts: 2, issues: ['valid issue', '  '], ok: false,
+            }),
+        ];
+
+        for (const attempt of attempts) {
+            assert.equal(isRetryingMemoryConsolidation(attempt), false, attempt.id);
+        }
+        assert.deepEqual(filterMemoryLogsForWebview(attempts).map(log => log.id), []);
+    });
+
+    it('hides restored running, retry, and terminal consolidation rows', () => {
+        // Persisted rows from a previous session cannot reopen a spinner, retry diagnostic, or terminal result in the current session.
+        const restoredRunning = {
+            ...stage('restored-running', 'memoryStep', {
+                current: 0, tool: 'consolidate', trigger: 'manual', status: 'running', operationId: 'restored-operation',
+                label: 'Organizing memory', summary: 'Organizing memory', ok: true,
+            }),
+            restoredFromPreviousSession: true,
+        };
+        const restoredRetry = {
+            ...stage('restored-retry', 'memoryStep', {
+                current: 0, tool: 'consolidation-attempt', trigger: 'manual', status: 'validation-failed', operationId: 'restored-operation',
+                attempt: 1, totalAttempts: 2, issues: ['retry issue'], ok: false,
+            }),
+            restoredFromPreviousSession: true,
+        };
+        const restoredTerminal = {
+            ...stage('restored-terminal', 'memoryStep', {
+                current: 0, tool: 'consolidate', trigger: 'manual', status: 'failed', operationId: 'restored-operation',
+                summary: 'Provider unavailable.', ok: false,
+            }),
+            restoredFromPreviousSession: true,
+        };
+        const logs = [ordinary('before'), restoredRunning, restoredRetry, restoredTerminal, ordinary('after')];
+
+        assert.deepEqual(filterMemoryLogsForWebview(logs).map(log => log.id), ['before', 'after']);
+        assert.equal(isRunningMemoryConsolidation(restoredRunning), false);
+        assert.equal(isRetryingMemoryConsolidation(restoredRetry), false);
+        assert.equal(isRunningMemoryConsolidation(restoredTerminal), false);
     });
 });
 

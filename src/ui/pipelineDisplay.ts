@@ -567,7 +567,7 @@ export type PipelineEventDetails =
     | { kind: 'investigationPlanned'; targets: string[]; targetCount: number; questionCount: number }
     | { kind: 'investigationStart'; maxSteps: number }
     | { kind: 'investigationStep'; current: number; total: number; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number }
-    | { kind: 'memoryStep'; current: number; total?: number; trigger?: string; status?: string; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number; sourceStatuses?: string[] }
+    | { kind: 'memoryStep'; current: number; total?: number; trigger?: string; status?: string; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number; sourceStatuses?: string[]; attempt?: number; totalAttempts?: number; issues?: string[] }
     | { kind: 'investigationComplete'; steps: number; evidenceCount: number }
     | { kind: 'investigationResolved'; findingCount: number; unresolvedCount: number; reason: string }
     | { kind: 'investigationSkipped'; reason: string }
@@ -966,7 +966,8 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
                 ...(asString(data.summary) ? { summary: asString(data.summary) } : {}),
                 ...(asNumber(data.evidenceCount) !== undefined ? { evidenceCount: asNumber(data.evidenceCount) } : {}),
             };
-        case 'memoryStep':
+        case 'memoryStep': {
+            const hasAttemptDetails = data.attempt !== undefined || data.totalAttempts !== undefined || data.issues !== undefined;
             return {
                 kind: stage,
                 current: requireNumberField(data, stage, 'current'),
@@ -979,7 +980,13 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
                 ...(asString(data.summary) ? { summary: asString(data.summary) } : {}),
                 ...(asNumber(data.evidenceCount) !== undefined ? { evidenceCount: asNumber(data.evidenceCount) } : {}),
                 ...(Array.isArray(data.sourceStatuses) ? { sourceStatuses: asFullStringList(data.sourceStatuses, stage, 'sourceStatuses') } : {}),
+                ...(hasAttemptDetails ? {
+                    attempt: requireNumberField(data, stage, 'attempt'),
+                    totalAttempts: requireNumberField(data, stage, 'totalAttempts'),
+                    issues: asFullStringList(data.issues, stage, 'issues'),
+                } : {}),
             };
+        }
         case 'investigationComplete':
             return {
                 kind: 'investigationComplete',

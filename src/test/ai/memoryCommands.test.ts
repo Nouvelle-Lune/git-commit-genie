@@ -21,15 +21,13 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('describes every structured consolidation outcome for user notifications', () => {
+        // Published output keeps only group and handbook counts, while partial and no-findings outputs retain their statistics.
         const published = describeConsolidationResult({
             status: 'published', groupCount: 5, handbookCount: 2, noFindingCount: 1, failedGroupCount: 0,
             skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 1,
             groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }],
         });
-        assert.match(published, /Consolidated 5 evidence groups into 2 handbook entries/);
-        assert.match(published, /1 groups had no stable findings/);
-        assert.match(published, /1 were deferred/);
-        assert.match(published, /1 retries/);
+        assert.equal(published, 'Consolidated 5 evidence groups into 2 handbook entries;');
         const partial = describeConsolidationResult({
             status: 'partial', groupCount: 2, handbookCount: 1, noFindingCount: 0, failedGroupCount: 1,
             skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 2,
@@ -39,7 +37,9 @@ describe('MemoryCommands repository maintenance', () => {
             ],
         });
         assert.match(partial, /Partially consolidated 2 evidence groups into 1 handbook entries/);
+        assert.match(partial, /0 groups had no stable findings/);
         assert.match(partial, /1 failed validation/);
+        assert.match(partial, /1 were deferred/);
         assert.match(partial, /2 retries/);
         const noFindings = describeConsolidationResult({
             status: 'no-findings', groupCount: 1, skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 1,
@@ -330,12 +330,13 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('surfaces every consolidation result and releases its spinner before notifying the user', async () => {
+        // The management command forwards the short published description and preserves the notification lifecycle for every outcome.
         const outcomes: Array<{ result: any; expected: RegExp }> = [
             { result: {
                 status: 'published', groupCount: 5, handbookCount: 2, noFindingCount: 1, failedGroupCount: 0,
                 skippedGroups: 0, deferredPaths: [], retryCount: 0,
                 groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }],
-            }, expected: /Consolidated 5 evidence groups into 2 handbook entries/ },
+            }, expected: /^Consolidated 5 evidence groups into 2 handbook entries;$/ },
             { result: { status: 'partial', groupCount: 2, handbookCount: 1, noFindingCount: 0, failedGroupCount: 1,
                 skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 1,
                 groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }, { path: 'src/client.ts', status: 'failed' }] }, expected: /Partially consolidated 2 evidence groups/ },

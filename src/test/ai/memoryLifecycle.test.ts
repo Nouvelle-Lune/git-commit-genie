@@ -507,6 +507,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('logs the complete response diagnostics for an incomplete consolidation attempt before failing', async () => {
+        // The response-incomplete attempt is not a retry, but its display payload must still carry complete attempt diagnostics.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: true, consolidationEnabled: true }, async () => {
                 const repositoryId = 'c'.repeat(64);
@@ -554,10 +555,14 @@ describe('repository memory lifecycle', function () {
                     });
                     assert.ok(attemptCall, 'the attempt callback must be persisted before termination');
                     const payload = JSON.parse(String(attemptCall!.args[1])) as {
-                        data?: { status?: string; ok?: boolean };
+                        data?: { status?: string; ok?: boolean; attempt?: number; totalAttempts?: number; issues?: unknown[] };
                     };
                     assert.equal(payload.data?.status, 'response-incomplete');
                     assert.equal(payload.data?.ok, false);
+                    assert.equal(payload.data?.attempt, 1);
+                    assert.equal(payload.data?.totalAttempts, 1);
+                    assert.ok(Array.isArray(payload.data?.issues));
+                    assert.ok((payload.data?.issues?.length ?? 0) > 0);
                     const rawData = attemptCall!.args[4] as {
                         output?: { details?: { response?: unknown; issues?: unknown[] } };
                     };
@@ -570,6 +575,49 @@ describe('repository memory lifecycle', function () {
                 }
             });
         });
+    });
+
+    it('records validation-failed attempt metadata before a successful consolidation retry', async () => {
+        // A validation failure before the final attempt must report attempt less than totalAttempts before the successful retry.
+        let sessionRuns = 0;
+        const attempts: Array<{ attempt: number; totalAttempts: number; issues: string[] }> = [];
+        const execution = makeExecution(16_000, {
+            maxRetries: 1,
+            createSession: () => ({
+                run: async (): Promise<any> => {
+                    sessionRuns += 1;
+                    return {
+                        text: '',
+                        structured: {},
+                        toolCalls: [],
+                        usage: { inputTokens: 1, outputTokens: 1 },
+                        stopReason: 'completed' as const,
+                        continuation: { serverManaged: false },
+                        raw: {},
+                    };
+                },
+            }) as any,
+            accountCall: async () => ({ status: 'usage-not-reported' as const }),
+        });
+        const runner = createConsolidationRunner(execution, undefined, (attempt, totalAttempts, issues) => {
+            attempts.push({ attempt, totalAttempts, issues });
+        });
+
+        const result = await runner('{}', new AbortController().signal, () => ({
+            entries: [],
+            processedGroupIds: [],
+            findingGroupIds: [],
+            noFindingGroupIds: [],
+            issues: sessionRuns === 1 ? ['groups.0: result is missing.'] : [],
+        }));
+
+        assert.equal(result.attempts, 2);
+        assert.equal(sessionRuns, 2);
+        assert.deepEqual(attempts, [
+            { attempt: 1, totalAttempts: 2, issues: ['groups.0: result is missing.'] },
+            { attempt: 2, totalAttempts: 2, issues: [] },
+        ]);
+        assert.ok(attempts[0].attempt < attempts[0].totalAttempts);
     });
 
     it('reuses execution-bound thinking for consolidation and never puts thinking on the run request', async () => {

@@ -26,7 +26,7 @@ export type MemoryCancellation = 'nothing-to-cancel' | 'scheduled-cancelled' | '
 /** Keep menu notifications and background Webview outcomes equally actionable. */
 export function describeConsolidationResult(result: ConsolidationResult): string {
     switch (result.status) {
-        case 'published': return vscode.l10n.t('Consolidated {0} evidence groups into {1} handbook entries; {2} groups had no stable findings, {3} were deferred by the input budget, and validation used {4} retries.', result.groupCount, result.handbookCount, result.noFindingCount, result.skippedGroups, result.retryCount);
+        case 'published': return vscode.l10n.t('Consolidated {0} evidence groups into {1} handbook entries;', result.groupCount, result.handbookCount);
         case 'partial': return vscode.l10n.t('Partially consolidated {0} evidence groups into {1} handbook entries; {2} groups had no stable findings, {3} failed validation, {4} were deferred by the input budget, and validation used {5} retries.', result.groupCount, result.handbookCount, result.noFindingCount, result.failedGroupCount, result.skippedGroups, result.retryCount);
         case 'no-findings': return vscode.l10n.t('Checked {0} evidence groups and found no stable cross-snapshot concerns; {1} groups were deferred by the input budget and validation used {2} retries.', result.groupCount, result.skippedGroups, result.retryCount);
         case 'not-ready': return vscode.l10n.t('Consolidation not run: the strongest pending evidence group has {0}/{1} independent snapshots.', result.pendingCount, result.threshold);
@@ -39,9 +39,16 @@ export function describeConsolidationResult(result: ConsolidationResult): string
     }
 }
 
+/** Presentation-only fields identify a scheduled retry without exposing provider response data. */
+interface MemoryConsolidationAttemptDisplay {
+    attempt: number;
+    totalAttempts: number;
+    issues: string[];
+}
+
 /** Operations share the Webview's memory lane, including manual and automatic maintenance. */
 export function logMemoryOperation(root: string, operation: string, trigger: MemoryTrigger, status: string, summary: string,
-    details: unknown = {}, operationId?: string): void {
+    details: unknown = {}, operationId?: string, attempt?: MemoryConsolidationAttemptDisplay): void {
     const labels: Record<string, string> = {
         inspect: vscode.l10n.t('Inspect episodes and handbook'), delete: vscode.l10n.t('Delete selected episodes'),
         clear: vscode.l10n.t('Clear repository memory'), rebuild: vscode.l10n.t('Rebuild memory index'), consolidate: vscode.l10n.t('Consolidate pending episodes'),
@@ -53,10 +60,17 @@ export function logMemoryOperation(root: string, operation: string, trigger: Mem
         type: 'memoryStep', data: {
             current: 0, tool: operation, trigger, status,
             summary, ok: status !== 'failed' && status !== 'validation-failed' && status !== 'response-incomplete',
-            label: operation === 'consolidate' && status === 'running'
+            label: (operation === 'consolidate' && status === 'running') || operation === 'consolidation-attempt'
                 ? summary
                 : vscode.l10n.t('Repository Memory: {0}', labels[operation]),
             ...(operationId ? { operationId } : {}),
+            // Keep retry identity in the presentation payload; raw provider
+            // responses remain debug-only and are not needed to render the row.
+            ...(attempt ? {
+                attempt: attempt.attempt,
+                totalAttempts: attempt.totalAttempts,
+                issues: attempt.issues,
+            } : {}),
         },
         rawData: { input: { operation, trigger }, output: { status, details } }
     });
@@ -283,7 +297,8 @@ export class RepositoryMemoryService implements vscode.Disposable {
                     : issues.length ? vscode.l10n.t('{0} validation issues', issues.length) : vscode.l10n.t('validated');
                 logMemoryOperation(root, 'consolidation-attempt', trigger, status,
                     vscode.l10n.t('Memory consolidation attempt {0}/{1}: {2}.', attempt, totalAttempts, outcome),
-                    { model: execution.model, inputFingerprint, attempt, totalAttempts, issues, response }, operationId);
+                    { model: execution.model, inputFingerprint, attempt, totalAttempts, issues, response }, operationId,
+                    { attempt, totalAttempts, issues });
             });
 
             logMemoryOperation(root, 'consolidation-budget', trigger, 'ready', vscode.l10n.t('Memory consolidation input budget: {0} tokens.', runner.maxInputTokens),

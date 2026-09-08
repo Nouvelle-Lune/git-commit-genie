@@ -430,7 +430,7 @@
 	"Automatic consolidation paused globally. Recording, retrieval and manual consolidation remain available; existing memory is preserved.": "已全域暫停自動整理；記錄、檢索和手動整理仍可用，既有記憶保留。",
 	"Repository Memory enabled globally. Existing data is preserved.": "已全域啟用儲存庫記憶，既有資料保留。",
 	"Repository Memory disabled globally. Recording, retrieval and consolidation stopped; existing data is preserved.": "已全域關閉儲存庫記憶；停止記錄、檢索和整理，既有資料保留。",
-	"Consolidated {0} evidence groups into {1} handbook entries; {2} groups had no stable findings, {3} were deferred by the input budget, and validation used {4} retries.": "已整理 {0} 個證據組並產生 {1} 條手冊項目；{2} 個組沒有穩定結論，{3} 個組因輸入預算延期，驗證使用了 {4} 次重試。",
+	"Consolidated {0} evidence groups into {1} handbook entries;": "已整理 {0} 個證據組並產生 {1} 條手冊項目；",
 	"Partially consolidated {0} evidence groups into {1} handbook entries; {2} groups had no stable findings, {3} failed validation, {4} were deferred by the input budget, and validation used {5} retries.": "已部分整理 {0} 個證據組並產生 {1} 條手冊項目；{2} 個組沒有穩定結論，{3} 個組驗證失敗，{4} 個組因輸入預算延期，驗證使用了 {5} 次重試。",
 	"Checked {0} evidence groups and found no stable cross-snapshot concerns; {1} groups were deferred by the input budget and validation used {2} retries.": "已檢查 {0} 個證據組，未發現穩定的跨快照關注點；{1} 個組因輸入預算延期，驗證使用了 {2} 次重試。",
 	"Consolidation not run: the strongest pending evidence group has {0}/{1} independent snapshots.": "未執行整理：證據最充分的待處理組只有 {0}/{1} 個獨立快照。",

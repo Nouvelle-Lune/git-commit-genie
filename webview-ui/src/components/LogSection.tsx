@@ -7,7 +7,7 @@ import { GenieCheckIcon, GenieCloudIcon, GenieReadIcon, GenieReasonIcon, GenieTo
 import { formatPipelineText, parseCommitStageLog, pipelineStageBadge, presentPipelineEvent, presentStructuredValidationLog } from '../../../src/ui/pipelineDisplay';
 import { PipelineLogDetails } from './PipelineLogDetails';
 import { isApiRequestLog } from '../../../src/ui/apiLogPolicy';
-import { filterMemoryLogsForWebview, isRunningMemoryConsolidation } from '../../../src/ui/memoryWebviewPolicy';
+import { filterMemoryLogsForWebview, isRetryingMemoryConsolidation, isRunningMemoryConsolidation } from '../../../src/ui/memoryWebviewPolicy';
 // @ts-ignore - react-markdown types
 import ReactMarkdown from 'react-markdown';
 
@@ -257,7 +257,7 @@ export const LogSection: React.FC = () => {
     };
 
     const isFailureLog = (log: LogEntry) => {
-        if (isValidationRetryLog(log)) return false;
+        if (isValidationRetryLog(log) || isRetryingMemoryConsolidation(log)) return false;
         if (isStructuredValidationLogEntry(log)) return true;
         if (getPipelinePresentation(log)?.tone === 'warning') return true;
         const t = (log.title || '').toLowerCase();
@@ -381,6 +381,9 @@ export const LogSection: React.FC = () => {
 
             // Commit generation stages
             if (title.includes('Commit stage:')) {
+                if (isRetryingMemoryConsolidation(log)) {
+                    return { label: 'RTY', className: 'stage-badge-validation' };
+                }
                 return pipelineStageBadge(parseCommitStageLog(log)!.stage);
             }
 

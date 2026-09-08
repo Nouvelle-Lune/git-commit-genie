@@ -2,7 +2,11 @@ import { strict as assert } from 'assert';
 import * as vscode from 'vscode';
 import { afterEach, beforeEach, describe, it } from 'mocha';
 import { Logger } from '../../services/logger/logger';
-import { filterMemoryLogsForWebview, isRunningMemoryConsolidation } from '../../ui/memoryWebviewPolicy';
+import {
+    filterMemoryLogsForWebview,
+    isRetryingMemoryConsolidation,
+    isRunningMemoryConsolidation,
+} from '../../ui/memoryWebviewPolicy';
 import { LogEntry, LogType } from '../../ui/types/messages';
 
 describe('persisted Memory Webview logs', () => {
@@ -17,6 +21,7 @@ describe('persisted Memory Webview logs', () => {
     });
 
     it('preserves an orphaned running consolidation as restored diagnostics without rewriting storage', async () => {
+        // Reloaded running, retry, and published lifecycle rows are marked restored and remain hidden without updating persisted state.
         const persisted = [
             ordinary('ordinary-before'),
             memoryStage('memory-running', {
@@ -28,6 +33,18 @@ describe('persisted Memory Webview logs', () => {
                 label: 'Organizing memory',
                 summary: 'Organizing memory',
                 ok: true,
+            }),
+            memoryStage('memory-retry', {
+                current: 0,
+                tool: 'consolidation-attempt',
+                trigger: 'manual',
+                status: 'validation-failed',
+                operationId: 'completed-operation',
+                attempt: 1,
+                totalAttempts: 2,
+                issues: ['groups.0: result is missing.'],
+                summary: 'Memory consolidation attempt 1/2: 1 validation issue.',
+                ok: false,
             }),
             memoryStage('memory-terminal', {
                 current: 0,
@@ -63,12 +80,20 @@ describe('persisted Memory Webview logs', () => {
 
         const buffer = (logger as any).logBuffer as LogEntry[];
         assert.deepEqual(buffer.map(log => log.id), [
-            'ordinary-before', 'memory-running', 'memory-terminal', 'memory-search', 'memory-budget', 'ordinary-after',
+            'ordinary-before', 'memory-running', 'memory-retry', 'memory-terminal', 'memory-search', 'memory-budget', 'ordinary-after',
         ]);
         const restoredRunning = buffer.find(log => log.id === 'memory-running');
+        const restoredRetry = buffer.find(log => log.id === 'memory-retry');
+        const restoredTerminal = buffer.find(log => log.id === 'memory-terminal');
         assert.ok(restoredRunning);
+        assert.ok(restoredRetry);
+        assert.ok(restoredTerminal);
         assert.equal(restoredRunning.restoredFromPreviousSession, true);
+        assert.equal(restoredRetry.restoredFromPreviousSession, true);
+        assert.equal(restoredTerminal.restoredFromPreviousSession, true);
         assert.equal(isRunningMemoryConsolidation(restoredRunning), false);
+        assert.equal(isRetryingMemoryConsolidation(restoredRetry), false);
+        assert.equal(isRunningMemoryConsolidation(restoredTerminal), false);
         assert.deepEqual(filterMemoryLogsForWebview(buffer).map(log => log.id), [
             'ordinary-before', 'ordinary-after',
         ]);

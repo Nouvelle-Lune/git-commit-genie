@@ -202,10 +202,17 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
                         { label: text.metricTrigger, value: <SemanticTag value={details.trigger} /> },
                         { label: text.detailStatus, value: <SemanticTag value={details.status!} /> },
                     ] : []),
+                    ...(details.kind === 'memoryStep' && details.attempt !== undefined ? [
+                        { label: text.detailAttempt, value: String(details.attempt) },
+                        { label: text.detailTotalAttempts, value: String(details.totalAttempts) },
+                    ] : []),
                     { label: text.detailSuccess, value: details.ok ? text.detailYes : text.detailNo },
                     ...(details.reason ? [{ label: text.detailReason, value: details.reason }] : []),
                     ...(details.summary ? [{ label: text.detailSummary, value: <DetailProse>{details.summary}</DetailProse> }] : []),
                     ...(details.evidenceCount !== undefined ? [{ label: text.detailEvidence, value: String(details.evidenceCount) }] : []),
+                    ...(details.kind === 'memoryStep' && details.issues?.length ? [
+                        { label: text.detailFieldIssues, value: <StringList items={details.issues} emptyLabel={text.detailEmptyList} /> },
+                    ] : []),
                     ...(details.kind === 'memoryStep' && details.sourceStatuses?.length
                         ? [{ label: text.detailStatus, value: details.sourceStatuses.map((status, index) => (
                             <React.Fragment key={`${status}-${index}`}>
