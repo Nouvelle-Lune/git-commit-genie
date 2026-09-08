@@ -96,6 +96,10 @@ describe('MemoryCommands repository maintenance', () => {
                 assert.equal(items.every(item => typeof item.description === 'string' && item.description.trim().length > 0), true);
                 assert.equal(items.every(item => !Object.prototype.hasOwnProperty.call(item, 'detail')), true);
             }
+            const recheck = seenMenus[0].find(item => item.id === 'recheck');
+            assert.ok(recheck);
+            assert.equal(recheck.description, 'Run the model again for evidence groups already checked with no source changes.');
+            assert.doesNotMatch(recheck.description, /API charges apply/);
             for (const options of seenOptions) {
                 assert.equal(options?.matchOnDescription, true);
                 assert.equal(options?.matchOnDetail, undefined);
@@ -316,7 +320,7 @@ describe('MemoryCommands repository maintenance', () => {
         assert.match(report, /after parser excerpt/);
         assert.match(report, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/);
         assert.doesNotMatch(report, /<script>alert/);
-        assert.match(report, /This excerpt was already truncated when the record was created\./);
+        assert.doesNotMatch(report, /This excerpt was already truncated when the record was created\./);
         assert.match(report, /Technical information/);
         assert.match(report, /Investigation ID/);
         assert.match(report, /Evidence ID/);

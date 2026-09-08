@@ -55,9 +55,6 @@ function renderEvidenceRecord(trace: RecheckEvidenceTrace, index: number): strin
     const excerpt = source.excerpt
         ? `<pre><code>${escapeHtml(source.excerpt)}</code></pre>`
         : `<p class="empty">${escapeHtml(vscode.l10n.t('No excerpt was saved for this record.'))}</p>`;
-    const truncated = source.truncated
-        ? `<p class="warning">${escapeHtml(vscode.l10n.t('This excerpt was already truncated when the record was created.'))}</p>`
-        : '';
     const versionLabel = source.side === 'before'
         ? vscode.l10n.t('Recorded before the change')
         : vscode.l10n.t('Recorded after the change');
@@ -75,7 +72,6 @@ function renderEvidenceRecord(trace: RecheckEvidenceTrace, index: number): strin
             <div class="evidence-body">
                 <h4>${escapeHtml(vscode.l10n.t('Saved excerpt'))}</h4>
                 ${excerpt}
-                ${truncated}
                 <details class="technical-details">
                     <summary>${escapeHtml(vscode.l10n.t('Technical information'))}</summary>
                     <dl>
@@ -403,7 +399,7 @@ export class MemoryCommands {
             { label: vscode.l10n.t('Clear repository memory'), id: 'clear', description: vscode.l10n.t('Permanently delete all memory in this repository and its shared worktrees.') },
             { label: vscode.l10n.t('Rebuild memory index'), id: 'rebuild', description: vscode.l10n.t('Rebuild the search index from saved investigation records.') },
             { label: vscode.l10n.t('Organize pending records'), id: 'consolidate', description: vscode.l10n.t('Organize pending records and update memory.') },
-            { label: vscode.l10n.t('Recheck organized evidence'), id: 'recheck', description: vscode.l10n.t('Run the model again for evidence groups already checked with no source changes; API charges apply.') },
+            { label: vscode.l10n.t('Recheck organized evidence'), id: 'recheck', description: vscode.l10n.t('Run the model again for evidence groups already checked with no source changes.') },
             { label: vscode.l10n.t('Cancel background organization'), id: 'cancel', description: vscode.l10n.t('Cancel queued or active memory organization.') },
             { label: config.get<boolean>('consolidation.enabled', true) ? vscode.l10n.t('Pause automatic organization') : vscode.l10n.t('Resume automatic organization'), id: 'pause', description: config.get<boolean>('consolidation.enabled', true) ? vscode.l10n.t('Pause automatic memory organization.') : vscode.l10n.t('Resume automatic memory organization.') },
             { label: config.get<boolean>('enabled', false) ? vscode.l10n.t('Disable repository memory') : vscode.l10n.t('Enable repository memory'), id: 'toggle', description: config.get<boolean>('enabled', false) ? vscode.l10n.t('Disable: stop recording, search, and organization; existing memory stays.') : vscode.l10n.t('Enable: resume recording, search, and organization.') },
