@@ -701,8 +701,9 @@ function makeEligibleEpisodes(repositoryId: string, count: number): Investigatio
 }
 
 function successfulConsolidationResponse(request: AIRunRequest): any {
+    // Build a finding for every supplied G* group from its first two projected S* handles.
     const input = JSON.parse(String(request.messages?.find(message => message.role === 'user')?.content ?? '{}')) as {
-        groups: Array<{ id: string; sources: Array<{ id: string }> }>;
+        groups: Array<{ id: string; snapshots: Array<{ sources: Array<{ id: string }> }> }>;
     };
     return {
         text: '',
@@ -713,7 +714,7 @@ function successfulConsolidationResponse(request: AIRunRequest): any {
                 rationale: 'The repeated sources support a stable concern.',
                 concerns: [{
                     text: 'The parser state may be observed before publication.',
-                    sourceIds: group.sources.slice(0, 2).map(source => source.id),
+                    sourceIds: group.snapshots.flatMap(snapshot => snapshot.sources).slice(0, 2).map(source => source.id),
                 }],
             })),
         },

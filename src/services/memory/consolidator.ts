@@ -16,6 +16,12 @@ interface GroupSource {
     tool: string;
 }
 
+interface ConsolidationSourceRef {
+    groupId: string;
+    snapshot: string;
+    value: GroupSource;
+}
+
 export interface ConsolidationGroup {
     id: string;
     fingerprint: string;
@@ -26,7 +32,7 @@ export interface ConsolidationGroup {
 export interface ConsolidationProjection {
     input: string;
     groups: ConsolidationGroup[];
-    sources: Map<string, { groupId: string; value: GroupSource }>;
+    sources: Map<string, ConsolidationSourceRef>;
 }
 
 export interface ConsolidationValidation {
@@ -94,18 +100,15 @@ export function buildConsolidationGroups(episodes: InvestigationEpisode[], compl
 
 /** The model sees bounded local handles and evidence, never persistent episode identifiers. */
 export function projectConsolidation(groups: ConsolidationGroup[]): ConsolidationProjection {
-    const sources = new Map<string, { groupId: string; value: GroupSource }>();
+    const sources = new Map<string, ConsolidationSourceRef>();
     const snapshotIds = [...new Set(groups.flatMap(group => group.sources.map(source => source.episode.snapshot.id)))];
-    const projected = groups.map(group => ({
-        id: group.id,
-        anchorPath: group.anchorPath,
-        independentSnapshots: new Set(group.sources.map(source => source.episode.snapshot.id)).size,
-        sources: group.sources.map(source => {
+    const projected = groups.map(group => {
+        const sourceRows = group.sources.map(source => {
             const id = `S${sources.size + 1}`;
-            sources.set(id, { groupId: group.id, value: source });
+            const snapshot = `V${snapshotIds.indexOf(source.episode.snapshot.id) + 1}`;
+            sources.set(id, { groupId: group.id, snapshot, value: source });
             return {
                 id,
-                snapshot: `V${snapshotIds.indexOf(source.episode.snapshot.id) + 1}`,
                 tool: source.tool,
                 side: source.evidence.source.side,
                 startLine: source.evidence.source.startLine,
@@ -113,8 +116,19 @@ export function projectConsolidation(groups: ConsolidationGroup[]): Consolidatio
                 truncated: source.evidence.source.truncated,
                 excerpt: source.evidence.source.excerpt,
             };
-        }),
-    }));
+        });
+        const snapshots = [...new Set(group.sources.map(source => `V${snapshotIds.indexOf(source.episode.snapshot.id) + 1}`))]
+            .map(snapshot => ({ id: snapshot, sources: sourceRows.filter((_, index) => {
+                const source = group.sources[index];
+                return `V${snapshotIds.indexOf(source.episode.snapshot.id) + 1}` === snapshot;
+            }) }));
+        return {
+            id: group.id,
+            anchorPath: group.anchorPath,
+            independentSnapshots: snapshots.length,
+            snapshots,
+        };
+    });
     return { input: JSON.stringify({ groups: projected }), groups, sources };
 }
 
@@ -183,13 +197,16 @@ export function validateConsolidation(raw: unknown, projection: ConsolidationPro
             const selected = sourceIds.map(id => ({ id, ref: projection.sources.get(id) }));
             for (const source of selected) {
                 if (!source.ref) { groupIssues.push(`${label}: source ID ${source.id} was not supplied.`); }
-                else if (source.ref.groupId !== group.id) { groupIssues.push(`${label}: source ID ${source.id} belongs to ${source.ref.groupId}.`); }
+                else if (source.ref.groupId !== group.id) {
+                    groupIssues.push(`${label}: source ID ${source.id} belongs to ${source.ref.groupId} (${source.id} is in ${source.ref.snapshot}).`);
+                }
             }
             if (selected.some(source => !source.ref || source.ref.groupId !== group.id)) { continue; }
             const values = selected.map(source => source.ref!.value);
             const snapshots = new Set(values.map(source => source.episode.snapshot.id));
             if (snapshots.size < REQUIRED_INDEPENDENT_SNAPSHOTS) {
-                groupIssues.push(`${label}: sources cover ${snapshots.size}/${REQUIRED_INDEPENDENT_SNAPSHOTS} independent snapshots.`);
+                const selectedHandles = selected.map(source => `${source.id}(${source.ref!.snapshot})`).join(', ');
+                groupIssues.push(`${label}: sources cover ${snapshots.size}/${REQUIRED_INDEPENDENT_SNAPSHOTS} independent snapshots (selected ${selectedHandles}); choose same-group sources from at least two distinct V* snapshots or remove the concern.`);
                 continue;
             }
             const supports = values.map(source => source.support);

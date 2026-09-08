@@ -51,12 +51,13 @@ export const handbookEntrySchema = z.object({
 export type HandbookEntry = z.infer<typeof handbookEntrySchema>;
 
 export const consolidationGroupProposalSchema = z.object({
-    groupId: z.string().regex(/^G\d+$/),
-    outcome: z.enum(['findings', 'no-findings']),
+    groupId: z.string().regex(/^G\d+$/).describe('Exactly one supplied G* group identifier.'),
+    outcome: z.enum(['findings', 'no-findings']).describe('Use findings only when at least one concern has valid cross-snapshot support.'),
     rationale: z.string().trim().min(1).max(600),
     concerns: z.array(z.object({
-        text: z.string().trim().min(1).max(600),
-        sourceIds: z.array(z.string().regex(/^S\d+$/)).min(2).max(32),
+        text: z.string().trim().min(1).max(600).describe('A repository-level concern directly supported by every cited source.'),
+        sourceIds: z.array(z.string().regex(/^S\d+$/)).min(2).max(32)
+            .describe('S* IDs from this G* group only; the selected sources must cover at least two distinct V* snapshots.'),
     }).strict()).max(6),
 }).strict();
 

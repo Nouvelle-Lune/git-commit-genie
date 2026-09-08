@@ -42,7 +42,14 @@ describe('memory consolidation evidence grouping', () => {
     });
 
     it('projects bounded G/S/V handles and evidence metadata without persistent IDs', () => {
-        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
+        // Verify the model input nests global S* handles under G* groups and V* snapshots without exposing persistent identifiers.
+        const episodes = [
+            makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/parser.ts', sourceExcerpt: 'parser snapshot one first' }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(1), sourcePath: 'src/parser.ts', sourceExcerpt: 'parser snapshot one second' }),
+            makeEpisode({ episodeId: uuidFor(3), snapshotId: digestFor(2), sourcePath: 'src/parser.ts', sourceExcerpt: 'parser snapshot two' }),
+            makeEpisode({ episodeId: uuidFor(4), snapshotId: digestFor(1), sourcePath: 'src/other.ts', sourceExcerpt: 'other snapshot one' }),
+            makeEpisode({ episodeId: uuidFor(5), snapshotId: digestFor(2), sourcePath: 'src/other.ts', sourceExcerpt: 'other snapshot two' }),
+        ];
         const groups = buildConsolidationGroups(episodes, []);
         const projection = projectConsolidation(groups);
         const input = JSON.parse(projection.input) as {
@@ -50,29 +57,56 @@ describe('memory consolidation evidence grouping', () => {
                 id: string;
                 anchorPath: string;
                 independentSnapshots: number;
-                sources: Array<Record<string, unknown>>;
+                snapshots: Array<{
+                    id: string;
+                    sources: Array<Record<string, unknown>>;
+                }>;
             }>;
         };
 
         assert.deepEqual(Object.keys(input), ['groups']);
-        assert.equal(input.groups.length, 1);
-        assert.equal(input.groups[0].id, 'G1');
-        assert.equal(input.groups[0].anchorPath, 'src/parser.ts');
-        assert.equal(input.groups[0].independentSnapshots, 2);
-        assert.equal(input.groups[0].sources.length, 2);
-        assert.equal(input.groups[0].sources.every(source => /^S\d+$/.test(String(source.id))), true);
-        assert.equal(input.groups[0].sources.every(source => /^V\d+$/.test(String(source.snapshot))), true);
-        assert.equal(input.groups[0].sources.every(source =>
-            ['id', 'snapshot', 'tool', 'side', 'startLine', 'endLine', 'truncated', 'excerpt'].every(key => key in source)), true);
-        assert.equal(input.groups[0].sources.every(source => !('episodeId' in source) && !('evidenceId' in source)), true);
-        assert.equal(projection.input.includes(episodes[0].id), false);
-        assert.equal(projection.input.includes(episodes[0].snapshot.id), false);
-        assert.equal(projection.sources.size, 2);
+        assert.equal(input.groups.length, 2);
+        assert.deepEqual(new Set(input.groups.map(group => group.anchorPath)), new Set(['src/other.ts', 'src/parser.ts']));
+        assert.equal(input.groups.every(group => !('sources' in group)), true);
+        assert.equal(input.groups.every(group => Object.keys(group).join(',') === 'id,anchorPath,independentSnapshots,snapshots'), true);
+
+        const parser = input.groups.find(group => group.anchorPath === 'src/parser.ts')!;
+        assert.equal(parser.id, 'G2');
+        assert.equal(parser.independentSnapshots, 2);
+        assert.equal(parser.snapshots.length, 2);
+        assert.deepEqual(parser.snapshots.map(snapshot => snapshot.sources.length), [2, 1]);
+        assert.equal(parser.snapshots[0].id, 'V1');
+        assert.equal(parser.snapshots[0].sources.every(source => /^S\d+$/.test(String(source.id))), true);
+        assert.equal(parser.snapshots[0].sources.length, 2, 'two sources from one V* must share one snapshots item');
+
+        const projectedSources = input.groups.flatMap(group => group.snapshots.flatMap(snapshot =>
+            snapshot.sources.map(source => ({ groupId: group.id, snapshotId: snapshot.id, source }))));
+        assert.equal(projectedSources.length, 5);
+        assert.equal(new Set(projectedSources.map(({ source }) => String(source.id))).size, projectedSources.length,
+            'S* handles remain globally unique across groups');
+        assert.equal(projection.sources.size, projectedSources.length);
+        for (const { groupId, snapshotId, source } of projectedSources) {
+            const reference = projection.sources.get(String(source.id));
+            assert.ok(reference);
+            assert.equal(reference.groupId, groupId);
+            assert.equal(reference.snapshot, snapshotId);
+            assert.deepEqual(Object.keys(source), ['id', 'tool', 'side', 'startLine', 'endLine', 'truncated', 'excerpt']);
+            assert.equal('snapshot' in source, false);
+            assert.equal('episodeId' in source, false);
+            assert.equal('evidenceId' in source, false);
+        }
+        assert.equal(input.groups.every(group => group.snapshots.every(snapshot =>
+            Object.keys(snapshot).join(',') === 'id,sources' && /^V\d+$/.test(snapshot.id))), true);
+        for (const episode of episodes) {
+            assert.equal(projection.input.includes(episode.id), false);
+            assert.equal(projection.input.includes(episode.snapshot.id), false);
+        }
     });
 });
 
 describe('memory consolidation validation', () => {
     it('derives one Handbook entry per concern and rejects single-snapshot concerns', () => {
+        // Verify valid concerns span distinct V* snapshots and same-V source selections are rejected with S(V) diagnostics.
         const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
         const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
         const group = projection.groups[0];
@@ -88,6 +122,32 @@ describe('memory consolidation validation', () => {
         assert.deepEqual(valid.entries[0].concerns, ['Cancellation may race with delayed publication.']);
         assert.deepEqual(new Set(valid.entries[0].supports.map(support => support.episodeId)),
             new Set(episodes.map(episode => episode.id)));
+
+        const sameSnapshotEpisodes = [
+            makeEpisode({ episodeId: uuidFor(10), snapshotId: digestFor(10), sourcePath: 'src/same-snapshot.ts', sourceExcerpt: 'first same snapshot excerpt' }),
+            makeEpisode({ episodeId: uuidFor(11), snapshotId: digestFor(10), sourcePath: 'src/same-snapshot.ts', sourceExcerpt: 'second same snapshot excerpt' }),
+            makeEpisode({ episodeId: uuidFor(12), snapshotId: digestFor(11), sourcePath: 'src/same-snapshot.ts', sourceExcerpt: 'different snapshot excerpt' }),
+        ];
+        const sameSnapshotProjection = projectConsolidation(
+            buildConsolidationGroups(sameSnapshotEpisodes, []),
+        );
+        const sameSnapshotGroup = sameSnapshotProjection.groups[0];
+        const sameSnapshotEntries = [...sameSnapshotProjection.sources.entries()]
+            .filter(([, reference]) => reference.groupId === sameSnapshotGroup.id && reference.value.episode.snapshot.id === digestFor(10));
+        assert.equal(sameSnapshotEntries.length, 2);
+        const sameSnapshotIds = sameSnapshotEntries.map(([id]) => id);
+        const sameSnapshotMappings = sameSnapshotEntries.map(([id, reference]) => `${id}(${reference.snapshot})`);
+        const rejected = validateConsolidation({
+            groups: [finding(sameSnapshotGroup, sameSnapshotIds, 'A concern supported by one snapshot must be removed.')],
+        }, sameSnapshotProjection);
+        assert.equal(rejected.entries.length, 0);
+        assert.deepEqual(rejected.processedGroupIds, []);
+        const rejection = rejected.issues.join('\n');
+        assert.match(rejection, /sources cover 1\/2 independent snapshots/);
+        for (const mapping of sameSnapshotMappings) {
+            assert.equal(rejection.includes(mapping), true, `single-snapshot diagnostics must name ${mapping}`);
+        }
+        assert.match(rejection, /choose same-group sources from at least two distinct V\* snapshots or remove the concern/);
 
         const oneSnapshot = makeRepeatedEpisodes('src/one.ts', 1);
         assert.deepEqual(buildConsolidationGroups(oneSnapshot, []), []);
@@ -172,6 +232,7 @@ describe('memory consolidation validation', () => {
     });
 
     it('rejects unknown and cross-group S handles while preserving an independently valid group', () => {
+        // Verify a concern citing another G* is rejected and the diagnostic identifies the source's owning G* and V*.
         const episodes = [
             ...makeRepeatedEpisodes('src/alpha.ts', 2, 1),
             ...makeRepeatedEpisodes('src/beta.ts', 2, 3),
@@ -188,7 +249,11 @@ describe('memory consolidation validation', () => {
         ] }, projection);
         assert.equal(crossGroup.entries.length, 1);
         assert.deepEqual(crossGroup.processedGroupIds, [beta.fingerprint]);
-        assert.match(crossGroup.issues.join('\n'), new RegExp(`source ID ${betaSources[0]} belongs to ${beta.id}`));
+        const betaReference = projection.sources.get(betaSources[0]);
+        assert.ok(betaReference);
+        assert.match(crossGroup.issues.join('\n'), new RegExp(
+            `source ID ${betaSources[0]} belongs to ${beta.id} \\(${betaSources[0]} is in ${betaReference.snapshot}\\)`,
+        ));
 
         const unknown = validateConsolidation({ groups: [
             finding(alpha, [alphaSources[0], 'S999'], 'Unknown source must fail.'),
@@ -316,6 +381,7 @@ describe('consolidatePending', function () {
     });
 
     it('publishes a finding, derives its paths and supports, and stores the group fingerprint', async () => {
+        // Verify consolidation consumers read S* handles from nested V* snapshots and publish the validated result unchanged.
         await withTempStorage(async storageRoot => {
             const repositoryId = '2'.repeat(64);
             const episodes = makeRepeatedEpisodes('src/parser.ts', 2, 20, repositoryId);
@@ -324,13 +390,16 @@ describe('consolidatePending', function () {
             let input = '';
             const runner = makeValidationRunner(async (request, _signal, validate) => {
                 input = request;
-                const projected = JSON.parse(request) as { groups: Array<{ id: string; sources: Array<{ id: string }> }> };
+                const projected = JSON.parse(request) as {
+                    groups: Array<{ id: string; snapshots: Array<{ sources: Array<{ id: string }> }> }>;
+                };
                 const group = projected.groups[0];
+                const sourceIds = group.snapshots.flatMap(snapshot => snapshot.sources.map(source => source.id));
                 const raw = { groups: [{
                     groupId: group.id,
                     outcome: 'findings',
                     rationale: 'Repeated direct evidence supports this concern.',
-                    concerns: [{ text: 'Parser state may be observed before publication.', sourceIds: group.sources.slice(0, 2).map(source => source.id) }],
+                    concerns: [{ text: 'Parser state may be observed before publication.', sourceIds: sourceIds.slice(0, 2) }],
                 }] };
                 return { value: validate(raw), attempts: 1 };
             });
@@ -342,7 +411,11 @@ describe('consolidatePending', function () {
                 failedGroupCount: 0, skippedGroups: 0, deferredPaths: [], retryCount: 0,
                 groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }],
             });
-            assert.equal(JSON.parse(input).groups[0].sources.length, 2);
+            const projected = JSON.parse(input) as {
+                groups: Array<{ snapshots: Array<{ sources: Array<{ id: string }> }> }>;
+            };
+            assert.equal(projected.groups[0].snapshots.length, 2);
+            assert.equal(projected.groups[0].snapshots.flatMap(snapshot => snapshot.sources).length, 2);
             const view = await store.inspect();
             assert.equal(view.handbook.length, 1);
             assert.deepEqual(view.handbook[0].targetPaths, ['src/parser.ts']);
@@ -462,6 +535,7 @@ describe('consolidatePending', function () {
     });
 
     it('publishes valid groups as partial when another group exhausts validation', async () => {
+        // Verify one nested G* result can publish while a sibling concern using an unknown S* remains failed.
         await withTempStorage(async storageRoot => {
             const repositoryId = '4'.repeat(64);
             const episodes = [
@@ -471,17 +545,21 @@ describe('consolidatePending', function () {
             const store = new MemoryStore(storageRoot, repositoryId);
             await recordAll(store, episodes);
             const runner = makeValidationRunner(async (request, _signal, validate) => {
-                const projected = JSON.parse(request) as { groups: Array<{ id: string; sources: Array<{ id: string }> }> };
+                const projected = JSON.parse(request) as {
+                    groups: Array<{ id: string; snapshots: Array<{ sources: Array<{ id: string }> }> }>;
+                };
                 const alpha = projected.groups.find(group => group.id === 'G1')!;
                 const beta = projected.groups.find(group => group.id === 'G2')!;
+                const alphaSourceIds = alpha.snapshots.flatMap(snapshot => snapshot.sources.map(source => source.id));
+                const betaSourceIds = beta.snapshots.flatMap(snapshot => snapshot.sources.map(source => source.id));
                 const raw = { groups: [
                     {
                         groupId: alpha.id, outcome: 'findings', rationale: 'Alpha is stable.',
-                        concerns: [{ text: 'Alpha has a stable cross-snapshot concern.', sourceIds: alpha.sources.slice(0, 2).map(source => source.id) }],
+                        concerns: [{ text: 'Alpha has a stable cross-snapshot concern.', sourceIds: alphaSourceIds.slice(0, 2) }],
                     },
                     {
                         groupId: beta.id, outcome: 'findings', rationale: 'Beta is malformed.',
-                        concerns: [{ text: 'Beta must fail validation.', sourceIds: ['S999', beta.sources[0].id] }],
+                        concerns: [{ text: 'Beta must fail validation.', sourceIds: ['S999', betaSourceIds[0]] }],
                     },
                 ] };
                 return { value: validate(raw), attempts: 1 };
@@ -602,6 +680,7 @@ describe('consolidatePending', function () {
 
 describe('createConsolidationRunner', () => {
     it('uses execution.maxRetries, zero temperature, no transport retries, and includes all local issues in repair input', async () => {
+        // Verify a failed first response triggers one repair request with explicit G*->V*->S* evidence guidance and preserves the completed result.
         const groups = buildConsolidationGroups(makeRepeatedEpisodes('src/parser.ts', 2), []);
         const projection = projectConsolidation(groups);
         const group = projection.groups[0];
@@ -631,6 +710,9 @@ describe('createConsolidationRunner', () => {
         );
 
         assert.equal(result.attempts, 2);
+        assert.equal(result.value.issues.length, 0);
+        assert.equal(result.value.entries.length, 1);
+        assert.deepEqual(result.value.processedGroupIds, [group.fingerprint]);
         assert.equal(requests.length, 2);
         assert.equal(accounted.length, 2);
         assert.equal(attempts.length, 2);
@@ -649,8 +731,15 @@ describe('createConsolidationRunner', () => {
         assert.equal(requests[0].responseFormat?.name, 'repositoryMemoryConsolidation');
         assert.equal(requests[1].messages?.length, 1);
         assert.equal(requests[1].messages?.[0].role, 'user');
-        assert.match(String(requests[1].messages?.[0].content), /targetPathFIds/);
-        assert.match(String(requests[1].messages?.[0].content), /Return the complete corrected result/);
+        const repairPrompt = String(requests[1].messages?.[0].content);
+        assert.match(repairPrompt, /targetPathFIds/);
+        assert.match(repairPrompt, /Return the complete corrected result/);
+        assert.match(repairPrompt, /G\* -> V\* -> S\*/);
+        assert.match(repairPrompt, /same-group sources/);
+        assert.match(repairPrompt, /at least two distinct V\* snapshots/);
+        assert.match(repairPrompt, /remove that concern/);
+        assert.match(repairPrompt, /return no-findings/);
+        assert.match(repairPrompt, /Do not add unrelated sources merely to satisfy the snapshot requirement/);
     });
 
     it('passes complete diagnostics to onAttempt when a completed response has no structured output', async () => {
