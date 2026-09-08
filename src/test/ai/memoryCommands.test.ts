@@ -3,7 +3,7 @@ import { describe, it, beforeEach, afterEach } from 'mocha';
 import sinon = require('sinon');
 import * as vscode from 'vscode';
 import { MemoryCommands } from '../../commands/MemoryCommands';
-import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
+import { hashContent, RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
 import { logger } from '../../services/logger';
 import { buildConsolidationGroups } from '../../services/memory/consolidator';
 import { describeConsolidationResult } from '../../services/memory/service';
@@ -25,15 +25,15 @@ describe('MemoryCommands repository maintenance', () => {
         const published = describeConsolidationResult({
             status: 'published', groupCount: 5, handbookCount: 2, noFindingCount: 1, failedGroupCount: 0,
             skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 1,
-            groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }],
+            groupOutcomes: [{ seedId: '00000000-0000-4000-8000-000000000001', status: 'published', entryIds: [], issues: [] }],
         });
         assert.equal(published, 'Consolidated 5 evidence groups into 2 handbook entries;');
         const partial = describeConsolidationResult({
             status: 'partial', groupCount: 2, handbookCount: 1, noFindingCount: 0, failedGroupCount: 1,
             skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 2,
             groupOutcomes: [
-                { path: 'src/parser.ts', status: 'published' },
-                { path: 'src/client.ts', status: 'failed' },
+                { seedId: '00000000-0000-4000-8000-000000000001', status: 'published', entryIds: [], issues: [] },
+                { seedId: '00000000-0000-4000-8000-000000000002', status: 'failed', entryIds: [], issues: ['validation failed'] },
             ],
         });
         assert.match(partial, /Partially consolidated 2 evidence groups into 1 handbook entries/);
@@ -42,8 +42,9 @@ describe('MemoryCommands repository maintenance', () => {
         assert.match(partial, /1 were deferred/);
         assert.match(partial, /2 retries/);
         const noFindings = describeConsolidationResult({
-            status: 'no-findings', groupCount: 1, skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 1,
-            groupOutcomes: [{ path: 'src/parser.ts', status: 'no-findings' }],
+            status: 'no-findings', groupCount: 1, handbookCount: 0, noFindingCount: 1, failedGroupCount: 0,
+            skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 1,
+            groupOutcomes: [{ seedId: '00000000-0000-4000-8000-000000000001', status: 'no-findings', entryIds: [], issues: [] }],
         });
         assert.match(noFindings, /Checked 1 evidence groups/);
         assert.match(noFindings, /1 groups were deferred/);
@@ -174,21 +175,21 @@ describe('MemoryCommands repository maintenance', () => {
         const store = makeStore();
         const episodes = makeRecheckEpisodes();
         const groups = buildConsolidationGroups(episodes as any, []);
-        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: groups.map(group => group.fingerprint) });
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId) });
         const memory = makeMemoryService(store);
         memory.consolidate.resolves({
             status: 'no-findings', groupCount: 2, skippedGroups: 0, deferredPaths: [], retryCount: 0,
             groupOutcomes: [
-                { path: 'src/parser.ts', status: 'no-findings' },
-                { path: 'src/unorganized.ts', status: 'no-findings' },
+                { seedId: '00000000-0000-4000-8000-000000000001', status: 'no-findings', entryIds: [], issues: [] },
+                { seedId: '00000000-0000-4000-8000-000000000002', status: 'no-findings', entryIds: [], issues: [] },
             ],
         });
         const { context } = makeContext();
         stubIdentity(sandbox);
         stubAction(sandbox, 'recheck');
         const picker = stubRecheckSelection(sandbox, items => {
-            assert.deepEqual(items.map(item => item.label), ['src/parser.ts', 'src/unorganized.ts']);
-            assert.deepEqual(items.map(item => item.path), ['src/parser.ts', 'src/unorganized.ts']);
+            assert.deepEqual(items.map(item => item.label), ['Where should src/parser.ts be investigated?', 'Where should src/unorganized.ts be investigated?']);
+            assert.deepEqual(items.map(item => item.path), [episodes[0].id, episodes[2].id]);
             assert.deepEqual(items.map(item => item.description), ['2 historical versions · 2 saved evidence records', '2 historical versions · 2 saved evidence records']);
             assert.equal(items.every(item => item.buttons?.length === 1), true);
             assert.equal(items.every(item => item.buttons?.[0].tooltip === 'Understand this evidence group'), true);
@@ -207,7 +208,7 @@ describe('MemoryCommands repository maintenance', () => {
         assert.equal(warning.calledOnce, true);
         assert.deepEqual(warning.firstCall.args[1], { modal: true });
         assert.equal(warning.firstCall.args[2], 'Recheck organized evidence');
-        assert.deepEqual(memory.consolidate.firstCall.args, ['r'.repeat(64), model, 'manual-recheck', ['src/parser.ts', 'src/unorganized.ts']]);
+        assert.deepEqual(memory.consolidate.firstCall.args, ['r'.repeat(64), model, 'manual-recheck', [episodes[0].id, episodes[2].id]]);
         assert.equal(information.length, 1);
         assertSpinnersReleased(statuses);
     });
@@ -216,8 +217,9 @@ describe('MemoryCommands repository maintenance', () => {
         // Cancelling the paid recheck confirmation leaves the selected evidence groups untouched and does not start consolidation.
         const store = makeStore();
         const episodes = makeRecheckEpisodes();
-        const organizedFingerprint = buildConsolidationGroups(episodes as any, [])[0].fingerprint;
-        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: [organizedFingerprint] });
+        const groups = buildConsolidationGroups(episodes as any, []);
+        const organizedFingerprint = groups[0].fingerprint;
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: [organizedFingerprint], organizedSeeds: [groups[0].seedId] });
         const memory = makeMemoryService(store);
         const { context } = makeContext();
         stubIdentity(sandbox);
@@ -242,12 +244,12 @@ describe('MemoryCommands repository maintenance', () => {
         const groups = buildConsolidationGroups(episodes as any, []);
         store.inspect.resolves({
             epoch: 'epoch', generation: 1, episodes, handbook: makeRecheckHandbook(episodes),
-            consolidated: groups.map(group => group.fingerprint),
+            consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId),
         });
         const memory = makeMemoryService(store);
         memory.consolidate.resolves({
             status: 'no-findings', groupCount: 1, skippedGroups: 0, deferredPaths: [], retryCount: 0,
-            groupOutcomes: [{ path: 'src/unorganized.ts', status: 'no-findings' }],
+            groupOutcomes: [{ seedId: '00000000-0000-4000-8000-000000000003', status: 'no-findings', entryIds: [], issues: [] }],
         });
         const { context } = makeContext();
         stubIdentity(sandbox);
@@ -263,8 +265,8 @@ describe('MemoryCommands repository maintenance', () => {
 
         const pending = invokeManage(commands);
         await flushAsync();
-        const parserItem = picker.quickPick.items.find(item => item.label === 'src/parser.ts');
-        const selectedItem = picker.quickPick.items.find(item => item.label === 'src/unorganized.ts');
+        const parserItem = picker.quickPick.items.find(item => item.label === 'Where should src/parser.ts be investigated?');
+        const selectedItem = picker.quickPick.items.find(item => item.label === 'Where should src/unorganized.ts be investigated?');
         assert.ok(parserItem);
         assert.ok(selectedItem);
         picker.quickPick.selectedItems = [selectedItem];
@@ -277,7 +279,7 @@ describe('MemoryCommands repository maintenance', () => {
         assert.deepEqual(picker.quickPick.selectedItems, [selectedItem]);
         assert.equal(webview.create.calledOnce, true);
         assert.equal(webview.create.firstCall.args[0], 'gitCommitGenie.memoryEvidence');
-        assert.equal(webview.create.firstCall.args[1], 'Historical evidence for src/parser.ts');
+        assert.equal(webview.create.firstCall.args[1], 'Historical evidence for 00000000-0000-4000-8000-000000000001');
         assert.equal((webview.create.firstCall.args[2] as { viewColumn?: vscode.ViewColumn }).viewColumn, vscode.ViewColumn.Beside);
         assert.equal((webview.create.firstCall.args[2] as { preserveFocus?: boolean }).preserveFocus, true);
         assert.equal((webview.create.firstCall.args[3] as vscode.WebviewOptions).enableScripts, false);
@@ -293,46 +295,28 @@ describe('MemoryCommands repository maintenance', () => {
         assert.equal(memory.consolidate.called, false);
 
         const report = webview.html();
-        assert.match(report, /Historical evidence preview/);
-        assert.match(report, /This page shows saved records from earlier repository versions, not the file as it is now\./);
-        assert.match(report, /What Repository Memory learned/);
-        assert.match(report, /2<\/strong><span>Versions observed<\/span><p>2 repository snapshots contained evidence for this path\./);
-        assert.match(report, /2<\/strong><span>Saved evidence<\/span><p>2 different evidence records remain after identical sources are counted once\./);
-        assert.match(report, /Why the numbers differ/);
-        assert.match(report, /One repository version can contain several observations\./);
-        assert.match(report, /All saved evidence in this group/);
-        assert.match(report, /Some may not support any current long-term memory\./);
-        assert.match(report, /Where to look/);
-        assert.match(report, /When this memory may be recalled/);
-        assert.match(report, /Remembered conclusion/);
+        assert.match(report, /Saved investigation experience/);
+        assert.match(report, /Preview of existing history; no recheck has run on this page\./);
+        assert.match(report, /Applicable situation/);
         assert.match(report, /Parser handbook conclusion/);
-        assert.equal((episodes[0] as any).observations[0].evidence.length, 2);
-        assert.match(report, /3 historical records support this conclusion/);
-        assert.match(report, /Why this was remembered/);
-        assertHtmlSupportTrace(report, episodes[0].id as string, 'E1', episodes[0].createdAt as number, 'readFileContent', 'src/parser.ts', 10, 12, '1'.repeat(64));
-        assertHtmlSupportTrace(report, episodes[1].id as string, 'E1', episodes[1].createdAt as number, 'searchCode', 'src/parser.ts', 20, 22, '2'.repeat(64));
-        assert.match(report, /A supporting record could not be found\./);
-        assert.match(report, /This memory points to investigation unresolved-episode, evidence E99, but that saved record is unavailable\./);
-        assert.match(report, /Recorded before the change/);
-        assert.match(report, /Recorded after the change/);
-        assert.match(report, /Saved excerpt/);
+        assert.match(report, /Investigation route/);
+        assert.match(report, /2 historical records · 2 independent snapshots/);
+        assert.match(report, /Available investigation history/);
+        assert.match(report, /Recorded investigation question/);
+        assert.match(report, /Associated historical finding/);
         assert.match(report, /before parser excerpt/);
         assert.match(report, /after parser excerpt/);
         assert.match(report, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/);
         assert.doesNotMatch(report, /<script>alert/);
-        assert.doesNotMatch(report, /This excerpt was already truncated when the record was created\./);
-        assert.match(report, /Technical information/);
-        assert.match(report, /Investigation ID/);
-        assert.match(report, /Evidence ID/);
+        assert.match(report, /Truncated result/);
         assert.match(report, /Repository snapshot/);
-        assert.match(report, /Investigation status/);
-        assert.match(report, /Collection tool/);
+        assert.match(report, /Recorded arguments/);
 
         picker.accept();
         await pending;
 
         assert.equal(warning.calledOnce, true);
-        assert.deepEqual(memory.consolidate.firstCall.args, ['r'.repeat(64), { model: 'memory-model' }, 'manual-recheck', ['src/unorganized.ts']]);
+        assert.deepEqual(memory.consolidate.firstCall.args, ['r'.repeat(64), { model: 'memory-model' }, 'manual-recheck', [episodes[2].id]]);
         assert.equal(information.length, 1);
     });
 
@@ -340,8 +324,9 @@ describe('MemoryCommands repository maintenance', () => {
         // A details report without a matching Handbook target explicitly states that no related Handbook entry exists.
         const report = await readRecheckDetailsHtml(sandbox, makeRecheckEpisodes(), []);
 
-        assert.match(report, /No long-term memory was created from this evidence group\./);
-        assert.match(report, /A recheck asks the model to review this saved history again/);
+        assert.match(report, /Saved investigation experience/);
+        assert.match(report, /Available investigation history/);
+        assert.doesNotMatch(report, /Applicable situation/);
     });
 
     it('reports when a recorded evidence excerpt is empty', async () => {
@@ -352,7 +337,7 @@ describe('MemoryCommands repository maintenance', () => {
 
         const report = await readRecheckDetailsHtml(sandbox, episodes, makeRecheckHandbook(episodes));
 
-        assert.match(report, /No excerpt was saved for this record\./);
+        assert.match(report, /<pre><code><\/code><\/pre>/);
     });
 
     it('reports when an investigation note is empty', async () => {
@@ -362,7 +347,7 @@ describe('MemoryCommands repository maintenance', () => {
 
         const report = await readRecheckDetailsHtml(sandbox, episodes, makeRecheckHandbook(episodes));
 
-        assert.match(report, /No investigation note was saved for this record\./);
+        assert.match(report, /<p><\/p>/);
     });
 
     it('cancels recheck without consolidation when the createQuickPick is hidden', async () => {
@@ -370,7 +355,7 @@ describe('MemoryCommands repository maintenance', () => {
         const store = makeStore();
         const episodes = makeRecheckEpisodes();
         const groups = buildConsolidationGroups(episodes as any, []);
-        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: groups.map(group => group.fingerprint) });
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId) });
         const memory = makeMemoryService(store);
         const { context } = makeContext();
         stubIdentity(sandbox);
@@ -511,13 +496,13 @@ describe('MemoryCommands repository maintenance', () => {
             { result: {
                 status: 'published', groupCount: 5, handbookCount: 2, noFindingCount: 1, failedGroupCount: 0,
                 skippedGroups: 0, deferredPaths: [], retryCount: 0,
-                groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }],
+                groupOutcomes: [{ seedId: '00000000-0000-4000-8000-000000000001', status: 'published', entryIds: [], issues: [] }],
             }, expected: /^Consolidated 5 evidence groups into 2 handbook entries;$/ },
             { result: { status: 'partial', groupCount: 2, handbookCount: 1, noFindingCount: 0, failedGroupCount: 1,
                 skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 1,
-                groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }, { path: 'src/client.ts', status: 'failed' }] }, expected: /Partially consolidated 2 evidence groups/ },
+                groupOutcomes: [{ seedId: '00000000-0000-4000-8000-000000000001', status: 'published', entryIds: [], issues: [] }, { seedId: '00000000-0000-4000-8000-000000000002', status: 'failed', entryIds: [], issues: ['validation failed'] }] }, expected: /Partially consolidated 2 evidence groups/ },
             { result: { status: 'no-findings', groupCount: 1, skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 0,
-                groupOutcomes: [{ path: 'src/parser.ts', status: 'no-findings' }] }, expected: /Checked 1 evidence groups/ },
+                groupOutcomes: [{ seedId: '00000000-0000-4000-8000-000000000001', status: 'no-findings', entryIds: [], issues: [] }] }, expected: /Checked 1 evidence groups/ },
             { result: { status: 'not-ready', pendingCount: 3, threshold: 2 }, expected: /Consolidation not run:.*3\/2/ },
             { result: { status: 'budget-exhausted', limit: 2, resumesAt: Date.now() + 60_000 }, expected: /24-hour start allowance/ },
             { result: { status: 'memory-disabled' }, expected: /Repository Memory is disabled/ },
@@ -929,7 +914,7 @@ async function readRecheckDetailsHtml(
 ): Promise<string> {
     const store = makeStore();
     const groups = buildConsolidationGroups(episodes as any, []);
-    store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook, consolidated: groups.map(group => group.fingerprint) });
+    store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook, consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId) });
     const memory = makeMemoryService(store);
     const { context } = makeContext();
     stubIdentity(sandbox);
@@ -944,7 +929,7 @@ async function readRecheckDetailsHtml(
 
     const pending = invokeManage(commands);
     await flushAsync();
-    const parserItem = picker.quickPick.items.find(item => item.label === 'src/parser.ts');
+    const parserItem = picker.quickPick.items.find(item => item.label === 'Where should src/parser.ts be investigated?');
     assert.ok(parserItem);
     picker.triggerItemButton(parserItem);
     await flushAsync();
@@ -1030,15 +1015,15 @@ function makeRecheckEpisodes(): Array<Record<string, unknown>> {
         { sourcePath: 'src/unorganized.ts', index: 3, side: 'before', tool: 'readFileContent', startLine: 30, endLine: 32, excerpt: 'before unorganized excerpt', truncated: false },
         { sourcePath: 'src/unorganized.ts', index: 4, side: 'after', tool: 'searchCode', startLine: 40, endLine: 42, excerpt: 'after unorganized excerpt', truncated: false },
     ];
-    return records.map(({ sourcePath, index, side, tool, startLine, endLine, excerpt, truncated }) => ({
-        version: 1,
+    return records.map(({ sourcePath, index, side, tool: recordedTool, startLine, endLine, excerpt, truncated }) => ({
+        version: 2,
         id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
         createdAt: index,
         status: 'complete',
         snapshot: { id: String(index).repeat(64) },
         observations: [{
             step: 0,
-            tool,
+            tool: sourcePath === 'src/parser.ts' ? 'readFileContent' : recordedTool,
             arguments: { filePath: sourcePath },
             ok: true,
             summary: 'recorded evidence',
@@ -1047,35 +1032,45 @@ function makeRecheckEpisodes(): Array<Record<string, unknown>> {
             evidence: [{ id: 'E1', source: {
                 snapshotId: String(index).repeat(64), path: sourcePath, side,
                 blobOid: String(index).repeat(40), startLine, endLine, excerpt,
-                contentHash: 'c'.repeat(64), truncated, sourceType: 'text',
+                contentHash: hashContent(excerpt), truncated, sourceType: 'text',
             } }, ...(index === 1 ? [{ id: 'E2', source: {
                 snapshotId: String(index).repeat(64), path: sourcePath, side,
-                blobOid: String(index).repeat(40), startLine, endLine, excerpt,
-                contentHash: 'c'.repeat(64), truncated, sourceType: 'text',
+                blobOid: String(index).repeat(40), startLine, endLine, excerpt: `${excerpt} second`,
+                contentHash: hashContent(`${excerpt} second`), truncated, sourceType: 'text',
             } }] : [])],
         }],
         changedPaths: [sourcePath],
         changedSymbols: [],
-        questions: [],
-        claims: [],
+        questions: [`Where should ${sourcePath} be investigated?`],
+        claims: [{ claim: 'The recorded source is available for historical inspection.', evidenceRefs: ['E1'], disposition: 'must_express' }],
         model: 'memory-test-model',
-        promptVersion: 'memory-2',
-        toolsetVersion: 'snapshot-memory-handles-3',
+        promptVersion: 'memory-experience-1',
+        toolsetVersion: 'snapshot-memory-experience-1',
     }));
 }
 
 function makeRecheckHandbook(episodes: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
     return [{
         id: '10000000-0000-4000-8000-000000000001',
-        triggers: ['src/parser.ts'],
+        situation: 'Parser handbook conclusion',
+        steps: [{
+            path: 'src/parser.ts', symbol: null, purpose: 'Inspect the parser entry point before changing the consumer.', operation: 'readFileContent',
+            supports: [
+                { episodeId: episodes[0].id, observationIndex: 0, evidenceId: 'E1', questionIndex: 0, claimIndex: 0 },
+                { episodeId: episodes[1].id, observationIndex: 0, evidenceId: 'E1', questionIndex: 0, claimIndex: 0 },
+            ], snapshotCount: 2,
+        }],
+        lessons: [{
+            observation: 'The historical parser record was captured before the current change.',
+            implication: 'Use the parser entry point as the first investigation location.',
+            limitation: 'The saved record is historical context and must be checked against current source.',
+            supports: [
+                { episodeId: episodes[0].id, observationIndex: 0 },
+                { episodeId: episodes[1].id, observationIndex: 0 },
+            ], snapshotCount: 2,
+        }],
+        triggers: ['src/parser.ts', 'parser entry point'],
         targetPaths: ['src/parser.ts'],
-        concerns: ['Parser handbook conclusion'],
-        supports: [
-            { episodeId: episodes[0].id, evidenceId: 'E1' },
-            { episodeId: episodes[1].id, evidenceId: 'E1' },
-            { episodeId: 'unresolved-episode', evidenceId: 'E99' },
-        ],
-        kind: 'navigation',
     }];
 }
 

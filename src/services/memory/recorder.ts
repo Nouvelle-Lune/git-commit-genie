@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto';
 import { hashContent, SnapshotIdentity } from '../git/repositorySnapshot';
-import { InvestigationEpisode, investigationEpisodeSchema, RecordedObservation } from './types';
+import { InvestigationEpisode, investigationEpisodeSchema, RecordedObservation, HandbookEntry } from './types';
 
 /** Records only observations already returned by the foreground investigation. */
 export class EpisodeRecorder {
@@ -14,9 +14,9 @@ export class EpisodeRecorder {
 
     seal(input: Pick<InvestigationEpisode, 'changedPaths' | 'changedSymbols' | 'questions' | 'claims' | 'status'>): InvestigationEpisode {
         const episode = investigationEpisodeSchema.parse({
-            ...input, version: 1, id: randomUUID(), createdAt: Date.now(), snapshot: this.snapshot,
-            // Identify the short-handle protocol without migrating older immutable episodes.
-            model: this.model, promptVersion: 'memory-2', toolsetVersion: 'snapshot-memory-handles-3', observations: this.observations,
+            ...input, version: 2, id: randomUUID(), createdAt: Date.now(), snapshot: this.snapshot,
+            // This unreleased format replaces old episodes; reset storage instead of migrating records.
+            model: this.model, promptVersion: 'memory-experience-1', toolsetVersion: 'snapshot-memory-experience-1', observations: this.observations,
         });
         validateEpisodeSources(episode);
         return episode;
@@ -41,7 +41,48 @@ export function validateEpisodeSources(episode: InvestigationEpisode): void {
     }
 }
 
+/** Completed local observations remain useful even when another analysis phase degraded. */
 export function isEligibleEpisode(episode: InvestigationEpisode): boolean {
-    return episode.status === 'complete' && episode.observations.some(observation =>
-        observation.ok && observation.tool !== 'readMemorySources' && observation.evidence.length > 0);
+    return ['complete', 'degraded', 'unavailable'].includes(episode.status)
+        && episode.observations.some(isInvestigationObservation);
+}
+
+export function isInvestigationObservation(observation: RecordedObservation): boolean {
+    return !['searchRepositoryMemory', 'readMemorySources'].includes(observation.tool);
+}
+
+/** Persist only reproducible item provenance; references are not a correctness score. */
+export function validateHandbookSources(entries: HandbookEntry[], episodes: InvestigationEpisode[]): void {
+    for (const entry of entries) {
+        for (const item of [...entry.steps, ...entry.lessons]) {
+            const snapshots = new Set<string>();
+            const seen = new Set<string>();
+            for (const support of item.supports) {
+                const key = `${support.episodeId}:${support.observationIndex}`;
+                if (seen.has(key)) { throw new Error('Experience repeats an observation support.'); }
+                seen.add(key);
+                const episode = episodes.find(value => value.id === support.episodeId);
+                const observation = episode?.observations[support.observationIndex];
+                if (!episode || !isEligibleEpisode(episode) || !observation || !isInvestigationObservation(observation)) {
+                    throw new Error('Experience references an ineligible or missing investigation observation.');
+                }
+                snapshots.add(episode.snapshot.id);
+                if (support.evidenceId && !observation.evidence.some(evidence => evidence.id === support.evidenceId)) {
+                    throw new Error('Experience source does not belong to its observation.');
+                }
+                if ('path' in item) {
+                    const source = observation.evidence.find(evidence => evidence.id === support.evidenceId);
+                    const claim = support.claimIndex === undefined ? undefined : episode.claims[support.claimIndex];
+                    const question = support.questionIndex === undefined ? undefined : episode.questions[support.questionIndex];
+                    if (!observation.ok || observation.tool !== item.operation || source?.source.path !== item.path
+                        || !question?.trim() || !claim?.claim.trim() || claim.disposition === 'omit'
+                        || !support.evidenceId || !claim.evidenceRefs.includes(support.evidenceId)
+                        || (item.symbol && !source.source.excerpt.includes(item.symbol) && !Object.values(observation.arguments).includes(item.symbol))) {
+                        throw new Error('Route support is missing its question, matching source, or retained finding.');
+                    }
+                }
+            }
+            if (snapshots.size < 2 || item.snapshotCount !== snapshots.size) { throw new Error('Experience snapshot count does not match independent supports.'); }
+        }
+    }
 }

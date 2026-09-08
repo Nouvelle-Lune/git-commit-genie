@@ -1,9 +1,9 @@
 import * as path from 'path';
 import { RepositorySnapshotReader } from '../git/repositorySnapshot';
 import { shouldExclude } from '../analysis/tools/pathFilters';
-import { isEligibleEpisode } from './recorder';
+import { isEligibleEpisode, isInvestigationObservation } from './recorder';
 import { MemoryView } from './store';
-import { HandbookEntry, MemoryNavigation, MemoryQuery, MemoryUsage } from './types';
+import { MemorySupport, MemoryNavigation, MemoryQuery, MemoryUsage, entrySupports, entryTerms } from './types';
 import { bm25Scores } from './ranking';
 import { SourceObservation } from '../git/repositorySnapshot';
 import { estimateTokens } from '../analysis/tools/modelContext';
@@ -19,10 +19,6 @@ export function memorySourceKey(source: SourceObservation): string {
     return JSON.stringify([source.path, source.side, source.blobOid, source.startLine, source.endLine, source.contentHash]);
 }
 
-function memorySupportKey(support: HandbookEntry['supports'][number]): string {
-    return `${support.episodeId}:${support.evidenceId}`;
-}
-
 /** Memory IDs identify navigation, never current-run evidence or facts. */
 export class MemoryRetriever {
     readonly usage: MemoryUsage = { recalled: 0, expanded: 0, adopted: 0, unavailable: 0, retrievalMs: 0,
@@ -34,8 +30,9 @@ export class MemoryRetriever {
     private readonly identities = new Map<string, string>();
     private readonly cache = new Map<string, MemorySourceResult>();
     private navigationTokens: number;
-    constructor(readonly view: MemoryView, private readonly snapshot: RepositorySnapshotReader, private readonly excludes: string[],
-        private readonly currentExcludes: () => string[] = () => [], readonly settings: MemorySettings = MEMORY_DEFAULTS) {
+    constructor(private view: MemoryView, private readonly snapshot: RepositorySnapshotReader, private readonly excludes: string[],
+        private readonly currentExcludes: () => string[] = () => [], readonly settings: MemorySettings = MEMORY_DEFAULTS,
+        private readonly access?: { load: (query: MemoryQuery) => Promise<MemoryView>; epoch: () => Promise<string> }) {
         this.navigationTokens = settings['navigation.maxTokens'];
     }
 
@@ -66,54 +63,60 @@ export class MemoryRetriever {
 
     retrieveNavigation(query: MemoryQuery, maxTokens = this.navigationTokens): MemoryNavigation[] {
         const started = performance.now();
-        const representedSources = new Set(this.view.handbook.flatMap(entry => entry.supports.map(memorySupportKey)));
-        const entries: Array<Pick<HandbookEntry, 'triggers' | 'targetPaths' | 'concerns' | 'supports'>> = [
-            ...this.view.handbook,
-            ...this.view.episodes.filter(isEligibleEpisode).flatMap(episode => {
-                const supports = episode.observations.flatMap(observation => observation.evidence.map(evidence => ({
-                    episodeId: episode.id, evidenceId: evidence.id,
-                }))).filter(support => !representedSources.has(memorySupportKey(support)));
-                if (!supports.length) { return []; }
-                const supportIds = new Set(supports.map(support => support.evidenceId));
-                return [{
-                    triggers: [...episode.changedPaths, ...episode.changedSymbols],
-                    targetPaths: [...new Set(episode.observations.flatMap(observation => observation.evidence
-                        .filter(evidence => supportIds.has(evidence.id)).map(evidence => evidence.source.path)))],
-                    // Task-bound questions can navigate to source locations, but only
-                    // consolidation may promote repeated observations into concerns.
-                    concerns: [], supports,
-                }];
-            }),
+        const entries = [
+            ...this.view.handbook.map(entry => ({ origin: 'handbook' as const, situation: entry.situation,
+                triggers: entry.triggers, targetPaths: entry.targetPaths, terms: entryTerms(entry), supports: entrySupports(entry),
+                steps: entry.steps.map(({ supports, ...step }) => step), lessons: entry.lessons.map(({ supports, ...lesson }) => lesson) })),
+            ...this.view.episodes.filter(isEligibleEpisode).map(episode => ({ origin: 'episode' as const,
+                situation: episode.questions.join(' · ') || episode.changedPaths.join(', '),
+                triggers: [...episode.changedPaths, ...episode.changedSymbols],
+                targetPaths: [...new Set(episode.observations.filter(isInvestigationObservation).flatMap(item => item.evidence.map(evidence => evidence.source.path)))],
+                terms: [...episode.questions, ...episode.changedPaths, ...episode.changedSymbols,
+                    ...episode.observations.filter(isInvestigationObservation).flatMap(item => [item.summary,
+                        ...Object.values(item.arguments).filter((value): value is string => typeof value === 'string')])],
+                supports: episode.observations.flatMap((observation, observationIndex) => isInvestigationObservation(observation)
+                    ? [{ episodeId: episode.id, observationIndex }] : []),
+                steps: [], lessons: [],
+            })),
         ];
         const exact = new Set([...query.paths, ...query.symbols]);
         const words = new Set([...query.keywords, ...query.symbols].flatMap(value => value.toLowerCase().split(/[^\p{L}\p{N}_]+/u)).filter(Boolean));
-        const lexical = bm25Scores(entries.map(entry => [...entry.triggers, ...entry.targetPaths, ...entry.concerns]),
+        const lexical = bm25Scores(entries.map(entry => entry.terms),
             [...query.paths, ...query.symbols, ...query.keywords]);
         const candidates = entries.map((entry, index) => {
-            const targets = entry.targetPaths.filter(target => !this.excluded(target));
+            const targets = entry.targetPaths;
             const score = entry.triggers.reduce((total, trigger) => total + (exact.has(trigger) ? 100 : 0), 0)
                 + targets.reduce((total, target) => total + (query.paths.includes(target) ? 30 : 0), 0)
                 + entry.triggers.reduce((total, trigger) => total + (query.paths.some(file => path.posix.dirname(file) !== '.' && path.posix.dirname(file) === path.posix.dirname(trigger)) ? 5 : 0), 0)
                 + [...words].filter(word => entry.triggers.join(' ').toLowerCase().includes(word)).length;
             return { entry, targets, score: score + lexical[index] };
-        }).filter(candidate => candidate.score > 0 && candidate.targets.length).sort((a, b) => b.score - a.score);
+        }).filter(candidate => candidate.score > 0 && !candidate.targets.some(target => this.excluded(target))).sort((a, b) => b.score - a.score);
         const result: MemoryNavigation[] = [];
         const seenIdentities = new Set<string>();
         const areaCounts = new Map<string, number>();
         const tokenLimit = Math.min(this.navigationTokens, maxTokens);
         for (const { entry, targets } of candidates) {
-            const filtered = targets.slice(0, 8);
-            if (!filtered.length) { continue; }
-            const area = path.posix.dirname(filtered[0]);
+            const filtered = targets;
+            const area = filtered.length ? path.posix.dirname(filtered[0]) : '<history>';
             if ((areaCounts.get(area) ?? 0) >= 2) { continue; }
-            const sources = [...new Map(entry.supports.map(support => this.sourceFor(support))
-                .filter((source): source is SourceObservation => !!source && filtered.includes(source.path))
-                .map(source => [memorySourceKey(source), source])).values()].slice(0, 4);
-            if (!sources.length) { continue; }
-            const identity = JSON.stringify([filtered, entry.concerns.slice(0, 2), sources.map(memorySourceKey)]);
+            const records = entry.supports.map(support => {
+                const episode = this.view.episodes.find(item => item.id === support.episodeId);
+                const observation = episode?.observations[support.observationIndex];
+                if (!episode || !observation) { throw new Error('Memory support is missing its investigation observation.'); }
+                return { episode, observation, support };
+            });
+            // Preserve all sources of the complete experience, including cross-file lessons.
+            const sources = [...new Map(records.flatMap(({ observation, support }) => observation.evidence
+                .filter(evidence => !('evidenceId' in support) || !support.evidenceId || evidence.id === support.evidenceId)
+                .map(evidence => evidence.source)).map(source => [memorySourceKey(source), source])).values()];
+            if (sources.some(source => this.excluded(source.path))) { continue; }
+            const fields = { origin: entry.origin, situation: entry.situation, targetPaths: filtered, steps: entry.steps, lessons: entry.lessons,
+                sourceCount: sources.length, observationCount: new Set(records.map(item => `${item.support.episodeId}:${item.support.observationIndex}`)).size,
+                snapshotCount: new Set(records.map(item => item.episode.snapshot.id)).size };
+            const identity = JSON.stringify([fields, sources.map(memorySourceKey)]);
             if (seenIdentities.has(identity)) { continue; }
             const id = this.identities.get(identity) ?? `M${this.navigation.size + 1}`;
-            const navigation: MemoryNavigation = { id, targetPaths: filtered, concerns: entry.concerns.slice(0, 2), sourceCount: sources.length };
+            const navigation: MemoryNavigation = { id, ...fields };
             if (estimateTokens(JSON.stringify([...result, navigation])) > tokenLimit) { continue; }
             this.identities.set(identity, id);
             this.navigation.set(id, { value: structuredClone(navigation), sources: structuredClone(sources) });
@@ -126,21 +129,25 @@ export class MemoryRetriever {
         return result;
     }
 
-    searchRepositoryMemory(query: MemoryQuery, maxTokens = this.navigationTokens): MemoryNavigation[] {
+    async searchRepositoryMemory(query: MemoryQuery, maxTokens = this.navigationTokens): Promise<MemoryNavigation[]> {
         if (this.searches >= this.settings['search.maxCalls']) { this.reject('search_budget_exceeded', 'Memory search budget exhausted.'); }
+        if (!this.access) { throw new Error('Repository memory search requires a live store.'); }
         this.searches += 1;
+        const view = await this.access.load(query);
+        if (view.epoch !== this.view.epoch || await this.access.epoch() !== this.view.epoch) { throw new Error('Memory was cleared during investigation.'); }
+        this.view = view;
         return this.retrieveNavigation(query, maxTokens);
     }
 
-    private sourceFor(support: HandbookEntry['supports'][number]) {
-        return this.view.episodes.find(episode => episode.id === support.episodeId)?.observations
-            .flatMap(observation => observation.evidence).find(evidence => evidence.id === support.evidenceId)?.source;
+    private async assertEpoch(): Promise<void> {
+        if (this.access && await this.access.epoch() !== this.view.epoch) { throw new Error('Memory was cleared during investigation.'); }
     }
 
     async readMemorySources(memoryIds: string[], signal?: AbortSignal): Promise<MemorySourceResult[]> {
         if (!Array.isArray(memoryIds) || !memoryIds.length || memoryIds.some(id => typeof id !== 'string' || !/^M\d+$/.test(id))) {
             this.reject('invalid_arguments', 'Provide a non-empty memoryIds array containing published M* navigation IDs.');
         }
+        await this.assertEpoch();
         const sources = new Map<string, SourceObservation>();
         for (const id of memoryIds) {
             const navigation = this.navigation.get(id);
@@ -167,6 +174,7 @@ export class MemoryRetriever {
                 timer = setTimeout(() => { const error = new Error(`Memory source validation exceeded ${timeoutMs} ms.`); controller.abort(error); reject(error); }, timeoutMs);
             }), aborted]);
             controller.signal.throwIfAborted();
+            await this.assertEpoch();
             if (performance.now() - started > timeoutMs) { throw new Error(`Memory source validation exceeded ${timeoutMs} ms.`); }
             const merged = new Map([...this.cache, ...expanded.map(item => [item.key, item] as const)]);
             const result = [...sources].map(([key, source]) => this.excluded(source.path)

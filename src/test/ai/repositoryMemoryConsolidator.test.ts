@@ -14,925 +14,544 @@ import {
     projectConsolidation,
     validateConsolidation,
 } from '../../services/memory/consolidator';
-import { LLMExecution } from '../../services/llm/llmTypes';
-import { AIRunRequest, AIRunResponse } from '../../services/llm/providers';
 import { MemoryStore } from '../../services/memory/store';
-import { HandbookEntry, InvestigationEpisode } from '../../services/memory/types';
+import { HandbookEntry, InvestigationEpisode, RecordedObservation } from '../../services/memory/types';
 import { MEMORY_DEFAULTS, MemorySettings } from '../../services/memory/settings';
 
-describe('memory consolidation evidence grouping', () => {
-    it('groups only exact paths with two direct independent snapshots', () => {
-        const episodes = [
-            makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/shared.ts' }),
-            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/shared.ts' }),
-            makeEpisode({ episodeId: uuidFor(3), snapshotId: digestFor(3), sourcePath: 'src/other.ts' }),
-            makeEpisode({ episodeId: uuidFor(4), snapshotId: digestFor(4), sourcePath: 'src/another.ts' }),
-            makeEpisode({ episodeId: uuidFor(5), snapshotId: digestFor(5), sourcePath: 'src/memory-only.ts', tool: 'readMemorySources' }),
-            makeEpisode({ episodeId: uuidFor(6), snapshotId: digestFor(6), sourcePath: 'src/memory-only.ts', tool: 'readMemorySources' }),
-            makeEpisode({ episodeId: uuidFor(7), snapshotId: digestFor(7), sourcePath: 'src/cancelled.ts', status: 'cancelled' }),
-            makeEpisode({ episodeId: uuidFor(8), snapshotId: digestFor(8), sourcePath: 'src/cancelled.ts', status: 'cancelled' }),
-        ];
+describe('memory consolidation grouping and projection', () => {
+    it('creates one G1 seed batch with at most twenty related complete episodes across files', () => {
+        // Verify grouping follows an investigation seed and lexical relationships instead of one anchor file.
+        const episodes = Array.from({ length: 25 }, (_, index) => makeEpisode({
+            episodeId: uuidFor(index + 1), snapshotId: digestFor(index + 1),
+            changedPaths: index === 0 ? ['src/ui/memoryWebviewPolicy.ts'] : [`src/services/related-${index}.ts`],
+            changedSymbols: index === 0 ? ['filterMemoryLogsForWebview'] : [`filterMemoryLogsForWebview${index}`],
+            questions: ['How does memory lifecycle filtering affect the investigation?'],
+            summary: `Inspect memory lifecycle after filterMemoryLogsForWebview change ${index}.`,
+        }));
 
         const groups = buildConsolidationGroups(episodes, []);
+        const seedGroup = groups.find(group => group.seedId === episodes[0].id);
 
-        assert.deepEqual(groups.map(group => group.anchorPath), ['src/shared.ts']);
-        assert.equal(groups[0].sources.length, 2);
-        assert.deepEqual(new Set(groups[0].sources.map(source => source.episode.snapshot.id)),
-            new Set([digestFor(1), digestFor(2)]));
+        assert.ok(seedGroup);
+        assert.equal(seedGroup.id, 'G1');
+        assert.equal(seedGroup.episodes.length, 20);
+        assert.equal(seedGroup.episodes[0].id, episodes[0].id);
+        assert.ok(seedGroup.episodes.some(episode => episode.changedPaths[0] !== 'src/ui/memoryWebviewPolicy.ts'));
+        assert.equal(new Set(seedGroup.episodes.map(episode => episode.snapshot.id)).size, 20);
+        assert.equal(groups.every(group => group.id === 'G1'), true);
     });
 
-    it('projects bounded G/S/V handles and evidence metadata without persistent IDs', () => {
-        // Verify the model input nests global S* handles under G* groups and V* snapshots without exposing persistent identifiers.
+    it('excludes cancelled, error, and memory-only episodes while retaining degraded and unavailable investigations', () => {
+        // Verify eligibility accepts complete, degraded, and unavailable episodes only when a non-memory observation exists.
         const episodes = [
-            makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/parser.ts', sourceExcerpt: 'parser snapshot one first' }),
-            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(1), sourcePath: 'src/parser.ts', sourceExcerpt: 'parser snapshot one second' }),
-            makeEpisode({ episodeId: uuidFor(3), snapshotId: digestFor(2), sourcePath: 'src/parser.ts', sourceExcerpt: 'parser snapshot two' }),
-            makeEpisode({ episodeId: uuidFor(4), snapshotId: digestFor(1), sourcePath: 'src/other.ts', sourceExcerpt: 'other snapshot one' }),
-            makeEpisode({ episodeId: uuidFor(5), snapshotId: digestFor(2), sourcePath: 'src/other.ts', sourceExcerpt: 'other snapshot two' }),
+            makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), status: 'complete' }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), status: 'degraded' }),
+            makeEpisode({ episodeId: uuidFor(3), snapshotId: digestFor(3), status: 'unavailable' }),
+            makeEpisode({ episodeId: uuidFor(4), snapshotId: digestFor(4), status: 'cancelled' }),
+            makeEpisode({ episodeId: uuidFor(5), snapshotId: digestFor(5), status: 'error' }),
+            makeEpisode({ episodeId: uuidFor(6), snapshotId: digestFor(6), tool: 'readMemorySources' }),
+            makeEpisode({ episodeId: uuidFor(7), snapshotId: digestFor(7), tool: 'searchRepositoryMemory' }),
         ];
+
         const groups = buildConsolidationGroups(episodes, []);
-        const projection = projectConsolidation(groups);
+        assert.ok(groups.length > 0);
+        for (const group of groups) {
+            assert.equal(group.episodes.some(episode => episode.status === 'cancelled' || episode.status === 'error'), false);
+            assert.equal(group.episodes.some(episode => episode.observations.every(observation =>
+                ['searchRepositoryMemory', 'readMemorySources'].includes(observation.tool))), false);
+        }
+        assert.equal(groups.some(group => group.episodes.some(episode => episode.id === uuidFor(2))), true);
+        assert.equal(groups.some(group => group.episodes.some(episode => episode.id === uuidFor(3))), true);
+    });
+
+    it('projects T, V, O, S, and H handles with questions, reasons, results, and claims', () => {
+        // Verify consolidation input preserves investigation context while hiding persistent episode and snapshot identities.
+        const episodes = makeRouteEpisodes();
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+        const existing = makeHandbook(episodes);
+        const projection = projectConsolidation([{ ...group, existing: [existing] }]);
         const input = JSON.parse(projection.input) as {
-            groups: Array<{
-                id: string;
-                anchorPath: string;
-                independentSnapshots: number;
-                snapshots: Array<{
-                    id: string;
-                    sources: Array<Record<string, unknown>>;
-                }>;
-            }>;
+            groups: Array<{ id: string; seed: string; episodes: Array<Record<string, unknown>>; existing: Array<Record<string, unknown>> }>;
         };
 
         assert.deepEqual(Object.keys(input), ['groups']);
-        assert.equal(input.groups.length, 2);
-        assert.deepEqual(new Set(input.groups.map(group => group.anchorPath)), new Set(['src/other.ts', 'src/parser.ts']));
-        assert.equal(input.groups.every(group => !('sources' in group)), true);
-        assert.equal(input.groups.every(group => Object.keys(group).join(',') === 'id,anchorPath,independentSnapshots,snapshots'), true);
+        assert.equal(input.groups.length, 1);
+        assert.deepEqual(Object.keys(input.groups[0]), ['id', 'seed', 'episodes', 'existing']);
+        assert.equal(input.groups[0].id, 'G1');
+        assert.equal(input.groups[0].seed, 'T1');
+        assert.equal(input.groups[0].episodes.length, 2);
+        assert.equal(input.groups[0].episodes[0].id, 'T1');
+        assert.equal(input.groups[0].episodes[0].snapshot, 'V1');
+        assert.equal(input.groups[0].episodes[1].snapshot, 'V2');
+        assert.match(JSON.stringify(input.groups[0].episodes), /Where should a new memory lifecycle log be inspected/);
+        assert.match(JSON.stringify(input.groups[0].episodes), /Read the filtering entry/);
+        assert.match(JSON.stringify(input.groups[0].episodes), /filterMemoryLogsForWebview/);
+        assert.match(JSON.stringify(input.groups[0].episodes), /usedByClaims/);
+        assert.equal(input.groups[0].existing[0].id, 'H1');
+        assert.equal(input.groups[0].existing[0].situation, existing.situation);
+        assert.equal(JSON.stringify(input).includes(episodes[0].id), false);
+        assert.equal(JSON.stringify(input).includes(episodes[0].snapshot.id), false);
+        assert.equal([...projection.observations.keys()].every(id => /^O\d+$/.test(id)), true);
+        assert.equal([...projection.sources.keys()].every(id => /^S\d+$/.test(id)), true);
+    });
 
-        const parser = input.groups.find(group => group.anchorPath === 'src/parser.ts')!;
-        assert.equal(parser.id, 'G2');
-        assert.equal(parser.independentSnapshots, 2);
-        assert.equal(parser.snapshots.length, 2);
-        assert.deepEqual(parser.snapshots.map(snapshot => snapshot.sources.length), [2, 1]);
-        assert.equal(parser.snapshots[0].id, 'V1');
-        assert.equal(parser.snapshots[0].sources.every(source => /^S\d+$/.test(String(source.id))), true);
-        assert.equal(parser.snapshots[0].sources.length, 2, 'two sources from one V* must share one snapshots item');
-
-        const projectedSources = input.groups.flatMap(group => group.snapshots.flatMap(snapshot =>
-            snapshot.sources.map(source => ({ groupId: group.id, snapshotId: snapshot.id, source }))));
-        assert.equal(projectedSources.length, 5);
-        assert.equal(new Set(projectedSources.map(({ source }) => String(source.id))).size, projectedSources.length,
-            'S* handles remain globally unique across groups');
-        assert.equal(projection.sources.size, projectedSources.length);
-        for (const { groupId, snapshotId, source } of projectedSources) {
-            const reference = projection.sources.get(String(source.id));
-            assert.ok(reference);
-            assert.equal(reference.groupId, groupId);
-            assert.equal(reference.snapshot, snapshotId);
-            assert.deepEqual(Object.keys(source), ['id', 'tool', 'side', 'startLine', 'endLine', 'truncated', 'excerpt']);
-            assert.equal('snapshot' in source, false);
-            assert.equal('episodeId' in source, false);
-            assert.equal('evidenceId' in source, false);
-        }
-        assert.equal(input.groups.every(group => group.snapshots.every(snapshot =>
-            Object.keys(snapshot).join(',') === 'id,sources' && /^V\d+$/.test(snapshot.id))), true);
-        for (const episode of episodes) {
-            assert.equal(projection.input.includes(episode.id), false);
-            assert.equal(projection.input.includes(episode.snapshot.id), false);
-        }
+    it('does not create a group when the selected seed has fewer than two snapshots', () => {
+        // Verify a single snapshot cannot trigger model consolidation even when several observations are present.
+        const episodes = [
+            makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), observationCount: 3 }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(1), observationCount: 2 }),
+        ];
+        assert.deepEqual(buildConsolidationGroups(episodes, []).filter(group => group.seedId === episodes[0].id), []);
     });
 });
 
 describe('memory consolidation validation', () => {
-    it('derives one Handbook entry per concern and rejects single-snapshot concerns', () => {
-        // Verify valid concerns span distinct V* snapshots and same-V source selections are rejected with S(V) diagnostics.
-        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
-        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
-        const group = projection.groups[0];
-        const sourceIds = sourceIdsFor(projection, group);
-        const valid = validateConsolidation({ groups: [finding(group, sourceIds, 'Cancellation may race with delayed publication.')] }, projection);
-
-        assert.equal(valid.issues.length, 0);
-        assert.deepEqual(valid.processedGroupIds, [group.fingerprint]);
-        assert.deepEqual(valid.findingGroupIds, [group.fingerprint]);
-        assert.equal(valid.entries.length, 1);
-        assert.deepEqual(valid.entries[0].targetPaths, ['src/parser.ts']);
-        assert.deepEqual(valid.entries[0].triggers, ['src/parser.ts', 'parse']);
-        assert.deepEqual(valid.entries[0].concerns, ['Cancellation may race with delayed publication.']);
-        assert.deepEqual(new Set(valid.entries[0].supports.map(support => support.episodeId)),
-            new Set(episodes.map(episode => episode.id)));
-
-        const sameSnapshotEpisodes = [
-            makeEpisode({ episodeId: uuidFor(10), snapshotId: digestFor(10), sourcePath: 'src/same-snapshot.ts', sourceExcerpt: 'first same snapshot excerpt' }),
-            makeEpisode({ episodeId: uuidFor(11), snapshotId: digestFor(10), sourcePath: 'src/same-snapshot.ts', sourceExcerpt: 'second same snapshot excerpt' }),
-            makeEpisode({ episodeId: uuidFor(12), snapshotId: digestFor(11), sourcePath: 'src/same-snapshot.ts', sourceExcerpt: 'different snapshot excerpt' }),
-        ];
-        const sameSnapshotProjection = projectConsolidation(
-            buildConsolidationGroups(sameSnapshotEpisodes, []),
-        );
-        const sameSnapshotGroup = sameSnapshotProjection.groups[0];
-        const sameSnapshotEntries = [...sameSnapshotProjection.sources.entries()]
-            .filter(([, reference]) => reference.groupId === sameSnapshotGroup.id && reference.value.episode.snapshot.id === digestFor(10));
-        assert.equal(sameSnapshotEntries.length, 2);
-        const sameSnapshotIds = sameSnapshotEntries.map(([id]) => id);
-        const sameSnapshotMappings = sameSnapshotEntries.map(([id, reference]) => `${id}(${reference.snapshot})`);
-        const rejected = validateConsolidation({
-            groups: [finding(sameSnapshotGroup, sameSnapshotIds, 'A concern supported by one snapshot must be removed.')],
-        }, sameSnapshotProjection);
-        assert.equal(rejected.entries.length, 0);
-        assert.deepEqual(rejected.processedGroupIds, []);
-        const rejection = rejected.issues.join('\n');
-        assert.match(rejection, /sources cover 1\/2 independent snapshots/);
-        for (const mapping of sameSnapshotMappings) {
-            assert.equal(rejection.includes(mapping), true, `single-snapshot diagnostics must name ${mapping}`);
-        }
-        assert.match(rejection, /choose same-group sources from at least two distinct V\* snapshots or remove the concern/);
-
-        const oneSnapshot = makeRepeatedEpisodes('src/one.ts', 1);
-        assert.deepEqual(buildConsolidationGroups(oneSnapshot, []), []);
-    });
-
-    it('accepts no-findings as a completed group with a rationale and no entry', () => {
-        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
-        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
-        const group = projection.groups[0];
+    it('publishes a situation with an ordered step and a lesson supported by separate snapshots', () => {
+        // Verify every experience item stores its own observation supports and derives paths, tools, and snapshot counts.
+        const episodes = makeRouteEpisodes();
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const routeObservations = observationsFor(projection, 'searchCode');
+        const failedObservationIds = [...projection.observations.entries()]
+            .filter(([, item]) => !item.observation.ok).map(([id]) => id);
+        const sourceId = sourceForObservation(projection, routeObservations[0]);
         const validated = validateConsolidation({ groups: [{
             groupId: group.id,
-            outcome: 'no-findings',
-            rationale: 'The two excerpts do not support a stable cross-snapshot concern.',
-            concerns: [],
+            outcome: 'findings',
+            rationale: 'Repeated investigations show a useful route and a bounded failure lesson.',
+            entries: [{
+                existingEntryId: null,
+                situation: 'When memory lifecycle visibility changes, locate filtering before reading the renderer.',
+                steps: [{
+                    sourceId,
+                    symbol: 'filterMemoryLogsForWebview',
+                    purpose: 'Find the filtering branch that decides whether the lifecycle row is visible.',
+                    findings: findingsFor(projection, routeObservations),
+                }],
+                lessons: [{
+                    observation: 'A historical search returned no matching renderer call in one investigation.',
+                    implication: 'Treat an empty search as a local limitation and inspect the filtering entry directly.',
+                    limitation: 'The empty result does not prove that the renderer has no caller.',
+                    observationIds: failedObservationIds,
+                }],
+            }],
         }] }, projection);
 
         assert.deepEqual(validated.issues, []);
-        assert.deepEqual(validated.entries, []);
         assert.deepEqual(validated.processedGroupIds, [group.fingerprint]);
-        assert.deepEqual(validated.noFindingGroupIds, [group.fingerprint]);
+        assert.equal(validated.entries.length, 1);
+        const entry = validated.entries[0];
+        assert.equal(entry.situation, 'When memory lifecycle visibility changes, locate filtering before reading the renderer.');
+        assert.equal(entry.steps.length, 1);
+        assert.equal(entry.steps[0].path, 'src/ui/memoryWebviewPolicy.ts');
+        assert.equal(entry.steps[0].symbol, 'filterMemoryLogsForWebview');
+        assert.equal(entry.steps[0].operation, 'searchCode');
+        assert.equal(entry.steps[0].snapshotCount, 2);
+        assert.equal(entry.steps[0].supports.length, 2);
+        assert.equal(entry.steps[0].supports.every(support => support.evidenceId !== undefined), true);
+        assert.equal(entry.lessons.length, 1);
+        assert.equal(entry.lessons[0].supports.every(support => support.evidenceId === undefined), true);
+        assert.equal(entry.lessons[0].snapshotCount, 2);
+        assert.deepEqual(entry.targetPaths, ['src/ui/memoryWebviewPolicy.ts']);
+        assert.ok(entry.triggers.includes('filterMemoryLogsForWebview'));
     });
 
-    it('reports whitespace-only rationale and concern text as validation issues before handbook derivation', () => {
-        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
-        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
-        const group = projection.groups[0];
-        const sourceIds = sourceIdsFor(projection, group);
-
-        const blankRationale = validateConsolidation({ groups: [{
-            ...finding(group, sourceIds, 'A stable concern.'),
-            rationale: ' \n\t ',
-        }] }, projection);
-        assert.equal(blankRationale.entries.length, 0);
-        assert.deepEqual(blankRationale.processedGroupIds, []);
-        assert.match(blankRationale.issues.join('\n'),
-            /groups\.0\.rationale: Too small: expected string to have >=1 characters/);
-
-        const blankConcern = validateConsolidation({ groups: [{
-            ...finding(group, sourceIds, ' \n\t '),
-        }] }, projection);
-        assert.equal(blankConcern.entries.length, 0);
-        assert.deepEqual(blankConcern.processedGroupIds, []);
-        assert.match(blankConcern.issues.join('\n'),
-            /groups\.0\.concerns\.0\.text: Too small: expected string to have >=1 characters/);
-
-        const trimmed = validateConsolidation({ groups: [{
-            ...finding(group, sourceIds, '  Trimmed concern.  '),
-            rationale: '  Trimmed rationale.  ',
-        }] }, projection);
-        assert.deepEqual(trimmed.issues, []);
-        assert.deepEqual(trimmed.entries.map(entry => entry.concerns), [['Trimmed concern.']]);
-    });
-
-    it('reports the actual malformed output instead of silently repairing legacy keys or arrays', () => {
-        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
-        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
-        const group = projection.groups[0];
-        const sourceIds = sourceIdsFor(projection, group);
-        const base = finding(group, sourceIds, 'A stable concern.');
-
-        const wrongKey = validateConsolidation({ groups: [{ ...base, targetPathFIds: ['F1'] }] }, projection);
-        assert.equal(wrongKey.entries.length, 0);
-        assert.match(wrongKey.issues.join('\n'), /Unrecognized key: "targetPathFIds"/);
-
-        const emptySources = validateConsolidation({ groups: [{
-            ...base,
-            concerns: [{ text: 'A stable concern.', sourceIds: [] }],
-        }] }, projection);
-        assert.match(emptySources.issues.join('\n'), /sourceIds.*expected array to have >=2 items/);
-
-        const oversized = validateConsolidation({ groups: [{
-            ...base,
-            concerns: Array.from({ length: 7 }, (_, index) => ({ text: `Concern ${index}`, sourceIds })),
-        }] }, projection);
-        assert.match(oversized.issues.join('\n'), /concerns.*expected array to have <=6 items/);
-
-        const oversizedSources = validateConsolidation({ groups: [{
-            ...base,
-            concerns: [{ text: 'A stable concern.', sourceIds: Array.from({ length: 33 }, (_, index) => `S${index + 1}`) }],
-        }] }, projection);
-        assert.match(oversizedSources.issues.join('\n'), /sourceIds.*expected array to have <=32 items/);
-    });
-
-    it('rejects unknown and cross-group S handles while preserving an independently valid group', () => {
-        // Verify a concern citing another G* is rejected and the diagnostic identifies the source's owning G* and V*.
+    it('requires each step and lesson to cite two distinct snapshots', () => {
+        // Verify repeated observations from one snapshot cannot satisfy the independent support rule.
         const episodes = [
-            ...makeRepeatedEpisodes('src/alpha.ts', 2, 1),
-            ...makeRepeatedEpisodes('src/beta.ts', 2, 3),
+            makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), observationCount: 2 }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2) }),
         ];
-        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
-        const alpha = projection.groups.find(group => group.anchorPath === 'src/alpha.ts')!;
-        const beta = projection.groups.find(group => group.anchorPath === 'src/beta.ts')!;
-        const betaSources = sourceIdsFor(projection, beta);
-        const alphaSources = sourceIdsFor(projection, alpha);
-
-        const crossGroup = validateConsolidation({ groups: [
-            finding(alpha, betaSources, 'Cross-group source must fail.'),
-            finding(beta, betaSources, 'Beta remains independently valid.'),
-        ] }, projection);
-        assert.equal(crossGroup.entries.length, 1);
-        assert.deepEqual(crossGroup.processedGroupIds, [beta.fingerprint]);
-        const betaReference = projection.sources.get(betaSources[0]);
-        assert.ok(betaReference);
-        assert.match(crossGroup.issues.join('\n'), new RegExp(
-            `source ID ${betaSources[0]} belongs to ${beta.id} \\(${betaSources[0]} is in ${betaReference.snapshot}\\)`,
-        ));
-
-        const unknown = validateConsolidation({ groups: [
-            finding(alpha, [alphaSources[0], 'S999'], 'Unknown source must fail.'),
-            finding(beta, betaSources, 'Beta remains independently valid.'),
-        ] }, projection);
-        assert.equal(unknown.entries.length, 1);
-        assert.deepEqual(unknown.processedGroupIds, [beta.fingerprint]);
-        assert.match(unknown.issues.join('\n'), /source ID S999 was not supplied/);
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const sameSnapshotIds = [...projection.observations.entries()]
+            .filter(([, item]) => item.episode.snapshot.id === digestFor(1)).map(([id]) => id);
+        const sourceId = sourceForObservation(projection, sameSnapshotIds[0]);
+        const invalid = validateConsolidation({ groups: [finding(group, {
+            existingEntryId: null,
+            situation: 'A single snapshot must not become durable experience.',
+            steps: [{ sourceId, symbol: null, purpose: 'Inspect the source only when repeated history supports it.',
+                findings: findingsFor(projection, sameSnapshotIds.slice(0, 2)) }],
+            lessons: [],
+        })] }, projection);
+        assert.equal(invalid.entries.length, 0);
+        assert.match(invalid.issues.join('\n'), /at least two independent V\* snapshots/);
     });
 
-    it('keeps valid groups processed when sibling structure or envelope validation fails', () => {
-        const episodes = [
-            ...makeRepeatedEpisodes('src/alpha.ts', 2, 1),
-            ...makeRepeatedEpisodes('src/beta.ts', 2, 3),
-        ];
-        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
-        const alpha = projection.groups.find(group => group.anchorPath === 'src/alpha.ts')!;
-        const beta = projection.groups.find(group => group.anchorPath === 'src/beta.ts')!;
-        const alphaSources = sourceIdsFor(projection, alpha);
-        const betaSources = sourceIdsFor(projection, beta);
-        const validBeta = finding(beta, betaSources, 'Beta remains independently valid.');
+    it('requires successful matching source path, symbol, and tool for every step finding', () => {
+        // Verify a step cannot borrow a source from another path, symbol, or failed tool observation.
+        const episodes = makeRouteEpisodes();
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const observations = observationsFor(projection, 'searchCode');
+        const sourceId = sourceForObservation(projection, observations[0]);
+        const invalid = validateConsolidation({ groups: [finding(group, {
+            existingEntryId: null,
+            situation: 'Invalid source matching must fail validation.',
+            steps: [{ sourceId, symbol: 'missingSymbol', purpose: 'This purpose is not supported by the cited source.',
+                findings: findingsFor(projection, observations) }], lessons: [],
+        })] }, projection);
+        assert.equal(invalid.entries.length, 0);
+        assert.match(invalid.issues.join('\n'), /successful matching tool observation/);
+    });
 
-        const unknownKey = validateConsolidation({ groups: [
-            { ...finding(alpha, alphaSources, 'Alpha has an invalid legacy field.'), targetPathFIds: ['F1'] },
-            validBeta,
-        ] }, projection);
-        assert.equal(unknownKey.entries.length, 1);
-        assert.deepEqual(unknownKey.processedGroupIds, [beta.fingerprint]);
-        assert.match(unknownKey.issues.join('\n'), /groups\.0: Unrecognized key: "targetPathFIds"/);
+    it('requires the complete ordered route to occur in two independent investigations', () => {
+        // Verify two individually supported steps are insufficient when their order never repeats within two snapshots.
+        const episodes = makeRouteEpisodes({ reverseSecondRoute: true });
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const first = observationsFor(projection, 'readFileContent');
+        const second = observationsFor(projection, 'searchCode');
+        const raw = finding(group, {
+            existingEntryId: null, situation: 'A route requires repeated order.',
+            steps: [
+                { sourceId: sourceForObservation(projection, first[0]), symbol: 'filterMemoryLogsForWebview', purpose: 'Read the filtering entry.',
+                    findings: findingsFor(projection, first) },
+                { sourceId: sourceForObservation(projection, second[0]), symbol: 'filterMemoryLogsForWebview', purpose: 'Search the filtering branch.',
+                    findings: findingsFor(projection, second) },
+            ], lessons: [],
+        });
+        const invalid = validateConsolidation({ groups: [raw] }, projection);
+        assert.equal(invalid.entries.length, 0);
+        assert.match(invalid.issues.join('\n'), /complete route must occur in order/);
+    });
 
-        const emptySourceIds = validateConsolidation({ groups: [
-            {
-                ...finding(alpha, alphaSources, 'Alpha has an empty source selection.'),
-                concerns: [{ text: 'Alpha has an empty source selection.', sourceIds: [] }],
-            },
-            validBeta,
-        ] }, projection);
-        assert.equal(emptySourceIds.entries.length, 1);
-        assert.deepEqual(emptySourceIds.processedGroupIds, [beta.fingerprint]);
-        assert.match(emptySourceIds.issues.join('\n'),
-            /groups\.0\.concerns\.0\.sourceIds: Too small: expected array to have >=2 items/);
+    it('rejects non-final or unrelated claims for a positive step', () => {
+        // Verify a step support must point to a non-omit final claim that references the cited source evidence.
+        const episodes = makeRouteEpisodes();
+        episodes[0].claims = [{ claim: 'An unrelated claim.', evidenceRefs: [], disposition: 'must_express' }];
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const observations = observationsFor(projection, 'searchCode');
+        const invalid = validateConsolidation({ groups: [finding(group, {
+            existingEntryId: null, situation: 'A source needs a final supporting claim.', steps: [{
+                sourceId: sourceForObservation(projection, observations[0]), symbol: 'filterMemoryLogsForWebview', purpose: 'Inspect the cited source.',
+                findings: findingsFor(projection, observations),
+            }], lessons: [],
+        })] }, projection);
+        assert.equal(invalid.entries.length, 0);
+        assert.match(invalid.issues.join('\n'), /claim.*reference|claim.*source|non-omit/i);
+    });
 
-        const oversizedEnvelope = validateConsolidation({
-            metadata: 'unexpected',
-            groups: [
-                finding(alpha, alphaSources, 'Alpha remains valid.'),
-                validBeta,
-                ...Array.from({ length: 11 }, (_, index) => ({
-                    groupId: `G${100 + index}`,
-                    outcome: 'no-findings',
-                    rationale: 'Unknown extra group.',
-                    concerns: [],
-                })),
+    it('rejects legacy concerns, oversized arrays, unknown handles, and empty experiences', () => {
+        // Verify the new schema fails closed instead of repairing the removed concerns and supports fields.
+        const episodes = makeRouteEpisodes();
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const baseEntry = { existingEntryId: null, situation: 'A valid situation.', steps: [], lessons: [lessonFor(projection)] };
+        const base = finding(group, baseEntry);
+        const legacy = validateConsolidation({ groups: [{ ...base, concerns: [{ text: 'Old shape', sourceIds: ['S1', 'S2'] }] }] }, projection);
+        assert.equal(legacy.entries.length, 0);
+        assert.match(legacy.issues.join('\n'), /Unrecognized key: "concerns"/);
+
+        const tooManySteps = { ...base, entries: [{ ...baseEntry, steps: Array.from({ length: 5 }, () => stepFor(projection)) }] };
+        const oversized = validateConsolidation({ groups: [tooManySteps] }, projection);
+        assert.match(oversized.issues.join('\n'), /steps.*expected array to have <=4 items/);
+
+        const unknown = validateConsolidation({ groups: [finding(group, { existingEntryId: null, situation: 'Unknown observation.', steps: [{
+            sourceId: 'S999', symbol: null, purpose: 'Unknown source must fail.', findings: [
+                { observationId: 'O1', questionIndex: 0, claimIndex: 0 }, { observationId: 'O999', questionIndex: 0, claimIndex: 0 },
             ],
-        }, projection);
-        assert.equal(oversizedEnvelope.entries.length, 2);
-        assert.deepEqual(oversizedEnvelope.processedGroupIds, [alpha.fingerprint, beta.fingerprint]);
-        assert.match(oversizedEnvelope.issues.join('\n'), /<root>: unrecognized key "metadata"/);
-        assert.match(oversizedEnvelope.issues.join('\n'), /groups: expected at most 12 items/);
+        }], lessons: [] })] }, projection);
+        assert.match(unknown.issues.join('\n'), /Unknown observation O999/);
+        assert.equal(validateConsolidation({ groups: [{ groupId: group.id, outcome: 'findings', rationale: 'No entries is invalid.', entries: [] }] }, projection).issues.length > 0, true);
+
+        const empty = validateConsolidation({ groups: [finding(group, { existingEntryId: null, situation: 'No step or lesson.', steps: [], lessons: [] })] }, projection);
+        assert.match(empty.issues.join('\n'), /needs steps or lessons/);
     });
 
-    it('fails globally when the envelope or its groups field has the wrong shape', () => {
-        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
-        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
-
-        const nonObject = validateConsolidation([], projection);
-        assert.deepEqual(nonObject.processedGroupIds, []);
-        assert.match(nonObject.issues.join('\n'), /<root>: expected an object containing groups/);
-
-        const nonArray = validateConsolidation({ groups: {}, metadata: 'unexpected' }, projection);
-        assert.deepEqual(nonArray.processedGroupIds, []);
-        assert.match(nonArray.issues.join('\n'), /<root>: unrecognized key "metadata"/);
-        assert.match(nonArray.issues.join('\n'), /groups: expected an array/);
-    });
-
-    it('requires every projected group exactly once and rejects duplicate or unknown groups', () => {
-        const episodes = [
-            ...makeRepeatedEpisodes('src/alpha.ts', 2, 1),
-            ...makeRepeatedEpisodes('src/beta.ts', 2, 3),
-        ];
-        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
-        const alpha = projection.groups.find(group => group.anchorPath === 'src/alpha.ts')!;
-        const beta = projection.groups.find(group => group.anchorPath === 'src/beta.ts')!;
-        const alphaResult = finding(alpha, sourceIdsFor(projection, alpha), 'Alpha concern.');
-
-        const missing = validateConsolidation({ groups: [alphaResult] }, projection);
-        assert.match(missing.issues.join('\n'), /G2: result is missing/);
-        assert.equal(missing.processedGroupIds.length, 1, 'a valid group remains publishable while another group is missing');
-
-        const duplicate = validateConsolidation({ groups: [alphaResult, alphaResult, finding(beta, sourceIdsFor(projection, beta), 'Beta concern.')] }, projection);
-        assert.match(duplicate.issues.join('\n'), /G1: result appears more than once/);
-        assert.equal(duplicate.processedGroupIds.length, 1);
-
-        const unknown = validateConsolidation({ groups: [alphaResult, finding(beta, sourceIdsFor(projection, beta), 'Beta concern.'), {
-            groupId: 'G999', outcome: 'no-findings', rationale: 'Unknown group.', concerns: [],
+    it('updates an existing H1 entry while preserving its persistent identifier', () => {
+        // Verify an existing experience is selected by its handle and a complete update keeps its UUID.
+        const episodes = makeRouteEpisodes();
+        const original = makeHandbook(episodes);
+        const group = buildConsolidationGroups(episodes, [], [original]).find(item => item.seedId === episodes[0].id)!;
+        assert.deepEqual(group.existing.map(entry => entry.id), [original.id]);
+        const projection = projectConsolidation([group]);
+        const observations = observationsFor(projection, 'searchCode');
+        const validated = validateConsolidation({ groups: [{
+            groupId: group.id, outcome: 'findings', rationale: 'The prior entry was rechecked and updated.', entries: [{
+                existingEntryId: 'H1', situation: 'Updated situation for the same investigation experience.',
+                steps: [{ sourceId: sourceForObservation(projection, observations[0]), symbol: 'filterMemoryLogsForWebview',
+                    purpose: 'Use the filtering function as the first investigation entry point.',
+                    findings: findingsFor(projection, observations) }], lessons: [],
+            }],
         }] }, projection);
-        assert.match(unknown.issues.join('\n'), /G999: group ID was not supplied/);
-        assert.equal(unknown.processedGroupIds.length, 2);
+
+        assert.deepEqual(validated.issues, []);
+        assert.equal(validated.entries[0].id, original.id);
+        assert.equal(validated.entries[0].situation, 'Updated situation for the same investigation experience.');
     });
 });
 
-describe('consolidatePending', function () {
-    this.timeout(20_000);
-
-    it('does not group public directory overlap or readMemorySources-only observations', async () => {
-        await withTempStorage(async storageRoot => {
-            const repositoryId = '1'.repeat(64);
-            const store = new MemoryStore(storageRoot, repositoryId);
-            await recordAll(store, [
-                makeEpisode({ repositoryId, episodeId: uuidFor(10), snapshotId: digestFor(10), sourcePath: 'src/first.ts' }),
-                makeEpisode({ repositoryId, episodeId: uuidFor(11), snapshotId: digestFor(11), sourcePath: 'src/second.ts' }),
-                makeEpisode({ repositoryId, episodeId: uuidFor(12), snapshotId: digestFor(12), sourcePath: 'src/memory.ts', tool: 'readMemorySources' }),
-                makeEpisode({ repositoryId, episodeId: uuidFor(13), snapshotId: digestFor(13), sourcePath: 'src/memory.ts', tool: 'readMemorySources' }),
-            ]);
-            let calls = 0;
-
-            const result = await consolidatePending(store, makeValidationRunner(async () => {
-                calls += 1;
-                throw new Error('runner should not be called');
-            }), new AbortController().signal);
-
-            assert.deepEqual(result, { status: 'not-ready', pendingCount: 1, threshold: 2 });
-            assert.equal(calls, 0);
-        });
-    });
-
-    it('publishes a finding, derives its paths and supports, and stores the group fingerprint', async () => {
-        // Verify consolidation consumers read S* handles from nested V* snapshots and publish the validated result unchanged.
-        await withTempStorage(async storageRoot => {
-            const repositoryId = '2'.repeat(64);
-            const episodes = makeRepeatedEpisodes('src/parser.ts', 2, 20, repositoryId);
-            const store = new MemoryStore(storageRoot, repositoryId);
-            await recordAll(store, episodes);
-            let input = '';
-            const runner = makeValidationRunner(async (request, _signal, validate) => {
-                input = request;
-                const projected = JSON.parse(request) as {
-                    groups: Array<{ id: string; snapshots: Array<{ sources: Array<{ id: string }> }> }>;
-                };
-                const group = projected.groups[0];
-                const sourceIds = group.snapshots.flatMap(snapshot => snapshot.sources.map(source => source.id));
-                const raw = { groups: [{
-                    groupId: group.id,
-                    outcome: 'findings',
-                    rationale: 'Repeated direct evidence supports this concern.',
-                    concerns: [{ text: 'Parser state may be observed before publication.', sourceIds: sourceIds.slice(0, 2) }],
-                }] };
-                return { value: validate(raw), attempts: 1 };
-            });
-
-            const result = await consolidatePending(store, runner, new AbortController().signal);
-
-            assert.deepEqual(result, {
-                status: 'published', groupCount: 1, handbookCount: 1, noFindingCount: 0,
-                failedGroupCount: 0, skippedGroups: 0, deferredPaths: [], retryCount: 0,
-                groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }],
-            });
-            const projected = JSON.parse(input) as {
-                groups: Array<{ snapshots: Array<{ sources: Array<{ id: string }> }> }>;
-            };
-            assert.equal(projected.groups[0].snapshots.length, 2);
-            assert.equal(projected.groups[0].snapshots.flatMap(snapshot => snapshot.sources).length, 2);
-            const view = await store.inspect();
-            assert.equal(view.handbook.length, 1);
-            assert.deepEqual(view.handbook[0].targetPaths, ['src/parser.ts']);
-            assert.deepEqual(new Set(view.handbook[0].supports.map(support => support.episodeId)),
-                new Set(episodes.map(episode => episode.id)));
-            assert.equal(view.consolidated.length, 1);
-            assert.match(view.consolidated[0], /^[0-9a-f-]{36}$/);
-            assert.equal(view.consolidated[0], buildConsolidationGroups(episodes, [])[0].fingerprint);
-        });
-    });
-
-    it('publishes no-findings once and re-evaluates the group only after its fingerprint changes', async () => {
-        await withTempStorage(async storageRoot => {
-            const repositoryId = '3'.repeat(64);
-            const episodes = makeRepeatedEpisodes('src/parser.ts', 2, 30, repositoryId);
-            const store = new MemoryStore(storageRoot, repositoryId);
-            await recordAll(store, episodes);
-            const consolidationSettings = makeSettings({ 'consolidation.maxCallsPer24h': 4 });
-            const previous = await store.inspect();
-            const previousReservation = await store.reserveConsolidation(previous, consolidationSettings['consolidation.maxCallsPer24h']);
-            assert.equal(previousReservation.status, 'reserved');
-            if (previousReservation.status !== 'reserved') { throw new Error('Expected a previous Handbook reservation.'); }
-            await store.publishHandbook(previous, previousReservation.generation, previousReservation.id,
-                [makeHandbookEntry(episodes)], []);
-            let calls = 0;
-            const runner = makeValidationRunner(async (request, _signal, validate) => {
-                calls += 1;
-                const projected = JSON.parse(request) as { groups: Array<{ id: string }> };
-                return {
-                    value: validate({ groups: projected.groups.map(group => ({
-                        groupId: group.id, outcome: 'no-findings',
-                        rationale: 'The evidence does not establish a stable concern.', concerns: [],
-                    })) }),
-                    attempts: 1,
-                };
-            });
-
-            assert.deepEqual(await consolidatePending(store, runner, new AbortController().signal, consolidationSettings), {
-                status: 'no-findings', groupCount: 1, skippedGroups: 0, deferredPaths: [], retryCount: 0,
-                groupOutcomes: [{ path: 'src/parser.ts', status: 'no-findings' }],
-            });
-            assert.equal(calls, 1);
-            assert.deepEqual(await consolidatePending(store, runner, new AbortController().signal, consolidationSettings), {
-                status: 'not-ready', pendingCount: 0, threshold: 2,
-            });
-            assert.equal(calls, 1, 'the same evidence group must not incur another model call');
-
-            const newEpisode = makeEpisode({
-                repositoryId, episodeId: uuidFor(32), snapshotId: digestFor(32), sourcePath: 'src/parser.ts',
-            });
-            await store.recordEpisode(newEpisode, await store.epoch());
-            const changed = buildConsolidationGroups([...episodes, newEpisode], []);
-            assert.notEqual(changed[0].fingerprint, buildConsolidationGroups(episodes, [])[0].fingerprint);
-            const rerun = await consolidatePending(store, runner, new AbortController().signal, consolidationSettings);
-            assert.equal(rerun.status, 'no-findings');
-            assert.equal(calls, 2);
-            assert.deepEqual((await store.inspect()).handbook, [],
-                'a completed no-findings group removes an older entry for the same exact path');
-        });
-    });
-
-    it('does not charge a second consolidation for a duplicate record of the same snapshot evidence', async () => {
+describe('consolidatePending lifecycle', () => {
+    it('publishes a finding and reports the G1 outcome with entry IDs', async () => {
+        // Verify a validated seed result is atomically published and exposes a reviewable group outcome.
         await withTempStorage(async storageRoot => {
             const repositoryId = 'a'.repeat(64);
-            const original = makeRepeatedEpisodes('src/parser.ts', 2, 33, repositoryId);
-            const duplicate = makeEpisode({
-                repositoryId,
-                episodeId: uuidFor(99),
-                snapshotId: original[0].snapshot.id,
-                sourcePath: 'src/parser.ts',
-            });
+            const episodes = makeRouteEpisodes({ repositoryId });
             const store = new MemoryStore(storageRoot, repositoryId);
-            await recordAll(store, original);
-            let calls = 0;
-            const runner = makeValidationRunner(async (request, _signal, validate) => {
-                calls += 1;
-                const projected = JSON.parse(request) as { groups: Array<{ id: string }> };
-                return {
-                    value: validate({ groups: projected.groups.map(group => ({
-                        groupId: group.id, outcome: 'no-findings', rationale: 'The evidence is unchanged.', concerns: [],
-                    })) }),
-                    attempts: 1,
-                };
+            await recordAll(store, episodes);
+            const runner = makeRunner(async (input, _signal, validate) => {
+                const projected = JSON.parse(input) as { groups: Array<{ id: string }> };
+                const sourceGroup = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+                const projection = projectConsolidation([sourceGroup]);
+                const observations = observationsFor(projection, 'searchCode');
+                return { value: validate({ groups: [{
+                    groupId: projected.groups[0].id, outcome: 'findings', rationale: 'Published from repeated route evidence.', entries: [{
+                        existingEntryId: null, situation: 'When lifecycle filtering changes, inspect the filtering entry point.',
+                        steps: [{ sourceId: sourceForObservation(projection, observations[0]), symbol: 'filterMemoryLogsForWebview', purpose: 'Inspect filtering conditions.',
+                            findings: findingsFor(projection, observations) }], lessons: [],
+                    }],
+                }] }), attempts: 1 };
             });
 
-            const first = await consolidatePending(store, runner, new AbortController().signal);
-            assert.equal(first.status, 'no-findings');
-            const firstFingerprint = (await store.inspect()).consolidated[0];
-            await store.recordEpisode(duplicate, await store.epoch());
-
-            assert.deepEqual(await consolidatePending(store, runner, new AbortController().signal), {
-                status: 'not-ready', pendingCount: 0, threshold: 2,
-            });
-            assert.equal(calls, 1, 'the duplicate storage record has the same evidence-group fingerprint');
-            assert.deepEqual((await store.inspect()).consolidated, [firstFingerprint]);
+            const result = await consolidatePending(store, runner, new AbortController().signal);
+            assert.equal(result.status, 'published');
+            if (result.status !== 'published' && result.status !== 'partial' && result.status !== 'no-findings') { return; }
+            assert.equal(result.groupOutcomes.length, 1);
+            assert.equal(result.groupOutcomes[0].seedId, episodes[0].id);
+            assert.equal(result.groupOutcomes[0].status, 'published');
+            assert.equal(result.groupOutcomes[0].entryIds.length, 1);
+            assert.equal(result.groupOutcomes[0].issues.length, 0);
+            assert.equal((await store.inspect()).handbook.length, 1);
         });
     });
 
-    it('counts only selected recheck paths when no complete group is available', async () => {
+    it('does not remove existing handbook entries when a recheck returns no-findings', async () => {
+        // Verify no-findings records completion without treating the absence of new findings as deletion.
         await withTempStorage(async storageRoot => {
             const repositoryId = 'b'.repeat(64);
-            const selected = makeRepeatedEpisodes('src/selected.ts', 1, 100, repositoryId);
-            const other = makeRepeatedEpisodes('src/other.ts', 2, 101, repositoryId);
-            const store = new MemoryStore(storageRoot, repositoryId);
-            await recordAll(store, [...selected, ...other]);
-            let called = false;
-            const runner = makeValidationRunner(async () => {
-                called = true;
-                throw new Error('A not-ready recheck must not invoke the runner.');
-            });
-
-            assert.deepEqual(await consolidatePending(store, runner, new AbortController().signal, MEMORY_DEFAULTS, ['src/selected.ts']), {
-                status: 'not-ready', pendingCount: 1, threshold: 2,
-            });
-            assert.equal(called, false);
-        });
-    });
-
-    it('publishes valid groups as partial when another group exhausts validation', async () => {
-        // Verify one nested G* result can publish while a sibling concern using an unknown S* remains failed.
-        await withTempStorage(async storageRoot => {
-            const repositoryId = '4'.repeat(64);
-            const episodes = [
-                ...makeRepeatedEpisodes('src/alpha.ts', 2, 40, repositoryId),
-                ...makeRepeatedEpisodes('src/beta.ts', 2, 42, repositoryId),
-            ];
+            const episodes = makeRouteEpisodes({ repositoryId });
+            const original = makeHandbook(episodes);
             const store = new MemoryStore(storageRoot, repositoryId);
             await recordAll(store, episodes);
-            const runner = makeValidationRunner(async (request, _signal, validate) => {
-                const projected = JSON.parse(request) as {
-                    groups: Array<{ id: string; snapshots: Array<{ sources: Array<{ id: string }> }> }>;
-                };
-                const alpha = projected.groups.find(group => group.id === 'G1')!;
-                const beta = projected.groups.find(group => group.id === 'G2')!;
-                const alphaSourceIds = alpha.snapshots.flatMap(snapshot => snapshot.sources.map(source => source.id));
-                const betaSourceIds = beta.snapshots.flatMap(snapshot => snapshot.sources.map(source => source.id));
-                const raw = { groups: [
-                    {
-                        groupId: alpha.id, outcome: 'findings', rationale: 'Alpha is stable.',
-                        concerns: [{ text: 'Alpha has a stable cross-snapshot concern.', sourceIds: alphaSourceIds.slice(0, 2) }],
-                    },
-                    {
-                        groupId: beta.id, outcome: 'findings', rationale: 'Beta is malformed.',
-                        concerns: [{ text: 'Beta must fail validation.', sourceIds: ['S999', betaSourceIds[0]] }],
-                    },
-                ] };
-                return { value: validate(raw), attempts: 1 };
-            });
-
-            const result = await consolidatePending(store, runner, new AbortController().signal, makeSettings({
-                'consolidation.maxCallsPer24h': 1,
-            }));
-
-            assert.deepEqual(result, {
-                status: 'partial', groupCount: 1, handbookCount: 1, noFindingCount: 0,
-                failedGroupCount: 1, skippedGroups: 0, deferredPaths: [], retryCount: 0,
-                groupOutcomes: [
-                    { path: 'src/alpha.ts', status: 'published' },
-                    { path: 'src/beta.ts', status: 'failed' },
-                ],
-            });
-            const view = await store.inspect();
-            assert.equal(view.handbook.length, 1);
-            assert.equal(view.handbook[0].targetPaths[0], 'src/alpha.ts');
-            assert.deepEqual(view.consolidated, [buildConsolidationGroups(episodes, [])[0].fingerprint]);
-        });
-    });
-
-    it('uses execution repair retries without consuming another 24-hour consolidation start allowance', async () => {
-        await withTempStorage(async storageRoot => {
-            const repositoryId = '5'.repeat(64);
-            const episodes = makeRepeatedEpisodes('src/parser.ts', 2, 50, repositoryId);
-            const store = new MemoryStore(storageRoot, repositoryId);
-            await recordAll(store, episodes);
-            let sent = 0;
-            const runner = makeValidationRunner(async (request, _signal, validate) => {
-                sent += 1;
-                const projected = JSON.parse(request) as { groups: Array<{ id: string }> };
-                const invalid = validate({ groups: [{ groupId: projected.groups[0].id, outcome: 'findings', rationale: 'invalid', concerns: [] }] });
-                assert.ok(invalid.issues.length > 0);
-                sent += 1;
-                const valid = validate({ groups: [{
-                    groupId: projected.groups[0].id, outcome: 'no-findings', rationale: 'No stable concern.', concerns: [],
-                }] });
-                return { value: valid, attempts: 2 };
-            });
-
-            const result = await consolidatePending(store, runner, new AbortController().signal, makeSettings({
-                'consolidation.maxCallsPer24h': 1,
-            }));
-            assert.deepEqual(result, {
-                status: 'no-findings', groupCount: 1, skippedGroups: 0, deferredPaths: [], retryCount: 1,
-                groupOutcomes: [{ path: 'src/parser.ts', status: 'no-findings' }],
-            });
-            assert.equal(sent, 2);
-            const manifest = JSON.parse(await fs.readFile(path.join(store.directory, 'current.json'), 'utf8')) as { attempts: unknown[] };
-            assert.equal(manifest.attempts.length, 1, 'repair retries do not consume another 24-hour consolidation start allowance');
-        });
-    });
-
-    it('defers complete groups when the batch limit or token budget cannot fit them', async () => {
-        await withTempStorage(async storageRoot => {
-            const repositoryId = '7'.repeat(64);
-            const episodes = Array.from({ length: 13 }, (_, index) => makeRepeatedEpisodes(
-                `src/group-${String(index).padStart(2, '0')}.ts`, 2, 70 + index * 2, repositoryId,
-            )).flat();
-            const store = new MemoryStore(storageRoot, repositoryId);
-            await recordAll(store, episodes);
-            let requestedGroups = 0;
-            const runner = makeValidationRunner(async (request, _signal, validate) => {
-                const projected = JSON.parse(request) as { groups: Array<{ id: string }> };
-                requestedGroups = projected.groups.length;
-                return {
-                    value: validate({ groups: projected.groups.map(group => ({
-                        groupId: group.id, outcome: 'no-findings', rationale: 'Deferred groups are processed later.', concerns: [],
-                    })) }),
-                    attempts: 1,
-                };
-            });
-            const result = await consolidatePending(store, runner, new AbortController().signal);
-
-            assert.equal(result.status, 'no-findings');
-            if (result.status === 'no-findings') {
-                assert.equal(result.groupCount, 12);
-                assert.equal(result.skippedGroups, 1);
-                assert.deepEqual(result.deferredPaths, ['src/group-12.ts']);
-                assert.deepEqual(result.groupOutcomes.length, 12);
-            }
-            assert.equal(requestedGroups, 12);
-            assert.equal((await store.inspect()).consolidated.length, 12);
-        });
-
-        await withTempStorage(async storageRoot => {
-            const repositoryId = '8'.repeat(64);
-            const large = makeRepeatedEpisodes('src/large.ts', 2, 90, repositoryId, 12_000);
-            const small = makeRepeatedEpisodes('src/small.ts', 2, 92, repositoryId);
-            const store = new MemoryStore(storageRoot, repositoryId);
-            await recordAll(store, [...large, ...small]);
-            let request = '';
-            const runner = makeValidationRunner(async (input, _signal, validate) => {
-                request = input;
+            const group = buildConsolidationGroups(episodes, [], [original]).find(item => item.seedId === episodes[0].id)!;
+            const runner = makeRunner(async (input, _signal, validate) => {
                 const projected = JSON.parse(input) as { groups: Array<{ id: string }> };
-                return {
-                    value: validate({ groups: projected.groups.map(group => ({
-                        groupId: group.id, outcome: 'no-findings', rationale: 'The complete small group fits.', concerns: [],
-                    })) }),
-                    attempts: 1,
-                };
-            }, 100, input => input.includes('large.ts') ? 101 : 0);
+                return { value: validate({ groups: [{ groupId: projected.groups[0].id, outcome: 'no-findings', rationale: 'No new reusable experience was found.', entries: [] }] }), attempts: 1 };
+            });
 
             const result = await consolidatePending(store, runner, new AbortController().signal);
             assert.equal(result.status, 'no-findings');
-            if (result.status === 'no-findings') {
-                assert.equal(result.skippedGroups, 1);
-                assert.deepEqual(result.deferredPaths, ['src/large.ts']);
-            }
-            assert.deepEqual(JSON.parse(request).groups.map((group: { anchorPath: string }) => group.anchorPath), ['src/small.ts']);
-            assert.equal((await store.inspect()).consolidated.length, 1);
+            assert.deepEqual((await store.inspect()).handbook.map(entry => entry.id), [original.id]);
+            assert.deepEqual((await store.inspect()).consolidated, [group.fingerprint]);
+        });
+    });
+
+    it('shrinks only whole episodes when the input budget is tight', async () => {
+        // Verify budget fitting never sends a partial episode or source fragment to the consolidation runner.
+        await withTempStorage(async storageRoot => {
+            const repositoryId = 'c'.repeat(64);
+            const episodes = makeRouteEpisodes({ repositoryId });
+            const store = new MemoryStore(storageRoot, repositoryId);
+            await recordAll(store, episodes);
+            const seen: string[] = [];
+            const runner = makeRunner(async (input, _signal, validate) => {
+                seen.push(input);
+                const projected = JSON.parse(input) as { groups: Array<{ id: string; episodes: Array<{ id: string }> }> };
+                return { value: validate({ groups: [{ groupId: projected.groups[0].id, outcome: 'no-findings', rationale: 'The bounded batch is valid.', entries: [] }] }), attempts: 1 };
+            }, 1_000_000, input => JSON.parse(input).groups[0].episodes.length > 2 ? 1_100 : 1);
+
+            const result = await consolidatePending(store, runner, new AbortController().signal, makeSettings({ 'consolidation.maxCallsPer24h': 3 }));
+            assert.equal(result.status, 'no-findings');
+            assert.equal(seen.length, 1);
+            const input = JSON.parse(seen[0]) as { groups: Array<{ episodes: Array<{ id: string }> }> };
+            assert.ok(input.groups[0].episodes.length >= 2);
+            assert.equal(input.groups[0].episodes.every(episode => /^T\d+$/.test(episode.id)), true);
         });
     });
 });
 
-describe('createConsolidationRunner', () => {
-    it('uses execution.maxRetries, zero temperature, no transport retries, and includes all local issues in repair input', async () => {
-        // Verify a failed first response triggers one repair request with explicit G*->V*->S* evidence guidance and preserves the completed result.
-        const groups = buildConsolidationGroups(makeRepeatedEpisodes('src/parser.ts', 2), []);
-        const projection = projectConsolidation(groups);
-        const group = projection.groups[0];
-        const sourceIds = sourceIdsFor(projection, group);
-        const requests: AIRunRequest[] = [];
-        const accounted: unknown[] = [];
-        const attempts: Array<{
-            attempt: number;
-            totalAttempts: number;
-            issues: string[];
-            response: AIRunResponse;
-            inputFingerprint: string;
-        }> = [];
-        const execution = makeExecution([
-            { targetPathFIds: ['F1'] },
-            { groups: [finding(group, sourceIds, 'The corrected concern.')] },
-        ], 1, requests, accounted);
-        const runner = loadConsolidationRunner()(execution, MEMORY_DEFAULTS,
-            (attempt, totalAttempts, issues, response, inputFingerprint) => {
-                attempts.push({ attempt, totalAttempts, issues, response, inputFingerprint });
-            });
-
-        const result = await runner(
-            projection.input,
-            new AbortController().signal,
-            raw => validateConsolidation(raw, projection),
-        );
-
-        assert.equal(result.attempts, 2);
-        assert.equal(result.value.issues.length, 0);
-        assert.equal(result.value.entries.length, 1);
-        assert.deepEqual(result.value.processedGroupIds, [group.fingerprint]);
-        assert.equal(requests.length, 2);
-        assert.equal(accounted.length, 2);
-        assert.equal(attempts.length, 2);
-        assert.equal(attempts[0].attempt, 1);
-        assert.equal(attempts[0].totalAttempts, 2);
-        assert.ok(attempts[0].issues.length > 0);
-        assert.equal(attempts[0].response.text, '');
-        assert.deepEqual(attempts[0].response.raw, {});
-        assert.equal(attempts[0].response.stopReason, 'completed');
-        assert.deepEqual(attempts[0].response.structured, { targetPathFIds: ['F1'] });
-        assert.equal(attempts[1].issues.length, 0);
-        assert.equal(attempts[1].response.stopReason, 'completed');
-        assert.equal(attempts[1].inputFingerprint, attempts[0].inputFingerprint);
-        assert.equal(requests[0].temperature, 0);
-        assert.equal(requests[0].transportRetries, 0);
-        assert.equal(requests[0].responseFormat?.name, 'repositoryMemoryConsolidation');
-        assert.equal(requests[1].messages?.length, 1);
-        assert.equal(requests[1].messages?.[0].role, 'user');
-        const repairPrompt = String(requests[1].messages?.[0].content);
-        assert.match(repairPrompt, /targetPathFIds/);
-        assert.match(repairPrompt, /Return the complete corrected result/);
-        assert.match(repairPrompt, /G\* -> V\* -> S\*/);
-        assert.match(repairPrompt, /same-group sources/);
-        assert.match(repairPrompt, /at least two distinct V\* snapshots/);
-        assert.match(repairPrompt, /remove that concern/);
-        assert.match(repairPrompt, /return no-findings/);
-        assert.match(repairPrompt, /Do not add unrelated sources merely to satisfy the snapshot requirement/);
-    });
-
-    it('passes complete diagnostics to onAttempt when a completed response has no structured output', async () => {
-        const groups = buildConsolidationGroups(makeRepeatedEpisodes('src/parser.ts', 2), []);
-        const projection = projectConsolidation(groups);
-        const requests: AIRunRequest[] = [];
-        const accounted: unknown[] = [];
-        const attempts: Array<{ issues: string[]; response: AIRunResponse }> = [];
-        const execution = makeExecution([undefined], 0, requests, accounted, 'completed',
-            'provider text without structured output', { provider: 'raw-completed' });
-        const runner = loadConsolidationRunner()(execution, MEMORY_DEFAULTS,
-            (_attempt, _totalAttempts, issues, response) => attempts.push({ issues, response }));
-
-        const result = await runner(
-            projection.input,
-            new AbortController().signal,
-            raw => validateConsolidation(raw, projection),
-        );
-
-        assert.equal(result.attempts, 1);
-        assert.equal(attempts.length, 1);
-        assert.ok(attempts[0].issues.length > 0);
-        assert.equal(attempts[0].response.text, 'provider text without structured output');
-        assert.deepEqual(attempts[0].response.raw, { provider: 'raw-completed' });
-        assert.equal(attempts[0].response.stopReason, 'completed');
-        assert.equal(attempts[0].response.structured, undefined);
-        assert.equal(accounted.length, 1);
-    });
-
-    it('accounts a completed HTTP response before rejecting a non-completed stop reason', async () => {
-        const requests: AIRunRequest[] = [];
-        const accounted: unknown[] = [];
-        const attempts: Array<{ issues: string[]; response: AIRunResponse }> = [];
-        const execution = makeExecution([{ groups: [] }], 2, requests, accounted, 'max_output_tokens',
-            'provider stopped before completion', { provider: 'raw-incomplete' });
-        const runner = loadConsolidationRunner()(execution, MEMORY_DEFAULTS,
-            (_attempt, _totalAttempts, issues, response) => attempts.push({ issues, response }));
-
-        await assert.rejects(
-            () => runner('{}', new AbortController().signal, () => ({
-                entries: [], processedGroupIds: [], findingGroupIds: [], noFindingGroupIds: [], issues: [],
-            })),
-            /stopped without a complete response: max_output_tokens/,
-        );
-        assert.equal(requests.length, 1);
-        assert.equal(accounted.length, 1);
-        assert.equal(attempts.length, 1);
-        assert.match(attempts[0].issues.join('\n'), /Response stopped without completing: max_output_tokens/);
-        assert.equal(attempts[0].response.text, 'provider stopped before completion');
-        assert.deepEqual(attempts[0].response.raw, { provider: 'raw-incomplete' });
-        assert.equal(attempts[0].response.stopReason, 'max_output_tokens');
-    });
-});
-
-async function withTempStorage<T>(action: (storageRoot: string) => Promise<T>): Promise<T> {
-    const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'genie-consolidator-test-'));
-    try {
-        return await action(storageRoot);
-    } finally {
-        await fs.rm(storageRoot, { recursive: true, force: true });
-    }
+function finding(group: ConsolidationGroup, entry: {
+    existingEntryId: string | null;
+    situation: string;
+    steps: Array<{ sourceId: string; symbol: string | null; purpose: string; findings: Array<{ observationId: string; questionIndex: number; claimIndex: number }> }>;
+    lessons: Array<{ observation: string; implication: string; limitation: string; observationIds: string[] }>;
+}): Record<string, unknown> {
+    return { groupId: group.id, outcome: 'findings', rationale: 'The selected observations support this experience.', entries: [entry] };
 }
 
-async function recordAll(store: MemoryStore, episodes: InvestigationEpisode[]): Promise<void> {
-    const epoch = await store.epoch();
-    for (const episode of episodes) {
-        await store.recordEpisode(episode, epoch);
-    }
+function stepFor(projection: ReturnType<typeof projectConsolidation>): {
+    sourceId: string; symbol: string | null; purpose: string; findings: Array<{ observationId: string; questionIndex: number; claimIndex: number }>;
+} {
+    const observations = [...projection.observations.keys()].slice(0, 2);
+    return { sourceId: sourceForObservation(projection, observations[0]), symbol: null, purpose: 'Inspect the cited entry point.',
+        findings: findingsFor(projection, observations) };
 }
 
-function makeValidationRunner(
-    action: (input: string, signal: AbortSignal,
-        validate: (raw: unknown) => ConsolidationValidation) => Promise<{ value: ConsolidationValidation; attempts: number }>,
-    maxInputTokens = 100_000,
-    estimateInputTokens: (input: string) => number = () => 0,
-): ConsolidationRunner {
-    return Object.assign(async (
-        input: string,
-        signal: AbortSignal,
-        validate: (raw: unknown) => ConsolidationValidation,
-    ) => action(input, signal, validate), { maxInputTokens, estimateInputTokens });
+function lessonFor(projection: ReturnType<typeof projectConsolidation>): { observation: string; implication: string; limitation: string; observationIds: string[] } {
+    return { observation: 'A bounded history did not return a match.', implication: 'Inspect the entry point directly after an empty search.',
+        limitation: 'An empty result is not proof that no implementation exists.', observationIds: [...projection.observations.keys()].slice(0, 2) };
 }
 
-function makeRepeatedEpisodes(
-    sourcePath: string,
-    count: number,
-    startIndex = 1,
-    repositoryId = 'a'.repeat(64),
-    excerptLength = 0,
-): InvestigationEpisode[] {
-    return Array.from({ length: count }, (_, index) => makeEpisode({
-        repositoryId,
-        episodeId: uuidFor(startIndex + index),
-        snapshotId: digestFor(startIndex + index),
-        sourcePath,
-        sourceExcerpt: excerptLength ? `parse evidence for ${sourcePath}`.padEnd(excerptLength, 'x') : undefined,
-    }));
+function observationsFor(projection: ReturnType<typeof projectConsolidation>, tool: string): string[] {
+    return [...projection.observations.entries()].filter(([, item]) => item.observation.tool === tool && item.observation.ok).map(([id]) => id);
+}
+
+function findingsFor(projection: ReturnType<typeof projectConsolidation>, observationIds: string[]): Array<{ observationId: string; questionIndex: number; claimIndex: number }> {
+    return observationIds.map(observationId => {
+        const item = projection.observations.get(observationId);
+        if (!item) { throw new Error(`Missing test observation ${observationId}.`); }
+        const questionIndex = item.episode.questions.findIndex(question => question.trim().length > 0);
+        const evidenceId = item.observation.evidence[0]?.id;
+        const claimIndex = evidenceId === undefined ? -1 : item.episode.claims.findIndex(claim =>
+            claim.disposition !== 'omit' && claim.evidenceRefs.includes(evidenceId));
+        if (questionIndex < 0 || claimIndex < 0) { throw new Error(`Test observation ${observationId} has no positive question/claim fixture.`); }
+        return { observationId, questionIndex, claimIndex };
+    });
+}
+
+function sourceForObservation(projection: ReturnType<typeof projectConsolidation>, observationId: string): string {
+    return [...projection.sources.entries()].find(([, value]) => value.observationId === observationId)![0];
+}
+
+function makeRouteEpisodes(options: {
+    repositoryId?: string;
+    reverseSecondRoute?: boolean;
+} = {}): InvestigationEpisode[] {
+    const repositoryId = options.repositoryId ?? 'd'.repeat(64);
+    return [1, 2].map((index, episodeIndex) => {
+        const route = options.reverseSecondRoute && episodeIndex === 1
+            ? [
+                makeObservation({ step: 0, tool: 'searchCode', path: 'src/ui/memoryWebviewPolicy.ts', excerpt: 'filterMemoryLogsForWebview result', summary: 'Search the filtering predicate first.', symbol: 'filterMemoryLogsForWebview' }),
+                makeObservation({ step: 1, tool: 'readFileContent', path: 'src/ui/memoryWebviewPolicy.ts', excerpt: 'function filterMemoryLogsForWebview', summary: 'Read the filtering predicate second.', symbol: 'filterMemoryLogsForWebview' }),
+            ]
+            : [
+                makeObservation({ step: 0, tool: 'readFileContent', path: 'src/ui/memoryWebviewPolicy.ts', excerpt: 'function filterMemoryLogsForWebview', summary: 'Read the filtering predicate first.', symbol: 'filterMemoryLogsForWebview' }),
+                makeObservation({ step: 1, tool: 'searchCode', path: 'src/ui/memoryWebviewPolicy.ts', excerpt: 'filterMemoryLogsForWebview result', summary: 'Search the filtering predicate second.', symbol: 'filterMemoryLogsForWebview' }),
+            ];
+        const failed = makeObservation({ step: 2, tool: 'searchCode', path: 'src/ui/memoryWebviewPolicy.ts', excerpt: '', summary: 'No renderer caller was found in this bounded search.', symbol: 'filterMemoryLogsForWebview', ok: false, error: 'No matches', evidence: [] });
+        const observations = [...route, failed];
+        return makeEpisode({ episodeId: uuidFor(index), snapshotId: digestFor(index), repositoryId,
+            changedPaths: ['src/ui/memoryWebviewPolicy.ts'], changedSymbols: ['filterMemoryLogsForWebview'],
+            questions: ['Where should a new memory lifecycle log be inspected?'], observations });
+    });
 }
 
 function makeEpisode(options: {
     episodeId?: string;
     snapshotId?: string;
     repositoryId?: string;
-    sourcePath?: string;
-    sourceExcerpt?: string;
     changedPaths?: string[];
     changedSymbols?: string[];
+    questions?: string[];
+    sourcePath?: string;
+    sourceExcerpt?: string;
+    summary?: string;
     tool?: string;
     status?: InvestigationEpisode['status'];
+    observationCount?: number;
+    observations?: RecordedObservation[];
 } = {}): InvestigationEpisode {
-    const repositoryId = options.repositoryId ?? 'a'.repeat(64);
-    const snapshot = makeSnapshot(options.snapshotId ?? 'a'.repeat(64), repositoryId);
-    const sourcePath = options.sourcePath ?? 'src/parser.ts';
-    const excerpt = options.sourceExcerpt ?? `parse evidence for ${sourcePath}`;
-    const source = makeSource(snapshot, sourcePath, excerpt);
+    const repositoryId = options.repositoryId ?? 'd'.repeat(64);
+    const sourcePath = options.sourcePath ?? options.changedPaths?.[0] ?? 'src/ui/memoryWebviewPolicy.ts';
+    const snapshot = makeSnapshot(options.snapshotId ?? digestFor(99), repositoryId);
+    const observations = options.observations ?? Array.from({ length: options.observationCount ?? 1 }, (_, index) => makeObservation({
+        step: index, tool: options.tool ?? 'readFileContent', path: sourcePath,
+        excerpt: options.sourceExcerpt ?? `function parseMemoryLog${index}() { return true; }`,
+        summary: options.summary ?? 'Read the investigation source.', symbol: options.changedSymbols?.[0] ?? 'parseMemoryLog', snapshot,
+    }));
+    // Route fixtures are already bound to their target snapshots; generated fixtures bind each observation here.
+    const rebound = observations.map(observation => ({
+        ...observation,
+        evidence: observation.evidence.map(evidence => ({ ...evidence, source: { ...evidence.source, snapshotId: snapshot.id } })),
+    }));
     return {
-        version: 1,
+        version: 2,
         id: options.episodeId ?? randomUUID(),
-        createdAt: Date.now(),
+        createdAt: Number(options.episodeId?.slice(-2) ?? Date.now()),
         snapshot,
         changedPaths: options.changedPaths ?? [sourcePath],
-        changedSymbols: options.changedSymbols ?? ['parse'],
-        questions: ['How should this evidence be interpreted?'],
-        observations: [{
-            step: 0,
-            tool: options.tool ?? 'readFileContent',
-            arguments: { filePath: sourcePath, startLine: 1, maxLines: 1 },
-            ok: true,
-            summary: 'read source',
-            evidence: [{ id: 'E1', source }],
-            durationMs: 1,
-            truncated: false,
-        }],
-        claims: [{ claim: 'Source explains the behavior.', evidenceRefs: ['E1'], disposition: 'must_express' }],
+        changedSymbols: options.changedSymbols ?? ['parseMemoryLog'],
+        questions: options.questions ?? ['Where should the changed source be inspected?'],
+        observations: rebound,
+        claims: rebound.flatMap(observation => observation.evidence.map(evidence => ({
+            claim: `The ${evidence.source.path} source supports the investigation.`, evidenceRefs: [evidence.id], disposition: 'must_express' as const,
+        }))),
         status: options.status ?? 'complete',
-        model: 'consolidator-test',
-        promptVersion: 'memory-1',
-        toolsetVersion: 'snapshot-1',
+        model: 'memory-experience-test',
+        promptVersion: 'memory-experience-1',
+        toolsetVersion: 'snapshot-memory-experience-1',
+    };
+}
+
+function makeObservation(options: {
+    step: number;
+    tool: string;
+    path: string;
+    excerpt: string;
+    summary: string;
+    symbol?: string;
+    ok?: boolean;
+    error?: string;
+    evidence?: RecordedObservation['evidence'];
+    snapshot?: SnapshotIdentity;
+}): RecordedObservation {
+    const snapshot = options.snapshot ?? makeSnapshot(digestFor(1), 'd'.repeat(64));
+    const evidence = options.evidence ?? [{ id: `E${options.step + 1}`, source: makeSource(snapshot, options.path, options.excerpt) }];
+    return {
+        step: options.step,
+        tool: options.tool,
+        arguments: { filePath: options.path, symbol: options.symbol ?? null, reason: options.summary },
+        ok: options.ok ?? true,
+        ...(options.error ? { error: options.error } : {}),
+        summary: options.summary,
+        evidence,
+        durationMs: 1,
+        truncated: false,
+    };
+}
+
+function makeHandbook(episodes: InvestigationEpisode[]): HandbookEntry {
+    return {
+        id: '10000000-0000-4000-8000-000000000001',
+        situation: 'When memory lifecycle visibility changes, inspect the filtering entry point.',
+        steps: [{
+            path: 'src/ui/memoryWebviewPolicy.ts', symbol: 'filterMemoryLogsForWebview',
+            purpose: 'Inspect the filtering conditions before changing the renderer.', operation: 'readFileContent',
+            supports: episodes.map(episode => ({ episodeId: episode.id, observationIndex: 0, evidenceId: 'E1' })), snapshotCount: 2,
+        }],
+        lessons: [],
+        targetPaths: ['src/ui/memoryWebviewPolicy.ts'],
+        triggers: ['src/ui/memoryWebviewPolicy.ts', 'filterMemoryLogsForWebview'],
     };
 }
 
 function makeSnapshot(snapshotId: string, repositoryId: string): SnapshotIdentity {
     return {
-        id: snapshotId,
-        repositoryId,
-        worktreeId: 'b'.repeat(64),
-        head: 'c'.repeat(40),
-        beforeTree: 'd'.repeat(40),
-        afterTree: 'e'.repeat(40),
-        indexFingerprint: 'f'.repeat(64),
-        autoStaged: false,
+        id: snapshotId, repositoryId, worktreeId: 'e'.repeat(64), head: 'f'.repeat(40),
+        beforeTree: '0'.repeat(40), afterTree: '1'.repeat(40), indexFingerprint: '2'.repeat(64), autoStaged: false,
     };
 }
 
 function makeSource(snapshot: SnapshotIdentity, sourcePath: string, excerpt: string): SourceObservation {
     return {
-        snapshotId: snapshot.id,
-        path: sourcePath,
-        side: 'after',
-        blobOid: '1'.repeat(40),
-        startLine: 1,
-        endLine: 1,
-        excerpt,
-        contentHash: hashContent(excerpt),
-        truncated: false,
-        sourceType: 'text',
+        snapshotId: snapshot.id, path: sourcePath, side: 'after', blobOid: '3'.repeat(40), startLine: 1, endLine: 1,
+        excerpt, contentHash: hashContent(excerpt), truncated: false, sourceType: 'text',
     };
 }
 
-function sourceIdsFor(projection: ReturnType<typeof projectConsolidation>, group: ConsolidationGroup): string[] {
-    return [...projection.sources.entries()]
-        .filter(([, source]) => source.groupId === group.id)
-        .map(([id]) => id);
+function makeRunner(
+    action: (input: string, signal: AbortSignal, validate: (raw: unknown) => ConsolidationValidation) => Promise<{ value: ConsolidationValidation; attempts: number }>,
+    maxInputTokens = 100_000,
+    estimateInputTokens: (input: string) => number = () => 0,
+): ConsolidationRunner {
+    return Object.assign(async (input: string, signal: AbortSignal, validate: (raw: unknown) => ConsolidationValidation) =>
+        action(input, signal, validate), { maxInputTokens, estimateInputTokens });
 }
 
-function finding(group: ConsolidationGroup, sourceIds: string[], text: string): Record<string, unknown> {
-    return {
-        groupId: group.id,
-        outcome: 'findings',
-        rationale: 'The selected direct evidence supports a stable concern.',
-        concerns: [{ text, sourceIds }],
-    };
+async function recordAll(store: MemoryStore, episodes: InvestigationEpisode[]): Promise<void> {
+    for (const episode of episodes) { await store.recordEpisode(episode, await store.epoch()); }
 }
 
-function makeHandbookEntry(episodes: InvestigationEpisode[], sourcePath = 'src/parser.ts'): HandbookEntry {
-    return {
-        id: randomUUID(),
-        triggers: [sourcePath],
-        targetPaths: [sourcePath],
-        concerns: ['An older concern for this path.'],
-        supports: episodes.map(episode => ({ episodeId: episode.id, evidenceId: 'E1' })),
-        kind: 'navigation',
-    };
+async function withTempStorage<T>(action: (storageRoot: string) => Promise<T>): Promise<T> {
+    const storageRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'genie-memory-consolidator-test-'));
+    try { return await action(storageRoot); }
+    finally { await fs.rm(storageRoot, { recursive: true, force: true }); }
+}
+
+function makeSettings(overrides: Partial<MemorySettings> = {}): MemorySettings {
+    return Object.freeze({ ...MEMORY_DEFAULTS, ...overrides });
 }
 
 function uuidFor(index: number): string {
@@ -941,77 +560,4 @@ function uuidFor(index: number): string {
 
 function digestFor(index: number): string {
     return index.toString(16).padStart(2, '0').repeat(32);
-}
-
-function makeSettings(overrides: Partial<MemorySettings> = {}): MemorySettings {
-    return Object.freeze({ ...MEMORY_DEFAULTS, ...overrides });
-}
-
-function makeExecution(
-    structuredResponses: unknown[],
-    maxRetries: number,
-    requests: AIRunRequest[],
-    accounted: unknown[],
-    stopReason: 'completed' | 'max_output_tokens' = 'completed',
-    responseText = '',
-    responseRaw: unknown = {},
-): LLMExecution {
-    let responseIndex = 0;
-    const tokenBudget = {
-        configuredContextTokens: 128_000,
-        effectiveContextTokens: 128_000,
-        maxOutputTokens: 32_000,
-        estimatedThinkingTokens: 0,
-        safetyTokens: 512,
-        hardInputTokens: 16_000,
-        compressionTriggerTokens: 16_000,
-        compressionTargetTokens: 14_400,
-        outputAccounting: 'shared' as const,
-    };
-    return {
-        model: 'consolidation-test',
-        temperature: 0,
-        maxOutputTokens: 4_000,
-        maxRetries,
-        thinking: { reasoning: false, level: 'off' },
-        tokenBudget,
-        createSession: () => ({
-            provider: 'custom',
-            model: 'consolidation-test',
-            run: async (request: AIRunRequest) => {
-                requests.push(request);
-                const structured = structuredResponses[Math.min(responseIndex++, structuredResponses.length - 1)];
-                return {
-                    text: responseText,
-                    structured,
-                    toolCalls: [],
-                    usage: { inputTokens: 1, outputTokens: 1 },
-                    stopReason,
-                    continuation: { serverManaged: false },
-                    raw: responseRaw,
-                };
-            },
-            snapshot: () => ({
-                provider: 'custom',
-                model: 'consolidation-test',
-                continuation: { serverManaged: false },
-                transcript: [],
-            }),
-        }) as any,
-        run: async () => { throw new Error('not used'); },
-        accountCall: async usage => { accounted.push(usage); return { status: 'usage-not-reported' as const }; },
-        getRecordedQuotes: () => [],
-        notifyUsageCostIfEnabled: () => undefined,
-    };
-}
-
-function loadConsolidationRunner(): typeof import('../../services/memory/service')['createConsolidationRunner'] {
-    const moduleLoader = require('module') as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
-    const originalLoad = moduleLoader._load;
-    moduleLoader._load = (request, parent, isMain) => request === 'vscode' ? {} : originalLoad(request, parent, isMain);
-    try {
-        return (require('../../services/memory/service') as typeof import('../../services/memory/service')).createConsolidationRunner;
-    } finally {
-        moduleLoader._load = originalLoad;
-    }
 }

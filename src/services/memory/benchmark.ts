@@ -145,7 +145,9 @@ export function createPipelineReplayAdapter(params: {
                 loadMemory: input.group === 'A' ? undefined : async query => {
                     const view = await store.loadNavigation(query);
                     if (input.group === 'B') { view.handbook = []; }
-                    return new MemoryRetriever(view, snapshot, params.excludes, () => [], params.settings);
+                    return new MemoryRetriever(view, snapshot, params.excludes, () => [], params.settings, { load: async query => {
+                        const next = await store.loadNavigation(query); if (input.group === 'B') { next.handbook = []; } return next;
+                    }, epoch: () => store.epoch() });
                 },
             }, execution, { investigation: { excludePatterns: params.excludes } });
             if (recorder) {

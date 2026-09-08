@@ -168,8 +168,8 @@ export function createChangeAnalysisProfile(
     return {
         id: 'change-analysis',
         // Cached prompt identities must not reuse the former UUID-based Memory contract.
-        promptVersion: '6',
-        toolsetVersion: 'snapshot-memory-handles-3',
+        promptVersion: '7',
+        toolsetVersion: 'snapshot-memory-experience-1',
         requestType: 'investigation',
         finalName: 'changeAnalysisCompoundTerminal',
         finalSchema: changeAnalysisAgentFinalResponseSchema,
@@ -183,7 +183,7 @@ export function createChangeAnalysisProfile(
                     '<context_checkpoint>',
                     'Continue the same change analysis from this deterministic checkpoint.',
                     `Completed tool calls: ${state.steps}`,
-                    `Published memory navigation (historical concerns): ${JSON.stringify(input.memory?.publishedNavigation ?? [])}`,
+                    `Published memory navigation (historical investigation experience): ${JSON.stringify(input.memory?.publishedNavigation ?? [])}`,
                     `Remaining memory budget: ${JSON.stringify(input.memory?.budget ?? null)}`,
                     `Diff evidence representation: ${JSON.stringify(input.evidence)}`,
                     `Repository evidence ledger: ${JSON.stringify(state.ledger.snapshot()
@@ -212,7 +212,7 @@ export function createChangeAnalysisProfile(
                     `Change extraction: ${JSON.stringify(profileInput.extraction)}`,
                     `Investigation plan: ${JSON.stringify(profileInput.plan)}`,
                     `Diff evidence: ${JSON.stringify(profileInput.evidence)}`,
-                    `Untrusted memory navigation (historical concerns): ${JSON.stringify(profileInput.navigation ?? [])}`,
+                    `Untrusted memory navigation (historical investigation experience): ${JSON.stringify(profileInput.navigation ?? [])}`,
                     `User template constraints: ${JSON.stringify(profileInput.userTemplate ?? null)}`,
                     '</run_context>',
                     '<investigation_goal>',
@@ -326,7 +326,7 @@ function createExecutableDefinition(
             const started = performance.now();
             const outcome = await runInvestigationTool(toolContext, toToolCall(toolName, args));
             input.recorder?.record({ step: state.steps, tool: toolName, arguments: args, ok: outcome.ok,
-                summary: outcome.summary, evidence: outcome.evidence.map(evidence => {
+                summary: outcome.summary, ...(outcome.error ? { error: outcome.error } : {}), evidence: outcome.evidence.map(evidence => {
                     if (!evidence.provenance) { throw new Error('Snapshot tool returned evidence without provenance.'); }
                     return { id: evidence.id, source: evidence.provenance };
                 }), durationMs: performance.now() - started, truncated: outcome.evidence.some(evidence => evidence.provenance?.truncated) });
@@ -369,13 +369,13 @@ function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRu
         }
     };
     return [{
-        name: 'searchRepositoryMemory', description: `Find historical navigation whose concerns were repeatedly observed in a region. Returns short M* IDs. At most ${memory.settings['search.maxCalls']} searches per run.`,
+        name: 'searchRepositoryMemory', description: `Search repository-wide historical situations, investigation routes and lessons. Select relevant guidance using the current diff. Returns short M* IDs. At most ${memory.settings['search.maxCalls']} searches per run.`,
         parameters: objectSchema({ query: { type: 'string', minLength: 1 } }, ['query']),
         execute: guarded('searchRepositoryMemory', async (_context, args) => {
             const started = performance.now();
             const parsed = searchSchema.safeParse(args);
             if (!parsed.success) { return memory.reject('invalid_arguments', parsed.error.message); }
-            const navigation = memory.searchRepositoryMemory({
+            const navigation = await memory.searchRepositoryMemory({
                 paths: input.extraction.changedFiles.map(file => file.path),
                 symbols: input.extraction.changedSymbols.map(symbol => symbol.name),
                 keywords: [parsed.data.query],

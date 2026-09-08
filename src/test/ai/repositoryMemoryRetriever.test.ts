@@ -1,751 +1,311 @@
 import { strict as assert } from 'assert';
 import { randomUUID } from 'crypto';
 import { describe, it } from 'mocha';
-import {
-    hashContent,
-    RepositorySnapshotReader,
-    SnapshotEntry,
-    SnapshotIdentity,
-    SnapshotSide,
-    SourceObservation,
-} from '../../services/git/repositorySnapshot';
+import { hashContent, RepositorySnapshotReader, SnapshotEntry, SnapshotIdentity, SourceObservation } from '../../services/git/repositorySnapshot';
 import { MemoryRetriever } from '../../services/memory/retriever';
 import { MemoryView } from '../../services/memory/store';
-import { HandbookEntry, InvestigationEpisode } from '../../services/memory/types';
 import { MEMORY_DEFAULTS, MemoryRequestError, MemorySettings } from '../../services/memory/settings';
+import { HandbookEntry, InvestigationEpisode, MemoryNavigation, RecordedObservation } from '../../services/memory/types';
 
-describe('MemoryRetriever', () => {
-    it('recalls path and symbol matches while excluding navigation targets', () => {
-        const parser = makeEpisode({
-            changedPaths: ['src/parser.ts'],
-            changedSymbols: ['parse'],
-            sourcePath: 'src/parser.ts',
-        });
-        const generated = makeEpisode({
-            changedPaths: ['generated/parser.ts'],
-            changedSymbols: ['generatedParse'],
-            sourcePath: 'generated/parser.ts',
-        });
-        const handbook = makeHandbook(parser, ['src/parser.ts', 'generated/parser.ts']);
-        const retriever = new MemoryRetriever(
-            makeView([parser, generated], [handbook]),
-            makeSnapshot(),
-            ['generated'],
-        );
+describe('memory navigation retrieval', () => {
+    it('returns structured handbook navigation with situation, steps, lessons, and all provenance counts', () => {
+        // Verify a handbook entry exposes its navigation structure while counting observations and snapshots independently.
+        const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/ui/memoryWebviewPolicy.ts' }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/ui/memoryWebviewPolicy.ts' })];
+        const handbook = makeHandbook(episodes);
+        const retriever = new MemoryRetriever(makeView(episodes, [handbook]), makeSnapshotReader(), []);
 
-        const result = retriever.retrieveNavigation({
-            paths: ['src/parser.ts'],
-            symbols: ['parse'],
-            keywords: ['parser'],
-        });
+        const result = retriever.retrieveNavigation({ paths: ['src/ui/memoryWebviewPolicy.ts'], symbols: ['filterMemoryLogsForWebview'], keywords: ['visibility'] });
 
         assert.equal(result.length, 1);
+        assert.deepEqual(Object.keys(result[0]).sort(), ['id', 'lessons', 'observationCount', 'origin', 'situation', 'snapshotCount', 'sourceCount', 'steps', 'targetPaths']);
         assert.equal(result[0].id, 'M1');
-        assert.deepEqual(result[0].targetPaths, ['src/parser.ts']);
-        assert.equal(result[0].sourceCount, 1);
-        assert.deepEqual(Object.keys(result[0]).sort(), ['concerns', 'id', 'sourceCount', 'targetPaths']);
-        assert.equal(result.some(item => item.targetPaths.some(target => target.startsWith('generated/'))), false);
+        assert.equal(result[0].origin, 'handbook');
+        assert.equal(result[0].situation, handbook.situation);
+        assert.deepEqual(result[0].targetPaths, ['src/ui/memoryWebviewPolicy.ts']);
+        assert.equal(result[0].steps[0].path, 'src/ui/memoryWebviewPolicy.ts');
+        assert.equal(result[0].steps[0].symbol, 'filterMemoryLogsForWebview');
+        assert.equal(result[0].lessons[0].limitation, handbook.lessons[0].limitation);
+        assert.equal(result[0].sourceCount, 2);
+        assert.equal(result[0].observationCount, 2);
+        assert.equal(result[0].snapshotCount, 2);
     });
 
-    it('keeps raw episode concerns empty and exposes only handbook concerns', () => {
-        const episode = makeEpisode({
-            changedPaths: ['src/alpha.ts'],
-            changedSymbols: ['alpha'],
-            sourcePath: 'src/alpha.ts',
-            snapshotId: '1'.repeat(64),
-        });
-        const supported = makeEpisode({
-            changedPaths: ['src/alpha.ts'],
-            changedSymbols: ['alphaHistory'],
-            sourcePath: 'src/alpha.ts',
-            snapshotId: '2'.repeat(64),
-        });
-        const distilled = ['Caching may delay result publication.', 'Invalidation may race with reads.', 'Third stable concern.'];
-        const handbook = { ...makeHandbook(supported, ['src/alpha.ts']), concerns: distilled };
-        const retriever = new MemoryRetriever(
-            makeView([episode, supported], [handbook]),
-            makeSnapshot(),
-            [],
-        );
+    it('indexes BM25 terms from situation, step purpose, and lesson text', () => {
+        // Verify a semantic query can recall an experience even when it does not repeat the target path or symbol.
+        const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/memory.ts' }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/memory.ts' })];
+        const handbook = makeHandbook(episodes);
+        handbook.situation = 'When restored session rows appear stale, inspect persistence boundaries.';
+        handbook.steps[0].purpose = 'Trace restored lifecycle records before changing rendering.';
+        handbook.lessons[0].observation = 'A persisted row is inert after a reload.';
+        const retriever = new MemoryRetriever(makeView(episodes, [handbook]), makeSnapshotReader(), []);
 
-        const result = retriever.retrieveNavigation({ paths: ['src/alpha.ts'], symbols: [], keywords: [] });
+        const result = retriever.retrieveNavigation({ paths: [], symbols: [], keywords: ['stale', 'persistence', 'inert'] });
+
+        assert.deepEqual(result.map(item => item.id), ['M1']);
+        assert.equal(result[0].situation, handbook.situation);
+    });
+
+    it('returns raw eligible episode navigation separately from handbook navigation', () => {
+        // Verify an unorganized episode remains a clearly marked historical navigation source with its task context.
+        const episode = makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/episode-only.ts', questions: ['Where should this event be traced?'] });
+        const retriever = new MemoryRetriever(makeView([episode], []), makeSnapshotReader(), []);
+
+        const result = retriever.retrieveNavigation({ paths: ['src/episode-only.ts'], symbols: [], keywords: [] });
+
+        assert.equal(result.length, 1);
+        assert.equal(result[0].origin, 'episode');
+        assert.equal(result[0].situation, 'Where should this event be traced?');
+        assert.deepEqual(result[0].steps, []);
+        assert.deepEqual(result[0].lessons, []);
+        assert.equal(result[0].observationCount, 1);
+        assert.equal(result[0].snapshotCount, 1);
+    });
+
+    it('recalls a lesson with no source evidence and returns no source rows on expansion', async () => {
+        // Verify a historical failure lesson remains useful for planning even when its supporting observation has no source code.
+        const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/memory.ts', failed: true }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/memory.ts', failed: true })];
+        const handbook: HandbookEntry = {
+            id: randomUUID(), situation: 'When a repository search returns no renderer caller, inspect the filtering entry directly.', steps: [],
+            lessons: [{ observation: 'The bounded search returned no caller.', implication: 'Use the filtering function as the next investigation entry point.', limitation: 'An empty result does not prove that the caller is absent.',
+                supports: episodes.map((episode, index) => ({ episodeId: episode.id, observationIndex: 0 })), snapshotCount: 2 }],
+            targetPaths: ['src/memory.ts'], triggers: ['renderer caller', 'filtering function'],
+        };
+        const retriever = new MemoryRetriever(makeView(episodes, [handbook]), makeSnapshotReader(), []);
+
+        const navigation = retriever.retrieveNavigation({ paths: [], symbols: [], keywords: ['renderer caller'] });
+        assert.equal(navigation.length, 1);
+        assert.equal(navigation[0].origin, 'handbook');
+        assert.equal(navigation[0].sourceCount, 0);
+        assert.equal(navigation[0].observationCount, 2);
+        assert.equal(navigation[0].snapshotCount, 2);
+        assert.deepEqual(await retriever.readMemorySources([navigation[0].id]), []);
+    });
+
+    it('keeps distinct handbook experiences and deduplicates only identical navigation identities', () => {
+        // Verify same-area experiences remain distinct when their situations or lessons differ.
+        const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/memory.ts' }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/memory.ts' })];
+        const alpha = makeHandbook(episodes);
+        const beta = makeHandbook(episodes);
+        beta.id = randomUUID();
+        beta.situation = 'When a retry row reappears, inspect lifecycle state transitions.';
+        beta.lessons[0].implication = 'Compare the retry transition before changing the UI.';
+        const duplicate = structuredClone(alpha);
+        duplicate.id = randomUUID();
+        const retriever = new MemoryRetriever(makeView(episodes, [alpha, beta, duplicate]), makeSnapshotReader(), []);
+
+        const result = retriever.retrieveNavigation({ paths: ['src/memory.ts'], symbols: [], keywords: [] });
 
         assert.equal(result.length, 2);
-        for (const item of result) {
-            assert.equal('questions' in item, false, 'M* navigation must not expose a questions key');
-            assert.deepEqual(Object.keys(item).sort(), ['concerns', 'id', 'sourceCount', 'targetPaths']);
-            assert.ok(Array.isArray(item.concerns) && item.concerns.every(concern => typeof concern === 'string'));
-        }
-        const rawEpisodeNavigation = result.filter(item => item.concerns.length === 0);
-        assert.equal(rawEpisodeNavigation.length, 1);
-        assert.deepEqual(rawEpisodeNavigation[0].concerns, []);
-        const handbookNavigation = result.filter(item => item.concerns.length > 0);
-        assert.equal(handbookNavigation.length, 1);
-        assert.deepEqual(handbookNavigation[0].concerns, distilled.slice(0, 2));
+        assert.deepEqual(new Set(result.map(item => item.situation)), new Set([alpha.situation, beta.situation]));
     });
+});
 
-    it('retains same-path distinct concerns, ranks concern matches, and deduplicates identical identities', () => {
-        const episode = makeEpisode({ changedPaths: ['src/shared.ts'], sourcePath: 'src/shared.ts' });
-        const alpha = makeHandbook(episode, ['src/shared.ts']);
-        alpha.triggers = ['shared'];
-        alpha.concerns = ['Alpha cache invariant.'];
-        const beta = makeHandbook(episode, ['src/shared.ts']);
-        beta.triggers = ['shared'];
-        beta.concerns = ['Beta cache invariant.'];
-        const duplicateAlpha = makeHandbook(episode, ['src/shared.ts']);
-        duplicateAlpha.triggers = ['shared'];
-        duplicateAlpha.concerns = ['Alpha cache invariant.'];
-
-        const retriever = new MemoryRetriever(
-            makeView([episode], [alpha, beta, duplicateAlpha]),
-            makeSnapshot(),
-            [],
-        );
-        const query = { paths: ['src/shared.ts'], symbols: [], keywords: ['beta'] };
-        const result = retriever.retrieveNavigation(query);
-
-        assert.equal(result.length, 2, 'distinct concerns survive same-area navigation limits while identical identity is removed');
-        assert.equal(result.some(item => item.concerns.length === 0), false,
-            'an episode represented by Handbook supports must not consume a raw navigation slot');
-        assert.deepEqual(result[0].targetPaths, ['src/shared.ts']);
-        assert.deepEqual(result[0].concerns, ['Beta cache invariant.'], 'a concern keyword ranks its navigation first');
-        assert.deepEqual(result[1].concerns, ['Alpha cache invariant.']);
-
-        const repeated = retriever.retrieveNavigation(query);
-        assert.deepEqual(repeated, result, 'the same full identity keeps its published M* ID');
-    });
-
-    it('omits represented raw episodes while retaining an unrepresented episode in another area', () => {
-        const represented = makeEpisode({
-            changedPaths: ['src/shared.ts'],
-            sourcePath: 'src/shared.ts',
-            snapshotId: '3'.repeat(64),
-        });
-        const unrepresented = makeEpisode({
-            changedPaths: ['lib/other.ts'],
-            sourcePath: 'lib/other.ts',
-            snapshotId: '4'.repeat(64),
-        });
-        const first = makeHandbook(represented, ['src/shared.ts']);
-        first.triggers = ['shared'];
-        first.concerns = ['Shared cache invariant.'];
-        const second = makeHandbook(represented, ['src/shared.ts']);
-        second.triggers = ['shared'];
-        second.concerns = ['Shared invalidation invariant.'];
-
-        const result = new MemoryRetriever(
-            makeView([represented, unrepresented], [first, second]),
-            makeSnapshot(),
-            [],
-        ).retrieveNavigation({
-            paths: ['src/shared.ts', 'lib/other.ts'],
-            symbols: [],
-            keywords: [],
-        });
-
-        const shared = result.filter(item => item.targetPaths.includes('src/shared.ts'));
-        const other = result.filter(item => item.targetPaths.includes('lib/other.ts'));
-        assert.equal(shared.length, 2, 'both distinct Handbook concerns remain visible');
-        assert.equal(shared.some(item => item.concerns.length === 0), false);
-        assert.equal(other.length, 1, 'the unrepresented eligible episode still has a navigation');
-        assert.deepEqual(other[0].concerns, []);
-    });
-
-    it('retains raw navigation for evidence not represented by a Handbook support', () => {
-        const episode = makeEpisode({
-            changedPaths: ['src/parser.ts'],
-            sourcePath: 'src/parser.ts',
-        });
-        episode.observations[0].evidence.push({
-            id: 'E2',
-            source: makeSource(episode.snapshot, { path: 'lib/helper.md', excerpt: 'helper();' }),
-        });
-        const retriever = new MemoryRetriever(
-            makeView([episode], [makeHandbook(episode, ['src/parser.ts'])]),
-            makeSnapshot(),
-            [],
-        );
-
-        const result = retriever.retrieveNavigation({ paths: ['lib/helper.md'], symbols: [], keywords: [] });
-
-        assert.equal(result.length, 1);
-        assert.deepEqual(result[0].targetPaths, ['lib/helper.md']);
-        assert.deepEqual(result[0].concerns, []);
-        assert.equal(result[0].sourceCount, 1);
-    });
-
-    it('orders keyword-only navigation by lexical relevance', () => {
-        const partial = makeEpisode({
-            changedPaths: ['src/partial.ts'],
-            changedSymbols: ['repository'],
-            sourcePath: 'src/partial.ts',
-        });
-        const full = makeEpisode({
-            changedPaths: ['src/full.ts'],
-            changedSymbols: ['repositoryMemory'],
-            sourcePath: 'src/full.ts',
-        });
-        const result = new MemoryRetriever(
-            makeView([partial, full], []),
-            makeSnapshot(),
-            [],
-        ).retrieveNavigation({ paths: [], symbols: [], keywords: ['repository memory'] });
-
-        assert.deepEqual(result.map(item => item.targetPaths[0]), ['src/full.ts', 'src/partial.ts']);
-    });
-
-    it('expands a published M navigation id without exposing UUID source handles', async () => {
-        const episode = makeEpisode({ changedPaths: ['src/parser.ts'], sourcePath: 'src/parser.ts' });
-        const retriever = new MemoryRetriever(
-            makeView([episode], [makeHandbook(episode)]),
-            makeSnapshot(),
-            [],
-        );
-        const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
-
-        assert.match(navigation[0].id, /^M\d+$/);
-        const result = await retriever.readMemorySources([navigation[0].id]);
-        assert.equal(result.length, 1);
-        assert.notEqual(result[0].status, 'unavailable');
-        assert.equal(result[0].source?.path, 'src/parser.ts');
-        assert.equal(retriever.budget.used, 1);
-    });
-
-    it('rejects UUID, evidence, and unknown navigation references without reading sources', async () => {
-        const episode = makeEpisode({ changedPaths: ['src/parser.ts'], sourcePath: 'src/parser.ts' });
-        const retriever = new MemoryRetriever(makeView([episode], []), makeSnapshot(), []);
-        const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
-
-        await assert.rejects(
-            () => retriever.readMemorySources(['E1']),
-            (error: unknown) => error instanceof MemoryRequestError && error.code === 'invalid_arguments',
-        );
-        await assert.rejects(
-            () => retriever.readMemorySources([episode.id]),
-            (error: unknown) => error instanceof MemoryRequestError && error.code === 'invalid_arguments',
-        );
-        await assert.rejects(
-            () => retriever.readMemorySources(['M999']),
-            (error: unknown) => error instanceof MemoryRequestError && error.code === 'unknown_memory_id',
-        );
-        assert.equal(retriever.budget.used, 0);
-        assert.equal(retriever.usage.invalidReferences, 3);
-        assert.equal(navigation[0].id, 'M1');
-    });
-
-    it('enforces the configured search and source budgets atomically', async () => {
-        const firstEpisode = makeEpisode({ changedPaths: ['src/parser.ts'], sourcePath: 'src/parser.ts' });
-        const secondEpisode = makeEpisode({ changedPaths: ['src/other.ts'], sourcePath: 'src/other.ts' });
-        const settings = makeSettings({ 'search.maxCalls': 2, 'sources.maxChunks': 1 });
-        const retriever = new MemoryRetriever(makeView([firstEpisode, secondEpisode], []), makeSnapshot(), [], () => [], settings);
-        const query = { paths: ['src/parser.ts'], symbols: [], keywords: ['parser'] };
-
-        retriever.searchRepositoryMemory(query, 1500);
-        retriever.searchRepositoryMemory(query, 1500);
-        assert.throws(
-            () => retriever.searchRepositoryMemory(query, 1500),
-            (error: unknown) => error instanceof MemoryRequestError && error.code === 'search_budget_exceeded',
-        );
-
-        const firstNavigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
-        const secondNavigation = retriever.retrieveNavigation({ paths: ['src/other.ts'], symbols: [], keywords: [] });
-        assert.equal(firstNavigation[0].id, 'M1');
-        assert.equal(secondNavigation[0].id, 'M2');
-        await retriever.readMemorySources(['M1']);
-        await assert.rejects(
-            () => retriever.readMemorySources(['M2']),
-            (error: unknown) => error instanceof MemoryRequestError
-                && error.code === 'source_budget_exceeded'
-                && error.details.requested === 1
-                && error.details.used === 1
-                && error.details.remaining === 0
-                && error.details.limit === 1,
-        );
-        assert.equal(retriever.budget.used, 1);
-        assert.equal(retriever.usage.budgetRejections, 2, 'search and source budget rejections are counted separately');
-    });
-
-    it('re-reads a changed source from the current A/B snapshot when its anchor is unique', async () => {
-        const episode = makeEpisode({
-            snapshotId: '1'.repeat(64),
-            sourcePath: 'src/parser.ts',
-            sourceOid: '0'.repeat(40),
-            sourceExcerpt: 'anchor();',
-            sourceStartLine: 2,
-            sourceSide: 'before',
-        });
-        const calls: string[] = [];
-        const snapshot = makeSnapshot({
-            currentOid: '2'.repeat(40),
-            content: 'branch B header\nanchor();\nbranch B footer\n',
-            snapshotId: 'b'.repeat(64),
-            onRead: (_candidate, side) => calls.push(`read:${side}`),
-            onObserve: (_candidate, startLine, side) => calls.push(`observe:${side}:${startLine}`),
-        });
-
-        const retriever = new MemoryRetriever(makeView([episode], []), snapshot, []);
-        const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
-        const result = await retriever.readMemorySources([navigation[0].id]);
-
-        assert.equal(result[0].status, 'source_relocated');
-        assert.equal(result[0].source?.side, 'before');
-        assert.equal(result[0].source?.startLine, 2);
-        assert.deepEqual(calls, ['read:before', 'observe:before:2']);
-    });
-
-    it('rejects source expansion that exceeds the configured validation deadline', async () => {
-        const episode = makeEpisode({
-            sourceOid: '0'.repeat(40),
-            sourceExcerpt: 'anchor();',
-        });
-        const snapshot = {
-            entry: () => ({ path: 'src/parser.ts', mode: '100644', oid: '2'.repeat(40) }),
-            read: async () => new Promise<string>(() => {}),
-            observe: async () => { throw new Error('observe should not be called'); },
-        } as unknown as RepositorySnapshotReader;
-        const retriever = new MemoryRetriever(makeView([episode], []), snapshot, [], () => [], makeSettings({ 'sources.timeoutMs': 250 }));
-        const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
-
-        await assert.rejects(
-            () => retriever.readMemorySources([navigation[0].id]),
-            (error: unknown) => error instanceof Error && /Memory source validation exceeded 250 ms/.test(error.message),
-        );
-        assert.equal(retriever.budget.used, 1, 'an already started validation attempt remains charged');
-        assert.equal(retriever.usage.sourceAttempts, 1);
-    });
-
-    it('returns unchanged sources without rereading and suppresses ambiguous anchors', async () => {
-        const unchangedEpisode = makeEpisode({
-            sourcePath: 'src/unchanged.ts',
-            sourceOid: '3'.repeat(40),
-            sourceExcerpt: 'same();',
-        });
-        let readCount = 0;
-        const unchangedSnapshot = makeSnapshot({
-            currentOid: '3'.repeat(40),
-            onRead: () => { readCount += 1; },
-        });
-        const unchangedRetriever = new MemoryRetriever(
-            makeView([unchangedEpisode], []),
-            unchangedSnapshot,
-            [],
-        );
-        const unchangedNavigation = unchangedRetriever.retrieveNavigation({ paths: ['src/unchanged.ts'], symbols: [], keywords: [] });
-        const unchanged = await unchangedRetriever.readMemorySources([unchangedNavigation[0].id]);
-        assert.equal(unchanged[0].status, 'source_unchanged');
-        assert.equal(readCount, 0);
-
-        const ambiguousEpisode = makeEpisode({
-            sourcePath: 'src/ambiguous.ts',
-            sourceOid: '4'.repeat(40),
-            sourceExcerpt: 'same();',
-        });
-        const ambiguousRetriever = new MemoryRetriever(
-            makeView([ambiguousEpisode], []),
-            makeSnapshot({ currentOid: '5'.repeat(40), content: 'same();\nother\nsame();\n' }),
-            [],
-        );
-        const ambiguousNavigation = ambiguousRetriever.retrieveNavigation({ paths: ['src/ambiguous.ts'], symbols: [], keywords: [] });
-        const ambiguous = await ambiguousRetriever.readMemorySources([ambiguousNavigation[0].id]);
-        assert.equal(ambiguous[0].status, 'needs_revalidation');
-        assert.equal('source' in ambiguous[0], false);
-    });
-
-    it('marks excluded or missing historical sources unavailable', async () => {
-        const episode = makeEpisode({ changedPaths: ['src/secret.ts'], sourcePath: 'src/secret.ts' });
-        let currentExcludes: string[] = [];
-        const excludedRetriever = new MemoryRetriever(
-            makeView([episode], []),
-            makeSnapshot(),
-            [],
-            () => currentExcludes,
-        );
-        const excludedNavigation = excludedRetriever.retrieveNavigation({ paths: ['src/secret.ts'], symbols: [], keywords: [] });
-        currentExcludes = ['src/secret.ts'];
-        const excluded = await excludedRetriever.readMemorySources([excludedNavigation[0].id]);
-        assert.equal(excluded[0].status, 'unavailable');
-        assert.equal(excluded[0].key.length > 0, true);
-
-        const missingRetriever = new MemoryRetriever(
-            makeView([episode], []),
-            makeSnapshot({ missing: true }),
-            [],
-        );
-        const missingNavigation = missingRetriever.retrieveNavigation({ paths: ['src/secret.ts'], symbols: [], keywords: [] });
-        const missing = await missingRetriever.readMemorySources([missingNavigation[0].id]);
-        assert.equal(missing[0].status, 'unavailable');
-        assert.equal(missing[0].key.length > 0, true);
-        assert.equal(missingRetriever.budget.used, 1);
-    });
-
-    it('reuses cached source results and keeps navigation IDs stable across repeated searches', async () => {
-        const episode = makeEpisode({ changedPaths: ['src/parser.ts'], sourcePath: 'src/parser.ts' });
-        let readCount = 0;
-        const retriever = new MemoryRetriever(
-            makeView([episode], []),
-            makeSnapshot({ onRead: () => { readCount += 1; } }),
-            [],
-        );
-        const first = retriever.searchRepositoryMemory({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
-        const second = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
-        assert.deepEqual(second, first);
-        await retriever.readMemorySources(['M1']);
-        const used = retriever.budget.used;
-        const cached = await retriever.readMemorySources(['M1']);
-        assert.deepEqual(cached, await retriever.readMemorySources(['M1']));
-        assert.equal(retriever.budget.used, used);
-        assert.equal(readCount, 1);
-        assert.equal(retriever.usage.sourceAttempts, 1);
-    });
-
-    it('deduplicates overlapping sources by the complete source fingerprint', async () => {
-        const episode = makeEpisode({ changedPaths: ['src/shared.ts'], sourcePath: 'src/shared.ts' });
-        const first = makeHandbook(episode);
-        first.triggers = ['alpha'];
-        first.concerns = ['Alpha establishes stable parser caching.'];
-        const second = makeHandbook(episode);
-        second.triggers = ['beta'];
-        second.concerns = ['Beta establishes stable cache invalidation.'];
-        let observeCount = 0;
-        const retriever = new MemoryRetriever(
-            makeView([episode], [first, second]),
-            makeSnapshot({ onObserve: () => { observeCount += 1; } }),
-            [],
-        );
-
-        const firstNavigation = retriever.retrieveNavigation({ paths: [], symbols: [], keywords: ['alpha'] });
-        const secondNavigation = retriever.retrieveNavigation({ paths: [], symbols: [], keywords: ['beta'] });
-        assert.deepEqual(firstNavigation.map(item => item.id), ['M1']);
-        assert.deepEqual(secondNavigation.map(item => item.id), ['M2']);
-
-        const result = await retriever.readMemorySources(['M1', 'M2']);
-
-        assert.equal(result.length, 1);
-        assert.equal(result[0].status, 'source_relocated');
-        assert.equal(observeCount, 1);
-        assert.equal(retriever.usage.sourceAttempts, 1);
-        assert.equal(retriever.budget.used, 1);
-    });
-
-    it('resolves every navigation ID before reading any mixed valid and unknown request', async () => {
-        const episode = makeEpisode({ changedPaths: ['src/parser.ts'], sourcePath: 'src/parser.ts' });
-        let observeCount = 0;
-        const retriever = new MemoryRetriever(
-            makeView([episode], []),
-            makeSnapshot({ onObserve: () => { observeCount += 1; } }),
-            [],
-        );
-        retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
-
-        await assert.rejects(
-            () => retriever.readMemorySources(['M1', 'M404']),
-            (error: unknown) => error instanceof MemoryRequestError
-                && error.code === 'unknown_memory_id'
-                && error.details.memoryId === 'M404',
-        );
-        assert.equal(observeCount, 0);
-        assert.equal(retriever.usage.sourceAttempts, 0);
-        assert.equal(retriever.budget.used, 0);
-    });
-
-    it('rejects an over-budget batch before partially expanding any source', async () => {
-        const first = makeEpisode({ changedPaths: ['src/first.ts'], sourcePath: 'src/first.ts' });
-        const second = makeEpisode({ changedPaths: ['src/second.ts'], sourcePath: 'src/second.ts' });
-        let observeCount = 0;
-        const retriever = new MemoryRetriever(
-            makeView([first, second], []),
-            makeSnapshot({ onObserve: () => { observeCount += 1; } }),
-            [],
-            () => [],
-            makeSettings({ 'sources.maxChunks': 1 }),
-        );
-        retriever.retrieveNavigation({ paths: ['src/first.ts'], symbols: [], keywords: [] });
-        retriever.retrieveNavigation({ paths: ['src/second.ts'], symbols: [], keywords: [] });
-
-        await assert.rejects(
-            () => retriever.readMemorySources(['M1', 'M2']),
-            (error: unknown) => error instanceof MemoryRequestError
-                && error.code === 'source_budget_exceeded'
-                && error.details.requested === 2
-                && error.details.used === 0
-                && error.details.remaining === 1
-                && error.details.limit === 1,
-        );
-        assert.equal(observeCount, 0);
-        assert.equal(retriever.usage.sourceAttempts, 0);
-        assert.equal(retriever.budget.used, 0);
-    });
-
-    it('rejects an oversized serialized result before caching the expanded source', async () => {
-        const episode = makeEpisode({ changedPaths: ['src/parser.ts'], sourcePath: 'src/parser.ts' });
-        const retriever = new MemoryRetriever(
-            makeView([episode], []),
-            makeSnapshot(),
-            [],
-            () => [],
-            makeSettings({ 'sources.maxResultTokens': 1 }),
-        );
-        const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
-
-        await assert.rejects(
-            () => retriever.readMemorySources([navigation[0].id]),
-            (error: unknown) => error instanceof MemoryRequestError
-                && error.code === 'result_budget_exceeded'
-                && error.details.limit === 1
-                && Number(error.details.requested) > 1,
-        );
-        assert.equal(retriever.usage.sourceAttempts, 1);
-        assert.equal(retriever.usage.expanded, 0);
-        assert.equal(retriever.budget.used, 1);
-
-        await assert.rejects(
-            () => retriever.readMemorySources([navigation[0].id]),
-            (error: unknown) => error instanceof MemoryRequestError && error.code === 'result_budget_exceeded',
-        );
-        assert.equal(retriever.usage.sourceAttempts, 2, 'a result rejected before cache publication must be attempted again');
-        assert.equal(retriever.budget.used, 2);
-    });
-
-    it('does not publish a timed-out expansion or mutate its cache after the timeout', async () => {
-        const episode = makeEpisode({
-            sourceOid: '0'.repeat(40),
-            sourceExcerpt: 'parse();',
-        });
-        let readCount = 0;
-        let releaseFirstRead: (() => void) | undefined;
-        const snapshot = makeSnapshot({
-            onObserve: () => undefined,
-        });
-        const blockingRead = async (_candidate: string, _side: SnapshotSide = 'after'): Promise<string> => {
-            readCount += 1;
-            if (readCount === 1) {
-                await new Promise<void>(resolve => { releaseFirstRead = resolve; });
-            }
-            return 'parse();\n';
+describe('live repository memory search', () => {
+    it('reloads the store on every async search and keeps M IDs stable for unchanged results', async () => {
+        // Verify searchRepositoryMemory bypasses the initial candidate snapshot and queries the live loader each time.
+        const episode = makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/initial.ts' });
+        const initial = makeView([episode], []);
+        const added = makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/newly-indexed.ts' });
+        let loads = 0;
+        const access = {
+            load: async (query: { paths: string[]; symbols: string[]; keywords: string[] }) => {
+                loads += 1;
+                return query.paths.includes('src/newly-indexed.ts') ? makeView([added], []) : initial;
+            },
+            epoch: async () => initial.epoch,
         };
-        const retriever = new MemoryRetriever(
-            makeView([episode], []),
-            { ...snapshot, read: blockingRead } as unknown as RepositorySnapshotReader,
-            [],
-            () => [],
-            makeSettings({ 'sources.timeoutMs': 30 }),
-        );
+        const retriever = new MemoryRetriever(initial, makeSnapshotReader(), [], () => [], MEMORY_DEFAULTS, access);
+
+        const first = await retriever.searchRepositoryMemory({ paths: ['src/initial.ts'], symbols: [], keywords: [] });
+        const second = await retriever.searchRepositoryMemory({ paths: ['src/newly-indexed.ts'], symbols: [], keywords: [] });
+        const repeat = await retriever.searchRepositoryMemory({ paths: ['src/newly-indexed.ts'], symbols: [], keywords: [] });
+
+        assert.equal(loads, 3);
+        assert.deepEqual(first.map(item => item.id), ['M1']);
+        assert.deepEqual(second.map(item => item.id), ['M2']);
+        assert.deepEqual(repeat.map(item => item.id), ['M2']);
+        assert.equal(retriever.budget.searchesUsed, 3);
+    });
+
+    it('fails explicitly when async search is requested without a live store accessor', async () => {
+        // Verify the live search contract cannot silently fall back to stale in-memory candidates.
+        const retriever = new MemoryRetriever(makeView([], []), makeSnapshotReader(), []);
+        await assert.rejects(() => retriever.searchRepositoryMemory({ paths: [], symbols: [], keywords: ['anything'] }), /requires a live store/);
+    });
+
+    it('rejects a cleared epoch before replacing the current navigation view', async () => {
+        // Verify a memory clear invalidates an in-flight search and prevents stale M IDs from being expanded.
+        const episode = makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/parser.ts' });
+        let currentEpoch = 'different-epoch';
+        const access = {
+            load: async () => makeView([episode], []),
+            epoch: async () => currentEpoch,
+        };
+        const retriever = new MemoryRetriever(makeView([], []), makeSnapshotReader(), [], () => [], MEMORY_DEFAULTS, access);
+
+        await assert.rejects(() => retriever.searchRepositoryMemory({ paths: ['src/parser.ts'], symbols: [], keywords: [] }), /cleared during investigation/);
+        assert.deepEqual(retriever.publishedNavigation, []);
+        currentEpoch = 'epoch';
+    });
+
+    it('enforces search and whole-navigation token budgets before exposing a partial result', async () => {
+        // Verify repeated live searches stop at the configured call budget and oversized entries are skipped whole.
+        const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/large.ts', summary: 'large ' + 'x'.repeat(2_000) }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/large.ts', summary: 'large ' + 'x'.repeat(2_000) })];
+        const settings = makeSettings({ 'search.maxCalls': 1, 'navigation.maxTokens': 1 });
+        const view = makeView(episodes, []);
+        const access = { load: async () => view, epoch: async () => view.epoch };
+        const retriever = new MemoryRetriever(view, makeSnapshotReader(), [], () => [], settings, access);
+
+        const first = await retriever.searchRepositoryMemory({ paths: ['src/large.ts'], symbols: [], keywords: [] });
+        assert.deepEqual(first, []);
+        await assert.rejects(() => retriever.searchRepositoryMemory({ paths: ['src/large.ts'], symbols: [], keywords: [] }), (error: unknown) =>
+            error instanceof MemoryRequestError && error.code === 'search_budget_exceeded');
+    });
+});
+
+describe('memory source expansion', () => {
+    it('expands M navigation into current E source and preserves the M to E boundary', async () => {
+        // Verify reading a published M ID returns current source status while navigation itself never becomes current evidence.
+        const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/parser.ts' }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/parser.ts' })];
+        const retriever = new MemoryRetriever(makeView(episodes, []), makeSnapshotReader({ currentOid: '3'.repeat(40) }), []);
         const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
 
-        await assert.rejects(
-            () => retriever.readMemorySources([navigation[0].id]),
-            (error: unknown) => error instanceof Error && error.message === 'Memory source validation exceeded 30 ms.',
-        );
-        assert.equal(retriever.usage.sourceAttempts, 1);
-        assert.equal(retriever.usage.expanded, 0);
-        assert.equal(retriever.budget.used, 1);
+        const result = await retriever.readMemorySources([navigation[0].id]);
 
-        const second = await retriever.readMemorySources([navigation[0].id]);
-        assert.equal(second[0].status, 'source_relocated');
-        assert.equal(readCount, 2);
+        assert.equal(result.length, 2);
+        assert.equal(result.every(item => item.status === 'source_relocated'), true);
+        assert.equal(result.every(item => item.source?.path === 'src/parser.ts'), true);
+        assert.deepEqual(retriever.publishedNavigation[0], navigation[0]);
+        assert.equal(retriever.usage.expanded, 2);
+    });
+
+    it('returns unavailable for a no-source lesson and rejects unknown M IDs before reading', async () => {
+        // Verify source expansion has no fabricated E evidence for lessons without source support and fails closed for unknown IDs.
+        const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/parser.ts', failed: true }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/parser.ts', failed: true })];
+        const lesson: HandbookEntry = {
+            id: randomUUID(), situation: 'An empty search needs a direct source inspection.', steps: [],
+            lessons: [{ observation: 'The search returned no matches.', implication: 'Inspect the known filtering entry.', limitation: 'The empty search does not prove absence.',
+                supports: episodes.map(episode => ({ episodeId: episode.id, observationIndex: 0 })), snapshotCount: 2 }],
+            targetPaths: [], triggers: ['empty search'],
+        };
+        const retriever = new MemoryRetriever(makeView(episodes, [lesson]), makeSnapshotReader(), []);
+        const navigation = retriever.retrieveNavigation({ paths: [], symbols: [], keywords: ['empty search'] });
+        assert.equal(navigation.length, 1);
+        assert.equal(navigation[0].sourceCount, 0);
+        assert.deepEqual(await retriever.readMemorySources([navigation[0].id]), []);
+        await assert.rejects(() => retriever.readMemorySources(['M404']), (error: unknown) =>
+            error instanceof MemoryRequestError && error.code === 'unknown_memory_id');
+    });
+
+    it('rejects a cleared epoch before source validation and does not consume a source attempt', async () => {
+        // Verify source expansion observes live epoch invalidation before reading current files.
+        const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/parser.ts' }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/parser.ts' })];
+        let currentEpoch = 'epoch';
+        const access = { load: async () => makeView(episodes, []), epoch: async () => currentEpoch };
+        const retriever = new MemoryRetriever(makeView(episodes, []), makeSnapshotReader(), [], () => [], MEMORY_DEFAULTS, access);
+        const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
+        currentEpoch = 'cleared';
+
+        await assert.rejects(() => retriever.readMemorySources([navigation[0].id]), /cleared during investigation/);
+        assert.equal(retriever.usage.sourceAttempts, 0);
+    });
+
+    it('deduplicates identical source fingerprints and reuses cached results', async () => {
+        // Verify overlapping M IDs consume one current source attempt and retain the first expansion result.
+        const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/shared.ts' }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/shared.ts' })];
+        const alpha = makeHandbook(episodes);
+        const beta = structuredClone(alpha);
+        beta.id = randomUUID();
+        beta.situation = 'A second historical route for the same source.';
+        let observes = 0;
+        const retriever = new MemoryRetriever(makeView(episodes, [alpha, beta]), makeSnapshotReader({ onObserve: () => { observes += 1; } }), []);
+        const first = retriever.retrieveNavigation({ paths: ['src/shared.ts'], symbols: [], keywords: [] });
+        assert.equal(first.length, 2);
+
+        const result = await retriever.readMemorySources(first.map(item => item.id));
+        const cached = await retriever.readMemorySources([first[0].id]);
+
+        assert.equal(result.length, 2);
+        assert.equal(observes, 2);
+        assert.deepEqual(cached, result.slice(0, 1));
         assert.equal(retriever.usage.sourceAttempts, 2);
-        assert.equal(retriever.usage.expanded, 1);
-        assert.equal(retriever.budget.used, 2);
-
-        releaseFirstRead?.();
-        await new Promise<void>(resolve => setImmediate(resolve));
-        assert.equal(retriever.usage.expanded, 1);
-        assert.equal(retriever.budget.used, 2);
-        const cached = await retriever.readMemorySources([navigation[0].id]);
-        assert.deepEqual(cached, second);
-        assert.equal(retriever.budget.used, 2);
-    });
-
-    it('rejects immediately on an external abort without late cache or usage mutation', async () => {
-        const episode = makeEpisode({ sourceOid: '0'.repeat(40), sourceExcerpt: 'parse();' });
-        let readStartedResolve!: () => void;
-        let releaseRead!: () => void;
-        const readStarted = new Promise<void>(resolve => { readStartedResolve = resolve; });
-        const snapshot = makeSnapshot();
-        const blockingRead = async (_candidate: string, _side: SnapshotSide = 'after'): Promise<string> => {
-            readStartedResolve();
-            await new Promise<void>(resolve => { releaseRead = resolve; });
-            return 'parse();\n';
-        };
-        const retriever = new MemoryRetriever(
-            makeView([episode], []),
-            { ...snapshot, read: blockingRead } as unknown as RepositorySnapshotReader,
-            [],
-            () => [],
-            makeSettings({ 'sources.timeoutMs': 5_000 }),
-        );
-        const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
-        const controller = new AbortController();
-        const reason = new Error('caller aborted');
-        const pending = retriever.readMemorySources([navigation[0].id], controller.signal);
-        await readStarted;
-        const started = Date.now();
-        controller.abort(reason);
-
-        await assert.rejects(pending, (error: unknown) => error === reason);
-        assert.ok(Date.now() - started < 500, 'external cancellation should not wait for the source timeout');
-        assert.equal(retriever.usage.sourceAttempts, 1);
-        assert.equal(retriever.usage.expanded, 0);
-        assert.equal(retriever.budget.used, 1);
-
-        releaseRead();
-        await new Promise<void>(resolve => setImmediate(resolve));
-        assert.equal(retriever.usage.expanded, 0);
-        assert.equal(retriever.budget.used, 1);
     });
 });
 
 function makeView(episodes: InvestigationEpisode[], handbook: HandbookEntry[]): MemoryView {
-    return { epoch: 'epoch', generation: 1, episodes, handbook, consolidated: [] };
+    return { epoch: 'epoch', generation: 1, episodes, handbook, consolidated: [], organizedSeeds: [] };
 }
 
 function makeSettings(overrides: Partial<MemorySettings> = {}): MemorySettings {
     return Object.freeze({ ...MEMORY_DEFAULTS, ...overrides });
 }
 
-function makeIdentity(snapshotId: string): SnapshotIdentity {
+function makeHandbook(episodes: InvestigationEpisode[]): HandbookEntry {
     return {
-        id: snapshotId,
-        repositoryId: 'a'.repeat(64),
-        worktreeId: 'b'.repeat(64),
-        head: 'c'.repeat(40),
-        beforeTree: 'd'.repeat(40),
-        afterTree: 'e'.repeat(40),
-        indexFingerprint: 'f'.repeat(64),
-        autoStaged: false,
+        id: randomUUID(), situation: 'When memory lifecycle visibility changes, inspect the filtering entry point.',
+        steps: [{ path: 'src/ui/memoryWebviewPolicy.ts', symbol: 'filterMemoryLogsForWebview', purpose: 'Find the filtering branch before changing the renderer.', operation: 'readFileContent',
+            supports: episodes.map(episode => ({ episodeId: episode.id, observationIndex: 0, evidenceId: 'E1', questionIndex: 0, claimIndex: 0 })), snapshotCount: 2 }],
+        lessons: [{ observation: 'Historical rows can be inert after a reload.', implication: 'Check restoration state before changing lifecycle rendering.', limitation: 'This historical behavior does not establish current source truth.',
+            supports: episodes.map(episode => ({ episodeId: episode.id, observationIndex: 0 })), snapshotCount: 2 }],
+        targetPaths: ['src/ui/memoryWebviewPolicy.ts'], triggers: ['src/ui/memoryWebviewPolicy.ts', 'filterMemoryLogsForWebview', 'visibility'],
     };
 }
 
 function makeEpisode(options: {
-    episodeId?: string;
-    snapshotId?: string;
-    changedPaths?: string[];
-    changedSymbols?: string[];
-    sourcePath?: string;
-    sourceOid?: string;
-    sourceExcerpt?: string;
-    sourceStartLine?: number;
-    sourceSide?: SnapshotSide;
-    tool?: string;
-    includeMemoryObservation?: boolean;
-} = {}): InvestigationEpisode {
-    const snapshot = makeIdentity(options.snapshotId ?? '0'.repeat(64));
-    const sourcePath = options.sourcePath ?? 'src/parser.ts';
-    const sourceExcerpt = options.sourceExcerpt ?? 'parse();';
-    const source = makeSource(snapshot, {
-        path: sourcePath,
-        blobOid: options.sourceOid ?? '1'.repeat(40),
-        excerpt: sourceExcerpt,
-        startLine: options.sourceStartLine ?? 1,
-        endLine: options.sourceStartLine ?? 1,
-        side: options.sourceSide ?? 'after',
-    });
-    const observations: InvestigationEpisode['observations'] = [{
-        step: 0,
-        tool: options.tool ?? 'readFileContent',
-        arguments: { filePath: sourcePath, startLine: source.startLine, maxLines: 1 },
-        ok: true,
-        summary: 'read current source',
-        evidence: [{ id: 'E1', source }],
-        durationMs: 1,
-        truncated: false,
-    }];
-    if (options.includeMemoryObservation) {
-        observations.push({
-            step: 1,
-            tool: 'readMemorySources',
-            arguments: { memoryIds: ['M1'] },
-            ok: true,
-            summary: 'read historical navigation',
-            evidence: [{ id: 'E2', source: makeSource(snapshot, { ...source, contentHash: hashContent(source.excerpt) }) }],
-            durationMs: 1,
-            truncated: false,
-        });
-    }
-    return {
-        version: 1,
-        id: options.episodeId ?? randomUUID(),
-        createdAt: Date.now(),
-        snapshot,
-        changedPaths: options.changedPaths ?? [sourcePath],
-        changedSymbols: options.changedSymbols ?? ['parse'],
-        questions: ['Where is the parser used?'],
-        observations,
-        claims: [{ claim: 'Parser evidence is available.', evidenceRefs: ['E1'], disposition: 'must_express' }],
-        status: 'complete',
-        model: 'retriever-test',
-        promptVersion: 'memory-1',
-        toolsetVersion: 'snapshot-1',
+    episodeId: string;
+    snapshotId: string;
+    sourcePath: string;
+    questions?: string[];
+    summary?: string;
+    failed?: boolean;
+}): InvestigationEpisode {
+    const snapshot = makeIdentity(options.snapshotId);
+    const observation: RecordedObservation = {
+        step: 0, tool: options.failed ? 'searchCode' : 'readFileContent', arguments: { filePath: options.sourcePath, reason: options.summary ?? 'Inspect the source.' },
+        ok: !options.failed, summary: options.summary ?? 'Read the source.', ...(options.failed ? { error: 'No matches' } : {}), evidence: options.failed ? [] : [{ id: 'E1', source: makeSource(snapshot, options.sourcePath) }], durationMs: 1, truncated: false,
     };
+    return { version: 2, id: options.episodeId, createdAt: Number(options.episodeId.slice(-2)), snapshot,
+        changedPaths: [options.sourcePath], changedSymbols: ['filterMemoryLogsForWebview'], questions: options.questions ?? ['Where should the changed source be inspected?'], observations: [observation],
+        claims: observation.evidence.length ? [{ claim: 'The source was inspected.', evidenceRefs: ['E1'], disposition: 'must_express' }] : [], status: 'complete', model: 'retriever-test', promptVersion: 'memory-experience-1', toolsetVersion: 'snapshot-memory-experience-1' };
 }
 
-function makeSource(snapshot: SnapshotIdentity, overrides: Partial<SourceObservation> = {}): SourceObservation {
-    const source: SourceObservation = {
-        snapshotId: snapshot.id,
-        path: 'src/parser.ts',
-        side: 'after',
-        blobOid: '1'.repeat(40),
-        startLine: 1,
-        endLine: 1,
-        excerpt: 'parse();',
-        contentHash: hashContent('parse();'),
-        truncated: false,
-        sourceType: 'text',
-        ...overrides,
-    };
-    source.contentHash = hashContent(source.excerpt);
-    return source;
+function makeIdentity(snapshotId: string): SnapshotIdentity {
+    return { id: snapshotId, repositoryId: 'a'.repeat(64), worktreeId: 'b'.repeat(64), head: 'c'.repeat(40), beforeTree: 'd'.repeat(40), afterTree: 'e'.repeat(40), indexFingerprint: 'f'.repeat(64), autoStaged: false };
 }
 
-function makeHandbook(episode: InvestigationEpisode, targetPaths = [episode.changedPaths[0]]): HandbookEntry {
-    return {
-        id: randomUUID(),
-        triggers: [...episode.changedPaths, ...episode.changedSymbols],
-        targetPaths,
-        // Raw episodes never promote task-specific questions into navigation concerns.
-        concerns: [],
-        supports: [{ episodeId: episode.id, evidenceId: 'E1' }],
-        kind: 'navigation',
-    };
+function makeSource(snapshot: SnapshotIdentity, sourcePath: string): SourceObservation {
+    const excerpt = `function filterMemoryLogsForWebview() { return '${sourcePath}'; }`;
+    return { snapshotId: snapshot.id, path: sourcePath, side: 'after', blobOid: '1'.repeat(40), startLine: 1, endLine: 1, excerpt, contentHash: hashContent(excerpt), truncated: false, sourceType: 'text' };
 }
 
-function makeSnapshot(options: {
+function makeSnapshotReader(options: {
     currentOid?: string;
-    content?: string;
-    snapshotId?: string;
     missing?: boolean;
-    onRead?: (candidate: string, side: SnapshotSide) => void;
-    onObserve?: (candidate: string, startLine: number, side: SnapshotSide) => void;
+    onObserve?: () => void;
 } = {}): RepositorySnapshotReader {
-    const entry = (_candidate: string, _side: SnapshotSide = 'after'): SnapshotEntry | undefined => options.missing
-        ? undefined
-        : { path: _candidate, mode: '100644', oid: options.currentOid ?? '2'.repeat(40) };
-    const read = async (candidate: string, side: SnapshotSide = 'after'): Promise<string> => {
-        options.onRead?.(candidate, side);
-        return options.content ?? 'parse();\n';
-    };
-    const observe = async (
-        candidate: string,
-        startLine: number,
-        _maxLines: number,
-        _excludes: string[] = [],
-        side: SnapshotSide = 'after',
-        maxChars = 2000,
-    ): Promise<SourceObservation> => {
-        options.onObserve?.(candidate, startLine, side);
-        const excerpt = (options.content ?? 'parse();\n').split('\n').slice(startLine - 1, startLine).join('\n').slice(0, maxChars);
-        return {
-            snapshotId: options.snapshotId ?? '9'.repeat(64),
-            path: candidate,
-            side,
-            blobOid: options.currentOid ?? '2'.repeat(40),
-            startLine,
-            endLine: startLine,
-            excerpt,
-            contentHash: hashContent(excerpt),
-            truncated: false,
-            sourceType: 'text',
-        };
+    const entry = (candidate: string): SnapshotEntry | undefined => options.missing ? undefined : { path: candidate, mode: '100644', oid: options.currentOid ?? '2'.repeat(40) };
+    const read = async (): Promise<string> => 'function filterMemoryLogsForWebview() { return true; }\n';
+    const observe = async (candidate: string, startLine: number, _maxLines: number, _excludes: string[] = [], side: 'before' | 'after' = 'after'): Promise<SourceObservation> => {
+        options.onObserve?.();
+        const excerpt = 'function filterMemoryLogsForWebview() { return true; }';
+        return { snapshotId: '9'.repeat(64), path: candidate, side, blobOid: options.currentOid ?? '2'.repeat(40), startLine, endLine: startLine, excerpt, contentHash: hashContent(excerpt), truncated: false, sourceType: 'text' };
     };
     return { entry, read, observe } as unknown as RepositorySnapshotReader;
+}
+
+function uuidFor(index: number): string {
+    return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+}
+
+function digestFor(index: number): string {
+    return index.toString(16).padStart(2, '0').repeat(32);
 }

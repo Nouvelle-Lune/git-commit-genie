@@ -223,7 +223,7 @@ describe('repository memory lifecycle', function () {
                     assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), {
                         status: 'published', groupCount: 1, handbookCount: 1, noFindingCount: 0,
                         failedGroupCount: 0, skippedGroups: 0, deferredPaths: [], retryCount: 0,
-                        groupOutcomes: [{ path: 'src/safe.ts', status: 'published' }],
+                        groupOutcomes: [{ seedId: episodes[0].id, status: 'published', entryIds: ['10000000-0000-4000-8000-000000000001'], issues: [] }],
                     });
                     assert.equal(createExecution.calledOnce, true);
                     assert.equal(sessionRuns, 1);
@@ -234,10 +234,10 @@ describe('repository memory lifecycle', function () {
                         status: 'not-ready', pendingCount: 0, threshold: 2,
                     });
                     assert.equal(sessionRuns, 1, 'ordinary organization does not repeat a completed group');
-                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual-recheck', ['src/safe.ts']), {
+                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual-recheck', [episodes[0].id]), {
                         status: 'published', groupCount: 1, handbookCount: 1, noFindingCount: 0,
                         failedGroupCount: 0, skippedGroups: 0, deferredPaths: [], retryCount: 0,
-                        groupOutcomes: [{ path: 'src/safe.ts', status: 'published' }],
+                        groupOutcomes: [{ seedId: episodes[0].id, status: 'published', entryIds: ['10000000-0000-4000-8000-000000000001'], issues: [] }],
                     });
                     assert.equal(sessionRuns, 2, 'manual recheck explicitly reruns the selected path group');
                     const events = memoryLogEvents(logToolCall);
@@ -460,7 +460,7 @@ describe('repository memory lifecycle', function () {
                     await config.update('excludePatterns', ['secrets/**'], vscode.ConfigurationTarget.Global);
                     const retriever = await run!.loadMemory({ paths: ['secrets/token.ts'], symbols: [], keywords: [] });
                     assert.ok(retriever);
-                    assert.equal(retriever!.view.episodes.some(episode => episode.changedPaths.includes('secrets/token.ts')), false);
+                    assert.equal(retriever!.publishedNavigation.some(item => item.targetPaths.includes('secrets/token.ts')), false);
                     assert.deepEqual(retriever!.retrieveNavigation({ paths: ['secrets/token.ts'], symbols: [], keywords: [] }), []);
                 } finally {
                     disposeContext(context);
@@ -822,10 +822,10 @@ function makeEpisode(repositoryId: string, sourcePath = 'src/safe.ts', snapshotI
     const excerpt = 'const value = 1;';
     const snapshot = { ...makeIdentity(repositoryId), id: snapshotId };
     return {
-        version: 1, id: `00000000-0000-4000-8000-${repositoryId.slice(0, 12)}`, createdAt: Date.now(), snapshot,
+        version: 2, id: `00000000-0000-4000-8000-${repositoryId.slice(0, 12)}`, createdAt: Date.now(), snapshot,
         changedPaths: [sourcePath], changedSymbols: ['value'], questions: ['How is this used?'],
         observations: [{ step: 0, tool: 'readFileContent', arguments: { filePath: sourcePath }, ok: true, summary: 'read', durationMs: 1, truncated: false,
             evidence: [{ id: 'E1', source: { snapshotId: snapshot.id, path: sourcePath, side: 'after', blobOid: '1'.repeat(40), startLine: 1, endLine: 1, excerpt, contentHash: hashContent(excerpt), truncated: false, sourceType: 'text' } }] }],
-        claims: [{ claim: 'value exists', evidenceRefs: ['E1'], disposition: 'must_express' }], status: 'complete', model: 'model', promptVersion: 'memory-1', toolsetVersion: 'snapshot-1',
+        claims: [{ claim: 'value exists', evidenceRefs: ['E1'], disposition: 'must_express' }], status: 'complete', model: 'model', promptVersion: 'memory-experience-1', toolsetVersion: 'snapshot-memory-experience-1',
     };
 }

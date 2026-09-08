@@ -6,244 +6,14 @@ import { createPipelineReplayAdapter, replayManifestSchema, runSequentialReplay,
 import { generateCommitMessageChain } from '../services/chain/commitMessageChain';
 import { createConsolidationRunner, describeConsolidationResult, logMemoryOperation, readMemorySettings } from '../services/memory/service';
 import { buildConsolidationGroups } from '../services/memory/consolidator';
-import type { ConsolidationGroup } from '../services/memory/consolidator';
+import type { ConsolidationGroup, GroupOutcome } from '../services/memory/consolidator';
 import { resolveInvestigationSettings } from '../services/analysis/change/investigation/config';
 import type { HandbookEntry, InvestigationEpisode } from '../services/memory/types';
+import { formatRecheckGroupReport } from '../ui/memoryExperienceReport';
 
 interface RecheckGroupItem extends vscode.QuickPickItem {
     path: string;
     group: ConsolidationGroup;
-}
-
-interface RecheckEvidenceTrace {
-    episode: InvestigationEpisode;
-    evidence: InvestigationEpisode['observations'][number]['evidence'][number];
-    tool: string;
-    summary: string;
-}
-
-function supportKey(support: HandbookEntry['supports'][number]): string {
-    return `${support.episodeId}:${support.evidenceId}`;
-}
-
-function collectEvidenceTraces(episodes: readonly InvestigationEpisode[]): Map<string, RecheckEvidenceTrace> {
-    const traces = new Map<string, RecheckEvidenceTrace>();
-    for (const episode of episodes) {
-        for (const observation of episode.observations) {
-            for (const evidence of observation.evidence) {
-                const support = { episodeId: episode.id, evidenceId: evidence.id };
-                traces.set(supportKey(support), { episode, evidence, tool: observation.tool, summary: observation.summary });
-            }
-        }
-    }
-    return traces;
-}
-
-function escapeHtml(value: string): string {
-    return value.replace(/[&<>"']/g, character => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-    }[character] ?? character));
-}
-
-function formatRecordedAt(createdAt: number): string {
-    return new Intl.DateTimeFormat(vscode.env.language, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(createdAt));
-}
-
-function renderEvidenceRecord(trace: RecheckEvidenceTrace, index: number): string {
-    const source = trace.evidence.source;
-    const summary = trace.summary || vscode.l10n.t('No investigation note was saved for this record.');
-    const excerpt = source.excerpt
-        ? `<pre><code>${escapeHtml(source.excerpt)}</code></pre>`
-        : `<p class="empty">${escapeHtml(vscode.l10n.t('No excerpt was saved for this record.'))}</p>`;
-    const versionLabel = source.side === 'before'
-        ? vscode.l10n.t('Recorded before the change')
-        : vscode.l10n.t('Recorded after the change');
-    return `
-        <details class="evidence-record">
-            <summary>
-                <span class="timeline-dot" aria-hidden="true"></span>
-                <span class="evidence-number">${index + 1}</span>
-                <span class="evidence-summary">
-                    <strong>${escapeHtml(summary)}</strong>
-                    <span>${escapeHtml(formatRecordedAt(trace.episode.createdAt))} · ${escapeHtml(source.path)} · ${escapeHtml(vscode.l10n.t('lines {0}-{1}', source.startLine, source.endLine))}</span>
-                </span>
-                <span class="version-tag">${escapeHtml(versionLabel)}</span>
-            </summary>
-            <div class="evidence-body">
-                <h4>${escapeHtml(vscode.l10n.t('Saved excerpt'))}</h4>
-                ${excerpt}
-                <details class="technical-details">
-                    <summary>${escapeHtml(vscode.l10n.t('Technical information'))}</summary>
-                    <dl>
-                        <dt>${escapeHtml(vscode.l10n.t('Investigation ID'))}</dt><dd><code>${escapeHtml(trace.episode.id)}</code></dd>
-                        <dt>${escapeHtml(vscode.l10n.t('Evidence ID'))}</dt><dd><code>${escapeHtml(trace.evidence.id)}</code></dd>
-                        <dt>${escapeHtml(vscode.l10n.t('Repository snapshot'))}</dt><dd><code>${escapeHtml(source.snapshotId)}</code></dd>
-                        <dt>${escapeHtml(vscode.l10n.t('Investigation status'))}</dt><dd><code>${escapeHtml(trace.episode.status)}</code></dd>
-                        <dt>${escapeHtml(vscode.l10n.t('Collection tool'))}</dt><dd><code>${escapeHtml(trace.tool)}</code></dd>
-                    </dl>
-                </details>
-            </div>
-        </details>`;
-}
-
-function renderMissingSupport(support: HandbookEntry['supports'][number]): string {
-    return `
-        <div class="missing-support" role="status">
-            <strong>${escapeHtml(vscode.l10n.t('A supporting record could not be found.'))}</strong>
-            <span>${escapeHtml(vscode.l10n.t('This memory points to investigation {0}, evidence {1}, but that saved record is unavailable.', support.episodeId, support.evidenceId))}</span>
-        </div>`;
-}
-
-function formatRecheckGroupReport(group: ConsolidationGroup, handbook: readonly HandbookEntry[], episodes: readonly InvestigationEpisode[]): string {
-    const independentSnapshots = new Set(group.sources.map(source => source.episode.snapshot.id)).size;
-    const relatedHandbook = handbook.filter(entry => entry.targetPaths.includes(group.anchorPath));
-    const evidenceTraces = collectEvidenceTraces(episodes);
-    const memories = relatedHandbook.length
-        ? relatedHandbook.map((entry, index) => {
-            const supports = entry.supports.map((support, supportIndex) => {
-                const trace = evidenceTraces.get(supportKey(support));
-                return trace ? renderEvidenceRecord(trace, supportIndex) : renderMissingSupport(support);
-            }).join('');
-            const concerns = entry.concerns.map(concern => `<li>${escapeHtml(concern)}</li>`).join('');
-            const triggers = entry.triggers.map(trigger => `<span class="trigger">${escapeHtml(trigger)}</span>`).join('');
-            const kind = entry.kind === 'navigation' ? vscode.l10n.t('Where to look') : vscode.l10n.t('How to handle it');
-            return `
-                <article class="memory-card">
-                    <div class="memory-heading">
-                        <span class="memory-index">${escapeHtml(vscode.l10n.t('Long-term memory {0}', index + 1))}</span>
-                        <span class="kind-tag">${escapeHtml(kind)}</span>
-                    </div>
-                    <h3>${escapeHtml(vscode.l10n.t('Remembered conclusion'))}</h3>
-                    <ul class="conclusions">${concerns}</ul>
-                    <div class="recall-context">
-                        <span>${escapeHtml(vscode.l10n.t('When this memory may be recalled'))}</span>
-                        <div class="triggers">${triggers}</div>
-                    </div>
-                    <details class="support-section">
-                        <summary>${escapeHtml(vscode.l10n.t('{0} historical records support this conclusion', entry.supports.length))}</summary>
-                        <div class="support-intro">${escapeHtml(vscode.l10n.t('Why this was remembered'))} · ${escapeHtml(vscode.l10n.t('Only the records below directly support this long-term memory.'))}</div>
-                        <div class="evidence-thread">${supports}</div>
-                    </details>
-                </article>`;
-        }).join('')
-        : `<div class="empty-state">
-                <h3>${escapeHtml(vscode.l10n.t('No long-term memory was created from this evidence group.'))}</h3>
-                <p>${escapeHtml(vscode.l10n.t('A recheck asks the model to review this saved history again and decide whether a durable conclusion should be added.'))}</p>
-           </div>`;
-    const allSources = group.sources.map((source, index) => {
-        const trace = evidenceTraces.get(supportKey(source.support));
-        return trace ? renderEvidenceRecord(trace, index) : renderMissingSupport(source.support);
-    }).join('');
-    return `<!DOCTYPE html>
-<html lang="${escapeHtml(vscode.env.language)}">
-<head>
-    <meta charset="UTF-8">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${escapeHtml(vscode.l10n.t('Historical evidence for {0}', group.anchorPath))}</title>
-    <style>
-        * { box-sizing: border-box; }
-        body { max-width: 980px; margin: 0 auto; padding: 32px 28px 64px; color: var(--vscode-editor-foreground); background: var(--vscode-editor-background); font-family: var(--vscode-font-family); font-size: var(--vscode-font-size); line-height: 1.6; }
-        h1, h2, h3, h4, p { margin-top: 0; }
-        h1 { margin-bottom: 10px; font-size: clamp(24px, 4vw, 38px); line-height: 1.18; overflow-wrap: anywhere; }
-        h2 { margin: 0 0 8px; font-size: 22px; }
-        h3 { margin-bottom: 10px; font-size: 16px; }
-        h4 { margin-bottom: 8px; font-size: 12px; color: var(--vscode-descriptionForeground); text-transform: uppercase; letter-spacing: .06em; }
-        code, pre { font-family: var(--vscode-editor-font-family); }
-        .hero { padding: 4px 0 28px; border-bottom: 1px solid var(--vscode-panel-border); }
-        .eyebrow { display: inline-block; margin-bottom: 12px; color: var(--vscode-descriptionForeground); font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
-        .hero-copy, .section-copy { color: var(--vscode-descriptionForeground); max-width: 760px; }
-        section { padding-top: 32px; }
-        .memory-list { display: grid; gap: 18px; margin-top: 18px; }
-        .memory-card { padding: 20px; background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-widget-border); border-radius: 10px; }
-        .memory-heading { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 18px; }
-        .memory-index { color: var(--vscode-descriptionForeground); font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
-        .kind-tag, .version-tag, .trigger { display: inline-flex; align-items: center; border: 1px solid var(--vscode-badge-background); border-radius: 999px; padding: 2px 8px; font-size: 12px; }
-        .kind-tag { color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); }
-        .conclusions { margin: 0; padding-left: 22px; font-size: 15px; }
-        .conclusions li + li { margin-top: 8px; }
-        .recall-context { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--vscode-panel-border); }
-        .recall-context > span { color: var(--vscode-descriptionForeground); font-size: 12px; font-weight: 600; }
-        .triggers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-        .trigger { font-family: var(--vscode-editor-font-family); overflow-wrap: anywhere; }
-        details > summary { cursor: pointer; }
-        details > summary:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 3px; }
-        .support-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--vscode-panel-border); }
-        .support-section > summary { color: var(--vscode-textLink-foreground); font-weight: 650; }
-        .support-intro { margin: 14px 0; color: var(--vscode-descriptionForeground); }
-        .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; margin-top: 18px; }
-        .metric { padding: 18px; border: 1px solid var(--vscode-widget-border); border-radius: 8px; }
-        .metric strong { display: block; margin-bottom: 4px; font-size: 28px; line-height: 1; }
-        .metric span { display: block; margin-bottom: 7px; font-weight: 650; }
-        .metric p { margin: 0; color: var(--vscode-descriptionForeground); }
-        .count-note { margin-top: 12px; padding-left: 14px; border-left: 3px solid var(--vscode-focusBorder); color: var(--vscode-descriptionForeground); }
-        .evidence-thread { position: relative; padding-left: 20px; border-left: 2px solid var(--vscode-gitDecoration-modifiedResourceForeground); }
-        .evidence-record { position: relative; padding: 12px 0; }
-        .evidence-record + .evidence-record { border-top: 1px solid var(--vscode-panel-border); }
-        .evidence-record > summary { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 10px; align-items: start; list-style: none; }
-        .evidence-record > summary::-webkit-details-marker { display: none; }
-        .timeline-dot { position: absolute; left: -26px; top: 21px; width: 10px; height: 10px; border-radius: 50%; background: var(--vscode-gitDecoration-modifiedResourceForeground); box-shadow: 0 0 0 4px var(--vscode-editor-background); }
-        .evidence-number { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; color: var(--vscode-badge-foreground); background: var(--vscode-badge-background); font-size: 11px; }
-        .evidence-summary { min-width: 0; }
-        .evidence-summary strong, .evidence-summary span { display: block; }
-        .evidence-summary strong { overflow-wrap: anywhere; }
-        .evidence-summary span { margin-top: 3px; color: var(--vscode-descriptionForeground); font-size: 12px; overflow-wrap: anywhere; }
-        .version-tag { color: var(--vscode-descriptionForeground); white-space: nowrap; }
-        .evidence-body { margin: 12px 0 0 34px; }
-        pre { max-height: 420px; margin: 0; padding: 14px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--vscode-textCodeBlock-background); border: 1px solid var(--vscode-panel-border); border-radius: 6px; }
-        .warning, .missing-support { color: var(--vscode-notificationsWarningIcon-foreground); }
-        .warning { margin: 8px 0 0; }
-        .empty { color: var(--vscode-descriptionForeground); font-style: italic; }
-        .technical-details { margin-top: 12px; color: var(--vscode-descriptionForeground); }
-        .technical-details > summary { font-size: 12px; }
-        dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin-bottom: 0; font-size: 12px; }
-        dt { font-weight: 650; }
-        dd { margin: 0; overflow-wrap: anywhere; }
-        .empty-state, .missing-support { padding: 16px; border: 1px solid var(--vscode-widget-border); border-radius: 8px; }
-        .empty-state p, .missing-support span { margin: 0; color: var(--vscode-descriptionForeground); }
-        .missing-support strong, .missing-support span { display: block; }
-        .all-evidence { margin-top: 18px; }
-        .all-evidence > summary { font-weight: 650; }
-        .all-evidence .evidence-thread { margin-top: 16px; }
-        @media (max-width: 620px) {
-            body { padding: 24px 16px 48px; }
-            .evidence-record > summary { grid-template-columns: 24px minmax(0, 1fr); }
-            .version-tag { grid-column: 2; justify-self: start; }
-            dl { grid-template-columns: 1fr; }
-        }
-    </style>
-</head>
-<body>
-    <header class="hero">
-        <span class="eyebrow">${escapeHtml(vscode.l10n.t('Historical evidence preview'))}</span>
-        <h1>${escapeHtml(group.anchorPath)}</h1>
-        <p class="hero-copy">${escapeHtml(vscode.l10n.t('This page shows saved records from earlier repository versions, not the file as it is now.'))}</p>
-    </header>
-    <main>
-        <section aria-labelledby="learned-title">
-            <h2 id="learned-title">${escapeHtml(vscode.l10n.t('What Repository Memory learned'))}</h2>
-            <p class="section-copy">${escapeHtml(vscode.l10n.t('These long-term memories may be recalled when related files or topics appear.'))}</p>
-            <div class="memory-list">${memories}</div>
-        </section>
-        <section aria-labelledby="history-title">
-            <h2 id="history-title">${escapeHtml(vscode.l10n.t('History at a glance'))}</h2>
-            <div class="metrics">
-                <div class="metric"><strong>${independentSnapshots}</strong><span>${escapeHtml(vscode.l10n.t('Versions observed'))}</span><p>${escapeHtml(vscode.l10n.t('{0} repository snapshots contained evidence for this path.', independentSnapshots))}</p></div>
-                <div class="metric"><strong>${group.sources.length}</strong><span>${escapeHtml(vscode.l10n.t('Saved evidence'))}</span><p>${escapeHtml(vscode.l10n.t('{0} different evidence records remain after identical sources are counted once.', group.sources.length))}</p></div>
-            </div>
-            <p class="count-note"><strong>${escapeHtml(vscode.l10n.t('Why the numbers differ'))}:</strong> ${escapeHtml(vscode.l10n.t('One repository version can contain several observations. A long-term memory uses only the records listed under its own "Why this was remembered" section.'))}</p>
-        </section>
-        <section aria-labelledby="all-evidence-title">
-            <h2 id="all-evidence-title">${escapeHtml(vscode.l10n.t('All saved evidence in this group'))}</h2>
-            <p class="section-copy">${escapeHtml(vscode.l10n.t('These are all distinct records available for recheck. Some may not support any current long-term memory.'))}</p>
-            <details class="all-evidence">
-                <summary>${escapeHtml(vscode.l10n.t('Show {0} saved evidence records', group.sources.length))}</summary>
-                <div class="evidence-thread">${allSources}</div>
-            </details>
-        </section>
-    </main>
-</body>
-</html>`;
 }
 
 /** Read-only inspection plus explicit repository-scoped maintenance commands. */
@@ -321,11 +91,11 @@ export class MemoryCommands {
 
     private async selectRecheckGroups(groups: ConsolidationGroup[], handbook: readonly HandbookEntry[], episodes: readonly InvestigationEpisode[], repositoryId: string): Promise<string[] | undefined> {
         const items: RecheckGroupItem[] = groups.map(group => ({
-            label: group.anchorPath,
+            label: group.title,
             description: vscode.l10n.t('{0} historical versions · {1} saved evidence records',
-                new Set(group.sources.map(source => source.episode.snapshot.id)).size, group.sources.length),
+                new Set(group.episodes.map(episode => episode.snapshot.id)).size, group.observations.length),
             buttons: [{ iconPath: new vscode.ThemeIcon('info'), tooltip: vscode.l10n.t('Understand this evidence group') }],
-            path: group.anchorPath,
+            path: group.seedId,
             group,
         }));
         const quickPick = vscode.window.createQuickPick<RecheckGroupItem>();
@@ -358,11 +128,11 @@ export class MemoryCommands {
         });
     }
 
-    private openRecheckGroupDetails(repositoryId: string, group: ConsolidationGroup, handbook: readonly HandbookEntry[], episodes: readonly InvestigationEpisode[]): void {
+    private openRecheckGroupDetails(repositoryId: string, group: ConsolidationGroup, handbook: readonly HandbookEntry[], episodes: readonly InvestigationEpisode[], outcome?: GroupOutcome): void {
         const panelKey = `${repositoryId}:${group.fingerprint}`;
         const existing = this.evidencePanels.get(panelKey);
         if (existing) {
-            existing.webview.html = formatRecheckGroupReport(group, handbook, episodes);
+            existing.webview.html = formatRecheckGroupReport(group, handbook, episodes, outcome);
             existing.reveal(vscode.ViewColumn.Beside, true);
             return;
         }
@@ -370,11 +140,11 @@ export class MemoryCommands {
         // read-only while still supporting progressive disclosure for non-technical users.
         const panel = vscode.window.createWebviewPanel(
             'gitCommitGenie.memoryEvidence',
-            vscode.l10n.t('Historical evidence for {0}', group.anchorPath),
+            vscode.l10n.t('Historical evidence for {0}', group.seedId),
             { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
             { enableScripts: false, retainContextWhenHidden: false },
         );
-        panel.webview.html = formatRecheckGroupReport(group, handbook, episodes);
+        panel.webview.html = formatRecheckGroupReport(group, handbook, episodes, outcome);
         this.evidencePanels.set(panelKey, panel);
         this.context.subscriptions.push(panel);
         panel.onDidDispose(() => this.evidencePanels.delete(panelKey), undefined, this.context.subscriptions);
@@ -408,7 +178,8 @@ export class MemoryCommands {
         if (!action) { return; }
         const root = selected.rootUri.fsPath;
         let ids: string[] = [];
-        let recheckPaths: string[] | undefined;
+        let recheckSeeds: string[] | undefined;
+        let recheckGroups: ConsolidationGroup[] = [];
         if (action.id === 'clear') {
             const confirm = vscode.l10n.t('Clear memory');
             if (await vscode.window.showWarningMessage(vscode.l10n.t('Delete all memory for this clone, including shared worktrees? This cannot be undone.'), { modal: true }, confirm) !== confirm) { return; }
@@ -437,8 +208,8 @@ export class MemoryCommands {
         }
         if (action.id === 'recheck') {
             const view = await store.inspect();
-            const organized = new Set(view.consolidated);
-            const groups = buildConsolidationGroups(view.episodes, []).filter(group => organized.has(group.fingerprint));
+            const organized = new Set(view.organizedSeeds);
+            const groups = buildConsolidationGroups(view.episodes, [], view.handbook).filter(group => organized.has(group.seedId));
             if (!groups.length) {
                 const message = vscode.l10n.t('No evidence groups have enough independent snapshots to recheck.');
                 vscode.window.setStatusBarMessage(message, 5000);
@@ -447,9 +218,10 @@ export class MemoryCommands {
             }
             const picked = await this.selectRecheckGroups(groups, view.handbook, view.episodes, identity.repositoryId);
             if (!picked?.length) { return; }
-            recheckPaths = picked;
+            recheckSeeds = picked;
+            recheckGroups = groups.filter(group => picked.includes(group.seedId));
             const confirm = vscode.l10n.t('Recheck organized evidence');
-            if (await vscode.window.showWarningMessage(vscode.l10n.t('Recheck {0} selected evidence groups even when their sources have not changed? This runs new model calls and may incur API charges.', recheckPaths.length),
+            if (await vscode.window.showWarningMessage(vscode.l10n.t('Recheck {0} selected evidence groups even when their sources have not changed? This runs new model calls and may incur API charges.', recheckSeeds.length),
                 { modal: true }, confirm) !== confirm) { return; }
         }
         const consolidationAction = action.id === 'consolidate' || action.id === 'recheck';
@@ -477,9 +249,25 @@ export class MemoryCommands {
                 status = result.status;
                 message = describeConsolidationResult(result);
             } else if (action.id === 'recheck') {
-                const result = await memory.consolidate(store.repositoryId, this.services.getCurrentLLMService(), 'manual-recheck', recheckPaths);
-                status = result.status;
-                message = describeConsolidationResult(result);
+                const messages: string[] = [];
+                for (const group of recheckGroups) {
+                    try {
+                        const result = await memory.consolidate(store.repositoryId, this.services.getCurrentLLMService(), 'manual-recheck', [group.seedId]);
+                        const view = await store.inspect();
+                        const outcome: GroupOutcome = 'groupOutcomes' in result ? result.groupOutcomes[0]
+                            : { seedId: group.seedId, status: 'failed', entryIds: [], issues: [describeConsolidationResult(result)] };
+                        this.openRecheckGroupDetails(identity.repositoryId, group, view.handbook, view.episodes, outcome);
+                        messages.push(describeConsolidationResult(result));
+                        status = result.status;
+                        if (!('groupOutcomes' in result)) { break; }
+                    } catch (error) {
+                        const view = await store.inspect();
+                        this.openRecheckGroupDetails(identity.repositoryId, group, view.handbook, view.episodes,
+                            { seedId: group.seedId, status: 'failed', entryIds: [], issues: [String(error)] });
+                        throw error;
+                    }
+                }
+                message = messages.join('\n');
             } else if (action.id === 'rebuild') {
                 message = vscode.l10n.t('Rebuilt the index from {0} stored episodes.', await store.rebuildIndex());
             } else if (action.id === 'cancel') {

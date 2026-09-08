@@ -5,8 +5,8 @@ import * as lockfile from 'proper-lockfile';
 import writeFileAtomic from 'write-file-atomic';
 import { z } from 'zod';
 import { hashContent } from '../git/repositorySnapshot';
-import { HandbookEntry, handbookEntrySchema, InvestigationEpisode, investigationEpisodeSchema, MemoryQuery } from './types';
-import { isEligibleEpisode, validateEpisodeSources } from './recorder';
+import { HandbookEntry, handbookEntrySchema, InvestigationEpisode, investigationEpisodeSchema, MemoryQuery, entrySupports, entryTerms } from './types';
+import { isEligibleEpisode, validateEpisodeSources, validateHandbookSources } from './recorder';
 import { shouldExclude } from '../analysis/tools/pathFilters';
 import { bm25Scores } from './ranking';
 import { MEMORY_DEFAULTS, MemorySettings } from './settings';
@@ -14,14 +14,15 @@ import { MEMORY_DEFAULTS, MemorySettings } from './settings';
 const consolidationAttemptSchema = z.object({ id: z.uuid(), at: z.number(), epoch: z.uuid() }).strict();
 
 const manifestSchema = z.object({
-    version: z.literal(1), epoch: z.uuid(), generation: z.number().int().nonnegative(),
+    version: z.literal(2), epoch: z.uuid(), generation: z.number().int().nonnegative(),
     episodes: z.array(z.object({ id: z.uuid(), hash: z.string(), bytes: z.number().int().positive(), createdAt: z.number(),
-        paths: z.array(z.string()), symbols: z.array(z.string()), targets: z.array(z.string()), eligible: z.boolean() }).strict()),
+        paths: z.array(z.string()), symbols: z.array(z.string()), targets: z.array(z.string()), terms: z.array(z.string()), eligible: z.boolean() }).strict()),
     handbook: z.array(handbookEntrySchema),
     attempts: z.array(consolidationAttemptSchema),
     // Deterministic evidence-group fingerprints prevent identical source sets
     // from incurring another model call until new evidence changes the group.
     consolidated: z.array(z.uuid()),
+    organizedSeeds: z.array(z.uuid()),
     job: z.object({ id: z.uuid(), expiresAt: z.number() }).strict().nullable(),
 }).strict();
 const clearStateSchema = z.object({
@@ -30,7 +31,7 @@ const clearStateSchema = z.object({
 }).passthrough();
 const episodePayloadName = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/i;
 type Manifest = z.infer<typeof manifestSchema>;
-export interface MemoryView { epoch: string; generation: number; episodes: InvestigationEpisode[]; handbook: HandbookEntry[]; consolidated: string[] }
+export interface MemoryView { epoch: string; generation: number; episodes: InvestigationEpisode[]; handbook: HandbookEntry[]; consolidated: string[]; organizedSeeds: string[] }
 export type ConsolidationReservation = { status: 'reserved'; id: string; generation: number } | { status: 'already-running' } |
     { status: 'budget-exhausted'; limit: number; resumesAt: number };
 
@@ -79,7 +80,7 @@ export class MemoryStore {
             }
             catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; }
-                state = { version: 1, epoch: randomUUID(), generation: 0, episodes: [], handbook: [], attempts: [], consolidated: [], job: null };
+                state = { version: 2, epoch: randomUUID(), generation: 0, episodes: [], handbook: [], attempts: [], consolidated: [], organizedSeeds: [], job: null };
                 assertOwned();
                 await writeFileAtomic(manifestPath, JSON.stringify(state), { fsync: true });
             }
@@ -113,31 +114,41 @@ export class MemoryStore {
 
     async inspect(): Promise<MemoryView> {
         return this.locked(async state => ({ epoch: state.epoch, generation: state.generation,
-            episodes: await this.readEpisodes(state), handbook: structuredClone(state.handbook), consolidated: [...state.consolidated] }));
+            episodes: await this.readEpisodes(state), handbook: structuredClone(state.handbook), consolidated: [...state.consolidated], organizedSeeds: [...state.organizedSeeds] }));
     }
 
-    /** Read only a bounded, exact-match-first candidate set, not the entire archive. */
+    /** Rank experiences before loading payloads so semantic hits cannot be lost to an episode prefilter. */
     async loadNavigation(query: MemoryQuery): Promise<MemoryView> {
         return this.locked(async state => {
-            const lexical = bm25Scores(state.episodes.map(entry => [...entry.paths, ...entry.symbols, ...entry.targets]), [...query.paths, ...query.symbols, ...query.keywords]);
-            const rank = (entry: Manifest['episodes'][number]) =>
-                entry.paths.filter(file => query.paths.includes(file)).length * 100 +
-                entry.symbols.filter(symbol => query.symbols.includes(symbol)).length * 100 +
-                entry.targets.filter(file => query.paths.includes(file)).length * 30 +
-                entry.paths.filter(file => query.paths.some(target => path.posix.dirname(file) !== '.' && path.posix.dirname(target) === path.posix.dirname(file))).length * 5 +
-                query.keywords.filter(word => word.length > 1 && [...entry.paths, ...entry.symbols].some(value => value.toLowerCase().includes(word.toLowerCase()))).length;
-            const candidates = state.episodes.map((entry, index) => ({ entry, score: entry.eligible ? rank(entry) + lexical[index] : 0 }))
-                .filter(item => item.score > 0).sort((a, b) => b.score - a.score || b.entry.createdAt - a.entry.createdAt);
+            const words = [...query.paths, ...query.symbols, ...query.keywords];
+            const handbookScores = bm25Scores(state.handbook.map(entryTerms), words);
+            const episodeScores = bm25Scores(state.episodes.map(entry => [...entry.paths, ...entry.symbols, ...entry.targets, ...entry.terms]), words);
+            const exact = (paths: string[], symbols: string[]) => paths.filter(value => query.paths.includes(value)).length * 100
+                + symbols.filter(value => query.symbols.includes(value)).length * 100;
+            const candidates = [
+                ...state.handbook.map((entry, index) => ({ kind: 'handbook' as const, id: entry.id,
+                    episodeIds: [...new Set(entrySupports(entry).map(support => support.episodeId))],
+                    score: handbookScores[index] + exact(entry.targetPaths, entry.triggers) })),
+                ...state.episodes.filter(entry => entry.eligible).map(entry => ({ kind: 'episode' as const, id: entry.id,
+                    episodeIds: [entry.id], score: episodeScores[state.episodes.indexOf(entry)] + exact([...entry.paths, ...entry.targets], entry.symbols) })),
+            ].filter(item => item.score > 0).sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+            const selected = new Map<string, Manifest['episodes'][number]>();
+            const handbook: HandbookEntry[] = [];
             let bytes = 0;
-            const selected: Manifest['episodes'] = [];
-            for (const { entry } of candidates) {
-                if (selected.length >= 20) { break; }
-                if (bytes + entry.bytes > 4 * 1024 * 1024) { continue; }
-                selected.push(entry); bytes += entry.bytes;
+            for (const candidate of candidates) {
+                const missing = candidate.episodeIds.filter(id => !selected.has(id)).map(id => {
+                    const episode = state.episodes.find(entry => entry.id === id);
+                    if (!episode) { throw new Error('Experience references an unpublished investigation.'); }
+                    return episode;
+                });
+                const extra = missing.reduce((total, item) => total + item.bytes, 0);
+                if (selected.size + missing.length > 20 || bytes + extra > 4 * 1024 * 1024) { continue; }
+                for (const item of missing) { selected.set(item.id, item); }
+                bytes += extra;
+                if (candidate.kind === 'handbook') { handbook.push(state.handbook.find(entry => entry.id === candidate.id)!); }
             }
-            const ids = new Set(selected.map(entry => entry.id));
-            return { epoch: state.epoch, generation: state.generation, episodes: await this.readEpisodes({ ...state, episodes: selected }),
-                handbook: state.handbook.filter(entry => entry.supports.every(ref => ids.has(ref.episodeId))), consolidated: [] };
+            return { epoch: state.epoch, generation: state.generation,
+                episodes: await this.readEpisodes({ ...state, episodes: [...selected.values()] }), handbook, consolidated: [], organizedSeeds: [] };
         });
     }
 
@@ -165,8 +176,9 @@ export class MemoryStore {
                 removed.add(entry.id); total -= entry.bytes; retained = retained.filter(item => item.id !== entry.id);
             }
             state.episodes = retained;
-            state.handbook = state.handbook.filter(entry => entry.supports.every(support => !removed.has(support.episodeId)));
-            state.consolidated = state.consolidated.filter(id => !removed.has(id));
+            state.handbook = state.handbook.filter(entry => entrySupports(entry).every(support => !removed.has(support.episodeId)));
+            state.organizedSeeds = state.organizedSeeds.filter(id => !removed.has(id));
+            if (removed.size > 0) { state.consolidated = []; }
             await this.publish(state, assertOwned, settings);
             for (const id of removed) { assertOwned(); await fs.unlink(path.join(this.directory, `${id}.json`)); }
         });
@@ -175,7 +187,9 @@ export class MemoryStore {
     private indexEpisode(episode: InvestigationEpisode, bytes: Buffer): Manifest['episodes'][number] {
         return { id: episode.id, hash: hashContent(bytes), bytes: bytes.length, createdAt: episode.createdAt,
             paths: episode.changedPaths, symbols: episode.changedSymbols,
-            targets: [...new Set(episode.observations.flatMap(item => item.evidence.map(evidence => evidence.source.path)))], eligible: isEligibleEpisode(episode) };
+            targets: [...new Set(episode.observations.flatMap(item => item.evidence.map(evidence => evidence.source.path)))],
+            terms: [...episode.questions, ...episode.observations.filter(item => !['searchRepositoryMemory', 'readMemorySources'].includes(item.tool))
+                .flatMap(item => [item.summary, ...Object.values(item.arguments).filter((value): value is string => typeof value === 'string')])], eligible: isEligibleEpisode(episode) };
     }
 
     async rebuildIndex(settings = this.settings()): Promise<number> {
@@ -197,8 +211,9 @@ export class MemoryStore {
         return this.locked(async (state, assertOwned) => {
             const removed = state.episodes.filter(entry => ids.includes(entry.id));
             state.episodes = state.episodes.filter(entry => !ids.includes(entry.id));
-            state.handbook = state.handbook.filter(entry => entry.supports.every(ref => !ids.includes(ref.episodeId)));
-            state.consolidated = state.consolidated.filter(id => !ids.includes(id));
+            state.handbook = state.handbook.filter(entry => entrySupports(entry).every(ref => !ids.includes(ref.episodeId)));
+            state.organizedSeeds = state.organizedSeeds.filter(id => !ids.includes(id));
+            state.consolidated = [];
             state.epoch = randomUUID(); state.job = null;
             await this.publish(state, assertOwned, settings);
             for (const entry of removed) { assertOwned(); await fs.unlink(path.join(this.directory, `${entry.id}.json`)); }
@@ -218,9 +233,9 @@ export class MemoryStore {
                 if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; }
             }
             const state: Manifest = {
-                version: 1, epoch: randomUUID(), generation: preserved.generation,
+                version: 2, epoch: randomUUID(), generation: preserved.generation,
                 episodes: [], handbook: [], attempts: preserved.attempts,
-                consolidated: [], job: null,
+                consolidated: [], organizedSeeds: [], job: null,
             };
             await this.publish(state, assertOwned, settings);
             const payloads = (await fs.readdir(this.directory)).filter(name => episodePayloadName.test(name));
@@ -247,17 +262,20 @@ export class MemoryStore {
         });
     }
 
-    async publishHandbook(expected: MemoryView, expectedGeneration: number, jobId: string, entries: HandbookEntry[], consumed: string[], signal?: AbortSignal, settings = this.settings()): Promise<void> {
+    async publishHandbook(expected: MemoryView, expectedGeneration: number, jobId: string, entries: HandbookEntry[], consumed: string[], signal?: AbortSignal, settings = this.settings(), seedId?: string): Promise<void> {
         await this.locked(async (state, assertOwned) => {
             signal?.throwIfAborted();
             if (state.epoch !== expected.epoch || state.generation !== expectedGeneration || state.job?.id !== jobId || state.job.expiresAt <= Date.now()) {
                 throw new Error('Consolidation lost its publication lease or source generation.');
             }
             const ids = new Set(state.episodes.map(entry => entry.id));
-            if (entries.some(entry => entry.supports.some(ref => !ids.has(ref.episodeId)))) {
+            if (entries.some(entry => entrySupports(entry).some(ref => !ids.has(ref.episodeId)))) {
                 throw new Error('Handbook references an unpublished episode.');
             }
             if (new Set(entries.map(entry => entry.id)).size !== entries.length) { throw new Error('Handbook contains duplicate entry identifiers.'); }
+            if (seedId && !ids.has(seedId)) { throw new Error('Consolidation seed is no longer published.'); }
+            if (seedId) { state.organizedSeeds = [...new Set([...state.organizedSeeds, seedId])]; }
+            validateHandbookSources(entries, await this.readEpisodes(state));
             state.handbook = entries.map(entry => handbookEntrySchema.parse(entry));
             state.consolidated = [...new Set([...state.consolidated, ...consumed])]; state.job = null;
             signal?.throwIfAborted();

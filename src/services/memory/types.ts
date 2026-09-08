@@ -17,60 +17,86 @@ export const snapshotIdentitySchema = z.object({
 
 export const recordedObservationSchema = z.object({
     step: z.number().int().nonnegative(), tool: z.string().min(1),
-    arguments: z.record(z.string(), z.unknown()), ok: z.boolean(), summary: z.string(),
+    arguments: z.record(z.string(), z.unknown()), ok: z.boolean(), summary: z.string(), error: z.string().optional(),
     evidence: z.array(z.object({ id: z.string().regex(/^E\d+$/), source: sourceObservationSchema }).strict()),
     durationMs: z.number().nonnegative(), truncated: z.boolean(),
 }).strict();
 
 export const investigationEpisodeSchema = z.object({
-    version: z.literal(1), id: z.uuid(), createdAt: z.number().int().nonnegative(), snapshot: snapshotIdentitySchema,
+    version: z.literal(2), id: z.uuid(), createdAt: z.number().int().nonnegative(), snapshot: snapshotIdentitySchema,
     changedPaths: z.array(safePath), changedSymbols: z.array(z.string()), questions: z.array(z.string()),
     observations: z.array(recordedObservationSchema),
     claims: z.array(z.object({ claim: z.string(), evidenceRefs: z.array(z.string()), disposition: z.enum(['must_express', 'optional', 'omit']) }).strict()),
     status: z.enum(['complete', 'degraded', 'unavailable', 'cancelled', 'error']),
-    // These are historical provenance labels, not model-call protocol negotiation.
-    // Immutable episodes retain their original labels after the active tool contract changes.
-    model: z.string(), promptVersion: z.enum(['memory-1', 'memory-2']), toolsetVersion: z.enum(['snapshot-1', 'snapshot-memory-handles-3']),
+    // Pin the experience protocol used to record these immutable observations.
+    // Old unreleased formats must be explicitly cleared, never migrated on read.
+    model: z.string(), promptVersion: z.literal('memory-experience-1'), toolsetVersion: z.literal('snapshot-memory-experience-1'),
 }).strict();
 
 export type InvestigationEpisode = z.infer<typeof investigationEpisodeSchema>;
 export type RecordedObservation = z.infer<typeof recordedObservationSchema>;
 
-export const handbookEntrySchema = z.object({
-    id: z.uuid(), triggers: z.array(z.string().min(1)).min(1),
-    targetPaths: z.array(safePath).min(1).max(8),
-    // Concerns are cross-episode, repository-level behaviors/risks/invariants,
-    // distilled by consolidation; they are never task-specific run questions.
-    concerns: z.array(z.string().min(1).max(600)).max(6),
-    supports: z.array(z.object({
-        episodeId: z.uuid(), evidenceId: z.string().regex(/^E\d+$/)
-    }).strict()).min(1).max(32),
-    kind: z.enum(['navigation', 'procedure']),
+// An observation can support a historical limitation without returning source code.
+export const memorySupportSchema = z.object({
+    episodeId: z.uuid(), observationIndex: z.number().int().nonnegative(),
+    evidenceId: z.string().regex(/^E\d+$/).optional(),
+    questionIndex: z.number().int().nonnegative().optional(), claimIndex: z.number().int().nonnegative().optional(),
 }).strict();
-
+export type MemorySupport = z.infer<typeof memorySupportSchema>;
+const text = z.string().trim().min(1).max(600);
+const supported = { supports: z.array(memorySupportSchema).min(2).max(32), snapshotCount: z.number().int().min(2) };
+export const investigationStepSchema = z.object({
+    path: safePath, symbol: z.string().min(1).optional(), purpose: text,
+    operation: z.string().min(1), ...supported,
+}).strict();
+export const historicalLessonSchema = z.object({
+    observation: text, implication: text, limitation: text, ...supported,
+}).strict();
+export const handbookEntrySchema = z.object({
+    id: z.uuid(), situation: text,
+    steps: z.array(investigationStepSchema).max(4), lessons: z.array(historicalLessonSchema).max(4),
+    targetPaths: z.array(safePath), triggers: z.array(z.string().min(1)),
+}).strict().refine(entry => entry.steps.length + entry.lessons.length > 0, 'An experience needs steps or lessons.');
 export type HandbookEntry = z.infer<typeof handbookEntrySchema>;
 
+const observationIds = z.array(z.string().regex(/^O\d+$/)).min(2).max(32);
 export const consolidationGroupProposalSchema = z.object({
-    groupId: z.string().regex(/^G\d+$/).describe('Exactly one supplied G* group identifier.'),
-    outcome: z.enum(['findings', 'no-findings']).describe('Use findings only when at least one concern has valid cross-snapshot support.'),
-    rationale: z.string().trim().min(1).max(600),
-    concerns: z.array(z.object({
-        text: z.string().trim().min(1).max(600).describe('A repository-level concern directly supported by every cited source.'),
-        sourceIds: z.array(z.string().regex(/^S\d+$/)).min(2).max(32)
-            .describe('S* IDs from this G* group only; the selected sources must cover at least two distinct V* snapshots.'),
+    groupId: z.string().regex(/^G\d+$/), outcome: z.enum(['findings', 'no-findings']), rationale: text,
+    entries: z.array(z.object({
+        existingEntryId: z.string().regex(/^H\d+$/).nullable(), situation: text,
+        steps: z.array(z.object({
+            sourceId: z.string().regex(/^S\d+$/), symbol: z.string().min(1).nullable(),
+            purpose: text, findings: z.array(z.object({
+                observationId: z.string().regex(/^O\d+$/),
+                questionIndex: z.number().int().nonnegative(), claimIndex: z.number().int().nonnegative(),
+            }).strict()).min(2).max(32),
+        }).strict()).max(4),
+        lessons: z.array(z.object({ observation: text, implication: text, limitation: text, observationIds }).strict()).max(4),
     }).strict()).max(6),
 }).strict();
-
-export const consolidationProposalSchema = z.object({
-    groups: z.array(consolidationGroupProposalSchema).min(1).max(12)
-}).strict();
+export const consolidationProposalSchema = z.object({ groups: z.array(consolidationGroupProposalSchema).length(1) }).strict();
 
 export interface MemoryNavigation {
     id: string;
+    origin: 'handbook' | 'episode';
+    situation: string;
     targetPaths: string[];
-    /** Historical concerns, not investigation instructions for the current change. */
-    concerns: string[];
+    steps: Array<Omit<HandbookEntry['steps'][number], 'supports'>>;
+    lessons: Array<Omit<HandbookEntry['lessons'][number], 'supports'>>;
     sourceCount: number;
+    observationCount: number;
+    snapshotCount: number;
+}
+
+/** Keep item provenance as the only authority; there is no entry-wide support shortcut. */
+export function entrySupports(entry: HandbookEntry): MemorySupport[] {
+    return [...new Map([...entry.steps, ...entry.lessons].flatMap(item => item.supports)
+        .map(support => [JSON.stringify(support), support])).values()];
+}
+export function entryTerms(entry: HandbookEntry): string[] {
+    return [entry.situation, ...entry.targetPaths, ...entry.triggers,
+        ...entry.steps.flatMap(step => [step.path, step.symbol ?? '', step.purpose]),
+        ...entry.lessons.flatMap(lesson => [lesson.observation, lesson.implication, lesson.limitation])];
 }
 
 export interface MemoryUsage {

@@ -120,7 +120,7 @@ function makeEpisode(repositoryId: string, options: { summary: string }): Invest
     };
     const excerpt = 'const value = 1;';
     return {
-        version: 1,
+        version: 2,
         id: randomUUID(),
         createdAt: Date.now(),
         snapshot,
@@ -154,7 +154,7 @@ function makeEpisode(repositoryId: string, options: { summary: string }): Invest
         claims: [{ claim: 'The setting is read.', evidenceRefs: ['E1'], disposition: 'must_express' }],
         status: 'complete',
         model: 'settings-test',
-        promptVersion: 'memory-1',
-        toolsetVersion: 'snapshot-1',
+        promptVersion: 'memory-experience-1',
+        toolsetVersion: 'snapshot-memory-experience-1',
     };
 }

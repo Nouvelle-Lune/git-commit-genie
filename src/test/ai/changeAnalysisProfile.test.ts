@@ -34,11 +34,17 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
     });
 
     it('returns summaries and evidence counts for both memory tool definitions', async () => {
+        // Verify the memory tools expose structured navigation and current source counts through their public result envelopes.
         const navigation = [{
             id: 'M1',
+            origin: 'handbook' as const,
+            situation: 'When parser behavior changes, inspect the parser entry point.',
             targetPaths: ['src/parser.ts'],
-            concerns: ['Parser callers are concentrated in src/client.ts.'],
+            steps: [{ path: 'src/parser.ts', symbol: 'parse', purpose: 'Inspect the parser entry point.', operation: 'readFileContent' }],
+            lessons: [],
             sourceCount: 1,
+            observationCount: 1,
+            snapshotCount: 2,
         }];
         const source = {
             snapshotId: 'snapshot-1',
@@ -55,7 +61,7 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         const memory = {
             settings: MEMORY_DEFAULTS,
             budget: { used: 0, remaining: 16, limit: 16, searchesUsed: 1, searchesRemaining: 2, navigationTokens: 1500, resultTokens: 4096 },
-            searchRepositoryMemory: () => navigation,
+            searchRepositoryMemory: async () => navigation,
             readMemorySources: async (memoryIds: string[]) => {
                 assert.deepEqual(memoryIds, ['M1']);
                 return [{ key: 'source-key', status: 'source_unchanged' as const, source }];
