@@ -12,6 +12,7 @@ interface MemoryConsolidationRetryEvent {
 }
 
 const VISIBLE_MEMORY_TERMINAL_STATUSES = new Set(['published', 'failed', 'cancelled']);
+const VISIBLE_AGENT_MEMORY_TOOLS = new Set(['searchRepositoryMemory', 'readMemorySources']);
 
 function parseMemoryConsolidation(log: PipelineLogLike): MemoryConsolidationEvent | undefined {
     const payload = parseCommitStageLog(log);
@@ -78,10 +79,10 @@ export function isMemoryConsolidationLifecycleLog(log: PipelineLogLike): boolean
 }
 
 /**
- * Hide low-level Memory diagnostics while keeping the operation lifecycle visible.
- * A visible terminal event closes its matching running row and replaces it in the
- * list; retry events remain as individual diagnostics and are not removed by the
- * terminal close signal.
+ * Hide low-level Memory maintenance diagnostics while keeping model tool calls and
+ * the operation lifecycle visible. A visible terminal event closes its matching
+ * running row and replaces it in the list; retry events remain as individual
+ * diagnostics and are not removed by the terminal close signal.
  */
 export function filterMemoryLogsForWebview<T extends PipelineLogLike>(logs: readonly T[]): T[] {
     const finishedOperations = new Set<string>();
@@ -97,7 +98,10 @@ export function filterMemoryLogsForWebview<T extends PipelineLogLike>(logs: read
 
         const consolidation = parseMemoryConsolidation(log);
         if (!consolidation) {
-            if (isRetryingMemoryConsolidation(log)) {
+            const isModelMemoryTool = payload?.stage === 'memoryStep'
+                && typeof payload.data.tool === 'string'
+                && VISIBLE_AGENT_MEMORY_TOOLS.has(payload.data.tool);
+            if (isRetryingMemoryConsolidation(log) || isModelMemoryTool) {
                 visible.push(log);
             }
             continue;

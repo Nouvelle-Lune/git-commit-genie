@@ -8,7 +8,8 @@ import {
 } from '../../ui/memoryWebviewPolicy';
 
 describe('Memory Webview log policy', () => {
-    it('keeps active consolidation alongside non-Memory logs and preserves their order', () => {
+    it('keeps successful model memory tools and active consolidation alongside non-Memory logs', () => {
+        // Successful model memory tool calls remain visible while maintenance rows stay hidden and ordinary logs retain their order.
         const running = stage('memory-running', 'memoryStep', {
             current: 0,
             tool: 'consolidate',
@@ -60,12 +61,13 @@ describe('Memory Webview log policy', () => {
         const visible = filterMemoryLogsForWebview(logs);
 
         assert.deepEqual(visible.map(log => log.id), [
-            'generation-start', 'api-request', 'memory-running', 'reason',
+            'generation-start', 'memory-search', 'api-request', 'memory-sources', 'memory-running', 'reason',
         ]);
         assert.equal(isRunningMemoryConsolidation(running), true);
     });
 
     it('renders the production running label and exposes the running spinner predicate', () => {
+        // A live consolidation memoryStep keeps its production label and is recognized as an active spinner row.
         const running = stage('running', 'memoryStep', {
             current: 0,
             tool: 'consolidate',
@@ -83,6 +85,52 @@ describe('Memory Webview log policy', () => {
         assert.equal(presentation.title, 'Organizing memory');
         assert.equal(presentation.description, 'Organizing memory');
         assert.equal(isRunningMemoryConsolidation(running), true);
+    });
+
+    it('keeps failed model memory tool calls visible while hiding navigation and maintenance preflight rows', () => {
+        // Failed model memory tool calls remain visible, while retrieveNavigation and consolidation preflight diagnostics remain hidden.
+        const logs = [
+            ordinary('before'),
+            stage('search-failed', 'memoryStep', {
+                current: 1,
+                total: 2,
+                tool: 'searchRepositoryMemory',
+                summary: 'Memory search failed.',
+                reason: 'Memory search unavailable.',
+                ok: false,
+            }),
+            stage('navigation-preflight', 'memoryStep', {
+                current: 0,
+                tool: 'retrieveNavigation',
+                trigger: 'manual',
+                status: 'preflight',
+                operationId: 'operation-failed-tools',
+                summary: 'Navigation preflight completed.',
+                ok: false,
+            }),
+            stage('read-failed', 'memoryStep', {
+                current: 2,
+                total: 2,
+                tool: 'readMemorySources',
+                summary: 'Memory source read failed.',
+                reason: 'Memory sources unavailable.',
+                ok: false,
+            }),
+            stage('consolidation-preflight', 'memoryStep', {
+                current: 0,
+                tool: 'consolidation-budget',
+                trigger: 'manual',
+                status: 'ready',
+                operationId: 'operation-failed-tools',
+                summary: 'Memory consolidation input budget prepared.',
+                ok: true,
+            }),
+            ordinary('after'),
+        ];
+
+        assert.deepEqual(filterMemoryLogsForWebview(logs).map(log => log.id), [
+            'before', 'search-failed', 'read-failed', 'after',
+        ]);
     });
 
     it('replaces an active row with its matching published terminal event without removing unrelated logs', () => {
