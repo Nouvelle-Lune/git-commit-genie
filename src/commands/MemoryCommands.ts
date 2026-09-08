@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import { createPipelineReplayAdapter, replayManifestSchema, runSequentialReplay, validateReplayHistory } from '../services/memory/benchmark';
 import { generateCommitMessageChain } from '../services/chain/commitMessageChain';
 import { createConsolidationRunner, describeConsolidationResult, logMemoryOperation, readMemorySettings } from '../services/memory/service';
+import { buildConsolidationGroups } from '../services/memory/consolidator';
 import { resolveInvestigationSettings } from '../services/analysis/change/investigation/config';
 
 /** Read-only inspection plus explicit repository-scoped maintenance commands. */
@@ -98,6 +99,7 @@ export class MemoryCommands {
             { label: vscode.l10n.t('Clear repository memory'), id: 'clear', description: vscode.l10n.t('Permanently delete all memory in this repository and its shared worktrees.') },
             { label: vscode.l10n.t('Rebuild memory index'), id: 'rebuild', description: vscode.l10n.t('Rebuild the search index from saved investigation records.') },
             { label: vscode.l10n.t('Organize pending records'), id: 'consolidate', description: vscode.l10n.t('Organize pending records and update memory.') },
+            { label: vscode.l10n.t('Recheck organized evidence'), id: 'recheck', description: vscode.l10n.t('Run the model again for evidence groups already checked with no source changes; API charges apply.') },
             { label: vscode.l10n.t('Cancel background organization'), id: 'cancel', description: vscode.l10n.t('Cancel queued or active memory organization.') },
             { label: config.get<boolean>('consolidation.enabled', true) ? vscode.l10n.t('Pause automatic organization') : vscode.l10n.t('Resume automatic organization'), id: 'pause', description: config.get<boolean>('consolidation.enabled', true) ? vscode.l10n.t('Pause automatic memory organization.') : vscode.l10n.t('Resume automatic memory organization.') },
             { label: config.get<boolean>('enabled', false) ? vscode.l10n.t('Disable repository memory') : vscode.l10n.t('Enable repository memory'), id: 'toggle', description: config.get<boolean>('enabled', false) ? vscode.l10n.t('Disable: stop recording, search, and organization; existing memory stays.') : vscode.l10n.t('Enable: resume recording, search, and organization.') },
@@ -106,6 +108,7 @@ export class MemoryCommands {
         if (!action) { return; }
         const root = selected.rootUri.fsPath;
         let ids: string[] = [];
+        let recheckPaths: string[] | undefined;
         if (action.id === 'clear') {
             const confirm = vscode.l10n.t('Clear memory');
             if (await vscode.window.showWarningMessage(vscode.l10n.t('Delete all memory for this clone, including shared worktrees? This cannot be undone.'), { modal: true }, confirm) !== confirm) { return; }
@@ -132,9 +135,31 @@ export class MemoryCommands {
             if (await vscode.window.showWarningMessage(vscode.l10n.t('Permanently delete {0} selected episodes and their dependent handbook entries for this clone? This cannot be undone.', ids.length),
                 { modal: true }, confirm) !== confirm) { return; }
         }
-        const running = action.id === 'consolidate' ? vscode.l10n.t('Consolidating Memory; model API charges may apply.') : action.label;
+        if (action.id === 'recheck') {
+            const view = await store.inspect();
+            const organized = new Set(view.consolidated);
+            const groups = buildConsolidationGroups(view.episodes, []).filter(group => organized.has(group.fingerprint));
+            if (!groups.length) {
+                const message = vscode.l10n.t('No evidence groups have enough independent snapshots to recheck.');
+                vscode.window.setStatusBarMessage(message, 5000);
+                await vscode.window.showInformationMessage(message);
+                return;
+            }
+            const picked = await vscode.window.showQuickPick(groups.map(group => ({
+                label: group.anchorPath,
+                description: vscode.l10n.t('{0} independent snapshots, {1} sources',
+                    new Set(group.sources.map(source => source.episode.snapshot.id)).size, group.sources.length),
+            })), { canPickMany: true, placeHolder: vscode.l10n.t('Select evidence groups to recheck') });
+            if (!picked?.length) { return; }
+            recheckPaths = picked.map(item => item.label);
+            const confirm = vscode.l10n.t('Recheck organized evidence');
+            if (await vscode.window.showWarningMessage(vscode.l10n.t('Recheck {0} selected evidence groups even when their sources have not changed? This runs new model calls and may incur API charges.', recheckPaths.length),
+                { modal: true }, confirm) !== confirm) { return; }
+        }
+        const consolidationAction = action.id === 'consolidate' || action.id === 'recheck';
+        const running = consolidationAction ? vscode.l10n.t('Consolidating Memory; model API charges may apply.') : action.label;
         const statusBar = vscode.window.setStatusBarMessage(`$(sync~spin) ${running}`);
-        if (action.id !== 'consolidate') { logMemoryOperation(root, action.id, 'manual', 'running', running); }
+        if (!consolidationAction) { logMemoryOperation(root, action.id, 'manual', 'running', running); }
         let message: string;
         let status = 'completed';
         try {
@@ -146,13 +171,17 @@ export class MemoryCommands {
                 message = vscode.l10n.t('Opened {0} episodes and {1} handbook entries (read-only).', view.episodes.length, view.handbook.length);
             } else if (action.id === 'clear') {
                 memory.cancel(store.repositoryId); await store.clear();
-                message = vscode.l10n.t('Repository memory permanently cleared. Source files are unchanged; the 24-hour call allowance was not reset.');
+                message = vscode.l10n.t('Repository memory permanently cleared. Source files are unchanged; the 24-hour consolidation start allowance was not reset.');
             } else if (action.id === 'delete') {
                 memory.cancel(store.repositoryId);
                 const count = await store.deleteEpisodes(ids);
                 message = vscode.l10n.t('Permanently deleted {0} episodes and removed their dependent handbook entries.', count);
             } else if (action.id === 'consolidate') {
                 const result = await memory.consolidate(store.repositoryId, this.services.getCurrentLLMService(), 'manual');
+                status = result.status;
+                message = describeConsolidationResult(result);
+            } else if (action.id === 'recheck') {
+                const result = await memory.consolidate(store.repositoryId, this.services.getCurrentLLMService(), 'manual-recheck', recheckPaths);
                 status = result.status;
                 message = describeConsolidationResult(result);
             } else if (action.id === 'rebuild') {
@@ -174,9 +203,9 @@ export class MemoryCommands {
                 message = enabled ? vscode.l10n.t('Repository Memory enabled globally. Existing data is preserved.')
                     : vscode.l10n.t('Repository Memory disabled globally. Recording, retrieval and consolidation stopped; existing data is preserved.');
             } else { throw new Error(`Unknown Memory operation: ${action.id}`); }
-            if (action.id !== 'consolidate') { logMemoryOperation(root, action.id, 'manual', status, message); }
+            if (!consolidationAction) { logMemoryOperation(root, action.id, 'manual', status, message); }
         } catch (error) {
-            if (action.id !== 'consolidate') { logMemoryOperation(root, action.id, 'manual', 'failed', String(error)); }
+            if (!consolidationAction) { logMemoryOperation(root, action.id, 'manual', 'failed', String(error)); }
             throw error;
         } finally { statusBar.dispose(); }
         vscode.window.setStatusBarMessage(message, 5000);

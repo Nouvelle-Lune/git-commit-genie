@@ -19,6 +19,8 @@ const manifestSchema = z.object({
         paths: z.array(z.string()), symbols: z.array(z.string()), targets: z.array(z.string()), eligible: z.boolean() }).strict()),
     handbook: z.array(handbookEntrySchema),
     attempts: z.array(consolidationAttemptSchema),
+    // Deterministic evidence-group fingerprints prevent identical source sets
+    // from incurring another model call until new evidence changes the group.
     consolidated: z.array(z.uuid()),
     job: z.object({ id: z.uuid(), expiresAt: z.number() }).strict().nullable(),
 }).strict();
@@ -29,7 +31,7 @@ const clearStateSchema = z.object({
 const episodePayloadName = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/i;
 type Manifest = z.infer<typeof manifestSchema>;
 export interface MemoryView { epoch: string; generation: number; episodes: InvestigationEpisode[]; handbook: HandbookEntry[]; consolidated: string[] }
-export type ConsolidationReservation = { status: 'reserved'; id: string } | { status: 'already-running' } |
+export type ConsolidationReservation = { status: 'reserved'; id: string; generation: number } | { status: 'already-running' } |
     { status: 'budget-exhausted'; limit: number; resumesAt: number };
 
 /**
@@ -241,18 +243,18 @@ export class MemoryStore {
             state.attempts.push({ id, at: now, epoch: state.epoch });
             state.job = { id, expiresAt: now + 10 * 60000 };
             await this.publish(state, assertOwned, settings);
-            return { status: 'reserved', id };
+            return { status: 'reserved', id, generation: state.generation };
         });
     }
 
-    async publishHandbook(expected: MemoryView, jobId: string, entries: HandbookEntry[], consumed: string[], signal?: AbortSignal, settings = this.settings()): Promise<void> {
+    async publishHandbook(expected: MemoryView, expectedGeneration: number, jobId: string, entries: HandbookEntry[], consumed: string[], signal?: AbortSignal, settings = this.settings()): Promise<void> {
         await this.locked(async (state, assertOwned) => {
             signal?.throwIfAborted();
-            if (state.epoch !== expected.epoch || state.generation !== expected.generation + 1 || state.job?.id !== jobId || state.job.expiresAt <= Date.now()) {
+            if (state.epoch !== expected.epoch || state.generation !== expectedGeneration || state.job?.id !== jobId || state.job.expiresAt <= Date.now()) {
                 throw new Error('Consolidation lost its publication lease or source generation.');
             }
             const ids = new Set(state.episodes.map(entry => entry.id));
-            if (consumed.some(id => !ids.has(id)) || entries.some(entry => entry.supports.some(ref => !ids.has(ref.episodeId)))) {
+            if (entries.some(entry => entry.supports.some(ref => !ids.has(ref.episodeId)))) {
                 throw new Error('Handbook references an unpublished episode.');
             }
             if (new Set(entries.map(entry => entry.id)).size !== entries.length) { throw new Error('Handbook contains duplicate entry identifiers.'); }

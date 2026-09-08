@@ -37,7 +37,7 @@ export type InvestigationEpisode = z.infer<typeof investigationEpisodeSchema>;
 export type RecordedObservation = z.infer<typeof recordedObservationSchema>;
 
 export const handbookEntrySchema = z.object({
-    id: z.uuid(), triggers: z.array(z.string().min(1)).min(1).max(20),
+    id: z.uuid(), triggers: z.array(z.string().min(1)).min(1),
     targetPaths: z.array(safePath).min(1).max(8),
     // Concerns are cross-episode, repository-level behaviors/risks/invariants,
     // distilled by consolidation; they are never task-specific run questions.
@@ -50,14 +50,18 @@ export const handbookEntrySchema = z.object({
 
 export type HandbookEntry = z.infer<typeof handbookEntrySchema>;
 
+export const consolidationGroupProposalSchema = z.object({
+    groupId: z.string().regex(/^G\d+$/),
+    outcome: z.enum(['findings', 'no-findings']),
+    rationale: z.string().trim().min(1).max(600),
+    concerns: z.array(z.object({
+        text: z.string().trim().min(1).max(600),
+        sourceIds: z.array(z.string().regex(/^S\d+$/)).min(2).max(32),
+    }).strict()).max(6),
+}).strict();
+
 export const consolidationProposalSchema = z.object({
-    entries: z.array(z.object({
-        triggerIds: z.array(z.string().regex(/^T\d+$/)).min(1).max(20),
-        targetPathIds: z.array(z.string().regex(/^F\d+$/)).min(1).max(8),
-        concerns: z.array(z.string().min(1).max(600)).max(6),
-        sourceIds: z.array(z.string().regex(/^S\d+$/)).min(1).max(32),
-        kind: z.enum(['navigation', 'procedure']),
-    }).strict()).max(30)
+    groups: z.array(consolidationGroupProposalSchema).min(1).max(12)
 }).strict();
 
 export interface MemoryNavigation {

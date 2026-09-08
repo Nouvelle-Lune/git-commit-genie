@@ -95,7 +95,7 @@ describe('repository memory lifecycle', function () {
                     service.storeFor(repositoryId, '/tmp/memory-status-repository');
                     assert.deepEqual(await service.consolidate(repositoryId, model, 'automatic'), { status: 'automatic-paused' });
                     assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), {
-                        status: 'not-ready', pendingCount: 0, threshold: 5,
+                        status: 'not-ready', pendingCount: 0, threshold: 2,
                     });
                 } finally {
                     disposeContext(context);
@@ -209,7 +209,7 @@ describe('repository memory lifecycle', function () {
                         snapshot: () => ({ provider: 'custom', model: 'memory-test', continuation: { serverManaged: false }, transcript: [] }),
                         run: async (_request: AIRunRequest) => {
                             sessionRuns += 1;
-                            return successfulConsolidationResponse();
+                            return successfulConsolidationResponse(_request);
                         },
                     }) as any,
                 });
@@ -221,13 +221,25 @@ describe('repository memory lifecycle', function () {
                     assert.equal(createExecution.called, false);
 
                     assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), {
-                        status: 'published', episodeCount: 1, handbookCount: 1, skippedEpisodes: 0,
+                        status: 'published', groupCount: 1, handbookCount: 1, noFindingCount: 0,
+                        failedGroupCount: 0, skippedGroups: 0, deferredPaths: [], retryCount: 0,
+                        groupOutcomes: [{ path: 'src/safe.ts', status: 'published' }],
                     });
                     assert.equal(createExecution.calledOnce, true);
                     assert.equal(sessionRuns, 1);
                     const view = await store.inspect();
                     assert.equal(view.handbook.length, 1);
-                    assert.deepEqual(view.consolidated, [episodes[0].id]);
+                    assert.equal(view.consolidated.length, 1);
+                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), {
+                        status: 'not-ready', pendingCount: 0, threshold: 2,
+                    });
+                    assert.equal(sessionRuns, 1, 'ordinary organization does not repeat a completed group');
+                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual-recheck', ['src/safe.ts']), {
+                        status: 'published', groupCount: 1, handbookCount: 1, noFindingCount: 0,
+                        failedGroupCount: 0, skippedGroups: 0, deferredPaths: [], retryCount: 0,
+                        groupOutcomes: [{ path: 'src/safe.ts', status: 'published' }],
+                    });
+                    assert.equal(sessionRuns, 2, 'manual recheck explicitly reruns the selected path group');
                     const events = memoryLogEvents(logToolCall);
                     assert.ok(events.some(event => event.status === 'automatic-paused'));
                     assertConsolidationLifecycle(events, 'published');
@@ -260,7 +272,7 @@ describe('repository memory lifecycle', function () {
                         snapshot: () => ({ provider: 'custom', model: 'memory-test', continuation: { serverManaged: false }, transcript: [] }),
                         run: async (_request: AIRunRequest) => {
                             sessionRuns += 1;
-                            return successfulConsolidationResponse();
+                            return successfulConsolidationResponse(_request);
                         },
                     }) as any,
                 });
@@ -394,7 +406,7 @@ describe('repository memory lifecycle', function () {
         });
     });
 
-    it('turns seal failures into warnings and times out memory retrieval at 100 ms', async () => {
+    it('turns seal failures into warnings and times out memory retrieval at 10 seconds', async () => {
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: true }, async () => {
                 const context = makeContext(storageRoot);
@@ -412,12 +424,12 @@ describe('repository memory lifecycle', function () {
                     const clock = sinon.useFakeTimers();
                     try {
                         const pending = run!.loadMemory({ paths: [], symbols: [], keywords: [] });
-                        await clock.tickAsync(101);
+                        await clock.tickAsync(10_001);
                         assert.equal(await pending, undefined);
                     } finally {
                         clock.restore();
                     }
-                    assert.match(String(warning.lastCall?.args[0]), /100 ms/);
+                    assert.match(String(warning.lastCall?.args[0]), /10000 ms/);
                 } finally {
                     warning.restore();
                     disposeContext(context);
@@ -464,7 +476,8 @@ describe('repository memory lifecycle', function () {
         assert.equal(oversizedRunner.maxInputTokens, 100);
         assert.ok(oversizedRunner.estimateInputTokens('{}') > 0);
         await assert.rejects(
-            () => oversizedRunner('x'.repeat(20_000), new AbortController().signal),
+            () => oversizedRunner('x'.repeat(20_000), new AbortController().signal,
+                () => ({ entries: [], processedGroupIds: [], findingGroupIds: [], noFindingGroupIds: [], issues: [] })),
             /exceed the reserved input budget/,
         );
 
@@ -484,12 +497,79 @@ describe('repository memory lifecycle', function () {
             accountCall: async usage => { accounted = usage; return { status: 'usage-not-reported' as const }; },
         });
         await assert.rejects(
-            () => createConsolidationRunner(execution)('{}', new AbortController().signal),
+            () => createConsolidationRunner(execution)('{}', new AbortController().signal,
+                () => ({ entries: [], processedGroupIds: [], findingGroupIds: [], noFindingGroupIds: [], issues: [] })),
             /stopped without a complete response: max_output_tokens/,
         );
         assert.equal(request?.transportRetries, 0);
         assert.equal('thinking' in (request ?? {}), false);
         assert.equal(accounted, undefined, 'unknown provider usage is passed through for explicit accounting');
+    });
+
+    it('logs the complete response diagnostics for an incomplete consolidation attempt before failing', async () => {
+        await withTempStorage(async storageRoot => {
+            await withMemorySettings({ enabled: true, consolidationEnabled: true }, async () => {
+                const repositoryId = 'c'.repeat(64);
+                const context = makeContext(storageRoot);
+                const service = new RepositoryMemoryService(context);
+                const store = service.storeFor(repositoryId, storageRoot);
+                await recordEpisodes(store, makeEligibleEpisodes(repositoryId, 5));
+                let accounted = 0;
+                const response = {
+                    text: 'provider stopped before completion',
+                    structured: undefined,
+                    toolCalls: [],
+                    usage: { inputTokens: 3, outputTokens: 2 },
+                    stopReason: 'max_output_tokens' as const,
+                    continuation: { serverManaged: false },
+                    raw: { provider: 'raw-incomplete' },
+                };
+                const execution = makeExecution(16_000, {
+                    createSession: () => ({
+                        provider: 'custom',
+                        model: 'memory-test',
+                        snapshot: () => ({ provider: 'custom', model: 'memory-test', continuation: { serverManaged: false }, transcript: [] }),
+                        run: async (_request: AIRunRequest) => response,
+                    }) as any,
+                    accountCall: async () => {
+                        accounted += 1;
+                        return { status: 'usage-not-reported' as const };
+                    },
+                });
+                const model = { createExecution: sinon.stub().returns(execution) } as unknown as LLMService;
+                const logToolCall = sinon.stub(logger, 'logToolCall');
+                try {
+                    await assert.rejects(
+                        () => service.consolidate(repositoryId, model, 'manual'),
+                        /stopped without a complete response: max_output_tokens/,
+                    );
+                    assert.equal(accounted, 1, 'each successful provider response is accounted exactly once');
+
+                    const attemptCall = logToolCall.getCalls().find(call => {
+                        const payload = JSON.parse(String(call.args[1])) as {
+                            stage?: string;
+                            data?: { tool?: string; status?: string; ok?: boolean };
+                        };
+                        return payload.stage === 'memoryStep' && payload.data?.tool === 'consolidation-attempt';
+                    });
+                    assert.ok(attemptCall, 'the attempt callback must be persisted before termination');
+                    const payload = JSON.parse(String(attemptCall!.args[1])) as {
+                        data?: { status?: string; ok?: boolean };
+                    };
+                    assert.equal(payload.data?.status, 'response-incomplete');
+                    assert.equal(payload.data?.ok, false);
+                    const rawData = attemptCall!.args[4] as {
+                        output?: { details?: { response?: unknown; issues?: unknown[] } };
+                    };
+                    assert.deepEqual(rawData.output?.details?.response, response);
+                    assert.ok((rawData.output?.details?.issues?.length ?? 0) > 0);
+                } finally {
+                    logToolCall.restore();
+                    disposeContext(context);
+                    service.dispose();
+                }
+            });
+        });
     });
 
     it('reuses execution-bound thinking for consolidation and never puts thinking on the run request', async () => {
@@ -522,7 +602,8 @@ describe('repository memory lifecycle', function () {
             accountCall: async () => ({ status: 'usage-not-reported' as const }),
         });
 
-        await createConsolidationRunner(execution)('{}', new AbortController().signal);
+        await createConsolidationRunner(execution)('{}', new AbortController().signal,
+            () => ({ entries: [], processedGroupIds: [], findingGroupIds: [], noFindingGroupIds: [], issues: [] }));
 
         assert.equal(execution.thinking, thinking);
         assert.equal(execution.thinking.level, 'high');
@@ -534,6 +615,7 @@ function makeExecution(hardInputTokens: number, overrides: Partial<LLMExecution>
     return {
         thinking: { reasoning: false, level: 'off' },
         maxOutputTokens: 4_000,
+        maxRetries: 0,
         tokenBudget: {
             hardInputTokens,
             effectiveContextTokens: 128_000,
@@ -544,6 +626,7 @@ function makeExecution(hardInputTokens: number, overrides: Partial<LLMExecution>
             throw new Error('session should not be called');
         } }) as any,
         accountCall: async () => ({ status: 'usage-not-reported' as const }),
+        notifyUsageCostIfEnabled: () => undefined,
         ...overrides,
     } as LLMExecution;
 }
@@ -563,23 +646,28 @@ async function recordEpisodes(store: MemoryStore, episodes: InvestigationEpisode
 
 function makeEligibleEpisodes(repositoryId: string, count: number): InvestigationEpisode[] {
     return Array.from({ length: count }, (_, index) => ({
-        ...makeEpisode(repositoryId),
+        ...makeEpisode(repositoryId, 'src/safe.ts', `${index + 1}`.repeat(64)),
         id: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
         createdAt: Date.now() + index,
     }));
 }
 
-function successfulConsolidationResponse(): any {
+function successfulConsolidationResponse(request: AIRunRequest): any {
+    const input = JSON.parse(String(request.messages?.find(message => message.role === 'user')?.content ?? '{}')) as {
+        groups: Array<{ id: string; sources: Array<{ id: string }> }>;
+    };
     return {
         text: '',
         structured: {
-            entries: [{
-                triggerIds: ['T1', 'T2'],
-                targetPathIds: ['F1'],
-                concerns: [],
-                sourceIds: ['S1'],
-                kind: 'navigation',
-            }],
+            groups: input.groups.map(group => ({
+                groupId: group.id,
+                outcome: 'findings',
+                rationale: 'The repeated sources support a stable concern.',
+                concerns: [{
+                    text: 'The parser state may be observed before publication.',
+                    sourceIds: group.sources.slice(0, 2).map(source => source.id),
+                }],
+            })),
         },
         toolCalls: [],
         usage: { inputTokens: 1, outputTokens: 1 },
@@ -681,9 +769,9 @@ function makeIdentity(repositoryId: string): SnapshotIdentity {
     };
 }
 
-function makeEpisode(repositoryId: string, sourcePath = 'src/safe.ts'): InvestigationEpisode {
+function makeEpisode(repositoryId: string, sourcePath = 'src/safe.ts', snapshotId = 'a'.repeat(64)): InvestigationEpisode {
     const excerpt = 'const value = 1;';
-    const snapshot = makeIdentity(repositoryId);
+    const snapshot = { ...makeIdentity(repositoryId), id: snapshotId };
     return {
         version: 1, id: `00000000-0000-4000-8000-${repositoryId.slice(0, 12)}`, createdAt: Date.now(), snapshot,
         changedPaths: [sourcePath], changedSymbols: ['value'], questions: ['How is this used?'],

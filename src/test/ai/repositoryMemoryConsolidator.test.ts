@@ -4,391 +4,704 @@ import * as fs from 'fs/promises';
 import * as os from 'os';
 import * as path from 'path';
 import { describe, it } from 'mocha';
-import { hashContent, SnapshotIdentity } from '../../services/git/repositorySnapshot';
-import { consolidatePending, ConsolidationRunner, projectConsolidation, validateConsolidation } from '../../services/memory/consolidator';
+import { hashContent, SnapshotIdentity, SourceObservation } from '../../services/git/repositorySnapshot';
+import {
+    buildConsolidationGroups,
+    consolidatePending,
+    ConsolidationGroup,
+    ConsolidationRunner,
+    ConsolidationValidation,
+    projectConsolidation,
+    validateConsolidation,
+} from '../../services/memory/consolidator';
 import { LLMExecution } from '../../services/llm/llmTypes';
-import { AIRunRequest } from '../../services/llm/providers';
+import { AIRunRequest, AIRunResponse } from '../../services/llm/providers';
 import { MemoryStore } from '../../services/memory/store';
 import { HandbookEntry, InvestigationEpisode } from '../../services/memory/types';
 import { MEMORY_DEFAULTS, MemorySettings } from '../../services/memory/settings';
 
-describe('memory consolidation validation', () => {
-    it('resolves valid T/F/S ids and rejects unknown or unsupported handles', () => {
-        const episode = makeEpisode();
-        const valid = makeEntry([episode]);
-        const validated = validateConsolidation(valid, [episode]);
-        assert.equal(validated.length, 1);
-        assert.deepEqual(validated[0].supports, [{ episodeId: episode.id, evidenceId: 'E1' }]);
-        assert.deepEqual(validated[0].triggers, ['src/parser.ts', 'parse']);
-        assert.deepEqual(validated[0].targetPaths, ['src/parser.ts']);
+describe('memory consolidation evidence grouping', () => {
+    it('groups only exact paths with two direct independent snapshots', () => {
+        const episodes = [
+            makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/shared.ts' }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/shared.ts' }),
+            makeEpisode({ episodeId: uuidFor(3), snapshotId: digestFor(3), sourcePath: 'src/other.ts' }),
+            makeEpisode({ episodeId: uuidFor(4), snapshotId: digestFor(4), sourcePath: 'src/another.ts' }),
+            makeEpisode({ episodeId: uuidFor(5), snapshotId: digestFor(5), sourcePath: 'src/memory-only.ts', tool: 'readMemorySources' }),
+            makeEpisode({ episodeId: uuidFor(6), snapshotId: digestFor(6), sourcePath: 'src/memory-only.ts', tool: 'readMemorySources' }),
+            makeEpisode({ episodeId: uuidFor(7), snapshotId: digestFor(7), sourcePath: 'src/cancelled.ts', status: 'cancelled' }),
+            makeEpisode({ episodeId: uuidFor(8), snapshotId: digestFor(8), sourcePath: 'src/cancelled.ts', status: 'cancelled' }),
+        ];
 
-        assert.throws(
-            () => validateConsolidation(makeEntry([episode], { targetPathIds: ['F999'] }), [episode]),
-            /invented target path ID: F999/,
-        );
-        assert.throws(
-            () => validateConsolidation(makeEntry([episode], { sourceIds: ['S999'] }), [episode]),
-            /invented source ID/,
-        );
-        assert.throws(
-            () => validateConsolidation(makeEntry([episode], { triggerIds: ['T999'] }), [episode]),
-            /invented trigger ID: T999/,
-        );
+        const groups = buildConsolidationGroups(episodes, []);
+
+        assert.deepEqual(groups.map(group => group.anchorPath), ['src/shared.ts']);
+        assert.equal(groups[0].sources.length, 2);
+        assert.deepEqual(new Set(groups[0].sources.map(source => source.episode.snapshot.id)),
+            new Set([digestFor(1), digestFor(2)]));
     });
 
-    it('rejects proposals that still carry the legacy per-entry questions key', () => {
-        const episode = makeEpisode();
-        const proposal = makeEntry([episode]);
-        // Positive control: the concerns-keyed proposal parses and validates.
-        assert.equal(validateConsolidation(proposal, [episode]).length, 1);
-
-        // A model returning the retired per-entry key must fail the strict proposal schema.
-        const legacyEntry = { ...proposal.entries[0], questions: proposal.entries[0].concerns };
-        assert.throws(
-            () => validateConsolidation({ entries: [legacyEntry] }, [episode]),
-            (error: unknown) => error instanceof Error
-                && /unrecognized_keys/.test(error.message)
-                && /Unrecognized key/.test(error.message)
-                && error.message.includes('questions'),
-        );
-    });
-
-    it('rejects catalog handles that are valid globally but unrelated to selected supports', () => {
-        const episodes = makeEpisodes(2, index => ({
-            sourcePath: `src/${index === 0 ? 'parser' : 'client'}.ts`,
-            changedPaths: [`src/${index === 0 ? 'parser' : 'client'}.ts`],
-            changedSymbols: [index === 0 ? 'parse' : 'callParse'],
-        }));
-        const projection = projectConsolidation(episodes);
-        const firstTriggerId = idForValue(projection.triggers, episodes[0].changedSymbols[0]);
-        const secondTriggerId = idForValue(projection.triggers, episodes[1].changedSymbols[0]);
-        const firstTargetPathId = idForValue(projection.targetPaths, episodes[0].observations[0].evidence[0].source.path);
-        const secondTargetPathId = idForValue(projection.targetPaths, episodes[1].observations[0].evidence[0].source.path);
-        const firstSourceId = [...projection.refs.keys()][0];
-
-        assert.throws(
-            () => validateConsolidation(makeEntry(episodes, {
-                triggerIds: [secondTriggerId], targetPathIds: [firstTargetPathId], sourceIds: [firstSourceId],
-            }), episodes),
-            /invented a trigger/,
-        );
-        assert.throws(
-            () => validateConsolidation(makeEntry(episodes, {
-                triggerIds: [firstTriggerId], targetPathIds: [secondTargetPathId], sourceIds: [firstSourceId],
-            }), episodes),
-            /invented a target path/,
-        );
-    });
-
-    it('requires two independent snapshots for concerns and rejects memory-only support', () => {
-        const oneSnapshot = makeEpisodes(1, () => ({ snapshotId: '1'.repeat(64) }));
-        assert.throws(
-            () => validateConsolidation(makeEntry(oneSnapshot, { concerns: ['A stable parser invariant.'] }), oneSnapshot),
-            /Historical concerns require two independently investigated snapshots/,
-        );
-
-        const twoSnapshots = makeEpisodes(2, index => ({ snapshotId: `${index + 1}`.repeat(64) }));
-        const accepted = validateConsolidation(
-            makeEntry(twoSnapshots, { concerns: ['A stable parser invariant.'] }),
-            twoSnapshots,
-        );
-        assert.deepEqual(accepted[0].concerns, ['A stable parser invariant.']);
-        assert.equal(new Set(accepted[0].supports.map(item => item.episodeId)).size, 2);
-
-        const memoryOnly = makeEpisodes(2, index => ({
-            snapshotId: `${index + 3}`.repeat(64),
-            includeMemoryObservation: true,
-        }));
-        assert.throws(
-            () => validateConsolidation(
-                makeEntry(memoryOnly, { concerns: ['A stable parser invariant.'], evidenceId: 'E2' }),
-                memoryOnly,
-            ),
-            /Historical concerns require two independently investigated snapshots/,
-        );
-    });
-
-    it('projects catalogs and short IDs instead of asking the model to copy source values', async () => {
-        const episodes = makeEpisodes(2, index => ({
-            sourcePath: `src/deidentified-${index}.ts`,
-            changedPaths: [`src/deidentified-${index}.ts`],
-        }));
-        const projection = projectConsolidation(episodes);
+    it('projects bounded G/S/V handles and evidence metadata without persistent IDs', () => {
+        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
+        const groups = buildConsolidationGroups(episodes, []);
+        const projection = projectConsolidation(groups);
         const input = JSON.parse(projection.input) as {
-            triggerCatalog: Array<{ id: string; value: string }>;
-            targetPathCatalog: Array<{ id: string; value: string }>;
-            episodes: Array<Record<string, unknown>>;
+            groups: Array<{
+                id: string;
+                anchorPath: string;
+                independentSnapshots: number;
+                sources: Array<Record<string, unknown>>;
+            }>;
         };
-        assert.equal(input.triggerCatalog.every(item => /^T\d+$/.test(item.id)), true);
-        assert.equal(input.targetPathCatalog.every(item => /^F\d+$/.test(item.id)), true);
-        assert.equal(input.episodes.every(episode => 'changedPathTriggerIds' in episode
-            && 'changedSymbolTriggerIds' in episode
-            && !('changedPaths' in episode)
-            && !('changedSymbols' in episode)), true);
-        assert.equal(input.episodes.every(episode => Array.isArray(episode.sources)
-            && (episode.sources as Array<Record<string, unknown>>).every(source => 'targetPathId' in source && !('path' in source))), true);
 
-        const requests: AIRunRequest[] = [];
-        const runner = loadConsolidationRunner()(makeConsolidationExecution(requests), MEMORY_DEFAULTS);
-        await runner(projection.input, new AbortController().signal);
-        const systemPrompt = String(requests[0].messages?.find(message => message.role === 'system')?.content ?? '');
-        assert.match(systemPrompt, /Select only supplied T\* IDs into triggerIds, F\* IDs into targetPathIds, and S\* IDs into sourceIds/);
-        assert.doesNotMatch(systemPrompt, /Copy only supplied trigger strings, paths/);
+        assert.deepEqual(Object.keys(input), ['groups']);
+        assert.equal(input.groups.length, 1);
+        assert.equal(input.groups[0].id, 'G1');
+        assert.equal(input.groups[0].anchorPath, 'src/parser.ts');
+        assert.equal(input.groups[0].independentSnapshots, 2);
+        assert.equal(input.groups[0].sources.length, 2);
+        assert.equal(input.groups[0].sources.every(source => /^S\d+$/.test(String(source.id))), true);
+        assert.equal(input.groups[0].sources.every(source => /^V\d+$/.test(String(source.snapshot))), true);
+        assert.equal(input.groups[0].sources.every(source =>
+            ['id', 'snapshot', 'tool', 'side', 'startLine', 'endLine', 'truncated', 'excerpt'].every(key => key in source)), true);
+        assert.equal(input.groups[0].sources.every(source => !('episodeId' in source) && !('evidenceId' in source)), true);
+        assert.equal(projection.input.includes(episodes[0].id), false);
+        assert.equal(projection.input.includes(episodes[0].snapshot.id), false);
+        assert.equal(projection.sources.size, 2);
+    });
+});
+
+describe('memory consolidation validation', () => {
+    it('derives one Handbook entry per concern and rejects single-snapshot concerns', () => {
+        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
+        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
+        const group = projection.groups[0];
+        const sourceIds = sourceIdsFor(projection, group);
+        const valid = validateConsolidation({ groups: [finding(group, sourceIds, 'Cancellation may race with delayed publication.')] }, projection);
+
+        assert.equal(valid.issues.length, 0);
+        assert.deepEqual(valid.processedGroupIds, [group.fingerprint]);
+        assert.deepEqual(valid.findingGroupIds, [group.fingerprint]);
+        assert.equal(valid.entries.length, 1);
+        assert.deepEqual(valid.entries[0].targetPaths, ['src/parser.ts']);
+        assert.deepEqual(valid.entries[0].triggers, ['src/parser.ts', 'parse']);
+        assert.deepEqual(valid.entries[0].concerns, ['Cancellation may race with delayed publication.']);
+        assert.deepEqual(new Set(valid.entries[0].supports.map(support => support.episodeId)),
+            new Set(episodes.map(episode => episode.id)));
+
+        const oneSnapshot = makeRepeatedEpisodes('src/one.ts', 1);
+        assert.deepEqual(buildConsolidationGroups(oneSnapshot, []), []);
     });
 
-    it('requires three independently investigated snapshots for procedure entries', () => {
-        const independent = makeEpisodes(3, index => ({ snapshotId: `${index + 1}`.repeat(64) }));
-        const valid = makeEntry(independent, { kind: 'procedure' });
-        const validated = validateConsolidation(valid, independent);
-        assert.equal(validated[0].kind, 'procedure');
-        assert.equal(new Set(validated[0].supports.map(item => item.episodeId)).size, 3);
+    it('accepts no-findings as a completed group with a rationale and no entry', () => {
+        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
+        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
+        const group = projection.groups[0];
+        const validated = validateConsolidation({ groups: [{
+            groupId: group.id,
+            outcome: 'no-findings',
+            rationale: 'The two excerpts do not support a stable cross-snapshot concern.',
+            concerns: [],
+        }] }, projection);
 
-        const duplicateSnapshot = makeEpisodes(3, () => ({ snapshotId: 'd'.repeat(64) }));
-        assert.throws(
-            () => validateConsolidation(makeEntry(duplicateSnapshot, { kind: 'procedure' }), duplicateSnapshot),
-            /three independently investigated snapshots/,
-        );
-
-        const navigationOnlySources = makeEpisodes(3, index => ({
-            snapshotId: `${index + 4}`.repeat(64),
-            includeMemoryObservation: true,
-        }));
-        assert.throws(
-            () => validateConsolidation(makeEntry(navigationOnlySources, { kind: 'procedure', evidenceId: 'E2' }), navigationOnlySources),
-            /three independently investigated snapshots/,
-        );
+        assert.deepEqual(validated.issues, []);
+        assert.deepEqual(validated.entries, []);
+        assert.deepEqual(validated.processedGroupIds, [group.fingerprint]);
+        assert.deepEqual(validated.noFindingGroupIds, [group.fingerprint]);
     });
 
-    it('instructs the runner to return one object instance with only top-level entries', async () => {
-        const requests: AIRunRequest[] = [];
-        const runner = loadConsolidationRunner()(makeConsolidationExecution(requests), MEMORY_DEFAULTS);
+    it('reports whitespace-only rationale and concern text as validation issues before handbook derivation', () => {
+        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
+        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
+        const group = projection.groups[0];
+        const sourceIds = sourceIdsFor(projection, group);
 
-        await runner('{"episodes":[]}', new AbortController().signal);
+        const blankRationale = validateConsolidation({ groups: [{
+            ...finding(group, sourceIds, 'A stable concern.'),
+            rationale: ' \n\t ',
+        }] }, projection);
+        assert.equal(blankRationale.entries.length, 0);
+        assert.deepEqual(blankRationale.processedGroupIds, []);
+        assert.match(blankRationale.issues.join('\n'),
+            /groups\.0\.rationale: Too small: expected string to have >=1 characters/);
 
-        const systemPrompt = String(requests[0].messages?.find(message => message.role === 'system')?.content ?? '');
-        assert.match(systemPrompt, /Return exactly one JSON object matching the response schema\./);
-        assert.match(systemPrompt, /The top-level object must contain only entries/);
-        assert.match(systemPrompt, /do not return the JSON Schema definition itself/);
-        assert.doesNotMatch(systemPrompt, /Return the strict JSON schema\./);
+        const blankConcern = validateConsolidation({ groups: [{
+            ...finding(group, sourceIds, ' \n\t '),
+        }] }, projection);
+        assert.equal(blankConcern.entries.length, 0);
+        assert.deepEqual(blankConcern.processedGroupIds, []);
+        assert.match(blankConcern.issues.join('\n'),
+            /groups\.0\.concerns\.0\.text: Too small: expected string to have >=1 characters/);
+
+        const trimmed = validateConsolidation({ groups: [{
+            ...finding(group, sourceIds, '  Trimmed concern.  '),
+            rationale: '  Trimmed rationale.  ',
+        }] }, projection);
+        assert.deepEqual(trimmed.issues, []);
+        assert.deepEqual(trimmed.entries.map(entry => entry.concerns), [['Trimmed concern.']]);
     });
 
-    it('instructs the runner that concerns are cross-change and never task questions', async () => {
-        const requests: AIRunRequest[] = [];
-        const runner = loadConsolidationRunner()(makeConsolidationExecution(requests), MEMORY_DEFAULTS);
+    it('reports the actual malformed output instead of silently repairing legacy keys or arrays', () => {
+        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
+        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
+        const group = projection.groups[0];
+        const sourceIds = sourceIdsFor(projection, group);
+        const base = finding(group, sourceIds, 'A stable concern.');
 
-        await runner('{"episodes":[]}', new AbortController().signal);
+        const wrongKey = validateConsolidation({ groups: [{ ...base, targetPathFIds: ['F1'] }] }, projection);
+        assert.equal(wrongKey.entries.length, 0);
+        assert.match(wrongKey.issues.join('\n'), /Unrecognized key: "targetPathFIds"/);
 
-        const systemPrompt = String(requests[0].messages?.find(message => message.role === 'system')?.content ?? '');
-        assert.match(systemPrompt, /Concerns are stable, repository-level behaviors, risks, invariants, or relationships/);
-        assert.match(systemPrompt, /Do not copy or paraphrase task-specific investigation questions into concerns/);
-        assert.match(systemPrompt, /Concerns must remain useful across different future changes to the same region/);
-        assert.match(systemPrompt, /Write "Cancellation may race with delayed result publication\.", not "Does cancellation propagate correctly in this change\?"/);
-        assert.match(systemPrompt, /Do not claim complete callers, passing tests, or unchanged dependencies\./);
-        assert.doesNotMatch(systemPrompt, /Use questions, not assertions/);
+        const emptySources = validateConsolidation({ groups: [{
+            ...base,
+            concerns: [{ text: 'A stable concern.', sourceIds: [] }],
+        }] }, projection);
+        assert.match(emptySources.issues.join('\n'), /sourceIds.*expected array to have >=2 items/);
+
+        const oversized = validateConsolidation({ groups: [{
+            ...base,
+            concerns: Array.from({ length: 7 }, (_, index) => ({ text: `Concern ${index}`, sourceIds })),
+        }] }, projection);
+        assert.match(oversized.issues.join('\n'), /concerns.*expected array to have <=6 items/);
+
+        const oversizedSources = validateConsolidation({ groups: [{
+            ...base,
+            concerns: [{ text: 'A stable concern.', sourceIds: Array.from({ length: 33 }, (_, index) => `S${index + 1}`) }],
+        }] }, projection);
+        assert.match(oversizedSources.issues.join('\n'), /sourceIds.*expected array to have <=32 items/);
+    });
+
+    it('rejects unknown and cross-group S handles while preserving an independently valid group', () => {
+        const episodes = [
+            ...makeRepeatedEpisodes('src/alpha.ts', 2, 1),
+            ...makeRepeatedEpisodes('src/beta.ts', 2, 3),
+        ];
+        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
+        const alpha = projection.groups.find(group => group.anchorPath === 'src/alpha.ts')!;
+        const beta = projection.groups.find(group => group.anchorPath === 'src/beta.ts')!;
+        const betaSources = sourceIdsFor(projection, beta);
+        const alphaSources = sourceIdsFor(projection, alpha);
+
+        const crossGroup = validateConsolidation({ groups: [
+            finding(alpha, betaSources, 'Cross-group source must fail.'),
+            finding(beta, betaSources, 'Beta remains independently valid.'),
+        ] }, projection);
+        assert.equal(crossGroup.entries.length, 1);
+        assert.deepEqual(crossGroup.processedGroupIds, [beta.fingerprint]);
+        assert.match(crossGroup.issues.join('\n'), new RegExp(`source ID ${betaSources[0]} belongs to ${beta.id}`));
+
+        const unknown = validateConsolidation({ groups: [
+            finding(alpha, [alphaSources[0], 'S999'], 'Unknown source must fail.'),
+            finding(beta, betaSources, 'Beta remains independently valid.'),
+        ] }, projection);
+        assert.equal(unknown.entries.length, 1);
+        assert.deepEqual(unknown.processedGroupIds, [beta.fingerprint]);
+        assert.match(unknown.issues.join('\n'), /source ID S999 was not supplied/);
+    });
+
+    it('keeps valid groups processed when sibling structure or envelope validation fails', () => {
+        const episodes = [
+            ...makeRepeatedEpisodes('src/alpha.ts', 2, 1),
+            ...makeRepeatedEpisodes('src/beta.ts', 2, 3),
+        ];
+        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
+        const alpha = projection.groups.find(group => group.anchorPath === 'src/alpha.ts')!;
+        const beta = projection.groups.find(group => group.anchorPath === 'src/beta.ts')!;
+        const alphaSources = sourceIdsFor(projection, alpha);
+        const betaSources = sourceIdsFor(projection, beta);
+        const validBeta = finding(beta, betaSources, 'Beta remains independently valid.');
+
+        const unknownKey = validateConsolidation({ groups: [
+            { ...finding(alpha, alphaSources, 'Alpha has an invalid legacy field.'), targetPathFIds: ['F1'] },
+            validBeta,
+        ] }, projection);
+        assert.equal(unknownKey.entries.length, 1);
+        assert.deepEqual(unknownKey.processedGroupIds, [beta.fingerprint]);
+        assert.match(unknownKey.issues.join('\n'), /groups\.0: Unrecognized key: "targetPathFIds"/);
+
+        const emptySourceIds = validateConsolidation({ groups: [
+            {
+                ...finding(alpha, alphaSources, 'Alpha has an empty source selection.'),
+                concerns: [{ text: 'Alpha has an empty source selection.', sourceIds: [] }],
+            },
+            validBeta,
+        ] }, projection);
+        assert.equal(emptySourceIds.entries.length, 1);
+        assert.deepEqual(emptySourceIds.processedGroupIds, [beta.fingerprint]);
+        assert.match(emptySourceIds.issues.join('\n'),
+            /groups\.0\.concerns\.0\.sourceIds: Too small: expected array to have >=2 items/);
+
+        const oversizedEnvelope = validateConsolidation({
+            metadata: 'unexpected',
+            groups: [
+                finding(alpha, alphaSources, 'Alpha remains valid.'),
+                validBeta,
+                ...Array.from({ length: 11 }, (_, index) => ({
+                    groupId: `G${100 + index}`,
+                    outcome: 'no-findings',
+                    rationale: 'Unknown extra group.',
+                    concerns: [],
+                })),
+            ],
+        }, projection);
+        assert.equal(oversizedEnvelope.entries.length, 2);
+        assert.deepEqual(oversizedEnvelope.processedGroupIds, [alpha.fingerprint, beta.fingerprint]);
+        assert.match(oversizedEnvelope.issues.join('\n'), /<root>: unrecognized key "metadata"/);
+        assert.match(oversizedEnvelope.issues.join('\n'), /groups: expected at most 12 items/);
+    });
+
+    it('fails globally when the envelope or its groups field has the wrong shape', () => {
+        const episodes = makeRepeatedEpisodes('src/parser.ts', 2);
+        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
+
+        const nonObject = validateConsolidation([], projection);
+        assert.deepEqual(nonObject.processedGroupIds, []);
+        assert.match(nonObject.issues.join('\n'), /<root>: expected an object containing groups/);
+
+        const nonArray = validateConsolidation({ groups: {}, metadata: 'unexpected' }, projection);
+        assert.deepEqual(nonArray.processedGroupIds, []);
+        assert.match(nonArray.issues.join('\n'), /<root>: unrecognized key "metadata"/);
+        assert.match(nonArray.issues.join('\n'), /groups: expected an array/);
+    });
+
+    it('requires every projected group exactly once and rejects duplicate or unknown groups', () => {
+        const episodes = [
+            ...makeRepeatedEpisodes('src/alpha.ts', 2, 1),
+            ...makeRepeatedEpisodes('src/beta.ts', 2, 3),
+        ];
+        const projection = projectConsolidation(buildConsolidationGroups(episodes, []));
+        const alpha = projection.groups.find(group => group.anchorPath === 'src/alpha.ts')!;
+        const beta = projection.groups.find(group => group.anchorPath === 'src/beta.ts')!;
+        const alphaResult = finding(alpha, sourceIdsFor(projection, alpha), 'Alpha concern.');
+
+        const missing = validateConsolidation({ groups: [alphaResult] }, projection);
+        assert.match(missing.issues.join('\n'), /G2: result is missing/);
+        assert.equal(missing.processedGroupIds.length, 1, 'a valid group remains publishable while another group is missing');
+
+        const duplicate = validateConsolidation({ groups: [alphaResult, alphaResult, finding(beta, sourceIdsFor(projection, beta), 'Beta concern.')] }, projection);
+        assert.match(duplicate.issues.join('\n'), /G1: result appears more than once/);
+        assert.equal(duplicate.processedGroupIds.length, 1);
+
+        const unknown = validateConsolidation({ groups: [alphaResult, finding(beta, sourceIdsFor(projection, beta), 'Beta concern.'), {
+            groupId: 'G999', outcome: 'no-findings', rationale: 'Unknown group.', concerns: [],
+        }] }, projection);
+        assert.match(unknown.issues.join('\n'), /G999: group ID was not supplied/);
+        assert.equal(unknown.processedGroupIds.length, 2);
     });
 });
 
 describe('consolidatePending', function () {
     this.timeout(20_000);
 
-    it('does not call the runner before five pending episodes share an area', async () => {
+    it('does not group public directory overlap or readMemorySources-only observations', async () => {
         await withTempStorage(async storageRoot => {
             const repositoryId = '1'.repeat(64);
             const store = new MemoryStore(storageRoot, repositoryId);
-            await recordAll(store, makeEpisodes(4, () => ({ snapshotId: undefined, repositoryId })));
+            await recordAll(store, [
+                makeEpisode({ repositoryId, episodeId: uuidFor(10), snapshotId: digestFor(10), sourcePath: 'src/first.ts' }),
+                makeEpisode({ repositoryId, episodeId: uuidFor(11), snapshotId: digestFor(11), sourcePath: 'src/second.ts' }),
+                makeEpisode({ repositoryId, episodeId: uuidFor(12), snapshotId: digestFor(12), sourcePath: 'src/memory.ts', tool: 'readMemorySources' }),
+                makeEpisode({ repositoryId, episodeId: uuidFor(13), snapshotId: digestFor(13), sourcePath: 'src/memory.ts', tool: 'readMemorySources' }),
+            ]);
             let calls = 0;
 
-            const result = await consolidatePending(store, makeRunner(async () => {
+            const result = await consolidatePending(store, makeValidationRunner(async () => {
                 calls += 1;
-                return { entries: [] };
+                throw new Error('runner should not be called');
             }), new AbortController().signal);
 
-            assert.deepEqual(result, { status: 'not-ready', pendingCount: 4, threshold: 5 });
+            assert.deepEqual(result, { status: 'not-ready', pendingCount: 1, threshold: 2 });
             assert.equal(calls, 0);
         });
     });
 
-    it('does not call the runner when the paid consolidation budget is exhausted', async () => {
+    it('publishes a finding, derives its paths and supports, and stores the group fingerprint', async () => {
         await withTempStorage(async storageRoot => {
             const repositoryId = '2'.repeat(64);
+            const episodes = makeRepeatedEpisodes('src/parser.ts', 2, 20, repositoryId);
             const store = new MemoryStore(storageRoot, repositoryId);
-            await recordAll(store, makeEpisodes(5, () => ({ snapshotId: undefined, repositoryId })));
+            await recordAll(store, episodes);
+            let input = '';
+            const runner = makeValidationRunner(async (request, _signal, validate) => {
+                input = request;
+                const projected = JSON.parse(request) as { groups: Array<{ id: string; sources: Array<{ id: string }> }> };
+                const group = projected.groups[0];
+                const raw = { groups: [{
+                    groupId: group.id,
+                    outcome: 'findings',
+                    rationale: 'Repeated direct evidence supports this concern.',
+                    concerns: [{ text: 'Parser state may be observed before publication.', sourceIds: group.sources.slice(0, 2).map(source => source.id) }],
+                }] };
+                return { value: validate(raw), attempts: 1 };
+            });
+
+            const result = await consolidatePending(store, runner, new AbortController().signal);
+
+            assert.deepEqual(result, {
+                status: 'published', groupCount: 1, handbookCount: 1, noFindingCount: 0,
+                failedGroupCount: 0, skippedGroups: 0, deferredPaths: [], retryCount: 0,
+                groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }],
+            });
+            assert.equal(JSON.parse(input).groups[0].sources.length, 2);
             const view = await store.inspect();
-            const firstReservation = await store.reserveConsolidation(view, 1);
-            assert.equal(firstReservation.status, 'reserved');
-            if (firstReservation.status !== 'reserved') { throw new Error('Expected a consolidation reservation.'); }
-            await store.releaseJob(firstReservation.id);
-            let calls = 0;
-
-            const result = await consolidatePending(store, makeRunner(async () => {
-                calls += 1;
-                return { entries: [] };
-            }), new AbortController().signal, makeSettings({ 'consolidation.maxCallsPer24h': 1 }));
-
-            assert.equal(result.status, 'budget-exhausted');
-            if (result.status === 'budget-exhausted') {
-                assert.equal(result.limit, 1);
-                assert.ok(result.resumesAt > Date.now());
-            }
-            assert.equal(calls, 0);
+            assert.equal(view.handbook.length, 1);
+            assert.deepEqual(view.handbook[0].targetPaths, ['src/parser.ts']);
+            assert.deepEqual(new Set(view.handbook[0].supports.map(support => support.episodeId)),
+                new Set(episodes.map(episode => episode.id)));
+            assert.equal(view.consolidated.length, 1);
+            assert.match(view.consolidated[0], /^[0-9a-f-]{36}$/);
+            assert.equal(view.consolidated[0], buildConsolidationGroups(episodes, [])[0].fingerprint);
         });
     });
 
-    it('rejects non-positive or fractional consolidation call budgets', async () => {
-        await withTempStorage(async storageRoot => {
-            const store = new MemoryStore(storageRoot, '2'.repeat(64));
-            const view = await store.inspect();
-
-            await assert.rejects(
-                () => store.reserveConsolidation(view, -1),
-                /Invalid consolidation call budget/,
-            );
-            await assert.rejects(
-                () => store.reserveConsolidation(view, 0),
-                /Invalid consolidation call budget/,
-            );
-            await assert.rejects(
-                () => store.reserveConsolidation(view, 1.5),
-                /Invalid consolidation call budget/,
-            );
-        });
-    });
-
-    it('preserves existing handbook entries and releases the job when the runner fails', async () => {
+    it('publishes no-findings once and re-evaluates the group only after its fingerprint changes', async () => {
         await withTempStorage(async storageRoot => {
             const repositoryId = '3'.repeat(64);
+            const episodes = makeRepeatedEpisodes('src/parser.ts', 2, 30, repositoryId);
             const store = new MemoryStore(storageRoot, repositoryId);
-            const existingEpisode = makeEpisode({ repositoryId, sourcePath: 'src/other.ts', changedPaths: ['src/other.ts'] });
-            const pending = makeEpisodes(5, index => ({
-                snapshotId: `${index + 1}`.repeat(64),
-                repositoryId,
-                sourcePath: 'src/parser.ts',
-                changedPaths: ['src/parser.ts'],
-            }));
-            await recordAll(store, [existingEpisode, ...pending]);
-            const beforePublish = await store.inspect();
-            const setupReservation = await store.reserveConsolidation(beforePublish, 2);
-            assert.equal(setupReservation.status, 'reserved');
-            if (setupReservation.status !== 'reserved') { throw new Error('Expected a consolidation reservation.'); }
-            const existingEntry = makeEntry([existingEpisode]);
-            const existingValidated = validateConsolidation(existingEntry, [existingEpisode]);
-            await store.publishHandbook(beforePublish, setupReservation.id, existingValidated, [existingEpisode.id]);
-
+            await recordAll(store, episodes);
+            const consolidationSettings = makeSettings({ 'consolidation.maxCallsPer24h': 4 });
+            const previous = await store.inspect();
+            const previousReservation = await store.reserveConsolidation(previous, consolidationSettings['consolidation.maxCallsPer24h']);
+            assert.equal(previousReservation.status, 'reserved');
+            if (previousReservation.status !== 'reserved') { throw new Error('Expected a previous Handbook reservation.'); }
+            await store.publishHandbook(previous, previousReservation.generation, previousReservation.id,
+                [makeHandbookEntry(episodes)], []);
             let calls = 0;
-            await assert.rejects(
-                () => consolidatePending(store, makeRunner(async () => {
-                    calls += 1;
-                    throw new Error('provider unavailable');
-                }), new AbortController().signal, makeSettings({ 'consolidation.maxCallsPer24h': 2 })),
-                /provider unavailable/,
-            );
+            const runner = makeValidationRunner(async (request, _signal, validate) => {
+                calls += 1;
+                const projected = JSON.parse(request) as { groups: Array<{ id: string }> };
+                return {
+                    value: validate({ groups: projected.groups.map(group => ({
+                        groupId: group.id, outcome: 'no-findings',
+                        rationale: 'The evidence does not establish a stable concern.', concerns: [],
+                    })) }),
+                    attempts: 1,
+                };
+            });
 
-            const afterFailure = await store.inspect();
+            assert.deepEqual(await consolidatePending(store, runner, new AbortController().signal, consolidationSettings), {
+                status: 'no-findings', groupCount: 1, skippedGroups: 0, deferredPaths: [], retryCount: 0,
+                groupOutcomes: [{ path: 'src/parser.ts', status: 'no-findings' }],
+            });
             assert.equal(calls, 1);
-            assert.deepEqual(afterFailure.handbook, existingValidated);
-            assert.equal(afterFailure.episodes.length, 6);
-            const manifest = JSON.parse(await fs.readFile(path.join(store.directory, 'current.json'), 'utf8')) as { job: unknown };
-            assert.equal(manifest.job, null);
+            assert.deepEqual(await consolidatePending(store, runner, new AbortController().signal, consolidationSettings), {
+                status: 'not-ready', pendingCount: 0, threshold: 2,
+            });
+            assert.equal(calls, 1, 'the same evidence group must not incur another model call');
 
-            const retryReservation = await store.reserveConsolidation(afterFailure, 2);
-            assert.equal(retryReservation.status, 'budget-exhausted');
+            const newEpisode = makeEpisode({
+                repositoryId, episodeId: uuidFor(32), snapshotId: digestFor(32), sourcePath: 'src/parser.ts',
+            });
+            await store.recordEpisode(newEpisode, await store.epoch());
+            const changed = buildConsolidationGroups([...episodes, newEpisode], []);
+            assert.notEqual(changed[0].fingerprint, buildConsolidationGroups(episodes, [])[0].fingerprint);
+            const rerun = await consolidatePending(store, runner, new AbortController().signal, consolidationSettings);
+            assert.equal(rerun.status, 'no-findings');
+            assert.equal(calls, 2);
+            assert.deepEqual((await store.inspect()).handbook, [],
+                'a completed no-findings group removes an older entry for the same exact path');
         });
     });
 
-    it('rejects publication when clear wins the race while the runner is active', async () => {
+    it('does not charge a second consolidation for a duplicate record of the same snapshot evidence', async () => {
+        await withTempStorage(async storageRoot => {
+            const repositoryId = 'a'.repeat(64);
+            const original = makeRepeatedEpisodes('src/parser.ts', 2, 33, repositoryId);
+            const duplicate = makeEpisode({
+                repositoryId,
+                episodeId: uuidFor(99),
+                snapshotId: original[0].snapshot.id,
+                sourcePath: 'src/parser.ts',
+            });
+            const store = new MemoryStore(storageRoot, repositoryId);
+            await recordAll(store, original);
+            let calls = 0;
+            const runner = makeValidationRunner(async (request, _signal, validate) => {
+                calls += 1;
+                const projected = JSON.parse(request) as { groups: Array<{ id: string }> };
+                return {
+                    value: validate({ groups: projected.groups.map(group => ({
+                        groupId: group.id, outcome: 'no-findings', rationale: 'The evidence is unchanged.', concerns: [],
+                    })) }),
+                    attempts: 1,
+                };
+            });
+
+            const first = await consolidatePending(store, runner, new AbortController().signal);
+            assert.equal(first.status, 'no-findings');
+            const firstFingerprint = (await store.inspect()).consolidated[0];
+            await store.recordEpisode(duplicate, await store.epoch());
+
+            assert.deepEqual(await consolidatePending(store, runner, new AbortController().signal), {
+                status: 'not-ready', pendingCount: 0, threshold: 2,
+            });
+            assert.equal(calls, 1, 'the duplicate storage record has the same evidence-group fingerprint');
+            assert.deepEqual((await store.inspect()).consolidated, [firstFingerprint]);
+        });
+    });
+
+    it('counts only selected recheck paths when no complete group is available', async () => {
+        await withTempStorage(async storageRoot => {
+            const repositoryId = 'b'.repeat(64);
+            const selected = makeRepeatedEpisodes('src/selected.ts', 1, 100, repositoryId);
+            const other = makeRepeatedEpisodes('src/other.ts', 2, 101, repositoryId);
+            const store = new MemoryStore(storageRoot, repositoryId);
+            await recordAll(store, [...selected, ...other]);
+            let called = false;
+            const runner = makeValidationRunner(async () => {
+                called = true;
+                throw new Error('A not-ready recheck must not invoke the runner.');
+            });
+
+            assert.deepEqual(await consolidatePending(store, runner, new AbortController().signal, MEMORY_DEFAULTS, ['src/selected.ts']), {
+                status: 'not-ready', pendingCount: 1, threshold: 2,
+            });
+            assert.equal(called, false);
+        });
+    });
+
+    it('publishes valid groups as partial when another group exhausts validation', async () => {
         await withTempStorage(async storageRoot => {
             const repositoryId = '4'.repeat(64);
+            const episodes = [
+                ...makeRepeatedEpisodes('src/alpha.ts', 2, 40, repositoryId),
+                ...makeRepeatedEpisodes('src/beta.ts', 2, 42, repositoryId),
+            ];
             const store = new MemoryStore(storageRoot, repositoryId);
-            const pending = makeEpisodes(5, index => ({ snapshotId: `${index + 1}`.repeat(64), repositoryId }));
-            await recordAll(store, pending);
+            await recordAll(store, episodes);
+            const runner = makeValidationRunner(async (request, _signal, validate) => {
+                const projected = JSON.parse(request) as { groups: Array<{ id: string; sources: Array<{ id: string }> }> };
+                const alpha = projected.groups.find(group => group.id === 'G1')!;
+                const beta = projected.groups.find(group => group.id === 'G2')!;
+                const raw = { groups: [
+                    {
+                        groupId: alpha.id, outcome: 'findings', rationale: 'Alpha is stable.',
+                        concerns: [{ text: 'Alpha has a stable cross-snapshot concern.', sourceIds: alpha.sources.slice(0, 2).map(source => source.id) }],
+                    },
+                    {
+                        groupId: beta.id, outcome: 'findings', rationale: 'Beta is malformed.',
+                        concerns: [{ text: 'Beta must fail validation.', sourceIds: ['S999', beta.sources[0].id] }],
+                    },
+                ] };
+                return { value: validate(raw), attempts: 1 };
+            });
 
-            await assert.rejects(
-                () => consolidatePending(store, makeRunner(async () => {
-                    await store.clear();
-                    return makeEntry(pending);
-                }), new AbortController().signal, makeSettings({ 'consolidation.maxCallsPer24h': 2 })),
-                /lost its publication lease or source generation/,
-            );
+            const result = await consolidatePending(store, runner, new AbortController().signal, makeSettings({
+                'consolidation.maxCallsPer24h': 1,
+            }));
 
+            assert.deepEqual(result, {
+                status: 'partial', groupCount: 1, handbookCount: 1, noFindingCount: 0,
+                failedGroupCount: 1, skippedGroups: 0, deferredPaths: [], retryCount: 0,
+                groupOutcomes: [
+                    { path: 'src/alpha.ts', status: 'published' },
+                    { path: 'src/beta.ts', status: 'failed' },
+                ],
+            });
             const view = await store.inspect();
-            assert.deepEqual(view.episodes, []);
-            assert.deepEqual(view.handbook, []);
+            assert.equal(view.handbook.length, 1);
+            assert.equal(view.handbook[0].targetPaths[0], 'src/alpha.ts');
+            assert.deepEqual(view.consolidated, [buildConsolidationGroups(episodes, [])[0].fingerprint]);
         });
     });
 
-    it('uses the real runner estimator for a complete default-budget episode batch', async () => {
+    it('uses execution repair retries without consuming another 24-hour consolidation start allowance', async () => {
         await withTempStorage(async storageRoot => {
             const repositoryId = '5'.repeat(64);
+            const episodes = makeRepeatedEpisodes('src/parser.ts', 2, 50, repositoryId);
             const store = new MemoryStore(storageRoot, repositoryId);
-            const episodes = makeEpisodes(5, index => ({
-                repositoryId,
-                episodeId: `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
-                sourcePath: `src/deidentified-${index}.ts`,
-                changedPaths: [`src/deidentified-${index}.ts`],
-            }));
             await recordAll(store, episodes);
-            const requests: AIRunRequest[] = [];
-            const runner = loadConsolidationRunner()(makeConsolidationExecution(requests), MEMORY_DEFAULTS);
-            const projection = projectConsolidation(episodes);
-            assert.equal(runner.maxInputTokens, MEMORY_DEFAULTS['consolidation.maxInputTokens']);
-            assert.ok(runner.estimateInputTokens(projection.input) <= runner.maxInputTokens);
+            let sent = 0;
+            const runner = makeValidationRunner(async (request, _signal, validate) => {
+                sent += 1;
+                const projected = JSON.parse(request) as { groups: Array<{ id: string }> };
+                const invalid = validate({ groups: [{ groupId: projected.groups[0].id, outcome: 'findings', rationale: 'invalid', concerns: [] }] });
+                assert.ok(invalid.issues.length > 0);
+                sent += 1;
+                const valid = validate({ groups: [{
+                    groupId: projected.groups[0].id, outcome: 'no-findings', rationale: 'No stable concern.', concerns: [],
+                }] });
+                return { value: valid, attempts: 2 };
+            });
 
-            const result = await consolidatePending(store, runner, new AbortController().signal);
-
-            assert.deepEqual(result, { status: 'published', episodeCount: 5, handbookCount: 5, skippedEpisodes: 0 });
-            assert.equal(requests.length, 1);
-            const input = JSON.parse(String(requests[0].messages?.find(message => message.role === 'user')?.content)) as {
-                triggerCatalog: Array<{ id: string; value: string }>;
-                targetPathCatalog: Array<{ id: string; value: string }>;
-                episodes: Array<{ id: string; changedPathTriggerIds: string[]; changedSymbolTriggerIds: string[]; questions: string[]; sources: Array<{ id: string; targetPathId: string; excerpt: string }> }>;
-            };
-            assert.deepEqual(input.episodes.map(episode => episode.id), ['P1', 'P2', 'P3', 'P4', 'P5']);
-            assert.equal(input.triggerCatalog.every(item => /^T\d+$/.test(item.id)), true);
-            assert.equal(input.targetPathCatalog.every(item => /^F\d+$/.test(item.id)), true);
-            assert.equal(input.episodes.every(episode => episode.changedPathTriggerIds.length === 1
-                && episode.changedSymbolTriggerIds.length === 1 && episode.questions.length === 1), true);
-            assert.equal(input.episodes.every(episode => episode.sources.length === 1
-                && episode.sources[0].id.startsWith('S') && /^F\d+$/.test(episode.sources[0].targetPathId)), true);
-            const view = await store.inspect();
-            assert.equal(view.handbook.length, 5);
-            assert.equal(view.consolidated.length, 5);
+            const result = await consolidatePending(store, runner, new AbortController().signal, makeSettings({
+                'consolidation.maxCallsPer24h': 1,
+            }));
+            assert.deepEqual(result, {
+                status: 'no-findings', groupCount: 1, skippedGroups: 0, deferredPaths: [], retryCount: 1,
+                groupOutcomes: [{ path: 'src/parser.ts', status: 'no-findings' }],
+            });
+            assert.equal(sent, 2);
+            const manifest = JSON.parse(await fs.readFile(path.join(store.directory, 'current.json'), 'utf8')) as { attempts: unknown[] };
+            assert.equal(manifest.attempts.length, 1, 'repair retries do not consume another 24-hour consolidation start allowance');
         });
     });
 
-    it('skips an oversized episode without spending budget or publishing it as consolidated', async () => {
+    it('defers complete groups when the batch limit or token budget cannot fit them', async () => {
         await withTempStorage(async storageRoot => {
-            const repositoryId = '6'.repeat(64);
+            const repositoryId = '7'.repeat(64);
+            const episodes = Array.from({ length: 13 }, (_, index) => makeRepeatedEpisodes(
+                `src/group-${String(index).padStart(2, '0')}.ts`, 2, 70 + index * 2, repositoryId,
+            )).flat();
             const store = new MemoryStore(storageRoot, repositoryId);
-            const oversized = makeLargeEpisode({
-                repositoryId,
-                episodeId: '00000000-0000-4000-8000-000000000006',
-                sourcePath: 'src/deidentified-large.ts',
-                changedPaths: ['src/deidentified-large.ts'],
+            await recordAll(store, episodes);
+            let requestedGroups = 0;
+            const runner = makeValidationRunner(async (request, _signal, validate) => {
+                const projected = JSON.parse(request) as { groups: Array<{ id: string }> };
+                requestedGroups = projected.groups.length;
+                return {
+                    value: validate({ groups: projected.groups.map(group => ({
+                        groupId: group.id, outcome: 'no-findings', rationale: 'Deferred groups are processed later.', concerns: [],
+                    })) }),
+                    attempts: 1,
+                };
             });
-            const small = makeEpisodes(4, index => ({
-                repositoryId,
-                episodeId: `00000000-0000-4000-8000-${String(index + 10).padStart(12, '0')}`,
-                sourcePath: `src/deidentified-small-${index}.ts`,
-                changedPaths: [`src/deidentified-small-${index}.ts`],
-            }));
-            await recordAll(store, [oversized, ...small]);
-            const requests: AIRunRequest[] = [];
-            const runner = loadConsolidationRunner()(makeConsolidationExecution(requests), MEMORY_DEFAULTS);
-            assert.ok(runner.estimateInputTokens(projectConsolidation([oversized]).input) > runner.maxInputTokens);
-
             const result = await consolidatePending(store, runner, new AbortController().signal);
 
-            assert.deepEqual(result, { status: 'published', episodeCount: 4, handbookCount: 4, skippedEpisodes: 1 });
-            assert.equal(requests.length, 1);
-            const input = JSON.parse(String(requests[0].messages?.find(message => message.role === 'user')?.content)) as {
-                episodes: Array<{ sources: Array<{ excerpt: string }> }>;
-            };
-            assert.equal(input.episodes.length, 4);
-            assert.equal(input.episodes.some(episode => episode.sources.some(source => source.excerpt.length === 12_000)), false);
-            const view = await store.inspect();
-            assert.equal(view.consolidated.includes(oversized.id), false);
-            assert.equal(view.consolidated.length, 4);
+            assert.equal(result.status, 'no-findings');
+            if (result.status === 'no-findings') {
+                assert.equal(result.groupCount, 12);
+                assert.equal(result.skippedGroups, 1);
+                assert.deepEqual(result.deferredPaths, ['src/group-12.ts']);
+                assert.deepEqual(result.groupOutcomes.length, 12);
+            }
+            assert.equal(requestedGroups, 12);
+            assert.equal((await store.inspect()).consolidated.length, 12);
         });
+
+        await withTempStorage(async storageRoot => {
+            const repositoryId = '8'.repeat(64);
+            const large = makeRepeatedEpisodes('src/large.ts', 2, 90, repositoryId, 12_000);
+            const small = makeRepeatedEpisodes('src/small.ts', 2, 92, repositoryId);
+            const store = new MemoryStore(storageRoot, repositoryId);
+            await recordAll(store, [...large, ...small]);
+            let request = '';
+            const runner = makeValidationRunner(async (input, _signal, validate) => {
+                request = input;
+                const projected = JSON.parse(input) as { groups: Array<{ id: string }> };
+                return {
+                    value: validate({ groups: projected.groups.map(group => ({
+                        groupId: group.id, outcome: 'no-findings', rationale: 'The complete small group fits.', concerns: [],
+                    })) }),
+                    attempts: 1,
+                };
+            }, 100, input => input.includes('large.ts') ? 101 : 0);
+
+            const result = await consolidatePending(store, runner, new AbortController().signal);
+            assert.equal(result.status, 'no-findings');
+            if (result.status === 'no-findings') {
+                assert.equal(result.skippedGroups, 1);
+                assert.deepEqual(result.deferredPaths, ['src/large.ts']);
+            }
+            assert.deepEqual(JSON.parse(request).groups.map((group: { anchorPath: string }) => group.anchorPath), ['src/small.ts']);
+            assert.equal((await store.inspect()).consolidated.length, 1);
+        });
+    });
+});
+
+describe('createConsolidationRunner', () => {
+    it('uses execution.maxRetries, zero temperature, no transport retries, and includes all local issues in repair input', async () => {
+        const groups = buildConsolidationGroups(makeRepeatedEpisodes('src/parser.ts', 2), []);
+        const projection = projectConsolidation(groups);
+        const group = projection.groups[0];
+        const sourceIds = sourceIdsFor(projection, group);
+        const requests: AIRunRequest[] = [];
+        const accounted: unknown[] = [];
+        const attempts: Array<{
+            attempt: number;
+            totalAttempts: number;
+            issues: string[];
+            response: AIRunResponse;
+            inputFingerprint: string;
+        }> = [];
+        const execution = makeExecution([
+            { targetPathFIds: ['F1'] },
+            { groups: [finding(group, sourceIds, 'The corrected concern.')] },
+        ], 1, requests, accounted);
+        const runner = loadConsolidationRunner()(execution, MEMORY_DEFAULTS,
+            (attempt, totalAttempts, issues, response, inputFingerprint) => {
+                attempts.push({ attempt, totalAttempts, issues, response, inputFingerprint });
+            });
+
+        const result = await runner(
+            projection.input,
+            new AbortController().signal,
+            raw => validateConsolidation(raw, projection),
+        );
+
+        assert.equal(result.attempts, 2);
+        assert.equal(requests.length, 2);
+        assert.equal(accounted.length, 2);
+        assert.equal(attempts.length, 2);
+        assert.equal(attempts[0].attempt, 1);
+        assert.equal(attempts[0].totalAttempts, 2);
+        assert.ok(attempts[0].issues.length > 0);
+        assert.equal(attempts[0].response.text, '');
+        assert.deepEqual(attempts[0].response.raw, {});
+        assert.equal(attempts[0].response.stopReason, 'completed');
+        assert.deepEqual(attempts[0].response.structured, { targetPathFIds: ['F1'] });
+        assert.equal(attempts[1].issues.length, 0);
+        assert.equal(attempts[1].response.stopReason, 'completed');
+        assert.equal(attempts[1].inputFingerprint, attempts[0].inputFingerprint);
+        assert.equal(requests[0].temperature, 0);
+        assert.equal(requests[0].transportRetries, 0);
+        assert.equal(requests[0].responseFormat?.name, 'repositoryMemoryConsolidation');
+        assert.equal(requests[1].messages?.length, 1);
+        assert.equal(requests[1].messages?.[0].role, 'user');
+        assert.match(String(requests[1].messages?.[0].content), /targetPathFIds/);
+        assert.match(String(requests[1].messages?.[0].content), /Return the complete corrected result/);
+    });
+
+    it('passes complete diagnostics to onAttempt when a completed response has no structured output', async () => {
+        const groups = buildConsolidationGroups(makeRepeatedEpisodes('src/parser.ts', 2), []);
+        const projection = projectConsolidation(groups);
+        const requests: AIRunRequest[] = [];
+        const accounted: unknown[] = [];
+        const attempts: Array<{ issues: string[]; response: AIRunResponse }> = [];
+        const execution = makeExecution([undefined], 0, requests, accounted, 'completed',
+            'provider text without structured output', { provider: 'raw-completed' });
+        const runner = loadConsolidationRunner()(execution, MEMORY_DEFAULTS,
+            (_attempt, _totalAttempts, issues, response) => attempts.push({ issues, response }));
+
+        const result = await runner(
+            projection.input,
+            new AbortController().signal,
+            raw => validateConsolidation(raw, projection),
+        );
+
+        assert.equal(result.attempts, 1);
+        assert.equal(attempts.length, 1);
+        assert.ok(attempts[0].issues.length > 0);
+        assert.equal(attempts[0].response.text, 'provider text without structured output');
+        assert.deepEqual(attempts[0].response.raw, { provider: 'raw-completed' });
+        assert.equal(attempts[0].response.stopReason, 'completed');
+        assert.equal(attempts[0].response.structured, undefined);
+        assert.equal(accounted.length, 1);
+    });
+
+    it('accounts a completed HTTP response before rejecting a non-completed stop reason', async () => {
+        const requests: AIRunRequest[] = [];
+        const accounted: unknown[] = [];
+        const attempts: Array<{ issues: string[]; response: AIRunResponse }> = [];
+        const execution = makeExecution([{ groups: [] }], 2, requests, accounted, 'max_output_tokens',
+            'provider stopped before completion', { provider: 'raw-incomplete' });
+        const runner = loadConsolidationRunner()(execution, MEMORY_DEFAULTS,
+            (_attempt, _totalAttempts, issues, response) => attempts.push({ issues, response }));
+
+        await assert.rejects(
+            () => runner('{}', new AbortController().signal, () => ({
+                entries: [], processedGroupIds: [], findingGroupIds: [], noFindingGroupIds: [], issues: [],
+            })),
+            /stopped without a complete response: max_output_tokens/,
+        );
+        assert.equal(requests.length, 1);
+        assert.equal(accounted.length, 1);
+        assert.equal(attempts.length, 1);
+        assert.match(attempts[0].issues.join('\n'), /Response stopped without completing: max_output_tokens/);
+        assert.equal(attempts[0].response.text, 'provider stopped before completion');
+        assert.deepEqual(attempts[0].response.raw, { provider: 'raw-incomplete' });
+        assert.equal(attempts[0].response.stopReason, 'max_output_tokens');
     });
 });
 
@@ -408,97 +721,33 @@ async function recordAll(store: MemoryStore, episodes: InvestigationEpisode[]): 
     }
 }
 
-function makeRunner(run: (input: string, signal: AbortSignal) => Promise<unknown>, maxInputTokens = 100_000): ConsolidationRunner {
-    return Object.assign(run, {
-        maxInputTokens,
-        estimateInputTokens: (_input: string) => 0,
-    });
+function makeValidationRunner(
+    action: (input: string, signal: AbortSignal,
+        validate: (raw: unknown) => ConsolidationValidation) => Promise<{ value: ConsolidationValidation; attempts: number }>,
+    maxInputTokens = 100_000,
+    estimateInputTokens: (input: string) => number = () => 0,
+): ConsolidationRunner {
+    return Object.assign(async (
+        input: string,
+        signal: AbortSignal,
+        validate: (raw: unknown) => ConsolidationValidation,
+    ) => action(input, signal, validate), { maxInputTokens, estimateInputTokens });
 }
 
-function makeConsolidationExecution(requests: AIRunRequest[]): LLMExecution {
-    const tokenBudget = {
-        configuredContextTokens: 128_000,
-        effectiveContextTokens: 128_000,
-        maxOutputTokens: 32_000,
-        estimatedThinkingTokens: 0,
-        safetyTokens: 512,
-        hardInputTokens: 16_000,
-        compressionTriggerTokens: 16_000,
-        compressionTargetTokens: 14_400,
-        outputAccounting: 'shared' as const,
-    };
-    return {
-        model: 'consolidation-test',
-        temperature: 0,
-        maxOutputTokens: 4_000,
-        maxRetries: 0,
-        thinking: { reasoning: false, level: 'off' },
-        tokenBudget,
-        createSession: () => ({
-            provider: 'custom',
-            model: 'consolidation-test',
-            run: async (request: AIRunRequest) => {
-                requests.push(request);
-                const content = String(request.messages?.find(message => message.role === 'user')?.content ?? '');
-                const projected = JSON.parse(content) as { episodes: Array<{
-                    changedPathTriggerIds: string[];
-                    changedSymbolTriggerIds: string[];
-                    questions: string[];
-                    sources: Array<{ id: string; targetPathId: string }>;
-                }> };
-                return {
-                    text: '',
-                    toolCalls: [],
-                    stopReason: 'completed' as const,
-                    continuation: { serverManaged: false },
-                    raw: {},
-                    structured: {
-                        entries: projected.episodes.map(episode => ({
-                            triggerIds: [episode.changedPathTriggerIds[0] ?? episode.changedSymbolTriggerIds[0]],
-                            targetPathIds: [episode.sources[0].targetPathId],
-                            // The fixture emits no cross-episode concerns unless a test
-                            // explicitly exercises the independent-snapshot rule.
-                            concerns: [],
-                            sourceIds: [episode.sources[0].id],
-                            kind: 'navigation' as const,
-                        })),
-                    },
-                };
-            },
-            snapshot: () => ({
-                provider: 'custom',
-                model: 'consolidation-test',
-                continuation: { serverManaged: false },
-                transcript: [],
-            }),
-        } as any),
-        run: async () => { throw new Error('not used'); },
-        accountCall: async () => ({ status: 'pricing-not-configured' as const }),
-        getRecordedQuotes: () => [],
-        notifyUsageCostIfEnabled: () => undefined,
-    };
-}
-
-function loadConsolidationRunner(): typeof import('../../services/memory/service')['createConsolidationRunner'] {
-    const moduleLoader = require('module') as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
-    const originalLoad = moduleLoader._load;
-    moduleLoader._load = (request, parent, isMain) => request === 'vscode' ? {} : originalLoad(request, parent, isMain);
-    try {
-        return (require('../../services/memory/service') as typeof import('../../services/memory/service')).createConsolidationRunner;
-    } finally {
-        moduleLoader._load = originalLoad;
-    }
-}
-
-function makeSettings(overrides: Partial<MemorySettings> = {}): MemorySettings {
-    return Object.freeze({ ...MEMORY_DEFAULTS, ...overrides });
-}
-
-function makeEpisodes(
+function makeRepeatedEpisodes(
+    sourcePath: string,
     count: number,
-    customize: (index: number) => Parameters<typeof makeEpisode>[0] = () => ({}),
+    startIndex = 1,
+    repositoryId = 'a'.repeat(64),
+    excerptLength = 0,
 ): InvestigationEpisode[] {
-    return Array.from({ length: count }, (_, index) => makeEpisode(customize(index)));
+    return Array.from({ length: count }, (_, index) => makeEpisode({
+        repositoryId,
+        episodeId: uuidFor(startIndex + index),
+        snapshotId: digestFor(startIndex + index),
+        sourcePath,
+        sourceExcerpt: excerptLength ? `parse evidence for ${sourcePath}`.padEnd(excerptLength, 'x') : undefined,
+    }));
 }
 
 function makeEpisode(options: {
@@ -506,35 +755,17 @@ function makeEpisode(options: {
     snapshotId?: string;
     repositoryId?: string;
     sourcePath?: string;
+    sourceExcerpt?: string;
     changedPaths?: string[];
     changedSymbols?: string[];
-    includeMemoryObservation?: boolean;
+    tool?: string;
+    status?: InvestigationEpisode['status'];
 } = {}): InvestigationEpisode {
-    const snapshot = makeSnapshot(options.snapshotId ?? 'a'.repeat(64), options.repositoryId ?? 'a'.repeat(64));
+    const repositoryId = options.repositoryId ?? 'a'.repeat(64);
+    const snapshot = makeSnapshot(options.snapshotId ?? 'a'.repeat(64), repositoryId);
     const sourcePath = options.sourcePath ?? 'src/parser.ts';
-    const excerpt = `evidence for ${sourcePath}`;
-    const observations: InvestigationEpisode['observations'] = [{
-        step: 0,
-        tool: 'readFileContent',
-        arguments: { filePath: sourcePath, startLine: 1, maxLines: 1 },
-        ok: true,
-        summary: 'read source',
-        evidence: [{ id: 'E1', source: makeSource(snapshot, sourcePath, excerpt) }],
-        durationMs: 1,
-        truncated: false,
-    }];
-    if (options.includeMemoryObservation) {
-        observations.push({
-            step: 1,
-            tool: 'readMemorySources',
-            arguments: { memoryIds: ['M1'] },
-            ok: true,
-            summary: 'read historical source',
-            evidence: [{ id: 'E2', source: makeSource(snapshot, sourcePath, excerpt) }],
-            durationMs: 1,
-            truncated: false,
-        });
-    }
+    const excerpt = options.sourceExcerpt ?? `parse evidence for ${sourcePath}`;
+    const source = makeSource(snapshot, sourcePath, excerpt);
     return {
         version: 1,
         id: options.episodeId ?? randomUUID(),
@@ -542,29 +773,22 @@ function makeEpisode(options: {
         snapshot,
         changedPaths: options.changedPaths ?? [sourcePath],
         changedSymbols: options.changedSymbols ?? ['parse'],
-        questions: ['How should this change be investigated?'],
-        observations,
-        claims: [{ claim: 'Source explains the change.', evidenceRefs: ['E1'], disposition: 'must_express' }],
-        status: 'complete',
+        questions: ['How should this evidence be interpreted?'],
+        observations: [{
+            step: 0,
+            tool: options.tool ?? 'readFileContent',
+            arguments: { filePath: sourcePath, startLine: 1, maxLines: 1 },
+            ok: true,
+            summary: 'read source',
+            evidence: [{ id: 'E1', source }],
+            durationMs: 1,
+            truncated: false,
+        }],
+        claims: [{ claim: 'Source explains the behavior.', evidenceRefs: ['E1'], disposition: 'must_express' }],
+        status: options.status ?? 'complete',
         model: 'consolidator-test',
         promptVersion: 'memory-1',
         toolsetVersion: 'snapshot-1',
-    };
-}
-
-function makeLargeEpisode(options: NonNullable<Parameters<typeof makeEpisode>[0]>): InvestigationEpisode {
-    const episode = makeEpisode(options);
-    const observation = episode.observations[0];
-    const excerpt = 'deidentified source content '.repeat(500).slice(0, 12_000);
-    return {
-        ...episode,
-        observations: [{
-            ...observation,
-            evidence: Array.from({ length: 8 }, (_, index) => ({
-                id: `E${index + 1}`,
-                source: makeSource(episode.snapshot, options.sourcePath ?? 'src/parser.ts', excerpt),
-            })),
-        }],
     };
 }
 
@@ -581,63 +805,124 @@ function makeSnapshot(snapshotId: string, repositoryId: string): SnapshotIdentit
     };
 }
 
-function makeSource(snapshot: SnapshotIdentity, sourcePath: string, excerpt: string) {
+function makeSource(snapshot: SnapshotIdentity, sourcePath: string, excerpt: string): SourceObservation {
     return {
         snapshotId: snapshot.id,
         path: sourcePath,
-        side: 'after' as const,
+        side: 'after',
         blobOid: '1'.repeat(40),
         startLine: 1,
         endLine: 1,
         excerpt,
         contentHash: hashContent(excerpt),
         truncated: false,
-        sourceType: 'text' as const,
+        sourceType: 'text',
     };
 }
 
-function makeEntry(
-    episodes: InvestigationEpisode[],
-    options: {
-        kind?: HandbookEntry['kind'];
-        targetPathIds?: string[];
-        triggerIds?: string[];
-        concerns?: string[];
-        sourceIds?: string[];
-        evidenceId?: string;
-    } = {},
-): { entries: Array<{
-    triggerIds: string[];
-    targetPathIds: string[];
-    concerns: string[];
-    sourceIds: string[];
-    kind: HandbookEntry['kind'];
-}> } {
-    const projection = projectConsolidation(episodes);
-    const refs = projection.refs;
-    const firstEpisode = episodes[0];
-    const firstSourcePath = firstEpisode.observations
-        .flatMap(observation => observation.evidence)
-        .map(evidence => evidence.source.path)[0];
-    const sourceIds = options.sourceIds ?? [...refs.entries()]
-        .filter(([, ref]) => ref.evidenceId === (options.evidenceId ?? 'E1'))
+function sourceIdsFor(projection: ReturnType<typeof projectConsolidation>, group: ConsolidationGroup): string[] {
+    return [...projection.sources.entries()]
+        .filter(([, source]) => source.groupId === group.id)
         .map(([id]) => id);
-    const triggerIds = options.triggerIds ?? [
-        idForValue(projection.triggers, firstEpisode.changedPaths[0]),
-        idForValue(projection.triggers, firstEpisode.changedSymbols[0]),
-    ];
-    const targetPathIds = options.targetPathIds ?? [idForValue(projection.targetPaths, firstSourcePath)];
-    return { entries: [{
-        triggerIds,
-        targetPathIds,
-        concerns: options.concerns ?? [],
-        sourceIds,
-        kind: options.kind ?? 'navigation',
-    }] };
 }
 
-function idForValue(catalog: Map<string, string>, value: string): string {
-    const entry = [...catalog.entries()].find(([, candidate]) => candidate === value);
-    if (!entry) { throw new Error(`Test catalog does not contain '${value}'.`); }
-    return entry[0];
+function finding(group: ConsolidationGroup, sourceIds: string[], text: string): Record<string, unknown> {
+    return {
+        groupId: group.id,
+        outcome: 'findings',
+        rationale: 'The selected direct evidence supports a stable concern.',
+        concerns: [{ text, sourceIds }],
+    };
+}
+
+function makeHandbookEntry(episodes: InvestigationEpisode[], sourcePath = 'src/parser.ts'): HandbookEntry {
+    return {
+        id: randomUUID(),
+        triggers: [sourcePath],
+        targetPaths: [sourcePath],
+        concerns: ['An older concern for this path.'],
+        supports: episodes.map(episode => ({ episodeId: episode.id, evidenceId: 'E1' })),
+        kind: 'navigation',
+    };
+}
+
+function uuidFor(index: number): string {
+    return `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+}
+
+function digestFor(index: number): string {
+    return index.toString(16).padStart(2, '0').repeat(32);
+}
+
+function makeSettings(overrides: Partial<MemorySettings> = {}): MemorySettings {
+    return Object.freeze({ ...MEMORY_DEFAULTS, ...overrides });
+}
+
+function makeExecution(
+    structuredResponses: unknown[],
+    maxRetries: number,
+    requests: AIRunRequest[],
+    accounted: unknown[],
+    stopReason: 'completed' | 'max_output_tokens' = 'completed',
+    responseText = '',
+    responseRaw: unknown = {},
+): LLMExecution {
+    let responseIndex = 0;
+    const tokenBudget = {
+        configuredContextTokens: 128_000,
+        effectiveContextTokens: 128_000,
+        maxOutputTokens: 32_000,
+        estimatedThinkingTokens: 0,
+        safetyTokens: 512,
+        hardInputTokens: 16_000,
+        compressionTriggerTokens: 16_000,
+        compressionTargetTokens: 14_400,
+        outputAccounting: 'shared' as const,
+    };
+    return {
+        model: 'consolidation-test',
+        temperature: 0,
+        maxOutputTokens: 4_000,
+        maxRetries,
+        thinking: { reasoning: false, level: 'off' },
+        tokenBudget,
+        createSession: () => ({
+            provider: 'custom',
+            model: 'consolidation-test',
+            run: async (request: AIRunRequest) => {
+                requests.push(request);
+                const structured = structuredResponses[Math.min(responseIndex++, structuredResponses.length - 1)];
+                return {
+                    text: responseText,
+                    structured,
+                    toolCalls: [],
+                    usage: { inputTokens: 1, outputTokens: 1 },
+                    stopReason,
+                    continuation: { serverManaged: false },
+                    raw: responseRaw,
+                };
+            },
+            snapshot: () => ({
+                provider: 'custom',
+                model: 'consolidation-test',
+                continuation: { serverManaged: false },
+                transcript: [],
+            }),
+        }) as any,
+        run: async () => { throw new Error('not used'); },
+        accountCall: async usage => { accounted.push(usage); return { status: 'usage-not-reported' as const }; },
+        getRecordedQuotes: () => [],
+        notifyUsageCostIfEnabled: () => undefined,
+    };
+}
+
+function loadConsolidationRunner(): typeof import('../../services/memory/service')['createConsolidationRunner'] {
+    const moduleLoader = require('module') as { _load: (request: string, parent: unknown, isMain: boolean) => unknown };
+    const originalLoad = moduleLoader._load;
+    moduleLoader._load = (request, parent, isMain) => request === 'vscode' ? {} : originalLoad(request, parent, isMain);
+    try {
+        return (require('../../services/memory/service') as typeof import('../../services/memory/service')).createConsolidationRunner;
+    } finally {
+        moduleLoader._load = originalLoad;
+    }
 }

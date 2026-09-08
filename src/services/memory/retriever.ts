@@ -19,6 +19,10 @@ export function memorySourceKey(source: SourceObservation): string {
     return JSON.stringify([source.path, source.side, source.blobOid, source.startLine, source.endLine, source.contentHash]);
 }
 
+function memorySupportKey(support: HandbookEntry['supports'][number]): string {
+    return `${support.episodeId}:${support.evidenceId}`;
+}
+
 /** Memory IDs identify navigation, never current-run evidence or facts. */
 export class MemoryRetriever {
     readonly usage: MemoryUsage = { recalled: 0, expanded: 0, adopted: 0, unavailable: 0, retrievalMs: 0,
@@ -62,17 +66,24 @@ export class MemoryRetriever {
 
     retrieveNavigation(query: MemoryQuery, maxTokens = this.navigationTokens): MemoryNavigation[] {
         const started = performance.now();
-        const representedEpisodes = new Set(this.view.handbook.flatMap(entry => entry.supports.map(support => support.episodeId)));
+        const representedSources = new Set(this.view.handbook.flatMap(entry => entry.supports.map(memorySupportKey)));
         const entries: Array<Pick<HandbookEntry, 'triggers' | 'targetPaths' | 'concerns' | 'supports'>> = [
             ...this.view.handbook,
-            ...this.view.episodes.filter(episode => isEligibleEpisode(episode) && !representedEpisodes.has(episode.id)).map(episode => ({
-                triggers: [...episode.changedPaths, ...episode.changedSymbols],
-                targetPaths: [...new Set(episode.observations.flatMap(observation => observation.evidence.map(evidence => evidence.source.path)))],
-                // Task-bound questions can navigate to source locations, but only
-                // consolidation may promote repeated observations into concerns.
-                concerns: [],
-                supports: episode.observations.flatMap(observation => observation.evidence.map(evidence => ({ episodeId: episode.id, evidenceId: evidence.id }))),
-            })),
+            ...this.view.episodes.filter(isEligibleEpisode).flatMap(episode => {
+                const supports = episode.observations.flatMap(observation => observation.evidence.map(evidence => ({
+                    episodeId: episode.id, evidenceId: evidence.id,
+                }))).filter(support => !representedSources.has(memorySupportKey(support)));
+                if (!supports.length) { return []; }
+                const supportIds = new Set(supports.map(support => support.evidenceId));
+                return [{
+                    triggers: [...episode.changedPaths, ...episode.changedSymbols],
+                    targetPaths: [...new Set(episode.observations.flatMap(observation => observation.evidence
+                        .filter(evidence => supportIds.has(evidence.id)).map(evidence => evidence.source.path)))],
+                    // Task-bound questions can navigate to source locations, but only
+                    // consolidation may promote repeated observations into concerns.
+                    concerns: [], supports,
+                }];
+            }),
         ];
         const exact = new Set([...query.paths, ...query.symbols]);
         const words = new Set([...query.keywords, ...query.symbols].flatMap(value => value.toLowerCase().split(/[^\p{L}\p{N}_]+/u)).filter(Boolean));

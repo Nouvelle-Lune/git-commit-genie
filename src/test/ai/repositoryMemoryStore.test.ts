@@ -236,17 +236,18 @@ describe('MemoryStore', function () {
 
             const entry = makeHandbookEntry(episode.id);
             await assert.rejects(
-                () => store.publishHandbook(released, randomUUID(), [entry], []),
+                () => store.publishHandbook(released, secondReservation.generation, randomUUID(), [entry], []),
                 /lost its publication lease/,
             );
-            await store.publishHandbook(released, secondReservation.id, [entry], [episode.id, episode.id]);
+            await store.publishHandbook(released, secondReservation.generation, secondReservation.id, [entry], [randomUUID(), randomUUID()]);
 
             const published = await store.inspect();
-            assert.equal(published.generation, released.generation + 2);
+            assert.equal(published.generation, secondReservation.generation + 1);
             assert.deepEqual(published.handbook, [entry]);
-            assert.deepEqual(published.consolidated, [episode.id]);
+            assert.equal(published.consolidated.length, 2);
+            assert.equal(published.consolidated.every(id => /^[0-9a-f-]{36}$/.test(id)), true);
             await assert.rejects(
-                () => store.publishHandbook(released, secondReservation.id, [entry], []),
+                () => store.publishHandbook(released, secondReservation.generation, secondReservation.id, [entry], []),
                 /lost its publication lease/,
             );
         });
@@ -271,7 +272,7 @@ describe('MemoryStore', function () {
             const jobId = reservation.id;
             const invalidEntry = { ...makeHandbookEntry(episode.id), id: 'not-a-uuid' } as HandbookEntry;
             await assert.rejects(
-                () => store.publishHandbook(view, jobId, [invalidEntry], []),
+                () => store.publishHandbook(view, reservation.generation, jobId, [invalidEntry], []),
                 /Invalid UUID|Invalid input/i,
             );
 
@@ -291,7 +292,7 @@ describe('MemoryStore', function () {
             assert.equal(reservation.status, 'reserved');
             if (reservation.status !== 'reserved') { throw new Error('Expected a consolidation reservation.'); }
             const jobId = reservation.id;
-            await store.publishHandbook(expected, jobId, [makeHandbookEntry(episode.id)], [episode.id]);
+            await store.publishHandbook(expected, reservation.generation, jobId, [makeHandbookEntry(episode.id)], [randomUUID()]);
             const payloadPath = path.join(store.directory, `${episode.id}.json`);
             await fs.access(payloadPath);
 
@@ -300,7 +301,8 @@ describe('MemoryStore', function () {
             const view = await store.inspect();
             assert.deepEqual(view.episodes, []);
             assert.deepEqual(view.handbook, []);
-            assert.deepEqual(view.consolidated, []);
+            assert.equal(view.consolidated.length, 1,
+                'consolidated stores opaque evidence fingerprints; deleting an episode does not treat a fingerprint as an episode ID');
             await assert.rejects(() => fs.access(payloadPath));
         });
     });
@@ -385,10 +387,10 @@ describe('MemoryStore', function () {
             assert.equal(reservation.status, 'reserved');
             if (reservation.status !== 'reserved') { throw new Error('Expected a consolidation reservation.'); }
             const jobId = reservation.id;
-            await store.publishHandbook(expected, jobId, [
+            await store.publishHandbook(expected, reservation.generation, jobId, [
                 makeHandbookEntry(secret.id, 'secrets/token.ts'),
                 makeHandbookEntry(safe.id, 'src/safe.ts'),
-            ], [secret.id, safe.id]);
+            ], [randomUUID(), randomUUID()]);
             const secretPayload = path.join(store.directory, `${secret.id}.json`);
             await fs.access(secretPayload);
 
@@ -398,7 +400,7 @@ describe('MemoryStore', function () {
             assert.notEqual(view.epoch, epoch);
             assert.deepEqual(view.episodes.map(item => item.id), [safe.id]);
             assert.deepEqual(view.handbook.map(item => item.supports[0].episodeId), [safe.id]);
-            assert.deepEqual(view.consolidated, [safe.id]);
+            assert.equal(view.consolidated.length, 2);
             await assert.rejects(() => fs.access(secretPayload));
             const current = JSON.parse(await fs.readFile(path.join(store.directory, 'current.json'), 'utf8')) as { job: unknown };
             assert.equal(current.job, null);

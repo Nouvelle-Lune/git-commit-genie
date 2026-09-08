@@ -151,6 +151,29 @@ describe('MemoryRetriever', () => {
         assert.deepEqual(other[0].concerns, []);
     });
 
+    it('retains raw navigation for evidence not represented by a Handbook support', () => {
+        const episode = makeEpisode({
+            changedPaths: ['src/parser.ts'],
+            sourcePath: 'src/parser.ts',
+        });
+        episode.observations[0].evidence.push({
+            id: 'E2',
+            source: makeSource(episode.snapshot, { path: 'lib/helper.md', excerpt: 'helper();' }),
+        });
+        const retriever = new MemoryRetriever(
+            makeView([episode], [makeHandbook(episode, ['src/parser.ts'])]),
+            makeSnapshot(),
+            [],
+        );
+
+        const result = retriever.retrieveNavigation({ paths: ['lib/helper.md'], symbols: [], keywords: [] });
+
+        assert.equal(result.length, 1);
+        assert.deepEqual(result[0].targetPaths, ['lib/helper.md']);
+        assert.deepEqual(result[0].concerns, []);
+        assert.equal(result[0].sourceCount, 1);
+    });
+
     it('orders keyword-only navigation by lexical relevance', () => {
         const partial = makeEpisode({
             changedPaths: ['src/partial.ts'],

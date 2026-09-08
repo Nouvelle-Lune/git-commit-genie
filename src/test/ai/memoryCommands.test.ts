@@ -5,6 +5,7 @@ import * as vscode from 'vscode';
 import { MemoryCommands } from '../../commands/MemoryCommands';
 import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
 import { logger } from '../../services/logger';
+import { buildConsolidationGroups } from '../../services/memory/consolidator';
 import { describeConsolidationResult } from '../../services/memory/service';
 
 describe('MemoryCommands repository maintenance', () => {
@@ -20,10 +21,35 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('describes every structured consolidation outcome for user notifications', () => {
-        assert.match(describeConsolidationResult({ status: 'published', episodeCount: 5, handbookCount: 2, skippedEpisodes: 1 }),
-            /Consolidated 5 episodes into 2 handbook entries/);
-        assert.match(describeConsolidationResult({ status: 'not-ready', pendingCount: 3, threshold: 5 }), /3\/5/);
-        assert.match(describeConsolidationResult({ status: 'budget-exhausted', limit: 2, resumesAt: Date.now() + 60_000 }), /24-hour allowance/);
+        const published = describeConsolidationResult({
+            status: 'published', groupCount: 5, handbookCount: 2, noFindingCount: 1, failedGroupCount: 0,
+            skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 1,
+            groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }],
+        });
+        assert.match(published, /Consolidated 5 evidence groups into 2 handbook entries/);
+        assert.match(published, /1 groups had no stable findings/);
+        assert.match(published, /1 were deferred/);
+        assert.match(published, /1 retries/);
+        const partial = describeConsolidationResult({
+            status: 'partial', groupCount: 2, handbookCount: 1, noFindingCount: 0, failedGroupCount: 1,
+            skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 2,
+            groupOutcomes: [
+                { path: 'src/parser.ts', status: 'published' },
+                { path: 'src/client.ts', status: 'failed' },
+            ],
+        });
+        assert.match(partial, /Partially consolidated 2 evidence groups into 1 handbook entries/);
+        assert.match(partial, /1 failed validation/);
+        assert.match(partial, /2 retries/);
+        const noFindings = describeConsolidationResult({
+            status: 'no-findings', groupCount: 1, skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 1,
+            groupOutcomes: [{ path: 'src/parser.ts', status: 'no-findings' }],
+        });
+        assert.match(noFindings, /Checked 1 evidence groups/);
+        assert.match(noFindings, /1 groups were deferred/);
+        assert.match(noFindings, /1 retries/);
+        assert.match(describeConsolidationResult({ status: 'not-ready', pendingCount: 3, threshold: 2 }), /3\/2/);
+        assert.match(describeConsolidationResult({ status: 'budget-exhausted', limit: 2, resumesAt: Date.now() + 60_000 }), /24-hour start allowance/);
         assert.match(describeConsolidationResult({ status: 'memory-disabled' }), /Repository Memory is disabled/);
         assert.match(describeConsolidationResult({ status: 'foreground-busy' }), /commit generation is active/);
         assert.match(describeConsolidationResult({ status: 'already-running' }), /another task holds/);
@@ -31,7 +57,7 @@ describe('MemoryCommands repository maintenance', () => {
         assert.match(describeConsolidationResult({ status: 'automatic-paused' }), /Automatic consolidation is paused/);
     });
 
-    it('describes all eight management actions and enables description matching', async () => {
+    it('describes all management actions and enables description matching', async () => {
         const config = vscode.workspace.getConfiguration('gitCommitGenie.memory');
         const previousConsolidationEnabled = config.get<boolean>('consolidation.enabled', true);
         const previousMemoryEnabled = config.get<boolean>('enabled', false);
@@ -65,7 +91,7 @@ describe('MemoryCommands repository maintenance', () => {
             assert.equal(seenMenus.length, 2);
             for (const items of seenMenus) {
                 assert.deepEqual(items.map(item => item.id), [
-                    'inspect', 'delete', 'clear', 'rebuild', 'consolidate', 'cancel', 'pause', 'toggle',
+                    'inspect', 'delete', 'clear', 'rebuild', 'consolidate', 'recheck', 'cancel', 'pause', 'toggle',
                 ]);
                 assert.equal(items.every(item => typeof item.description === 'string' && item.description.trim().length > 0), true);
                 assert.equal(items.every(item => !Object.prototype.hasOwnProperty.call(item, 'detail')), true);
@@ -121,7 +147,7 @@ describe('MemoryCommands repository maintenance', () => {
     it('surfaces a structured not-ready consolidation result and releases its spinner', async () => {
         const store = makeStore();
         const memory = makeMemoryService(store);
-        memory.consolidate.resolves({ status: 'not-ready', pendingCount: 3, threshold: 5 });
+        memory.consolidate.resolves({ status: 'not-ready', pendingCount: 3, threshold: 2 });
         const { context } = makeContext();
         stubIdentity(sandbox);
         stubAction(sandbox, 'consolidate');
@@ -135,8 +161,57 @@ describe('MemoryCommands repository maintenance', () => {
         assert.deepEqual(memory.consolidate.firstCall.args, ['r'.repeat(64), model, 'manual']);
         assert.equal(information.length, 1);
         assert.match(information[0], /Consolidation not run/);
-        assert.match(information[0], /3\/5/);
+        assert.match(information[0], /3\/2/);
         assert.equal(statuses[0].disposed, true);
+    });
+
+    it('requires modal confirmation before rechecking organized evidence and passes the recheck trigger', async () => {
+        const store = makeStore();
+        const episodes = makeRecheckEpisodes();
+        const organizedFingerprint = buildConsolidationGroups(episodes as any, [])[0].fingerprint;
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: [organizedFingerprint] });
+        const memory = makeMemoryService(store);
+        memory.consolidate.resolves({
+            status: 'no-findings', groupCount: 1, skippedGroups: 0, deferredPaths: [], retryCount: 0,
+            groupOutcomes: [{ path: 'src/parser.ts', status: 'no-findings' }],
+        });
+        const { context } = makeContext();
+        stubIdentity(sandbox);
+        stubRecheckSelection(sandbox);
+        const statuses = stubStatusBar(sandbox);
+        const information = stubInformation(sandbox);
+        const warning = sandbox.stub(vscode.window, 'showWarningMessage').resolves('Recheck organized evidence' as never);
+        const model = { model: 'memory-model' };
+
+        await invokeManage(new MemoryCommands(context, makeRegistry(store, memory, model) as never));
+
+        assert.equal(warning.calledOnce, true);
+        assert.deepEqual(warning.firstCall.args[1], { modal: true });
+        assert.equal(warning.firstCall.args[2], 'Recheck organized evidence');
+        assert.deepEqual(memory.consolidate.firstCall.args, ['r'.repeat(64), model, 'manual-recheck', ['src/parser.ts']]);
+        assert.equal(information.length, 1);
+        assertSpinnersReleased(statuses);
+    });
+
+    it('does not call consolidation when the recheck cost confirmation is cancelled', async () => {
+        const store = makeStore();
+        const episodes = makeRecheckEpisodes();
+        const organizedFingerprint = buildConsolidationGroups(episodes as any, [])[0].fingerprint;
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: [organizedFingerprint] });
+        const memory = makeMemoryService(store);
+        const { context } = makeContext();
+        stubIdentity(sandbox);
+        stubRecheckSelection(sandbox);
+        const warning = sandbox.stub(vscode.window, 'showWarningMessage').resolves(undefined);
+        const information = stubInformation(sandbox);
+        const statuses = stubStatusBar(sandbox);
+
+        await invokeManage(new MemoryCommands(context, makeRegistry(store, memory) as never));
+
+        assert.equal(warning.calledOnce, true);
+        assert.equal(memory.consolidate.called, false);
+        assert.deepEqual(information, []);
+        assert.deepEqual(statuses, []);
     });
 
     it('deletes selected episodes after the exact destructive confirmation and reports the dependent cleanup', async () => {
@@ -256,9 +331,18 @@ describe('MemoryCommands repository maintenance', () => {
 
     it('surfaces every consolidation result and releases its spinner before notifying the user', async () => {
         const outcomes: Array<{ result: any; expected: RegExp }> = [
-            { result: { status: 'published', episodeCount: 5, handbookCount: 2, skippedEpisodes: 0 }, expected: /Consolidated 5 episodes into 2 handbook entries/ },
-            { result: { status: 'not-ready', pendingCount: 3, threshold: 5 }, expected: /Consolidation not run:.*3\/5/ },
-            { result: { status: 'budget-exhausted', limit: 2, resumesAt: Date.now() + 60_000 }, expected: /24-hour allowance/ },
+            { result: {
+                status: 'published', groupCount: 5, handbookCount: 2, noFindingCount: 1, failedGroupCount: 0,
+                skippedGroups: 0, deferredPaths: [], retryCount: 0,
+                groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }],
+            }, expected: /Consolidated 5 evidence groups into 2 handbook entries/ },
+            { result: { status: 'partial', groupCount: 2, handbookCount: 1, noFindingCount: 0, failedGroupCount: 1,
+                skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 1,
+                groupOutcomes: [{ path: 'src/parser.ts', status: 'published' }, { path: 'src/client.ts', status: 'failed' }] }, expected: /Partially consolidated 2 evidence groups/ },
+            { result: { status: 'no-findings', groupCount: 1, skippedGroups: 1, deferredPaths: ['src/deferred.ts'], retryCount: 0,
+                groupOutcomes: [{ path: 'src/parser.ts', status: 'no-findings' }] }, expected: /Checked 1 evidence groups/ },
+            { result: { status: 'not-ready', pendingCount: 3, threshold: 2 }, expected: /Consolidation not run:.*3\/2/ },
+            { result: { status: 'budget-exhausted', limit: 2, resumesAt: Date.now() + 60_000 }, expected: /24-hour start allowance/ },
             { result: { status: 'memory-disabled' }, expected: /Repository Memory is disabled/ },
             { result: { status: 'foreground-busy' }, expected: /commit generation is active/ },
             { result: { status: 'already-running' }, expected: /another task holds/ },
@@ -355,7 +439,7 @@ describe('MemoryCommands repository maintenance', () => {
         assert.equal(memory.cancel.calledWith('r'.repeat(64)), true);
         assert.equal(information.length, 1);
         assert.match(information[0], /permanently cleared/);
-        assert.match(information[0], /24-hour call allowance was not reset/);
+        assert.match(information[0], /24-hour consolidation start allowance was not reset/);
         assert.equal(statuses[0].disposed, true);
     });
 
@@ -534,6 +618,21 @@ function stubAction(sandbox: sinon.SinonSandbox, id: string): void {
     }) as unknown as typeof vscode.window.showQuickPick);
 }
 
+function stubRecheckSelection(sandbox: sinon.SinonSandbox, onGroups?: (items: Array<vscode.QuickPickItem & { id?: string }>) => void): void {
+    let quickPickCall = 0;
+    sandbox.stub(vscode.window, 'showQuickPick').callsFake((async (
+        items: readonly vscode.QuickPickItem[] | Thenable<readonly vscode.QuickPickItem[]>,
+    ) => {
+        quickPickCall += 1;
+        const resolved = Array.isArray(items) ? items : await items;
+        if (quickPickCall === 1) {
+            return (resolved as Array<vscode.QuickPickItem & { id?: string }>).find(item => item.id === 'recheck') as never;
+        }
+        onGroups?.(resolved as Array<vscode.QuickPickItem & { id?: string }>);
+        return [resolved[0]] as never;
+    }) as unknown as typeof vscode.window.showQuickPick);
+}
+
 function stubStatusBar(sandbox: sinon.SinonSandbox): Array<{ message: string; disposed: boolean }> {
     const statuses: Array<{ message: string; disposed: boolean }> = [];
     sandbox.stub(vscode.window, 'setStatusBarMessage').callsFake(((message: string) => {
@@ -581,6 +680,24 @@ function makeMemoryService(store: any): any {
         consolidate: sinon.stub(),
         warn: sinon.stub(),
     };
+}
+
+function makeRecheckEpisodes(): Array<Record<string, unknown>> {
+    return [
+        ['src/parser.ts', 1], ['src/parser.ts', 2],
+        ['src/unorganized.ts', 3], ['src/unorganized.ts', 4],
+    ].map(([sourcePath, index]) => ({
+        version: 1,
+        id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+        createdAt: index,
+        status: 'complete',
+        snapshot: { id: String(index).repeat(64) },
+        observations: [{
+            ok: true,
+            tool: 'readFileContent',
+            evidence: [{ id: 'E1', source: { path: sourcePath } }],
+        }],
+    }));
 }
 
 function makeRegistry(store: any, memory: any, model: unknown = { model: 'memory-model' }): any {
