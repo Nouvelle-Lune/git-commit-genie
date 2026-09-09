@@ -84,5 +84,28 @@ export function validateHandbookSources(entries: HandbookEntry[], episodes: Inve
             }
             if (snapshots.size < 2 || item.snapshotCount !== snapshots.size) { throw new Error('Experience snapshot count does not match independent supports.'); }
         }
+        if (entry.retirement) {
+            const snapshots = new Set<string>();
+            const seen = new Set<string>();
+            for (const support of entry.retirement.supports) {
+                const key = `${support.episodeId}:${support.observationIndex}`;
+                if (seen.has(key)) { throw new Error('Retirement repeats an observation support.'); }
+                seen.add(key);
+                const episode = episodes.find(value => value.id === support.episodeId);
+                const observation = episode?.observations[support.observationIndex];
+                const evidence = observation?.evidence.find(item => item.id === support.evidenceId);
+                const question = support.questionIndex === undefined ? undefined : episode?.questions[support.questionIndex];
+                const claim = support.claimIndex === undefined ? undefined : episode?.claims[support.claimIndex];
+                if (!episode || !isEligibleEpisode(episode) || !observation || !isInvestigationObservation(observation)
+                    || !observation.ok || evidence?.source.side !== 'after' || !question?.trim() || !claim?.claim.trim()
+                    || claim.disposition === 'omit' || !support.evidenceId || !claim.evidenceRefs.includes(support.evidenceId)) {
+                    throw new Error('Retirement support is missing after-tree counterevidence, its question, or its retained finding.');
+                }
+                snapshots.add(episode.snapshot.id);
+            }
+            if (snapshots.size < 2 || entry.retirement.snapshotCount !== snapshots.size) {
+                throw new Error('Retirement snapshot count does not match independent counterevidence.');
+            }
+        }
     }
 }

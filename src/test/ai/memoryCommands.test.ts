@@ -7,6 +7,8 @@ import { hashContent, RepositorySnapshotReader } from '../../services/git/reposi
 import { logger } from '../../services/logger';
 import { buildConsolidationGroups } from '../../services/memory/consolidator';
 import { describeConsolidationResult } from '../../services/memory/service';
+import { entrySupports, HandbookEntry } from '../../services/memory/types';
+import { formatRecheckGroupReport } from '../../ui/memoryExperienceReport';
 
 describe('MemoryCommands repository maintenance', () => {
     let sandbox: sinon.SinonSandbox;
@@ -59,6 +61,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('describes all management actions and enables description matching', async () => {
+        // Verify describes all management actions and enables description matching.
         const config = vscode.workspace.getConfiguration('gitCommitGenie.memory');
         const previousConsolidationEnabled = config.get<boolean>('consolidation.enabled', true);
         const previousMemoryEnabled = config.get<boolean>('enabled', false);
@@ -125,9 +128,10 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('opens read-only inspection output and releases its spinner before success notification', async () => {
+        // Verify opens read-only inspection output and releases its spinner before success notification.
         const store = makeStore();
         const view = {
-            epoch: 'epoch', generation: 7, episodes: [{ id: 'episode-1' }], handbook: [{ id: 'entry-1' }], consolidated: [],
+            epoch: 'epoch', generation: 7, episodes: [{ id: 'episode-1' }], handbook: [{ id: 'entry-1' }], representedSupports: [], consolidated: [], organizedSeeds: [],
         };
         store.inspect.resolves(view);
         const memory = makeMemoryService(store);
@@ -150,6 +154,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('surfaces a structured not-ready consolidation result and releases its spinner', async () => {
+        // Verify surfaces a structured not-ready consolidation result and releases its spinner.
         const store = makeStore();
         const memory = makeMemoryService(store);
         memory.consolidate.resolves({ status: 'not-ready', pendingCount: 3, threshold: 2 });
@@ -175,7 +180,7 @@ describe('MemoryCommands repository maintenance', () => {
         const store = makeStore();
         const episodes = makeRecheckEpisodes();
         const groups = buildConsolidationGroups(episodes as any, []);
-        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId) });
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], representedSupports: [], consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId) });
         const memory = makeMemoryService(store);
         memory.consolidate.resolves({
             status: 'no-findings', groupCount: 2, skippedGroups: 0, deferredPaths: [], retryCount: 0,
@@ -219,7 +224,7 @@ describe('MemoryCommands repository maintenance', () => {
         const episodes = makeRecheckEpisodes();
         const groups = buildConsolidationGroups(episodes as any, []);
         const organizedFingerprint = groups[0].fingerprint;
-        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: [organizedFingerprint], organizedSeeds: [groups[0].seedId] });
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], representedSupports: [], consolidated: [organizedFingerprint], organizedSeeds: [groups[0].seedId] });
         const memory = makeMemoryService(store);
         const { context } = makeContext();
         stubIdentity(sandbox);
@@ -244,6 +249,7 @@ describe('MemoryCommands repository maintenance', () => {
         const groups = buildConsolidationGroups(episodes as any, []);
         store.inspect.resolves({
             epoch: 'epoch', generation: 1, episodes, handbook: makeRecheckHandbook(episodes),
+            representedSupports: entrySupports(makeRecheckHandbook(episodes)[0] as unknown as HandbookEntry),
             consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId),
         });
         const memory = makeMemoryService(store);
@@ -350,12 +356,47 @@ describe('MemoryCommands repository maintenance', () => {
         assert.match(report, /<p><\/p>/);
     });
 
+    it('renders retirement reason, replacement, and supports while keeping failed and no-findings results separate', () => {
+        // Verify the recheck report renders the new retirement structure and never presents old history as a failed or empty result.
+        const episodes = makeRecheckEpisodes();
+        const handbook = makeRecheckHandbook(episodes) as unknown as HandbookEntry[];
+        handbook[0].retirement = {
+            reason: 'Retired <strong>historical route</strong>',
+            supports: [
+                { episodeId: episodes[0].id as string, observationIndex: 0, evidenceId: 'E1', questionIndex: 0, claimIndex: 0 },
+                { episodeId: episodes[1].id as string, observationIndex: 0, evidenceId: 'E1', questionIndex: 0, claimIndex: 0 },
+            ],
+            snapshotCount: 2,
+            replacementEntryId: '10000000-0000-4000-8000-000000000099',
+        };
+        const group = buildConsolidationGroups(episodes as any, []).find(item => item.seedId === episodes[0].id)!;
+        const preview = formatRecheckGroupReport(group, handbook, episodes as any);
+        assert.match(preview, /Retired historical experience/);
+        assert.match(preview, /Retired &lt;strong&gt;historical route&lt;\/strong&gt;/);
+        assert.match(preview, /Replacement experience/);
+        assert.match(preview, /10000000-0000-4000-8000-000000000099/);
+        assert.match(preview, /2 historical records · 2 independent snapshots/);
+
+        const failed = formatRecheckGroupReport(group, handbook, episodes as any, {
+            seedId: group.seedId, status: 'failed', entryIds: [], issues: ['validation failed'],
+        });
+        assert.match(failed, /Recheck failed/);
+        assert.match(failed, /validation failed/);
+        assert.doesNotMatch(failed, /Retired &lt;strong&gt;historical route&lt;\/strong&gt;/);
+        const noFindings = formatRecheckGroupReport(group, handbook, episodes as any, {
+            seedId: group.seedId, status: 'no-findings', entryIds: [], issues: [],
+        });
+        assert.match(noFindings, /Recheck found no new experience/);
+        assert.match(noFindings, /Previously saved experience was preserved/);
+        assert.doesNotMatch(noFindings, /Retired &lt;strong&gt;historical route&lt;\/strong&gt;/);
+    });
+
     it('cancels recheck without consolidation when the createQuickPick is hidden', async () => {
         // Hiding the recheck QuickPick resolves as cancellation and prevents both the paid confirmation and consolidation call.
         const store = makeStore();
         const episodes = makeRecheckEpisodes();
         const groups = buildConsolidationGroups(episodes as any, []);
-        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId) });
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], representedSupports: [], consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId) });
         const memory = makeMemoryService(store);
         const { context } = makeContext();
         stubIdentity(sandbox);
@@ -376,12 +417,13 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('deletes selected episodes after the exact destructive confirmation and reports the dependent cleanup', async () => {
+        // Verify deletes selected episodes after the exact destructive confirmation and reports the dependent cleanup.
         const store = makeStore();
         const episode = {
             id: 'episode-1', createdAt: 1, changedPaths: ['src/parser.ts'], status: 'complete',
             snapshot: { id: 's'.repeat(64) },
         };
-        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes: [episode], handbook: [], consolidated: [] });
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes: [episode], handbook: [], representedSupports: [], consolidated: [], organizedSeeds: [] });
         store.deleteEpisodes.resolves(1);
         const memory = makeMemoryService(store);
         const { context } = makeContext();
@@ -412,8 +454,9 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('reports empty memory for delete without opening a confirmation or mutating the store', async () => {
+        // Verify reports empty memory for delete without opening a confirmation or mutating the store.
         const store = makeStore();
-        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes: [], handbook: [], consolidated: [] });
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes: [], handbook: [], representedSupports: [], consolidated: [], organizedSeeds: [] });
         const memory = makeMemoryService(store);
         const { context } = makeContext();
         stubIdentity(sandbox);
@@ -431,6 +474,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('reports no consolidation task when cancellation has nothing to cancel', async () => {
+        // Verify reports no consolidation task when cancellation has nothing to cancel.
         const result = await runCancelAction(sandbox, 'nothing-to-cancel');
 
         assert.match(result.message, /No consolidation task to cancel/);
@@ -439,6 +483,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('reports cancellation of a waiting consolidation task', async () => {
+        // Verify reports cancellation of a waiting consolidation task.
         const result = await runCancelAction(sandbox, 'scheduled-cancelled');
 
         assert.match(result.message, /Cancelled the waiting consolidation task/);
@@ -447,6 +492,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('reports a cancellation request for a running consolidation task', async () => {
+        // Verify reports a cancellation request for a running consolidation task.
         const result = await runCancelAction(sandbox, 'running-cancel-requested');
 
         assert.match(result.message, /Cancellation requested for running consolidation/);
@@ -455,6 +501,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('pauses automatic consolidation globally and preserves manual memory operations', async () => {
+        // Verify pauses automatic consolidation globally and preserves manual memory operations.
         const result = await runSettingAction(sandbox, 'pause', 'consolidation.enabled', true);
 
         assert.equal(result.value, false);
@@ -464,6 +511,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('resumes automatic consolidation globally', async () => {
+        // Verify resumes automatic consolidation globally.
         const result = await runSettingAction(sandbox, 'pause', 'consolidation.enabled', false);
 
         assert.equal(result.value, true);
@@ -473,6 +521,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('disables repository memory globally without deleting existing data', async () => {
+        // Verify disables repository memory globally without deleting existing data.
         const result = await runSettingAction(sandbox, 'toggle', 'enabled', true);
 
         assert.equal(result.value, false);
@@ -482,6 +531,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('enables repository memory globally', async () => {
+        // Verify enables repository memory globally.
         const result = await runSettingAction(sandbox, 'toggle', 'enabled', false);
 
         assert.equal(result.value, true);
@@ -534,6 +584,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('releases the consolidation spinner and shows a failed-operation error for a provider exception', async () => {
+        // Verify releases the consolidation spinner and shows a failed-operation error for a provider exception.
         const store = makeStore();
         const memory = makeMemoryService(store);
         memory.consolidate.rejects(new Error('provider unavailable'));
@@ -565,6 +616,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('reports a successful index rebuild and releases its spinner', async () => {
+        // Verify reports a successful index rebuild and releases its spinner.
         const store = makeStore();
         store.rebuildIndex.resolves(4);
         const memory = makeMemoryService(store);
@@ -583,6 +635,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('reports a successful clear while preserving the non-reset quota contract', async () => {
+        // Verify reports a successful clear while preserving the non-reset quota contract.
         const store = makeStore();
         const memory = makeMemoryService(store);
         const { context } = makeContext();
@@ -606,6 +659,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('reports management failures through the registered command handler', async () => {
+        // Verify reports management failures through the registered command handler.
         const store = makeStore();
         store.inspect.rejects(new Error('inspect failed'));
         const memory = makeMemoryService(store);
@@ -637,6 +691,7 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('cancels clear confirmation silently without mutating memory', async () => {
+        // Verify cancels clear confirmation silently without mutating memory.
         const store = makeStore();
         const memory = makeMemoryService(store);
         const { context } = makeContext();
@@ -655,9 +710,10 @@ describe('MemoryCommands repository maintenance', () => {
     });
 
     it('cancels delete confirmation silently after selecting episodes', async () => {
+        // Verify cancels delete confirmation silently after selecting episodes.
         const store = makeStore();
         const episode = { id: 'episode-1', createdAt: 1, changedPaths: ['src/parser.ts'], status: 'complete', snapshot: { id: 's'.repeat(64) } };
-        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes: [episode], handbook: [], consolidated: [] });
+        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes: [episode], handbook: [], representedSupports: [], consolidated: [], organizedSeeds: [] });
         const memory = makeMemoryService(store);
         const { context } = makeContext();
         stubIdentity(sandbox);
@@ -914,7 +970,9 @@ async function readRecheckDetailsHtml(
 ): Promise<string> {
     const store = makeStore();
     const groups = buildConsolidationGroups(episodes as any, []);
-    store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook, consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId) });
+    store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook,
+        representedSupports: handbook.flatMap(entry => entrySupports(entry as unknown as HandbookEntry)),
+        consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId) });
     const memory = makeMemoryService(store);
     const { context } = makeContext();
     stubIdentity(sandbox);

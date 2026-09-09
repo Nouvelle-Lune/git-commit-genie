@@ -17,6 +17,7 @@ describe('repository memory lifecycle', function () {
     this.timeout(20_000);
 
     it('cancels foreground timers and aborts background work, then schedules after sixty idle seconds', async () => {
+        // Verify cancels foreground timers and aborts background work, then schedules after sixty idle seconds.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: false }, async () => {
                 const context = makeContext(storageRoot);
@@ -52,6 +53,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('returns distinct cancellation states and keeps a running slot until the job releases it', async () => {
+        // Verify returns distinct cancellation states and keeps a running slot until the job releases it.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: true }, async () => {
                 const context = makeContext(storageRoot);
@@ -84,6 +86,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('separates automatic pause from manual consolidation and reports lifecycle outcomes', async () => {
+        // Verify separates automatic pause from manual consolidation and reports lifecycle outcomes.
         await withTempStorage(async storageRoot => {
             const repositoryId = 'd'.repeat(64);
             const model = makeMemoryModel();
@@ -144,6 +147,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('cancels an actual delayed consolidation through public APIs and releases its running slot in finally', async () => {
+        // Verify cancels an actual delayed consolidation through public APIs and releases its running slot in finally.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: true, consolidationEnabled: true }, async () => {
                 const repositoryId = '8'.repeat(64);
@@ -193,6 +197,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('runs a real manual consolidation while automatic consolidation is paused and logs the published result', async () => {
+        // Verify a real version-2 consolidation publishes a handbook entry and reports its seed-scoped outcome.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: true, consolidationEnabled: false }, async () => {
                 const repositoryId = '9'.repeat(64);
@@ -220,11 +225,14 @@ describe('repository memory lifecycle', function () {
                     assert.deepEqual(await service.consolidate(repositoryId, model, 'automatic'), { status: 'automatic-paused' });
                     assert.equal(createExecution.called, false);
 
-                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), {
-                        status: 'published', groupCount: 1, handbookCount: 1, noFindingCount: 0,
-                        failedGroupCount: 0, skippedGroups: 0, deferredPaths: [], retryCount: 0,
-                        groupOutcomes: [{ seedId: episodes[0].id, status: 'published', entryIds: ['10000000-0000-4000-8000-000000000001'], issues: [] }],
-                    });
+                    const published = await service.consolidate(repositoryId, model, 'manual');
+                    assert.equal(published.status, 'published');
+                    if (published.status !== 'published') { throw new Error('Expected manual consolidation to publish.'); }
+                    assert.equal(published.groupCount, 1);
+                    assert.equal(published.handbookCount, 1);
+                    assert.equal(published.noFindingCount, 0);
+                    assert.equal(published.failedGroupCount, 0);
+                    assert.deepEqual(published.groupOutcomes, [{ seedId: episodes[0].id, status: 'published', entryIds: [published.groupOutcomes[0].entryIds[0]], issues: [] }]);
                     assert.equal(createExecution.calledOnce, true);
                     assert.equal(sessionRuns, 1);
                     const view = await store.inspect();
@@ -234,11 +242,12 @@ describe('repository memory lifecycle', function () {
                         status: 'not-ready', pendingCount: 0, threshold: 2,
                     });
                     assert.equal(sessionRuns, 1, 'ordinary organization does not repeat a completed group');
-                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual-recheck', [episodes[0].id]), {
-                        status: 'published', groupCount: 1, handbookCount: 1, noFindingCount: 0,
-                        failedGroupCount: 0, skippedGroups: 0, deferredPaths: [], retryCount: 0,
-                        groupOutcomes: [{ seedId: episodes[0].id, status: 'published', entryIds: ['10000000-0000-4000-8000-000000000001'], issues: [] }],
-                    });
+                    const rechecked = await service.consolidate(repositoryId, model, 'manual-recheck', [episodes[0].id]);
+                    assert.equal(rechecked.status, 'published');
+                    if (rechecked.status !== 'published') { throw new Error('Expected manual recheck to publish.'); }
+                    assert.equal(rechecked.groupCount, 1);
+                    assert.equal(rechecked.handbookCount, 1);
+                    assert.deepEqual(rechecked.groupOutcomes, [{ seedId: episodes[0].id, status: 'published', entryIds: [rechecked.groupOutcomes[0].entryIds[0]], issues: [] }]);
                     assert.equal(sessionRuns, 2, 'manual recheck explicitly reruns the selected path group');
                     const events = memoryLogEvents(logToolCall);
                     assert.ok(events.some(event => event.status === 'automatic-paused'));
@@ -253,6 +262,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('returns a real budget-exhausted result without invoking the consolidation runner and logs the reason', async () => {
+        // Verify returns a real budget-exhausted result without invoking the consolidation runner and logs the reason.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: true, consolidationEnabled: true, maxCalls: 1 }, async () => {
                 const repositoryId = 'a'.repeat(64);
@@ -299,6 +309,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('rethrows a real model exception after logging a failed Webview memory event and releasing the job', async () => {
+        // Verify rethrows a real model exception after logging a failed Webview memory event and releasing the job.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: true, consolidationEnabled: true }, async () => {
                 const repositoryId = 'b'.repeat(64);
@@ -339,6 +350,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('does no memory I/O when disabled and detaches episode persistence from commit delivery', async () => {
+        // Verify does no memory I/O when disabled and detaches episode persistence from commit delivery.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: false }, async () => {
                 const context = makeContext(storageRoot);
@@ -380,6 +392,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('freezes a run budget while applying changed settings to the next preparation', async () => {
+        // Verify freezes a run budget while applying changed settings to the next preparation.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: true, sourceMaxChunks: 1 }, async () => {
                 const context = makeContext(storageRoot);
@@ -407,6 +420,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('turns seal failures into warnings and times out memory retrieval at 10 seconds', async () => {
+        // Verify turns seal failures into warnings and times out memory retrieval at 10 seconds.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: true }, async () => {
                 const context = makeContext(storageRoot);
@@ -440,6 +454,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('filters newly excluded paths before returning navigation and never returns their secret source', async () => {
+        // Verify live exclusions are applied to navigation results without reaching the private retriever view.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: true, excludePatterns: [] }, async () => {
                 const context = makeContext(storageRoot);
@@ -471,6 +486,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('bounds consolidation prompt input, sends transportRetries zero, accounts unknown usage, and rejects incomplete output', async () => {
+        // Verify bounds consolidation prompt input, sends transportRetries zero, accounts unknown usage, and rejects incomplete output.
         const oversized = makeExecution(100);
         const oversizedRunner = createConsolidationRunner(oversized);
         assert.equal(oversizedRunner.maxInputTokens, 100);
@@ -621,6 +637,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('reuses execution-bound thinking for consolidation and never puts thinking on the run request', async () => {
+        // Verify reuses execution-bound thinking for consolidation and never puts thinking on the run request.
         const thinking = { reasoning: true, level: 'high' as const };
         let seenRequest: AIRunRequest | undefined;
         const execution = makeExecution(16_000, {
@@ -701,9 +718,9 @@ function makeEligibleEpisodes(repositoryId: string, count: number): Investigatio
 }
 
 function successfulConsolidationResponse(request: AIRunRequest): any {
-    // Build a finding for every supplied G* group from its first two projected S* handles.
+    // Build a valid source-backed step from two projected observations in the supplied G* group.
     const input = JSON.parse(String(request.messages?.find(message => message.role === 'user')?.content ?? '{}')) as {
-        groups: Array<{ id: string; snapshots: Array<{ sources: Array<{ id: string }> }> }>;
+        groups: Array<{ id: string; episodes: Array<{ observations: Array<{ id: string; tool: string; ok: boolean; evidence: Array<{ id: string; path: string; usedByClaims: Array<{ index: number }> }> }>; questions: string[]; claims: Array<{ index: number; disposition: string; text: string }> }> }>;
     };
     return {
         text: '',
@@ -711,11 +728,24 @@ function successfulConsolidationResponse(request: AIRunRequest): any {
             groups: input.groups.map(group => ({
                 groupId: group.id,
                 outcome: 'findings',
-                rationale: 'The repeated sources support a stable concern.',
-                concerns: [{
-                    text: 'The parser state may be observed before publication.',
-                    sourceIds: group.snapshots.flatMap(snapshot => snapshot.sources).slice(0, 2).map(source => source.id),
-                }],
+                rationale: 'The repeated source-backed observations identify a stable investigation entry point.',
+                entries: (() => {
+                    const candidates = group.episodes.flatMap(episode => episode.observations
+                        .filter(observation => observation.ok && observation.evidence.length)
+                        .map(observation => ({ episode, observation })));
+                    const first = candidates[0];
+                    const second = candidates.find(candidate => candidate.episode !== first?.episode);
+                    if (!first || !second) { return []; }
+                    const source = first.observation.evidence[0];
+                    const findingFor = (candidate: typeof first) => {
+                        const evidence = candidate.observation.evidence[0];
+                        const claimIndex = candidate.episode.claims.find(claim => claim.index === evidence.usedByClaims[0]?.index)?.index ?? 0;
+                        return { observationId: candidate.observation.id, questionIndex: 0, claimIndex };
+                    };
+                    return [{ existingEntryId: null, situation: 'When the changed source requires historical investigation, inspect the recorded entry point first.',
+                        steps: [{ sourceId: source.id, symbol: null, purpose: 'Inspect the source entry point before expanding the investigation.',
+                            findings: [findingFor(first), findingFor(second)] }], lessons: [] }];
+                })(),
             })),
         },
         toolCalls: [],

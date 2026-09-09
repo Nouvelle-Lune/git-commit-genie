@@ -52,8 +52,12 @@ export const investigationStepSchema = z.object({
 export const historicalLessonSchema = z.object({
     observation: text, implication: text, limitation: text, ...supported,
 }).strict();
+export const experienceRetirementSchema = z.object({
+    reason: text, supports: z.array(memorySupportSchema).min(2).max(32), snapshotCount: z.number().int().min(2),
+    replacementEntryId: z.uuid().nullable(),
+}).strict();
 export const handbookEntrySchema = z.object({
-    id: z.uuid(), situation: text,
+    id: z.uuid(), situation: text, retirement: experienceRetirementSchema.nullable(),
     steps: z.array(investigationStepSchema).max(4), lessons: z.array(historicalLessonSchema).max(4),
     targetPaths: z.array(safePath), triggers: z.array(z.string().min(1)),
 }).strict().refine(entry => entry.steps.length + entry.lessons.length > 0, 'An experience needs steps or lessons.');
@@ -73,12 +77,28 @@ export const consolidationGroupProposalSchema = z.object({
         }).strict()).max(4),
         lessons: z.array(z.object({ observation: text, implication: text, limitation: text, observationIds }).strict()).max(4),
     }).strict()).max(6),
+    retirements: z.array(z.object({
+        existingEntryId: z.string().regex(/^H\d+$/), reason: text,
+        replacementEntryIndex: z.number().int().nonnegative().nullable(),
+        findings: z.array(z.object({
+            observationId: z.string().regex(/^O\d+$/), sourceId: z.string().regex(/^S\d+$/),
+            questionIndex: z.number().int().nonnegative(), claimIndex: z.number().int().nonnegative(),
+        }).strict()).min(2).max(32),
+    }).strict()).max(6),
 }).strict();
 export const consolidationProposalSchema = z.object({ groups: z.array(consolidationGroupProposalSchema).length(1) }).strict();
 
+export interface MemoryAvailability {
+    snapshotId: string;
+    location: 'available' | 'needs_revalidation' | 'unavailable' | 'historical_only';
+    experience: 'unverified' | 'retired' | 'retirement_unmatched';
+    targets: Array<{ path: string; state: 'available' | 'needs_revalidation' | 'unavailable' }>;
+    retirement: { reason: string; replacementEntryId: string | null } | null;
+}
 export interface MemoryNavigation {
     id: string;
     origin: 'handbook' | 'episode';
+    availability: MemoryAvailability;
     situation: string;
     targetPaths: string[];
     steps: Array<Omit<HandbookEntry['steps'][number], 'supports'>>;
@@ -90,13 +110,14 @@ export interface MemoryNavigation {
 
 /** Keep item provenance as the only authority; there is no entry-wide support shortcut. */
 export function entrySupports(entry: HandbookEntry): MemorySupport[] {
-    return [...new Map([...entry.steps, ...entry.lessons].flatMap(item => item.supports)
+    return [...new Map([...entry.steps, ...entry.lessons, ...(entry.retirement ? [entry.retirement] : [])].flatMap(item => item.supports)
         .map(support => [JSON.stringify(support), support])).values()];
 }
 export function entryTerms(entry: HandbookEntry): string[] {
     return [entry.situation, ...entry.targetPaths, ...entry.triggers,
         ...entry.steps.flatMap(step => [step.path, step.symbol ?? '', step.purpose]),
-        ...entry.lessons.flatMap(lesson => [lesson.observation, lesson.implication, lesson.limitation])];
+        ...entry.lessons.flatMap(lesson => [lesson.observation, lesson.implication, lesson.limitation]),
+        ...(entry.retirement ? [entry.retirement.reason] : [])];
 }
 
 export interface MemoryUsage {

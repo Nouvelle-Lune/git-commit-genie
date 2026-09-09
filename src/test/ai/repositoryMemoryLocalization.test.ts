@@ -5,19 +5,19 @@ import { describe, it } from 'mocha';
 
 describe('Repository Memory localization catalogs', () => {
     it('contains every literal Memory command and service message in all locale catalogs', () => {
+        // Verify command, service, and report localization literals are present with identical placeholders in every catalog.
         const sourceFiles = [
             path.resolve(__dirname, '../../../src/commands/MemoryCommands.ts'),
             path.resolve(__dirname, '../../../src/services/memory/service.ts'),
+            path.resolve(__dirname, '../../../src/ui/memoryExperienceReport.ts'),
         ];
         const sourceKeys = new Set<string>();
         for (const sourceFile of sourceFiles) {
             const source = fs.readFileSync(sourceFile, 'utf8');
-            for (const match of source.matchAll(/vscode\.l10n\.t\('((?:\\.|[^'\\])*)'/g)) {
-                sourceKeys.add(unescapeSourceString(match[1]));
-            }
-            for (const match of source.matchAll(/vscode\.l10n\.t\("((?:\\.|[^"\\])*)"/g)) {
-                sourceKeys.add(unescapeSourceString(match[1]));
-            }
+            for (const match of source.matchAll(/vscode\.l10n\.t\('((?:\\.|[^'\\])*)'/g)) { sourceKeys.add(unescapeSourceString(match[1])); }
+            for (const match of source.matchAll(/vscode\.l10n\.t\("((?:\\.|[^"\\])*)"/g)) { sourceKeys.add(unescapeSourceString(match[1])); }
+            for (const match of source.matchAll(/(?<![\w.])t\('((?:\\.|[^'\\])*)'/g)) { sourceKeys.add(unescapeSourceString(match[1])); }
+            for (const match of source.matchAll(/(?<![\w.])t\("((?:\\.|[^"\\])*)"/g)) { sourceKeys.add(unescapeSourceString(match[1])); }
         }
         assert.ok(sourceKeys.size > 0);
 

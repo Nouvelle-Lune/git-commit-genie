@@ -40,6 +40,10 @@ function renderSupports(supports: MemorySupport[], episodes: readonly Investigat
 }
 function renderEntry(entry: HandbookEntry, episodes: readonly InvestigationEpisode[]): string {
     return `<article class="memory-card"><h3>${t('Applicable situation')}</h3><p class="situation">${html(entry.situation)}</p>
+        ${entry.retirement ? `<section class="experience-item retirement"><h3>${t('Retired historical experience')}</h3>
+            <p>${html(entry.retirement.reason)}</p>${entry.retirement.replacementEntryId
+                ? `<p class="section-copy">${t('Replacement experience')}: <code>${html(entry.retirement.replacementEntryId)}</code></p>` : ''}
+            ${renderSupports(entry.retirement.supports, episodes)}</section>` : ''}
         ${entry.steps.length ? `<h3>${t('Investigation route')}</h3><ol>${entry.steps.map(step => `<li class="experience-item">
             <code>${html(step.path)}${step.symbol ? ` → ${html(step.symbol)}` : ''}</code><p>${html(step.purpose)}</p>
             <p class="section-copy">${t('Historical tool')}: ${html(step.operation)}</p>${renderSupports(step.supports, episodes)}</li>`).join('')}</ol>` : ''}
@@ -133,6 +137,7 @@ export function formatRecheckGroupReport(group: ConsolidationGroup, handbook: re
             dl { grid-template-columns: 1fr; }
         }
         .experience-item { margin: 18px 0; padding: 16px; border: 1px solid var(--vscode-panel-border); border-radius: 8px; }
+        .retirement { border-color: var(--vscode-notificationsWarningIcon-foreground); }
         .situation { font-size: 18px; } .error { color: var(--vscode-errorForeground); } code, pre, p { overflow-wrap: anywhere; }
         </style></head><body><header class="hero"><h1>${html(group.title)}</h1><p>${t('Historical experience guides investigation; current source must be checked before drawing conclusions.')}</p></header>
         <main><h2>${heading}</h2><p class="section-copy">${summary}</p>

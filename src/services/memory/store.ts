@@ -14,7 +14,7 @@ import { MEMORY_DEFAULTS, MemorySettings } from './settings';
 const consolidationAttemptSchema = z.object({ id: z.uuid(), at: z.number(), epoch: z.uuid() }).strict();
 
 const manifestSchema = z.object({
-    version: z.literal(2), epoch: z.uuid(), generation: z.number().int().nonnegative(),
+    version: z.literal(3), epoch: z.uuid(), generation: z.number().int().nonnegative(),
     episodes: z.array(z.object({ id: z.uuid(), hash: z.string(), bytes: z.number().int().positive(), createdAt: z.number(),
         paths: z.array(z.string()), symbols: z.array(z.string()), targets: z.array(z.string()), terms: z.array(z.string()), eligible: z.boolean() }).strict()),
     handbook: z.array(handbookEntrySchema),
@@ -31,7 +31,10 @@ const clearStateSchema = z.object({
 }).passthrough();
 const episodePayloadName = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/i;
 type Manifest = z.infer<typeof manifestSchema>;
-export interface MemoryView { epoch: string; generation: number; episodes: InvestigationEpisode[]; handbook: HandbookEntry[]; consolidated: string[]; organizedSeeds: string[] }
+export interface MemoryView {
+    epoch: string; generation: number; episodes: InvestigationEpisode[]; handbook: HandbookEntry[];
+    representedSupports: import('./types').MemorySupport[]; consolidated: string[]; organizedSeeds: string[];
+}
 export type ConsolidationReservation = { status: 'reserved'; id: string; generation: number } | { status: 'already-running' } |
     { status: 'budget-exhausted'; limit: number; resumesAt: number };
 
@@ -80,7 +83,7 @@ export class MemoryStore {
             }
             catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; }
-                state = { version: 2, epoch: randomUUID(), generation: 0, episodes: [], handbook: [], attempts: [], consolidated: [], organizedSeeds: [], job: null };
+                state = { version: 3, epoch: randomUUID(), generation: 0, episodes: [], handbook: [], attempts: [], consolidated: [], organizedSeeds: [], job: null };
                 assertOwned();
                 await writeFileAtomic(manifestPath, JSON.stringify(state), { fsync: true });
             }
@@ -114,7 +117,9 @@ export class MemoryStore {
 
     async inspect(): Promise<MemoryView> {
         return this.locked(async state => ({ epoch: state.epoch, generation: state.generation,
-            episodes: await this.readEpisodes(state), handbook: structuredClone(state.handbook), consolidated: [...state.consolidated], organizedSeeds: [...state.organizedSeeds] }));
+            episodes: await this.readEpisodes(state), handbook: structuredClone(state.handbook),
+            representedSupports: structuredClone(state.handbook.flatMap(entrySupports)),
+            consolidated: [...state.consolidated], organizedSeeds: [...state.organizedSeeds] }));
     }
 
     /** Rank experiences before loading payloads so semantic hits cannot be lost to an episode prefilter. */
@@ -148,7 +153,8 @@ export class MemoryStore {
                 if (candidate.kind === 'handbook') { handbook.push(state.handbook.find(entry => entry.id === candidate.id)!); }
             }
             return { epoch: state.epoch, generation: state.generation,
-                episodes: await this.readEpisodes({ ...state, episodes: [...selected.values()] }), handbook, consolidated: [], organizedSeeds: [] };
+                episodes: await this.readEpisodes({ ...state, episodes: [...selected.values()] }), handbook,
+                representedSupports: structuredClone(state.handbook.flatMap(entrySupports)), consolidated: [], organizedSeeds: [] };
         });
     }
 
@@ -233,7 +239,7 @@ export class MemoryStore {
                 if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; }
             }
             const state: Manifest = {
-                version: 2, epoch: randomUUID(), generation: preserved.generation,
+                version: 3, epoch: randomUUID(), generation: preserved.generation,
                 episodes: [], handbook: [], attempts: preserved.attempts,
                 consolidated: [], organizedSeeds: [], job: null,
             };

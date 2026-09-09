@@ -8,6 +8,7 @@ import { bm25Scores } from './ranking';
 import { SourceObservation } from '../git/repositorySnapshot';
 import { estimateTokens } from '../analysis/tools/modelContext';
 import { MEMORY_DEFAULTS, MemoryRequestError, MemorySettings } from './settings';
+import { assessMemoryAvailability } from './availability';
 
 export interface MemorySourceResult {
     key: string;
@@ -63,21 +64,41 @@ export class MemoryRetriever {
 
     retrieveNavigation(query: MemoryQuery, maxTokens = this.navigationTokens): MemoryNavigation[] {
         const started = performance.now();
+        const representedObservations = new Set<string>();
+        const representedEvidence = new Set<string>();
+        for (const support of this.view.representedSupports) {
+            const observationKey = `${support.episodeId}:${support.observationIndex}`;
+            if (support.evidenceId) { representedEvidence.add(`${observationKey}:${support.evidenceId}`); }
+            else { representedObservations.add(observationKey); }
+        }
         const entries = [
             ...this.view.handbook.map(entry => ({ origin: 'handbook' as const, situation: entry.situation,
                 triggers: entry.triggers, targetPaths: entry.targetPaths, terms: entryTerms(entry), supports: entrySupports(entry),
+                positiveSupports: [...entry.steps, ...entry.lessons].flatMap(item => item.supports), retirement: entry.retirement,
                 steps: entry.steps.map(({ supports, ...step }) => step), lessons: entry.lessons.map(({ supports, ...lesson }) => lesson) })),
-            ...this.view.episodes.filter(isEligibleEpisode).map(episode => ({ origin: 'episode' as const,
+            ...this.view.episodes.filter(isEligibleEpisode).flatMap(episode => {
+                const observations = episode.observations.flatMap((observation, observationIndex) =>
+                    isInvestigationObservation(observation) && !representedObservations.has(`${episode.id}:${observationIndex}`)
+                        ? [{ observation, observationIndex, evidence: observation.evidence.filter(item =>
+                            !representedEvidence.has(`${episode.id}:${observationIndex}:${item.id}`)) }] : [])
+                    .filter(item => item.evidence.length > 0 || item.observation.evidence.length === 0);
+                if (!observations.length) { return []; }
+                return [{ origin: 'episode' as const,
                 situation: episode.questions.join(' · ') || episode.changedPaths.join(', '),
                 triggers: [...episode.changedPaths, ...episode.changedSymbols],
-                targetPaths: [...new Set(episode.observations.filter(isInvestigationObservation).flatMap(item => item.evidence.map(evidence => evidence.source.path)))],
+                targetPaths: [...new Set(observations.flatMap(item => item.evidence.map(evidence => evidence.source.path)))],
                 terms: [...episode.questions, ...episode.changedPaths, ...episode.changedSymbols,
-                    ...episode.observations.filter(isInvestigationObservation).flatMap(item => [item.summary,
-                        ...Object.values(item.arguments).filter((value): value is string => typeof value === 'string')])],
-                supports: episode.observations.flatMap((observation, observationIndex) => isInvestigationObservation(observation)
-                    ? [{ episodeId: episode.id, observationIndex }] : []),
-                steps: [], lessons: [],
-            })),
+                    ...observations.flatMap(item => [item.observation.summary,
+                        ...Object.values(item.observation.arguments).filter((value): value is string => typeof value === 'string')])],
+                supports: observations.flatMap(item => item.evidence.length
+                    ? item.evidence.map(evidence => ({ episodeId: episode.id, observationIndex: item.observationIndex, evidenceId: evidence.id }))
+                    : [{ episodeId: episode.id, observationIndex: item.observationIndex }]),
+                positiveSupports: observations.flatMap(item => item.evidence.length
+                    ? item.evidence.map(evidence => ({ episodeId: episode.id, observationIndex: item.observationIndex, evidenceId: evidence.id }))
+                    : [{ episodeId: episode.id, observationIndex: item.observationIndex }]),
+                retirement: null,
+                steps: [], lessons: [] }];
+            }),
         ];
         const exact = new Set([...query.paths, ...query.symbols]);
         const words = new Set([...query.keywords, ...query.symbols].flatMap(value => value.toLowerCase().split(/[^\p{L}\p{N}_]+/u)).filter(Boolean));
@@ -110,7 +131,9 @@ export class MemoryRetriever {
                 .filter(evidence => !('evidenceId' in support) || !support.evidenceId || evidence.id === support.evidenceId)
                 .map(evidence => evidence.source)).map(source => [memorySourceKey(source), source])).values()];
             if (sources.some(source => this.excluded(source.path))) { continue; }
-            const fields = { origin: entry.origin, situation: entry.situation, targetPaths: filtered, steps: entry.steps, lessons: entry.lessons,
+            const availability = assessMemoryAvailability({ targetPaths: filtered,
+                supports: entry.positiveSupports, retirement: entry.retirement }, this.view.episodes, this.snapshot);
+            const fields = { origin: entry.origin, availability, situation: entry.situation, targetPaths: filtered, steps: entry.steps, lessons: entry.lessons,
                 sourceCount: sources.length, observationCount: new Set(records.map(item => `${item.support.episodeId}:${item.support.observationIndex}`)).size,
                 snapshotCount: new Set(records.map(item => item.episode.snapshot.id)).size };
             const identity = JSON.stringify([fields, sources.map(memorySourceKey)]);

@@ -369,7 +369,7 @@ function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRu
         }
     };
     return [{
-        name: 'searchRepositoryMemory', description: `Search repository-wide historical situations, investigation routes and lessons. Select relevant guidance using the current diff. Returns short M* IDs. At most ${memory.settings['search.maxCalls']} searches per run.`,
+        name: 'searchRepositoryMemory', description: `Search repository-wide historical situations, investigation routes, lessons, and their current-snapshot availability or retirement state. Select relevant guidance using the current diff. Returns short M* IDs. At most ${memory.settings['search.maxCalls']} searches per run.`,
         parameters: objectSchema({ query: { type: 'string', minLength: 1 } }, ['query']),
         execute: guarded('searchRepositoryMemory', async (_context, args) => {
             const started = performance.now();

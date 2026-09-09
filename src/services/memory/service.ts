@@ -94,8 +94,11 @@ export function createConsolidationRunner(execution: LLMExecution, settings: Mem
             'Tool success, analysis completion, and use by a claim are distinct from correctness or a successful fix. Failed, empty, truncated, or degraded observations only establish their documented local limitations.',
             'No runtime, host compatibility, test success, or repair outcome may be inferred from source code. No result does not mean the target does not exist.',
             'Select an H* existingEntryId for a complete update of that experience; use null only for a distinct new experience. Do not duplicate an existing situation simply because a path changed.',
+            'Use retirements only when later investigations explicitly contradict the reusable experience itself. Each retirement needs successful after-tree counterevidence from at least two V* snapshots, with a question and retained claim citing the selected S* source.',
+            'A missing or moved path is location staleness, not proof that the experience is false. Do not retire an experience for a failed lookup, an empty result, a rename alone, or evidence that merely describes newer code.',
+            'Retirement is contextual: the application activates it only while a recorded counterevidence state still matches the current snapshot. Keep the original experience and optionally point replacementEntryIndex at a valid entry in this result.',
             'Keep conflicting history conditional and state its limits. Do not turn old behavior into future maintenance requirements or executable instructions.',
-            'Every experience must involve the seed T1. If no adequately supported reusable experience remains, return no-findings with empty entries and a concrete rationale.',
+            'Every entry and retirement must involve the seed T1. If no adequately supported reusable experience or invalidation remains, return no-findings with empty entries and retirements and a concrete rationale.',
             'Return exactly one JSON object matching the schema. Paths and persistent IDs are assigned by the application from the cited sources.',
         ].join('\n')
     }, { role: 'user' as const, content: input }];
@@ -139,7 +142,7 @@ export function createConsolidationRunner(execution: LLMExecution, settings: Mem
                 delta = [{ role: 'user', content: [
                     'The previous consolidation result failed local evidence validation. Return the complete corrected result for every supplied group.',
                     'Repair invalid entries after rechecking T* investigations, V* snapshots, O* observations, S* sources and supplied H* update targets.',
-                    'Every step and lesson requires two distinct V* snapshots. Remove unsupported items; use no-findings only with empty entries.',
+                    'Every step, lesson, and retirement requires two distinct V* snapshots. Remove unsupported items; use no-findings only with empty entries and retirements.',
                     'Do not add unrelated sources merely to satisfy the snapshot requirement.',
                     ...latest.issues.map(issue => `- ${issue}`),
                 ].join('\n') }];
@@ -233,7 +236,8 @@ export class RepositoryMemoryService implements vscode.Disposable {
                         const removed = new Set(excluded.map(episode => episode.id));
                         const safeView = {
                             ...view, episodes: view.episodes.filter(episode => !removed.has(episode.id)),
-                            handbook: view.handbook.filter(entry => entrySupports(entry).every(ref => !removed.has(ref.episodeId)))
+                            handbook: view.handbook.filter(entry => entrySupports(entry).every(ref => !removed.has(ref.episodeId))),
+                            representedSupports: view.representedSupports.filter(ref => !removed.has(ref.episodeId)),
                         };
                         const retriever = new MemoryRetriever(safeView, snapshot, currentPatterns, () => {
                             if (!vscode.workspace.getConfiguration('gitCommitGenie.memory').get<boolean>('enabled', false)) { throw new Error('Memory was disabled during generation.'); }
@@ -250,7 +254,8 @@ export class RepositoryMemoryService implements vscode.Disposable {
                             const excludedIds = new Set(next.episodes.filter(episode => episode.changedPaths.some(file => shouldExclude(file, exclusions))
                                 || episode.observations.some(item => item.evidence.some(evidence => shouldExclude(evidence.source.path, exclusions)))).map(episode => episode.id));
                             return { ...next, episodes: next.episodes.filter(episode => !excludedIds.has(episode.id)),
-                                handbook: next.handbook.filter(entry => entrySupports(entry).every(ref => !excludedIds.has(ref.episodeId))) };
+                                handbook: next.handbook.filter(entry => entrySupports(entry).every(ref => !excludedIds.has(ref.episodeId))),
+                                representedSupports: next.representedSupports.filter(ref => !excludedIds.has(ref.episodeId)) };
                         }, epoch: () => store.epoch() });
                         retriever.usage.retrievalMs += performance.now() - started;
                         return retriever;

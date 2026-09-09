@@ -5,7 +5,7 @@ import { hashContent, RepositorySnapshotReader, SnapshotEntry, SnapshotIdentity,
 import { MemoryRetriever } from '../../services/memory/retriever';
 import { MemoryView } from '../../services/memory/store';
 import { MEMORY_DEFAULTS, MemoryRequestError, MemorySettings } from '../../services/memory/settings';
-import { HandbookEntry, InvestigationEpisode, MemoryNavigation, RecordedObservation } from '../../services/memory/types';
+import { HandbookEntry, InvestigationEpisode, MemoryNavigation, RecordedObservation, entrySupports } from '../../services/memory/types';
 
 describe('memory navigation retrieval', () => {
     it('returns structured handbook navigation with situation, steps, lessons, and all provenance counts', () => {
@@ -18,15 +18,18 @@ describe('memory navigation retrieval', () => {
         const result = retriever.retrieveNavigation({ paths: ['src/ui/memoryWebviewPolicy.ts'], symbols: ['filterMemoryLogsForWebview'], keywords: ['visibility'] });
 
         assert.equal(result.length, 1);
-        assert.deepEqual(Object.keys(result[0]).sort(), ['id', 'lessons', 'observationCount', 'origin', 'situation', 'snapshotCount', 'sourceCount', 'steps', 'targetPaths']);
+        assert.deepEqual(Object.keys(result[0]).sort(), ['availability', 'id', 'lessons', 'observationCount', 'origin', 'situation', 'snapshotCount', 'sourceCount', 'steps', 'targetPaths']);
         assert.equal(result[0].id, 'M1');
         assert.equal(result[0].origin, 'handbook');
+        assert.equal(result[0].availability.location, 'needs_revalidation');
+        assert.equal(result[0].availability.experience, 'unverified');
+        assert.deepEqual(result[0].availability.targets, [{ path: 'src/ui/memoryWebviewPolicy.ts', state: 'needs_revalidation' }]);
         assert.equal(result[0].situation, handbook.situation);
         assert.deepEqual(result[0].targetPaths, ['src/ui/memoryWebviewPolicy.ts']);
         assert.equal(result[0].steps[0].path, 'src/ui/memoryWebviewPolicy.ts');
         assert.equal(result[0].steps[0].symbol, 'filterMemoryLogsForWebview');
         assert.equal(result[0].lessons[0].limitation, handbook.lessons[0].limitation);
-        assert.equal(result[0].sourceCount, 2);
+        assert.equal(result[0].sourceCount, 1);
         assert.equal(result[0].observationCount, 2);
         assert.equal(result[0].snapshotCount, 2);
     });
@@ -63,12 +66,47 @@ describe('memory navigation retrieval', () => {
         assert.equal(result[0].snapshotCount, 1);
     });
 
+    it('suppresses represented evidence at evidence granularity while preserving remaining raw clues', () => {
+        // Verify a handbook source support hides only its E1 evidence, whereas a lesson support without evidenceId hides the whole observation.
+        const episodes = [makeEpisodeWithTwoEvidence(1), makeEpisodeWithTwoEvidence(2)];
+        const route: HandbookEntry = {
+            ...makeHandbook(episodes),
+            lessons: [],
+            targetPaths: ['src/primary.ts'],
+            triggers: ['src/primary.ts', 'primary source'],
+        };
+        const rawRetriever = new MemoryRetriever(makeView(episodes, [route]), makeSnapshotReader(), []);
+        const raw = rawRetriever.retrieveNavigation({ paths: ['history/secondary.xyz'], symbols: [], keywords: [] });
+
+        assert.equal(raw.length, 1);
+        assert.equal(raw.every(item => item.origin === 'episode'), true);
+        assert.equal(raw.every(item => JSON.stringify(item.targetPaths) === JSON.stringify(['history/secondary.xyz'])), true);
+        assert.equal(raw.every(item => item.sourceCount === 1 && item.observationCount === 1), true);
+
+        const lesson: HandbookEntry = {
+            ...route,
+            id: randomUUID(),
+            situation: 'When the secondary source search fails, inspect the recorded limitation.',
+            steps: [],
+            lessons: [{ observation: 'The historical search was bounded.', implication: 'Use the saved limitation to plan the next check.',
+                limitation: 'The observation is historical context only.', supports: episodes.map(episode => ({ episodeId: episode.id, observationIndex: 0 })), snapshotCount: 2 }],
+            targetPaths: ['history/secondary.xyz'],
+            triggers: ['secondary source search'],
+        };
+        const lessonRetriever = new MemoryRetriever(makeView(episodes, [lesson]), makeSnapshotReader(), []);
+        const lessonResult = lessonRetriever.retrieveNavigation({ paths: ['history/secondary.xyz'], symbols: [], keywords: [] });
+
+        assert.equal(lessonResult.length, 1);
+        assert.equal(lessonResult[0].origin, 'handbook');
+        assert.equal(lessonResult.some(item => item.origin === 'episode'), false);
+    });
+
     it('recalls a lesson with no source evidence and returns no source rows on expansion', async () => {
         // Verify a historical failure lesson remains useful for planning even when its supporting observation has no source code.
         const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/memory.ts', failed: true }),
             makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/memory.ts', failed: true })];
         const handbook: HandbookEntry = {
-            id: randomUUID(), situation: 'When a repository search returns no renderer caller, inspect the filtering entry directly.', steps: [],
+            id: randomUUID(), situation: 'When a repository search returns no renderer caller, inspect the filtering entry directly.', retirement: null, steps: [],
             lessons: [{ observation: 'The bounded search returned no caller.', implication: 'Use the filtering function as the next investigation entry point.', limitation: 'An empty result does not prove that the caller is absent.',
                 supports: episodes.map((episode, index) => ({ episodeId: episode.id, observationIndex: 0 })), snapshotCount: 2 }],
             targetPaths: ['src/memory.ts'], triggers: ['renderer caller', 'filtering function'],
@@ -178,11 +216,11 @@ describe('memory source expansion', () => {
 
         const result = await retriever.readMemorySources([navigation[0].id]);
 
-        assert.equal(result.length, 2);
+        assert.equal(result.length, 1);
         assert.equal(result.every(item => item.status === 'source_relocated'), true);
         assert.equal(result.every(item => item.source?.path === 'src/parser.ts'), true);
         assert.deepEqual(retriever.publishedNavigation[0], navigation[0]);
-        assert.equal(retriever.usage.expanded, 2);
+        assert.equal(retriever.usage.expanded, 1);
     });
 
     it('returns unavailable for a no-source lesson and rejects unknown M IDs before reading', async () => {
@@ -190,7 +228,7 @@ describe('memory source expansion', () => {
         const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/parser.ts', failed: true }),
             makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/parser.ts', failed: true })];
         const lesson: HandbookEntry = {
-            id: randomUUID(), situation: 'An empty search needs a direct source inspection.', steps: [],
+            id: randomUUID(), situation: 'An empty search needs a direct source inspection.', retirement: null, steps: [],
             lessons: [{ observation: 'The search returned no matches.', implication: 'Inspect the known filtering entry.', limitation: 'The empty search does not prove absence.',
                 supports: episodes.map(episode => ({ episodeId: episode.id, observationIndex: 0 })), snapshotCount: 2 }],
             targetPaths: [], triggers: ['empty search'],
@@ -234,15 +272,16 @@ describe('memory source expansion', () => {
         const result = await retriever.readMemorySources(first.map(item => item.id));
         const cached = await retriever.readMemorySources([first[0].id]);
 
-        assert.equal(result.length, 2);
-        assert.equal(observes, 2);
+        assert.equal(result.length, 1);
+        assert.equal(observes, 1);
         assert.deepEqual(cached, result.slice(0, 1));
-        assert.equal(retriever.usage.sourceAttempts, 2);
+        assert.equal(retriever.usage.sourceAttempts, 1);
     });
 });
 
 function makeView(episodes: InvestigationEpisode[], handbook: HandbookEntry[]): MemoryView {
-    return { epoch: 'epoch', generation: 1, episodes, handbook, consolidated: [], organizedSeeds: [] };
+    return { epoch: 'epoch', generation: 1, episodes, handbook,
+        representedSupports: handbook.flatMap(entrySupports), consolidated: [], organizedSeeds: [] };
 }
 
 function makeSettings(overrides: Partial<MemorySettings> = {}): MemorySettings {
@@ -251,7 +290,7 @@ function makeSettings(overrides: Partial<MemorySettings> = {}): MemorySettings {
 
 function makeHandbook(episodes: InvestigationEpisode[]): HandbookEntry {
     return {
-        id: randomUUID(), situation: 'When memory lifecycle visibility changes, inspect the filtering entry point.',
+        id: randomUUID(), situation: 'When memory lifecycle visibility changes, inspect the filtering entry point.', retirement: null,
         steps: [{ path: 'src/ui/memoryWebviewPolicy.ts', symbol: 'filterMemoryLogsForWebview', purpose: 'Find the filtering branch before changing the renderer.', operation: 'readFileContent',
             supports: episodes.map(episode => ({ episodeId: episode.id, observationIndex: 0, evidenceId: 'E1', questionIndex: 0, claimIndex: 0 })), snapshotCount: 2 }],
         lessons: [{ observation: 'Historical rows can be inert after a reload.', implication: 'Check restoration state before changing lifecycle rendering.', limitation: 'This historical behavior does not establish current source truth.',
@@ -278,12 +317,25 @@ function makeEpisode(options: {
         claims: observation.evidence.length ? [{ claim: 'The source was inspected.', evidenceRefs: ['E1'], disposition: 'must_express' }] : [], status: 'complete', model: 'retriever-test', promptVersion: 'memory-experience-1', toolsetVersion: 'snapshot-memory-experience-1' };
 }
 
+function makeEpisodeWithTwoEvidence(index: number): InvestigationEpisode {
+    const episode = makeEpisode({ episodeId: uuidFor(index), snapshotId: digestFor(index), sourcePath: 'src/primary.ts' });
+    const snapshot = episode.snapshot;
+    const excerpt = 'function filterMemoryLogsForWebview() { return true; }';
+    const secondary = { id: 'E2', source: {
+        snapshotId: snapshot.id, path: 'history/secondary.xyz', side: 'after' as const, blobOid: '1'.repeat(40), startLine: 1, endLine: 1,
+        excerpt, contentHash: hashContent(excerpt), truncated: false, sourceType: 'text' as const,
+    } };
+    episode.observations[0].evidence.push(secondary);
+    episode.claims.push({ claim: 'The secondary source was inspected.', evidenceRefs: ['E2'], disposition: 'must_express' });
+    return episode;
+}
+
 function makeIdentity(snapshotId: string): SnapshotIdentity {
     return { id: snapshotId, repositoryId: 'a'.repeat(64), worktreeId: 'b'.repeat(64), head: 'c'.repeat(40), beforeTree: 'd'.repeat(40), afterTree: 'e'.repeat(40), indexFingerprint: 'f'.repeat(64), autoStaged: false };
 }
 
 function makeSource(snapshot: SnapshotIdentity, sourcePath: string): SourceObservation {
-    const excerpt = `function filterMemoryLogsForWebview() { return '${sourcePath}'; }`;
+    const excerpt = 'function filterMemoryLogsForWebview() { return true; }';
     return { snapshotId: snapshot.id, path: sourcePath, side: 'after', blobOid: '1'.repeat(40), startLine: 1, endLine: 1, excerpt, contentHash: hashContent(excerpt), truncated: false, sourceType: 'text' };
 }
 
@@ -299,7 +351,7 @@ function makeSnapshotReader(options: {
         const excerpt = 'function filterMemoryLogsForWebview() { return true; }';
         return { snapshotId: '9'.repeat(64), path: candidate, side, blobOid: options.currentOid ?? '2'.repeat(40), startLine, endLine: startLine, excerpt, contentHash: hashContent(excerpt), truncated: false, sourceType: 'text' };
     };
-    return { entry, read, observe } as unknown as RepositorySnapshotReader;
+    return { identity: makeIdentity('9'.repeat(64)), entry, read, observe } as unknown as RepositorySnapshotReader;
 }
 
 function uuidFor(index: number): string {

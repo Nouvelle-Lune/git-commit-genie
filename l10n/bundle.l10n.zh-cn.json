@@ -501,6 +501,8 @@
 	"No recorded claim used this source.": "没有记录到结论引用这份源码。",
 	"{0} historical records · {1} independent snapshots": "{0} 条历史记录 · {1} 个独立快照",
 	"Applicable situation": "适用场景",
+	"Retired historical experience": "已停用的历史经验",
+	"Replacement experience": "替代经验",
 	"Investigation route": "定位入口与查找目的",
 	"Historical tool": "历史使用的工具",
 	"Historical lessons": "历史调查经验",

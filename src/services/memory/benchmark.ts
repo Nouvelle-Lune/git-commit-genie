@@ -144,9 +144,9 @@ export function createPipelineReplayAdapter(params: {
             const output = await params.runChain({ diffs, currentTime, repositoryPath: input.repository, snapshot, recorder,
                 loadMemory: input.group === 'A' ? undefined : async query => {
                     const view = await store.loadNavigation(query);
-                    if (input.group === 'B') { view.handbook = []; }
+                    if (input.group === 'B') { view.handbook = []; view.representedSupports = []; }
                     return new MemoryRetriever(view, snapshot, params.excludes, () => [], params.settings, { load: async query => {
-                        const next = await store.loadNavigation(query); if (input.group === 'B') { next.handbook = []; } return next;
+                        const next = await store.loadNavigation(query); if (input.group === 'B') { next.handbook = []; next.representedSupports = []; } return next;
                     }, epoch: () => store.epoch() });
                 },
             }, execution, { investigation: { excludePatterns: params.excludes } });

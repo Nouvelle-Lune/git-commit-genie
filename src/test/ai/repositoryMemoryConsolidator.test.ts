@@ -84,7 +84,7 @@ describe('memory consolidation grouping and projection', () => {
         assert.equal(input.groups[0].episodes[0].snapshot, 'V1');
         assert.equal(input.groups[0].episodes[1].snapshot, 'V2');
         assert.match(JSON.stringify(input.groups[0].episodes), /Where should a new memory lifecycle log be inspected/);
-        assert.match(JSON.stringify(input.groups[0].episodes), /Read the filtering entry/);
+        assert.match(JSON.stringify(input.groups[0].episodes), /Read the filtering predicate/);
         assert.match(JSON.stringify(input.groups[0].episodes), /filterMemoryLogsForWebview/);
         assert.match(JSON.stringify(input.groups[0].episodes), /usedByClaims/);
         assert.equal(input.groups[0].existing[0].id, 'H1');
@@ -135,6 +135,7 @@ describe('memory consolidation validation', () => {
                     observationIds: failedObservationIds,
                 }],
             }],
+            retirements: [],
         }] }, projection);
 
         assert.deepEqual(validated.issues, []);
@@ -154,6 +155,38 @@ describe('memory consolidation validation', () => {
         assert.equal(entry.lessons[0].snapshotCount, 2);
         assert.deepEqual(entry.targetPaths, ['src/ui/memoryWebviewPolicy.ts']);
         assert.ok(entry.triggers.includes('filterMemoryLogsForWebview'));
+    });
+
+    it('derives target paths from cited step evidence while lessons retain all observation sources', () => {
+        // Verify evidence-bound route supports avoid unrelated paths while evidence-free lessons preserve the observation context.
+        const episodes = makeRouteEpisodes().map(addSecondaryTargetSource);
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const routeObservations = observationsFor(projection, 'searchCode');
+        const route = validateConsolidation({ groups: [finding(group, {
+            existingEntryId: null,
+            situation: 'When the lifecycle source changes, inspect the cited filtering path first.',
+            steps: [{ sourceId: sourceForObservation(projection, routeObservations[0]), symbol: 'filterMemoryLogsForWebview',
+                purpose: 'Inspect the source evidence selected by the repeated route.', findings: findingsFor(projection, routeObservations) }],
+            lessons: [],
+        })] }, projection);
+
+        assert.deepEqual(route.issues, []);
+        assert.deepEqual(route.entries[0].targetPaths, ['src/ui/memoryWebviewPolicy.ts']);
+        assert.equal(route.entries[0].targetPaths.includes('src/services/unrelated.ts'), false);
+
+        const lessonObservations = observationsFor(projection, 'readFileContent');
+        const lesson = validateConsolidation({ groups: [finding(group, {
+            existingEntryId: null,
+            situation: 'When a bounded source reading finds multiple related files, retain the full observation context.',
+            steps: [],
+            lessons: [{ observation: 'A source reading included an additional related file.',
+                implication: 'Use all files observed by the lesson when planning a follow-up investigation.',
+                limitation: 'The lesson does not identify one source as the sole target.', observationIds: lessonObservations }],
+        })] }, projection);
+
+        assert.deepEqual(lesson.issues, []);
+        assert.deepEqual(lesson.entries[0].targetPaths, ['src/ui/memoryWebviewPolicy.ts', 'src/services/unrelated.ts']);
     });
 
     it('requires each step and lesson to cite two distinct snapshots', () => {
@@ -219,14 +252,16 @@ describe('memory consolidation validation', () => {
     it('rejects non-final or unrelated claims for a positive step', () => {
         // Verify a step support must point to a non-omit final claim that references the cited source evidence.
         const episodes = makeRouteEpisodes();
-        episodes[0].claims = [{ claim: 'An unrelated claim.', evidenceRefs: [], disposition: 'must_express' }];
         const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
         const projection = projectConsolidation([group]);
         const observations = observationsFor(projection, 'searchCode');
+        const findings = findingsFor(projection, observations);
+        const invalidClaimIndex = findings[0].claimIndex;
+        episodes[0].claims[invalidClaimIndex] = { claim: 'An unrelated claim.', evidenceRefs: [], disposition: 'must_express' };
         const invalid = validateConsolidation({ groups: [finding(group, {
             existingEntryId: null, situation: 'A source needs a final supporting claim.', steps: [{
                 sourceId: sourceForObservation(projection, observations[0]), symbol: 'filterMemoryLogsForWebview', purpose: 'Inspect the cited source.',
-                findings: findingsFor(projection, observations),
+                findings,
             }], lessons: [],
         })] }, projection);
         assert.equal(invalid.entries.length, 0);
@@ -254,7 +289,7 @@ describe('memory consolidation validation', () => {
             ],
         }], lessons: [] })] }, projection);
         assert.match(unknown.issues.join('\n'), /Unknown observation O999/);
-        assert.equal(validateConsolidation({ groups: [{ groupId: group.id, outcome: 'findings', rationale: 'No entries is invalid.', entries: [] }] }, projection).issues.length > 0, true);
+        assert.equal(validateConsolidation({ groups: [{ groupId: group.id, outcome: 'findings', rationale: 'No entries is invalid.', entries: [], retirements: [] }] }, projection).issues.length > 0, true);
 
         const empty = validateConsolidation({ groups: [finding(group, { existingEntryId: null, situation: 'No step or lesson.', steps: [], lessons: [] })] }, projection);
         assert.match(empty.issues.join('\n'), /needs steps or lessons/);
@@ -274,12 +309,121 @@ describe('memory consolidation validation', () => {
                 steps: [{ sourceId: sourceForObservation(projection, observations[0]), symbol: 'filterMemoryLogsForWebview',
                     purpose: 'Use the filtering function as the first investigation entry point.',
                     findings: findingsFor(projection, observations) }], lessons: [],
-            }],
+            }], retirements: [],
         }] }, projection);
 
         assert.deepEqual(validated.issues, []);
         assert.equal(validated.entries[0].id, original.id);
         assert.equal(validated.entries[0].situation, 'Updated situation for the same investigation experience.');
+    });
+});
+
+describe('memory retirement validation', () => {
+    it('publishes a retirement only from successful after-tree findings in two snapshots', () => {
+        // Verify a retirement preserves H1 while requiring source-bound questions and claims from two independent snapshots.
+        const episodes = makeRouteEpisodes();
+        const original = makeHandbook(episodes);
+        const group = buildConsolidationGroups(episodes, [], [original]).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const observations = observationsFor(projection, 'readFileContent');
+        const findings = observations.map(observationId => ({
+            ...findingsFor(projection, [observationId])[0],
+            sourceId: sourceForObservation(projection, observationId),
+        }));
+        const validated = validateConsolidation({ groups: [{
+            groupId: group.id,
+            outcome: 'findings',
+            rationale: 'The current after-tree evidence invalidates the historical route.',
+            entries: [],
+            retirements: [{ existingEntryId: 'H1', reason: 'The historical route no longer matches the current source behavior.', replacementEntryIndex: null, findings }],
+        }] }, projection);
+
+        assert.deepEqual(validated.issues, []);
+        assert.equal(validated.entries.length, 1);
+        assert.equal(validated.entries[0].id, original.id);
+        assert.equal(validated.entries[0].retirement?.reason, 'The historical route no longer matches the current source behavior.');
+        assert.equal(validated.entries[0].retirement?.supports.length, 2);
+        assert.equal(validated.entries[0].retirement?.snapshotCount, 2);
+        assert.equal(validated.entries[0].retirement?.supports.every(support => support.evidenceId === 'E1'
+            && support.questionIndex === 0 && support.claimIndex === 0), true);
+    });
+
+    it('rejects retirement findings with an unknown source, unrelated claim, or one snapshot', () => {
+        // Verify retirement counterevidence fails closed when its source or finding linkage is invalid or lacks independent snapshots.
+        const episodes = makeRouteEpisodes();
+        const original = makeHandbook(episodes);
+        const group = buildConsolidationGroups(episodes, [], [original]).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const observations = observationsFor(projection, 'readFileContent');
+        const validFindings = observations.map(observationId => ({
+            ...findingsFor(projection, [observationId])[0],
+            sourceId: sourceForObservation(projection, observationId),
+        }));
+        const unknownSource = validateConsolidation({ groups: [{
+            groupId: group.id, outcome: 'findings', rationale: 'Invalid source handle must be rejected.', entries: [],
+            retirements: [{ existingEntryId: 'H1', reason: 'Invalid source evidence.', replacementEntryIndex: null,
+                findings: [{ ...validFindings[0], sourceId: 'S999' }, validFindings[1]] }],
+        }] }, projection);
+        assert.equal(unknownSource.entries.length, 0);
+        assert.match(unknownSource.issues.join('\n'), /counterevidence.*bind/i);
+
+        const unrelatedClaim = validateConsolidation({ groups: [{
+            groupId: group.id, outcome: 'findings', rationale: 'Unrelated claim must be rejected.', entries: [],
+            retirements: [{ existingEntryId: 'H1', reason: 'Unrelated claim evidence.', replacementEntryIndex: null,
+                findings: [{ ...validFindings[0], claimIndex: 1 }, validFindings[1]] }],
+        }] }, projection);
+        assert.equal(unrelatedClaim.entries.length, 0);
+        assert.match(unrelatedClaim.issues.join('\n'), /counterevidence.*claim|retirement.*claim/i);
+
+        const oneSnapshot = validateConsolidation({ groups: [{
+            groupId: group.id, outcome: 'findings', rationale: 'One snapshot must be rejected.', entries: [],
+            retirements: [{ existingEntryId: 'H1', reason: 'Only one historical version.', replacementEntryIndex: null,
+                findings: [{ ...validFindings[0], sourceId: sourceForObservation(projection, observations[0]) },
+                    { ...findingsFor(projection, [observations[0]])[0], sourceId: sourceForObservation(projection, observations[0]) }] }],
+        }] }, projection);
+        assert.equal(oneSnapshot.entries.length, 0);
+        assert.match(oneSnapshot.issues.join('\n'), /two independent V\* snapshots/);
+    });
+
+    it('links a retirement to a replacement entry from the same proposal', () => {
+        // Verify replacementEntryIndex resolves to the newly validated entry ID while H1 remains a retired record.
+        const episodes = makeRouteEpisodes();
+        const original = makeHandbook(episodes);
+        const group = buildConsolidationGroups(episodes, [], [original]).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const positiveObservations = observationsFor(projection, 'searchCode');
+        const retirementObservations = observationsFor(projection, 'readFileContent');
+        const validated = validateConsolidation({ groups: [{
+            groupId: group.id,
+            outcome: 'findings',
+            rationale: 'The replacement route supersedes the retired experience.',
+            entries: [{
+                existingEntryId: null,
+                situation: 'When the source changes, inspect the updated filtering route.',
+                steps: [{ sourceId: sourceForObservation(projection, positiveObservations[0]), symbol: 'filterMemoryLogsForWebview',
+                    purpose: 'Inspect the updated filtering route before expanding callers.', findings: findingsFor(projection, positiveObservations) }],
+                lessons: [],
+            }],
+            retirements: [{ existingEntryId: 'H1', reason: 'The old route was superseded by the updated filtering route.', replacementEntryIndex: 0,
+                findings: retirementObservations.map(observationId => ({ ...findingsFor(projection, [observationId])[0], sourceId: sourceForObservation(projection, observationId) })) }],
+        }] }, projection);
+
+        assert.deepEqual(validated.issues, []);
+        assert.equal(validated.entries.length, 2);
+        const replacement = validated.entries.find(entry => entry.id !== original.id)!;
+        const retired = validated.entries.find(entry => entry.id === original.id)!;
+        assert.ok(replacement);
+        assert.equal(retired.retirement?.replacementEntryId, replacement.id);
+    });
+
+    it('requires both entries and retirements arrays for every proposal group', () => {
+        // Verify the version-3 proposal protocol rejects omitted retirements and requires empty arrays for no-findings.
+        const episodes = makeRouteEpisodes();
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const omitted = validateConsolidation({ groups: [{ groupId: group.id, outcome: 'no-findings', rationale: 'The shape is intentionally incomplete.', entries: [] }] }, projection);
+        assert.equal(omitted.entries.length, 0);
+        assert.match(omitted.issues.join('\n'), /retirements|required/i);
     });
 });
 
@@ -297,11 +441,21 @@ describe('consolidatePending lifecycle', () => {
                 const projection = projectConsolidation([sourceGroup]);
                 const observations = observationsFor(projection, 'searchCode');
                 return { value: validate({ groups: [{
-                    groupId: projected.groups[0].id, outcome: 'findings', rationale: 'Published from repeated route evidence.', entries: [{
-                        existingEntryId: null, situation: 'When lifecycle filtering changes, inspect the filtering entry point.',
-                        steps: [{ sourceId: sourceForObservation(projection, observations[0]), symbol: 'filterMemoryLogsForWebview', purpose: 'Inspect filtering conditions.',
-                            findings: findingsFor(projection, observations) }], lessons: [],
+                    groupId: projected.groups[0].id,
+                    outcome: 'findings',
+                    rationale: 'Published from repeated route evidence.',
+                    entries: [{
+                        existingEntryId: null,
+                        situation: 'When lifecycle filtering changes, inspect the filtering entry point.',
+                        steps: [{
+                            sourceId: sourceForObservation(projection, observations[0]),
+                            symbol: 'filterMemoryLogsForWebview',
+                            purpose: 'Inspect filtering conditions.',
+                            findings: findingsFor(projection, observations),
+                        }],
+                        lessons: [],
                     }],
+                    retirements: [],
                 }] }), attempts: 1 };
             });
 
@@ -325,16 +479,22 @@ describe('consolidatePending lifecycle', () => {
             const original = makeHandbook(episodes);
             const store = new MemoryStore(storageRoot, repositoryId);
             await recordAll(store, episodes);
+            const initial = await store.inspect();
+            const reservation = await store.reserveConsolidation(initial, 2);
+            assert.equal(reservation.status, 'reserved');
+            if (reservation.status !== 'reserved') { throw new Error('Expected a publication lease for the existing handbook fixture.'); }
+            await store.publishHandbook(initial, reservation.generation, reservation.id, [original], [], undefined, MEMORY_DEFAULTS);
             const group = buildConsolidationGroups(episodes, [], [original]).find(item => item.seedId === episodes[0].id)!;
             const runner = makeRunner(async (input, _signal, validate) => {
                 const projected = JSON.parse(input) as { groups: Array<{ id: string }> };
-                return { value: validate({ groups: [{ groupId: projected.groups[0].id, outcome: 'no-findings', rationale: 'No new reusable experience was found.', entries: [] }] }), attempts: 1 };
+                return { value: validate({ groups: [{ groupId: projected.groups[0].id, outcome: 'no-findings', rationale: 'No new reusable experience was found.', entries: [], retirements: [] }] }), attempts: 1 };
             });
 
             const result = await consolidatePending(store, runner, new AbortController().signal);
             assert.equal(result.status, 'no-findings');
             assert.deepEqual((await store.inspect()).handbook.map(entry => entry.id), [original.id]);
-            assert.deepEqual((await store.inspect()).consolidated, [group.fingerprint]);
+            const storedGroup = buildConsolidationGroups((await store.inspect()).episodes, [], [original]).find(item => item.seedId === episodes[0].id)!;
+            assert.deepEqual((await store.inspect()).consolidated, [storedGroup.fingerprint]);
         });
     });
 
@@ -349,7 +509,7 @@ describe('consolidatePending lifecycle', () => {
             const runner = makeRunner(async (input, _signal, validate) => {
                 seen.push(input);
                 const projected = JSON.parse(input) as { groups: Array<{ id: string; episodes: Array<{ id: string }> }> };
-                return { value: validate({ groups: [{ groupId: projected.groups[0].id, outcome: 'no-findings', rationale: 'The bounded batch is valid.', entries: [] }] }), attempts: 1 };
+                return { value: validate({ groups: [{ groupId: projected.groups[0].id, outcome: 'no-findings', rationale: 'The bounded batch is valid.', entries: [], retirements: [] }] }), attempts: 1 };
             }, 1_000_000, input => JSON.parse(input).groups[0].episodes.length > 2 ? 1_100 : 1);
 
             const result = await consolidatePending(store, runner, new AbortController().signal, makeSettings({ 'consolidation.maxCallsPer24h': 3 }));
@@ -368,7 +528,7 @@ function finding(group: ConsolidationGroup, entry: {
     steps: Array<{ sourceId: string; symbol: string | null; purpose: string; findings: Array<{ observationId: string; questionIndex: number; claimIndex: number }> }>;
     lessons: Array<{ observation: string; implication: string; limitation: string; observationIds: string[] }>;
 }): Record<string, unknown> {
-    return { groupId: group.id, outcome: 'findings', rationale: 'The selected observations support this experience.', entries: [entry] };
+    return { groupId: group.id, outcome: 'findings', rationale: 'The selected observations support this experience.', entries: [entry], retirements: [] };
 }
 
 function stepFor(projection: ReturnType<typeof projectConsolidation>): {
@@ -428,6 +588,19 @@ function makeRouteEpisodes(options: {
     });
 }
 
+function addSecondaryTargetSource(episode: InvestigationEpisode): InvestigationEpisode {
+    return {
+        ...episode,
+        observations: episode.observations.map((observation, observationIndex) => ({
+            ...observation,
+            evidence: [...observation.evidence, {
+                id: `EXTRA-${observationIndex}`,
+                source: makeSource(episode.snapshot, 'src/services/unrelated.ts', `unrelated source ${observationIndex}`),
+            }],
+        })),
+    };
+}
+
 function makeEpisode(options: {
     episodeId?: string;
     snapshotId?: string;
@@ -459,7 +632,7 @@ function makeEpisode(options: {
     return {
         version: 2,
         id: options.episodeId ?? randomUUID(),
-        createdAt: Number(options.episodeId?.slice(-2) ?? Date.now()),
+        createdAt: Date.now() + Number(options.episodeId?.slice(-2) ?? 0),
         snapshot,
         changedPaths: options.changedPaths ?? [sourcePath],
         changedSymbols: options.changedSymbols ?? ['parseMemoryLog'],
@@ -506,10 +679,11 @@ function makeHandbook(episodes: InvestigationEpisode[]): HandbookEntry {
     return {
         id: '10000000-0000-4000-8000-000000000001',
         situation: 'When memory lifecycle visibility changes, inspect the filtering entry point.',
+        retirement: null,
         steps: [{
             path: 'src/ui/memoryWebviewPolicy.ts', symbol: 'filterMemoryLogsForWebview',
             purpose: 'Inspect the filtering conditions before changing the renderer.', operation: 'readFileContent',
-            supports: episodes.map(episode => ({ episodeId: episode.id, observationIndex: 0, evidenceId: 'E1' })), snapshotCount: 2,
+            supports: episodes.map(episode => ({ episodeId: episode.id, observationIndex: 0, evidenceId: 'E1', questionIndex: 0, claimIndex: 0 })), snapshotCount: 2,
         }],
         lessons: [],
         targetPaths: ['src/ui/memoryWebviewPolicy.ts'],

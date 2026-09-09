@@ -14,6 +14,7 @@ import {
 
 describe('EpisodeRecorder', () => {
     it('seals detached observations bound to the same snapshot and valid excerpt hashes', () => {
+        // Verify a sealed episode records the version-2 experience protocol and detached source provenance.
         const snapshot = makeSnapshot();
         const recorder = new EpisodeRecorder(snapshot, 'test-model');
         const observation = makeObservation(snapshot);
@@ -26,8 +27,8 @@ describe('EpisodeRecorder', () => {
 
         assert.deepEqual(episode.snapshot, snapshot);
         assert.equal(episode.model, 'test-model');
-        assert.equal(episode.promptVersion, 'memory-2');
-        assert.equal(episode.toolsetVersion, 'snapshot-memory-handles-3');
+        assert.equal(episode.promptVersion, 'memory-experience-1');
+        assert.equal(episode.toolsetVersion, 'snapshot-memory-experience-1');
         assert.equal(episode.observations[0].summary, 'read source');
         assert.equal(episode.observations[0].evidence[0].source.excerpt, 'const value = 1;');
         assert.equal(episode.observations[0].evidence[0].source.contentHash, hashContent('const value = 1;'));
@@ -35,6 +36,7 @@ describe('EpisodeRecorder', () => {
     });
 
     it('rejects evidence from another snapshot or with a mismatched content hash', () => {
+        // Verify rejects evidence from another snapshot or with a mismatched content hash.
         const snapshot = makeSnapshot();
         const recorder = new EpisodeRecorder(snapshot, 'test-model');
         const foreign = makeObservation(makeSnapshot({ id: 'f'.repeat(64) }));
@@ -49,6 +51,7 @@ describe('EpisodeRecorder', () => {
     });
 
     it('rejects duplicate evidence IDs and claims that reference an unobserved E id', () => {
+        // Verify rejects duplicate evidence IDs and claims that reference an unobserved E id.
         const snapshot = makeSnapshot();
         const duplicateRecorder = new EpisodeRecorder(snapshot, 'test-model');
         duplicateRecorder.record(makeObservation(snapshot));
@@ -64,6 +67,7 @@ describe('EpisodeRecorder', () => {
     });
 
     it('enforces source and episode schema boundaries before validation', () => {
+        // Verify enforces source and episode schema boundaries before validation.
         const snapshot = makeSnapshot();
         const invalidPath = makeSource(snapshot, { path: '../outside.ts' });
         assert.equal(sourceObservationSchema.safeParse(invalidPath).success, false);
@@ -78,12 +82,23 @@ describe('EpisodeRecorder', () => {
         assert.throws(() => recorder.seal(makeSealInput()), /too_small|positive|nonnegative/i);
     });
 
-    it('classifies only complete episodes with non-memory successful evidence as eligible', () => {
+    it('classifies complete, degraded, and unavailable episodes with non-memory observations as eligible', () => {
+        // Verify degraded and unavailable investigations remain eligible while cancelled, error, and memory-only episodes remain excluded.
         const snapshot = makeSnapshot();
         const completeRecorder = new EpisodeRecorder(snapshot, 'test-model');
         completeRecorder.record(makeObservation(snapshot));
         const complete = completeRecorder.seal(makeSealInput());
         assert.equal(isEligibleEpisode(complete), true);
+
+        const degradedRecorder = new EpisodeRecorder(snapshot, 'test-model');
+        degradedRecorder.record(makeObservation(snapshot));
+        const degraded = degradedRecorder.seal(makeSealInput([], 'degraded'));
+        assert.equal(isEligibleEpisode(degraded), true);
+
+        const unavailableRecorder = new EpisodeRecorder(snapshot, 'test-model');
+        unavailableRecorder.record(makeObservation(snapshot));
+        const unavailable = unavailableRecorder.seal(makeSealInput([], 'unavailable'));
+        assert.equal(isEligibleEpisode(unavailable), true);
 
         const memoryRecorder = new EpisodeRecorder(snapshot, 'test-model');
         memoryRecorder.record(makeObservation(snapshot, { tool: 'readMemorySources' }));
@@ -94,9 +109,15 @@ describe('EpisodeRecorder', () => {
         errorRecorder.record(makeObservation(snapshot));
         const errored = errorRecorder.seal(makeSealInput([], 'error'));
         assert.equal(isEligibleEpisode(errored), false);
+
+        const cancelledRecorder = new EpisodeRecorder(snapshot, 'test-model');
+        cancelledRecorder.record(makeObservation(snapshot));
+        const cancelled = cancelledRecorder.seal(makeSealInput([], 'cancelled'));
+        assert.equal(isEligibleEpisode(cancelled), false);
     });
 
     it('validates already sealed episodes when called directly', () => {
+        // Verify validates already sealed episodes when called directly.
         const snapshot = makeSnapshot();
         const recorder = new EpisodeRecorder(snapshot, 'test-model');
         recorder.record(makeObservation(snapshot));
