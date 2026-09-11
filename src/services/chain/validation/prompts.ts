@@ -1,6 +1,12 @@
 import { AIMessage } from '../../llm/providers';
+import type { CommitFactContext } from './commitValidation';
 
-export function buildValidateAndFixMessages(commitMessage: string, checklistText?: string, userTemplate?: string): AIMessage[] {
+export function buildValidateAndFixMessages(
+    commitMessage: string,
+    checklistText?: string,
+    userTemplate?: string,
+    factContext?: CommitFactContext,
+): AIMessage[] {
     const system: AIMessage = {
         role: 'system',
         content: [
@@ -11,7 +17,8 @@ export function buildValidateAndFixMessages(commitMessage: string, checklistText
             '<critical>',
             'Output ONLY JSON.',
             'Do not include markdown.',
-            'Apply minimal edits when fixing.',
+            'Apply minimal edits when fixing, but you may edit header, body, footers, language, and template structure as required.',
+            'The semantic facts supplied below are authoritative. Never remove a required fact or add a fact that is not supplied.',
             'If user template is provided, follow it with HIGHEST PRIORITY while maintaining Conventional Commits structure.',
             '</critical>'
         ].join('\n')
@@ -68,6 +75,7 @@ export function buildValidateAndFixMessages(commitMessage: string, checklistText
             '  "status": "valid"|"fixed" (default: "valid"),',
             '  "commitMessage": string,',
             '  "violations": string[] (default: []),',
+            '  "preservedFactIds": string[] (every required C* id that remains expressed),',
             '  "notes": string|null (default: null)',
             '}',
             '</schema>',
@@ -79,6 +87,16 @@ export function buildValidateAndFixMessages(commitMessage: string, checklistText
             checklist,
             templateSection,
             '',
+            '<fact_contract>',
+            'Required facts must remain expressed after any fix, even if their wording changes.',
+            'preservedFactIds must list every required fact id that is still expressed in commitMessage.',
+            'Optional facts may be retained or removed only when needed for format or template compliance.',
+            JSON.stringify({
+                required_facts: factContext?.requiredFacts ?? [],
+                optional_facts: factContext?.optionalFacts ?? [],
+            }, null, 2),
+            '</fact_contract>',
+            '',
             '<input>',
             'Commit message:',
             commitMessage,
@@ -89,61 +107,12 @@ export function buildValidateAndFixMessages(commitMessage: string, checklistText
     return [system, user];
 }
 
-export function buildEnforceStrictFixMessages(current: string, problems: string[], userTemplate?: string): AIMessage[] {
-    const system: AIMessage = {
-        role: 'system',
-        content: [
-            '<critical>',
-            'Return STRICT JSON only.',
-            'Fix commit message to satisfy Conventional Commits exactly.',
-            'If user template is provided, follow it with HIGHEST PRIORITY while maintaining Conventional Commits structure.',
-            '</critical>'
-        ].join('\n')
-    };
-
-    let templateSection = '';
-    if (userTemplate && userTemplate.trim()) {
-        templateSection = [
-            '',
-            '<user_template>',
-            'USER TEMPLATE - HIGHEST PRIORITY:',
-            '- Follow the user template with highest priority',
-            '- Maintain Conventional Commits header format',
-            '- Apply template requirements for body, footers, and formatting',
-            '',
-            userTemplate,
-            '</user_template>'
-        ].join('\n');
-    }
-
-    const user: AIMessage = {
-        role: 'user',
-        content: [
-            '<instructions>',
-            'Fix the commit message to satisfy all constraints.',
-            '</instructions>',
-            '',
-            '<schema>',
-            'Output only:',
-            '{"commitMessage": string}',
-            '</schema>',
-            '',
-            '<input>',
-            'Current message:',
-            current,
-            '</input>',
-            '',
-            '<problems>',
-            'Detected problems:',
-            JSON.stringify(problems),
-            '</problems>',
-            templateSection
-        ].filter(Boolean).join('\n')
-    };
-    return [system, user];
-}
-
-export function buildEnforceLanguageMessages(commitMessage: string, lang: string, userTemplate?: string): AIMessage[] {
+export function buildEnforceLanguageMessages(
+    commitMessage: string,
+    lang: string,
+    userTemplate?: string,
+    factContext?: CommitFactContext,
+): AIMessage[] {
     const system: AIMessage = {
         role: 'system',
         content: [
@@ -185,6 +154,7 @@ export function buildEnforceLanguageMessages(commitMessage: string, lang: string
             '- Do NOT translate the Conventional Commit <type> token (must be a valid commit type in English)',
             '- Do NOT translate footer tokens such as BREAKING CHANGE or Refs',
             '- Preserve the exact structure: header, blank lines, body, footers',
+            '- Preserve every required semantic fact and exact identifier from the fact contract',
             '</constraints>',
             templateSection,
             '',
@@ -193,8 +163,15 @@ export function buildEnforceLanguageMessages(commitMessage: string, lang: string
             '</target_language>',
             '',
             '<schema>',
-            'Return only JSON: {"commitMessage": string}',
+            'Return only JSON: {"commitMessage": string, "preservedFactIds": string[]}',
             '</schema>',
+            '',
+            '<fact_contract>',
+            JSON.stringify({
+                required_facts: factContext?.requiredFacts ?? [],
+                optional_facts: factContext?.optionalFacts ?? [],
+            }, null, 2),
+            '</fact_contract>',
             '',
             '<input>',
             'Commit message:',

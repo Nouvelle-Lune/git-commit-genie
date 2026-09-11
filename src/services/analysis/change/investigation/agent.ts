@@ -11,10 +11,8 @@ import {
     buildInvestigationPlanMessages,
 } from '../prompts';
 import {
-    ChangeExtraction,
     DraftEvidence,
     InvestigationPlan,
-    InvestigationTarget,
     RepositoryEvidence,
 } from '../types';
 import {
@@ -29,9 +27,6 @@ import {
 
 export type { ChangeAnalysisAgentOutput, InvestigationStepEvent } from './changeAnalysisProfile';
 
-const MAX_TARGETS = 3;
-const MAX_QUESTIONS_PER_TARGET = 2;
-
 function dedupeStrings(values: unknown): string[] {
     if (!Array.isArray(values)) {
         return [];
@@ -43,62 +38,12 @@ function dedupeStrings(values: unknown): string[] {
     ));
 }
 
-/**
- * Names the change actually touched. Planner targets are intersected with this
- * set so the investigation cannot be redirected onto an unrelated part of the
- * repository that merely sounds relevant.
- */
-function collectGroundedNames(extraction: ChangeExtraction): Set<string> {
-    return new Set([
-        ...extraction.changedSymbols.map(symbol => symbol.name),
-        ...extraction.introducedSymbols,
-        ...extraction.removedSymbols,
-        ...extraction.changedCalls,
-        ...extraction.changedConfigs,
-        ...extraction.changedTypes,
-        ...extraction.changedDependencies,
-    ]);
-}
-
-/**
- * Validates planner targets against the part of the extraction appropriate for
- * their kind. File targets are deliberately checked against changedFiles rather
- * than the general name set so an unchanged repository path cannot redirect the
- * investigation.
- */
-function isGroundedTarget(
-    extraction: ChangeExtraction,
-    groundedNames: Set<string>,
-    target: string,
-    kind: InvestigationTarget['kind'],
-    file: string | null,
-): boolean {
-    if (kind === 'file') {
-        return file === target && extraction.changedFiles.some(changedFile => changedFile.path === target);
-    }
-    return groundedNames.has(target);
-}
-
-/**
- * Returns true when the diff alone already determines the change's meaning, so
- * repository investigation would only add cost. Documentation, lockfile, and
- * pure-formatting changes have no code path to trace.
- */
-export function isInvestigationWorthwhile(extraction: ChangeExtraction): boolean {
-    const hasCodeTarget = extraction.changedSymbols.length > 0
-        || extraction.changedConfigs.length > 0
-        || extraction.changedTypes.length > 0
-        || extraction.changedDependencies.length > 0
-        || extraction.changedCalls.length > 0;
-    return hasCodeTarget;
-}
-
 export async function planInvestigation(
-    extraction: ChangeExtraction,
+    evidence: DraftEvidence[],
     execution: LLMExecution,
     navigation?: import('../../../memory/types').MemoryNavigation[],
 ): Promise<InvestigationPlan> {
-    const messages = buildInvestigationPlanMessages({ changeExtraction: extraction, navigation });
+    const messages = buildInvestigationPlanMessages({ evidence, navigation });
     const session = execution.createSession(messages);
     let requestMessages = messages;
 
@@ -106,79 +51,120 @@ export async function planInvestigation(
         const parsed = await execution.run<InvestigationPlan>(session, requestMessages, {
             requestType: 'investigationPlan',
         });
-        const groundedPlan = groundInvestigationPlan(extraction, parsed);
-
-        // An intentionally empty plan means the diff is self-explanatory. Retry only
-        // when the model attempted to investigate but every proposed target violated
-        // the deterministic grounding boundary.
-        if (!parsed.targets.length || groundedPlan.targets.length || attempt === execution.maxRetries) {
-            return groundedPlan;
+        const invalid = validateInvestigationPlan(evidence, parsed);
+        if (!invalid.length) {
+            return normalizeInvestigationPlan(parsed);
         }
-
+        if (attempt === execution.maxRetries) {
+            throw new Error(`Investigation plan violated the raw-diff contract: ${invalid.join(' | ')}`);
+        }
         requestMessages = [{
             role: 'user',
-            content: buildGroundingRetryMessage(extraction, parsed),
+            content: buildPlanCorrectionMessage(evidence, parsed, invalid),
         }];
     }
 
     throw new Error('Investigation planning exhausted its grounding attempts without a result.');
 }
 
-function groundInvestigationPlan(
-    extraction: ChangeExtraction,
-    parsed: InvestigationPlan,
-): InvestigationPlan {
-    const grounded = collectGroundedNames(extraction);
-    const targets: InvestigationTarget[] = [];
-    for (const candidate of parsed.targets) {
-        const name = candidate.target.trim();
-        if (!name || !isGroundedTarget(extraction, grounded, name, candidate.kind, candidate.file)) {
-            continue;
-        }
-        if (targets.some(existing => existing.target === name)) {
-            continue;
-        }
-        const kind = candidate.kind;
-        const questions = dedupeStrings(candidate.questions).slice(0, MAX_QUESTIONS_PER_TARGET);
-        targets.push({
-            target: name,
-            kind,
-            file: candidate.file,
-            questions,
-        });
-        if (targets.length >= MAX_TARGETS) {
-            break;
-        }
-    }
-
-    return { targets, notes: parsed.notes };
+function normalizeInvestigationPlan(parsed: InvestigationPlan): InvestigationPlan {
+    return {
+        targets: parsed.targets.map(target => ({
+            ...target,
+            id: target.id.trim(),
+            target: target.target.trim(),
+            file: target.file?.trim() || null,
+            diffEvidenceRefs: Array.from(new Set(target.diffEvidenceRefs.map(ref => ref.trim()))),
+            questions: dedupeStrings(target.questions),
+        })),
+        coverage: parsed.coverage.map(entry => ({
+            diffEvidenceRef: entry.diffEvidenceRef.trim(),
+            decision: entry.decision,
+            targetIds: Array.from(new Set(entry.targetIds.map(id => id.trim()))),
+        })),
+        notes: parsed.notes?.trim() || null,
+    };
 }
 
-function buildGroundingRetryMessage(
-    extraction: ChangeExtraction,
+function validateInvestigationPlan(
+    evidence: DraftEvidence[],
     parsed: InvestigationPlan,
+): string[] {
+    const allowed = new Set(evidence.flatMap(item => item.kind === 'raw' ? item.evidenceIds : item.coveredHunkIds));
+    const errors: string[] = [];
+    const targetIds = new Set<string>();
+    for (const target of parsed.targets) {
+        if (!target.id.trim() || targetIds.has(target.id.trim())) {
+            errors.push(`target id '${target.id}' is empty or duplicated`);
+        }
+        targetIds.add(target.id.trim());
+        if (!target.target.trim()) { errors.push(`target '${target.id}' is empty`); }
+        if (!target.diffEvidenceRefs.length) { errors.push(`target '${target.id}' has no diff evidence`); }
+        for (const ref of target.diffEvidenceRefs) {
+            if (!allowed.has(ref)) { errors.push(`target '${target.id}' references unknown diff evidence '${ref}'`); }
+        }
+    }
+    const seenCoverage = new Set<string>();
+    for (const entry of parsed.coverage) {
+        if (!allowed.has(entry.diffEvidenceRef)) {
+            errors.push(`coverage references unknown diff evidence '${entry.diffEvidenceRef}'`);
+        }
+        if (seenCoverage.has(entry.diffEvidenceRef)) {
+            errors.push(`coverage repeats diff evidence '${entry.diffEvidenceRef}'`);
+        }
+        seenCoverage.add(entry.diffEvidenceRef);
+        if (entry.decision === 'investigate' && entry.targetIds.some(id => !targetIds.has(id))) {
+            errors.push(`investigated evidence '${entry.diffEvidenceRef}' references an unknown target`);
+        }
+        if (entry.decision === 'investigate' && !entry.targetIds.length) {
+            errors.push(`investigated evidence '${entry.diffEvidenceRef}' has no target`);
+        }
+        if (entry.decision === 'diff_sufficient' && entry.targetIds.length) {
+            errors.push(`diff-sufficient evidence '${entry.diffEvidenceRef}' must not have investigation targets`);
+        }
+        if (entry.decision === 'investigate') {
+            for (const targetId of entry.targetIds) {
+                const target = parsed.targets.find(candidate => candidate.id.trim() === targetId.trim());
+                if (target && !target.diffEvidenceRefs.includes(entry.diffEvidenceRef)) {
+                    errors.push(`target '${targetId}' does not cover investigated evidence '${entry.diffEvidenceRef}'`);
+                }
+            }
+        }
+    }
+    for (const ref of allowed) {
+        if (!seenCoverage.has(ref)) { errors.push(`diff evidence '${ref}' is missing from coverage`); }
+    }
+    for (const target of parsed.targets) {
+        if (!parsed.coverage.some(entry => entry.decision === 'investigate' && entry.targetIds.includes(target.id))) {
+            errors.push(`target '${target.id}' is not attached to an investigated diff evidence item`);
+        }
+    }
+    return errors;
+}
+
+function buildPlanCorrectionMessage(
+    evidence: DraftEvidence[],
+    parsed: InvestigationPlan,
+    errors: string[],
 ): string {
+    const allowed = evidence.flatMap(item => item.kind === 'raw' ? item.evidenceIds : item.coveredHunkIds);
     return [
-        '<grounding_rejected>',
-        'None of the proposed investigation targets could be grounded in the supplied change extraction.',
-        `Rejected targets: ${JSON.stringify(parsed.targets.map(target => ({
-            target: target.target,
-            kind: target.kind,
-            file: target.file,
-        })))}`,
-        `Allowed changed file paths for kind "file": ${JSON.stringify(extraction.changedFiles.map(file => file.path))}`,
-        `Allowed changed names for non-file kinds: ${JSON.stringify(Array.from(collectGroundedNames(extraction)))}`,
-        'Return a corrected investigation plan using exact values and the matching target kind. Return an empty targets array only if the diff itself fully answers every useful repository question.',
-        '</grounding_rejected>',
+        '<plan_rejected>',
+        ...errors.map(error => `- ${error}`),
+        `Allowed diff evidence ids: ${JSON.stringify(allowed)}`,
+        `Previous plan: ${JSON.stringify(parsed)}`,
+        'Return the complete corrected plan. Every allowed D* id must appear once in coverage.',
+        'Do not remove a hunk from coverage. Use diff_sufficient when no repository lookup is necessary.',
+        '</plan_rejected>',
     ].join('\n');
 }
 
 export interface ChangeAnalysisAgentParams {
-    snapshot: import('../../../git/repositorySnapshot').RepositorySnapshotReader;
+    snapshot?: import('../../../git/repositorySnapshot').RepositorySnapshotReader;
     recorder?: import('../../../memory/recorder').EpisodeRecorder;
     memory?: import('../../../memory/retriever').MemoryRetriever;
     navigation?: import('../../../memory/types').MemoryNavigation[];
-    extraction: ChangeExtraction;
+    rawDiff: DraftEvidence[];
     plan: InvestigationPlan;
     repositoryPath: string;
     excludePatterns: string[];
@@ -265,7 +251,7 @@ export async function runChangeAnalysisAgent(
             recorder: params.recorder,
             memory: params.memory,
             navigation: params.navigation,
-            extraction: params.extraction,
+            rawDiff: params.rawDiff,
             plan: params.plan,
             repositoryPath: params.repositoryPath,
             excludePatterns: params.excludePatterns,

@@ -1,7 +1,6 @@
 export type PipelineStepId =
     | 'evidence'
     | 'summary'
-    | 'extract'
     | 'investigate'
     | 'analyze'
     | 'select'
@@ -14,10 +13,10 @@ export type PipelineStepId =
  * when the run actually produced them, so default single-prompt generation
  * does not display permanently pending chain steps.
  */
-const CHANGE_CONDITIONED_STEPS: PipelineStepId[] = ['extract', 'investigate', 'analyze', 'select'];
+const CHANGE_CONDITIONED_STEPS: PipelineStepId[] = ['investigate', 'analyze', 'select'];
 
 const PIPELINE_STEP_ORDER: PipelineStepId[] = [
-    'evidence', 'summary', 'extract', 'investigate', 'analyze', 'select', 'rag', 'draft', 'verify',
+    'evidence', 'summary', 'investigate', 'analyze', 'select', 'rag', 'draft', 'verify',
 ];
 export type PipelineStepState = 'pending' | 'active' | 'complete' | 'skipped' | 'warning';
 export type PipelineRunState = 'running' | 'ready' | 'degraded';
@@ -47,7 +46,6 @@ export interface PipelineTextCatalog {
     stagesLabel: string;
     stepEvidence: string;
     stepSummary: string;
-    stepExtract: string;
     stepInvestigate: string;
     stepAnalyze: string;
     stepSelect: string;
@@ -55,7 +53,6 @@ export interface PipelineTextCatalog {
     stepDraft: string;
     stepVerify: string;
     draftInput: string;
-    extractInput: string;
     analyzeInput: string;
     tokenUsage: string;
     payloadEvidence: string;
@@ -66,7 +63,6 @@ export interface PipelineTextCatalog {
     phaseInput: string;
     phaseTransform: string;
     phaseHandoff: string;
-    phaseExtract: string;
     phaseInvestigate: string;
     phaseAnalyze: string;
     phaseSelect: string;
@@ -88,7 +84,6 @@ export interface PipelineTextCatalog {
     metricType: string;
     metricScope: string;
     metricReferences: string;
-    metricSymbols: string;
     metricTargets: string;
     metricQuestions: string;
     metricSteps: string;
@@ -121,11 +116,6 @@ export interface PipelineTextCatalog {
     evidenceRoutedTitle: string;
     evidenceRoutedSummarized: string;
     evidenceRoutedRaw: string;
-    changeExtractionStartTitle: string;
-    changeExtractionStartDescription: string;
-    changeExtractedTitle: string;
-    changeExtractedDescription: string;
-    changeExtractedEmptyDescription: string;
     investigationPlanStartTitle: string;
     investigationPlanStartDescription: string;
     investigationPlannedTitle: string;
@@ -169,9 +159,6 @@ export interface PipelineTextCatalog {
     validationStartTitle: string;
     validationStartDescription: string;
     validateFixTitle: string;
-    strictFixStartTitle: string;
-    strictFixStartDescription: string;
-    strictFixTitle: string;
     enforceLanguageStartTitle: string;
     enforceLanguageStartDescription: string;
     enforceLanguageStartDefault: string;
@@ -247,7 +234,6 @@ export interface PipelineTextCatalog {
     detailForced: string;
     sourceDraft: string;
     sourceValidation: string;
-    sourceStrictFix: string;
     sourceLanguageEnforcement: string;
     sourceFinal: string;
 }
@@ -266,7 +252,6 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     stagesLabel: 'Commit generation stages',
     stepEvidence: 'Evidence',
     stepSummary: 'Summary',
-    stepExtract: 'Extract',
     stepInvestigate: 'Investigate',
     stepAnalyze: 'Analyze',
     stepSelect: 'Select',
@@ -274,7 +259,6 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     stepDraft: 'Draft',
     stepVerify: 'Verify',
     draftInput: 'Draft input',
-    extractInput: 'Change extraction input',
     analyzeInput: 'Repository Investigation and Semantic Analysis',
     tokenUsage: 'Input token usage {0}%',
     payloadEvidence: 'Evidence',
@@ -285,7 +269,6 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     phaseInput: 'Input',
     phaseTransform: 'Transform',
     phaseHandoff: 'Handoff',
-    phaseExtract: 'Extract',
     phaseInvestigate: 'Investigate',
     phaseAnalyze: 'Analyze',
     phaseSelect: 'Select',
@@ -307,7 +290,6 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     metricType: 'Type',
     metricScope: 'Scope',
     metricReferences: 'References',
-    metricSymbols: 'Symbols',
     metricTargets: 'Targets',
     metricQuestions: 'Questions',
     metricSteps: 'Steps',
@@ -340,11 +322,6 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     evidenceRoutedTitle: 'Evidence ready for {0}',
     evidenceRoutedSummarized: 'The largest raw diffs were replaced until the complete request fit the configured budget.',
     evidenceRoutedRaw: 'The complete request fits the configured budget; raw diffs remain intact.',
-    changeExtractionStartTitle: 'Extracting what changed',
-    changeExtractionStartDescription: 'The diff is being reduced to changed symbols, calls, configuration keys, types, and dependencies.',
-    changeExtractedTitle: 'Change surface extracted',
-    changeExtractedDescription: 'Changed symbols: {0}.',
-    changeExtractedEmptyDescription: 'No changed code symbol was found; the diff alone will carry the meaning of this change.',
     investigationPlanStartTitle: 'Planning the investigation',
     investigationPlanStartDescription: 'Deciding what still has to be known about the repository to explain this change.',
     investigationPlannedTitle: 'Investigation plan ready',
@@ -388,9 +365,6 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     validationStartTitle: 'Checking commit rules',
     validationStartDescription: 'The draft is being checked against the active Conventional Commit rules and template.',
     validateFixTitle: 'Commit rules checked',
-    strictFixStartTitle: 'Repairing header format',
-    strictFixStartDescription: 'The local strict check found a Conventional Commit header problem.',
-    strictFixTitle: 'Header format repaired',
     enforceLanguageStartTitle: 'Checking target language',
     enforceLanguageStartDescription: 'Narrative text is being checked for {0}.',
     enforceLanguageStartDefault: 'Narrative text is being checked against the target language.',
@@ -466,7 +440,6 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     detailForced: 'Forced compaction',
     sourceDraft: 'Draft',
     sourceValidation: 'Validation',
-    sourceStrictFix: 'Strict fix',
     sourceLanguageEnforcement: 'Language enforcement',
     sourceFinal: 'Final',
 };
@@ -501,7 +474,7 @@ export interface RagReferenceEntry {
     commitHash?: string;
 }
 
-export type CommitMessageSource = 'draft' | 'validation' | 'strictFix' | 'languageEnforcement' | 'final';
+export type CommitMessageSource = 'draft' | 'validation' | 'languageEnforcement' | 'final';
 
 /**
  * Why a structured request was rejected. Kept distinct so a truncated
@@ -563,7 +536,6 @@ export type PipelineEventDetails =
     | { kind: 'summarizeProgress'; file: string; summary: string; breaking: boolean; current: number; total: number }
     | { kind: 'summarizeFailed'; target: string; error: string }
     | { kind: 'evidenceRouted'; target: string; rawFiles: number; summarizedFiles: number; initialEstimatedInputTokens: number; estimatedInputTokens: number; maxInputTokens: number; didSummarize: boolean; forced?: boolean }
-    | { kind: 'changeExtracted'; symbols: string[]; symbolCount: number; configCount: number; typeCount: number; dependencyCount: number }
     | { kind: 'investigationPlanned'; targets: string[]; targetCount: number; questionCount: number }
     | { kind: 'investigationStart'; maxSteps: number }
     | { kind: 'investigationStep'; current: number; total: number; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number }
@@ -579,7 +551,6 @@ export type PipelineEventDetails =
     | { kind: 'ragRetrieved'; count: number; references: RagReferenceEntry[] }
     | { kind: 'ragRetrievalSkipped'; error: string }
     | { kind: 'commitMessage'; message: string; source: CommitMessageSource }
-    | { kind: 'strictFixStart'; problems: string[] }
     | {
         kind: 'structuredValidation';
         stage: string;
@@ -625,7 +596,7 @@ export interface PipelineSnapshot {
     predictedScope?: string;
     referenceCount?: number;
     latestHandoff?: {
-        target: 'changeExtraction' | 'semanticAnalysis' | 'draft';
+        target: 'semanticAnalysis' | 'draft';
         rawFiles: number;
         summarizedFiles: number;
         estimatedInputTokens: number;
@@ -649,8 +620,6 @@ export type PipelineStageName =
     | 'summarizeProgress'
     | 'summarizeFailed'
     | 'evidenceRouted'
-    | 'changeExtractionStart'
-    | 'changeExtracted'
     | 'investigationPlanStart'
     | 'investigationPlanned'
     | 'investigationStart'
@@ -673,8 +642,6 @@ export type PipelineStageName =
     | 'classifyDraft'
     | 'validationStart'
     | 'validateFix'
-    | 'strictFixStart'
-    | 'strictFix'
     | 'enforceLanguageStart'
     | 'enforceLanguage'
     | 'done';
@@ -698,8 +665,6 @@ export const PIPELINE_STAGE_BADGES: Record<PipelineStageName, PipelineStageBadge
     summarizeStart: { label: 'SUM', className: 'stage-badge-summarize' },
     summarizeProgress: { label: 'SUM', className: 'stage-badge-summarize' },
     summarizeFailed: { label: 'SUM', className: 'stage-badge-summarize' },
-    changeExtractionStart: { label: 'EXTR', className: 'stage-badge-extract' },
-    changeExtracted: { label: 'EXTR', className: 'stage-badge-extract' },
     investigationPlanStart: { label: 'PLAN', className: 'stage-badge-plan' },
     investigationPlanned: { label: 'PLAN', className: 'stage-badge-plan' },
     investigationStart: { label: 'INVG', className: 'stage-badge-investigate' },
@@ -722,8 +687,6 @@ export const PIPELINE_STAGE_BADGES: Record<PipelineStageName, PipelineStageBadge
     classifyDraft: { label: 'DRFT', className: 'stage-badge-classify' },
     validationStart: { label: 'CHK', className: 'stage-badge-verify' },
     validateFix: { label: 'CHK', className: 'stage-badge-verify' },
-    strictFixStart: { label: 'CHK', className: 'stage-badge-verify' },
-    strictFix: { label: 'CHK', className: 'stage-badge-verify' },
     enforceLanguageStart: { label: 'CHK', className: 'stage-badge-verify' },
     enforceLanguage: { label: 'CHK', className: 'stage-badge-verify' },
     done: { label: 'DONE', className: 'stage-badge-done' },
@@ -786,14 +749,7 @@ export function parseCommitStageLog(log: PipelineLogLike): CommitStagePayload | 
 }
 
 function handoffTargetLabel(target: unknown, text: PipelineTextCatalog): string {
-    switch (target) {
-        case 'changeExtraction':
-            return text.extractInput;
-        case 'semanticAnalysis':
-            return text.analyzeInput;
-        default:
-            return text.draftInput;
-    }
+    return target === 'semanticAnalysis' ? text.analyzeInput : text.draftInput;
 }
 
 function asStringList(value: unknown, limit: number): string[] {
@@ -933,15 +889,6 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
                 maxInputTokens: requireNumberField(data, stage, 'maxInputTokens'),
                 didSummarize: requireBooleanField(data, stage, 'didSummarize'),
                 ...(typeof data.forced === 'boolean' ? { forced: data.forced } : {}),
-            };
-        case 'changeExtracted':
-            return {
-                kind: 'changeExtracted',
-                symbols: asFullStringList(data.symbols, stage, 'symbols'),
-                symbolCount: requireNumberField(data, stage, 'symbolCount'),
-                configCount: requireNumberField(data, stage, 'configCount'),
-                typeCount: requireNumberField(data, stage, 'typeCount'),
-                dependencyCount: requireNumberField(data, stage, 'dependencyCount'),
             };
         case 'investigationPlanned':
             return {
@@ -1087,17 +1034,6 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
                 kind: 'commitMessage',
                 message: requireMessageField(data, stage, 'validMessage'),
                 source: 'validation',
-            };
-        case 'strictFixStart':
-            return {
-                kind: 'strictFixStart',
-                problems: asFullStringList(data.problems, stage, 'problems'),
-            };
-        case 'strictFix':
-            return {
-                kind: 'commitMessage',
-                message: requireMessageField(data, stage, 'message'),
-                source: 'strictFix',
             };
         case 'enforceLanguage':
             return {
@@ -1394,34 +1330,6 @@ function presentPipelineEventCore(
                     ...(estimatedTokens !== undefined && maxInputTokens !== undefined
                         ? [{ label: text.metricInput, value: `${formatInteger(estimatedTokens)} / ${formatInteger(maxInputTokens)}`, tone: 'budget' as const }]
                         : []),
-                ],
-                tone: 'success',
-                data,
-            };
-        }
-        case 'changeExtractionStart':
-            return {
-                stage,
-                phase: text.phaseExtract,
-                title: text.changeExtractionStartTitle,
-                description: text.changeExtractionStartDescription,
-                metrics: [],
-                tone: 'active',
-                data,
-            };
-        case 'changeExtracted': {
-            const symbols = asStringList(data.symbols, 4);
-            const symbolCount = asNumber(data.symbolCount) ?? symbols.length;
-            return {
-                stage,
-                phase: text.phaseExtract,
-                title: text.changeExtractedTitle,
-                description: symbols.length
-                    ? formatPipelineText(text.changeExtractedDescription, symbols.join(', '))
-                    : text.changeExtractedEmptyDescription,
-                metrics: [
-                    { label: text.metricSymbols, value: String(symbolCount) },
-                    ...(asNumber(data.configCount) ? [{ label: text.metricScope, value: String(asNumber(data.configCount)) }] : []),
                 ],
                 tone: 'success',
                 data,
@@ -1731,26 +1639,6 @@ function presentPipelineEventCore(
                 tone: 'success',
                 data,
             };
-        case 'strictFixStart':
-            return {
-                stage,
-                phase: text.phaseVerify,
-                title: text.strictFixStartTitle,
-                description: text.strictFixStartDescription,
-                metrics: [],
-                tone: 'active',
-                data,
-            };
-        case 'strictFix':
-            return {
-                stage,
-                phase: text.phaseVerify,
-                title: text.strictFixTitle,
-                description: firstLine(data.message),
-                metrics: [],
-                tone: 'success',
-                data,
-            };
         case 'enforceLanguageStart':
             return {
                 stage,
@@ -1822,7 +1710,6 @@ export function deriveLatestPipelineSnapshot(
     const stepStates: Record<PipelineStepId, PipelineStepState> = {
         evidence: 'pending',
         summary: 'pending',
-        extract: 'pending',
         investigate: 'pending',
         analyze: 'pending',
         select: 'pending',
@@ -1859,7 +1746,7 @@ export function deriveLatestPipelineSnapshot(
                     stepStates.summary = 'skipped';
                 }
                 if (
-                    (data.target === 'draft' || data.target === 'changeExtraction' || data.target === 'semanticAnalysis')
+                    (data.target === 'draft' || data.target === 'semanticAnalysis')
                     && asNumber(data.rawFiles) !== undefined
                     && asNumber(data.summarizedFiles) !== undefined
                     && asNumber(data.estimatedInputTokens) !== undefined
@@ -1873,14 +1760,6 @@ export function deriveLatestPipelineSnapshot(
                         maxInputTokens: asNumber(data.maxInputTokens)!,
                     };
                 }
-                break;
-            case 'changeExtractionStart':
-                changeConditioned = true;
-                stepStates.extract = 'active';
-                break;
-            case 'changeExtracted':
-                changeConditioned = true;
-                stepStates.extract = 'complete';
                 break;
             case 'investigationPlanStart':
             case 'investigationPlanned':
@@ -1950,12 +1829,10 @@ export function deriveLatestPipelineSnapshot(
                 stepStates.draft = 'complete';
                 break;
             case 'validationStart':
-            case 'strictFixStart':
             case 'enforceLanguageStart':
                 stepStates.verify = 'active';
                 break;
             case 'validateFix':
-            case 'strictFix':
             case 'enforceLanguage':
                 stepStates.verify = 'complete';
                 break;
@@ -1979,7 +1856,6 @@ export function deriveLatestPipelineSnapshot(
                 label: {
                     evidence: text.stepEvidence,
                     summary: text.stepSummary,
-                    extract: text.stepExtract,
                     investigate: text.stepInvestigate,
                     analyze: text.stepAnalyze,
                     select: text.stepSelect,

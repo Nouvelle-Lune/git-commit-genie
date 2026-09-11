@@ -14,54 +14,20 @@ describe('terminal contract regression', () => {
 
     it('uses the two-phase short-memory-ID profile version and cache identity', () => {
         // The finalization profile must retain its two-phase prompt and cache identity contract.
-        const input = {
-            extraction: {
-                changedFiles: [{ path: 'src/parser.ts', changeType: 'modified' as const }],
-                changedSymbols: [],
-                introducedSymbols: [],
-                removedSymbols: [],
-                changedCalls: [],
-                changedConfigs: [],
-                changedTypes: [],
-                changedDependencies: [],
-            },
-            plan: { targets: [], notes: null },
-            snapshot: {} as RepositorySnapshotReader,
-            repositoryPath: '/tmp/repository',
-            excludePatterns: [],
-            evidence: [],
-            maxSteps: 2,
-        };
+        const input = makeInput();
         const profile = createChangeAnalysisProfile(input);
 
-        assert.equal(profile.promptVersion, '6');
-        assert.equal(profile.toolsetVersion, 'snapshot-memory-handles-3');
+        assert.equal(profile.promptVersion, '8');
+        assert.equal(profile.toolsetVersion, 'snapshot-memory-experience-2');
         assert.match(
             `agent:${profile.id}:${profile.promptVersion}:${profile.toolsetVersion}:gpt-5`,
-            /^agent:change-analysis:6:snapshot-memory-handles-3:/,
+            /^agent:change-analysis:8:snapshot-memory-experience-2:/,
         );
     });
 
     it('keeps investigation prompts free of terminal JSON contract text', () => {
         // Investigation messages must stay tool-focused while the closed-tools finalization message carries the terminal contract.
-        const input = {
-            extraction: {
-                changedFiles: [{ path: 'src/parser.ts', changeType: 'modified' as const }],
-                changedSymbols: [],
-                introducedSymbols: [],
-                removedSymbols: [],
-                changedCalls: [],
-                changedConfigs: [],
-                changedTypes: [],
-                changedDependencies: [],
-            },
-            plan: { targets: [], notes: null },
-            snapshot: {} as RepositorySnapshotReader,
-            repositoryPath: '/tmp/repository',
-            excludePatterns: [],
-            evidence: [],
-            maxSteps: 2,
-        };
+        const input = makeInput();
         const profile = createChangeAnalysisProfile(input);
         const investigation = [
             ...profile.buildPrompt(input).stable,
@@ -112,3 +78,25 @@ describe('terminal contract regression', () => {
         assert.match(correction, /do not relax.{0,100}finding E\* rule/i);
     });
 });
+
+function makeInput() {
+    return {
+        rawDiff: [{
+            kind: 'raw' as const,
+            fileName: 'src/parser.ts',
+            status: 'modified' as const,
+            evidenceIds: ['D1'],
+            rawDiff: '@@ -1 +1 @@\n-old\n+new',
+        }],
+        plan: {
+            targets: [],
+            coverage: [{ diffEvidenceRef: 'D1', decision: 'diff_sufficient' as const, targetIds: [] }],
+            notes: null,
+        },
+        snapshot: {} as RepositorySnapshotReader,
+        repositoryPath: '/tmp/repository',
+        excludePatterns: [],
+        evidence: [],
+        maxSteps: 2,
+    };
+}

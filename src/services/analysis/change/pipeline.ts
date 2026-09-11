@@ -1,19 +1,9 @@
 import { DiffData } from '../../git/gitTypes';
 import { LLMExecution } from '../../llm/llmTypes';
-import { AIMessage } from '../../llm/providers';
 import { safeRun } from '../../../utils/safeRun';
 import { StageEvent } from '../../../ui/StageNotificationManager';
 import {
-    DeterministicChangeExtraction,
-    extractChanges,
-    extractChangesDeterministically,
-} from './extraction';
-import {
-    buildChangeExtractionMessages,
-} from './prompts';
-import {
     emptyRepositoryEvidence,
-    isInvestigationWorthwhile,
     planInvestigation,
     runChangeAnalysisAgent,
 } from './investigation/agent';
@@ -30,21 +20,13 @@ import {
     InformationSelection,
     InvestigationPlan,
 } from './types';
-import { isContextWindowFailure } from '../../llm/inputTokenBudget';
 import { EvidenceLedger } from '../../../agent/evidenceLedger';
-
-export type EvidenceRouteTarget = 'changeExtraction' | 'semanticAnalysis' | 'draft';
 
 export interface ChangeAnalysisPipelineParams {
     diffs: DiffData[];
     inputs: ChangeAnalysisInputs;
     execution: LLMExecution;
     getEvidence: () => DraftEvidence[];
-    compactFor: (
-        target: EvidenceRouteTarget,
-        buildTargetMessages: (current: DraftEvidence[]) => AIMessage[],
-        force?: boolean,
-    ) => Promise<void>;
     investigationOverrides?: Partial<InvestigationSettings>;
     evidenceLedger: EvidenceLedger;
     onStage?: (event: StageEvent) => void;
@@ -52,48 +34,25 @@ export interface ChangeAnalysisPipelineParams {
 }
 
 /**
- * Runs Change Extraction and Investigation Planning, then delegates repository
- * tools plus compound semantic/selection output to one continued agent session.
- * Analyze and Select remain local projection stages for validation and UI.
+ * Runs a raw-diff Planner and then delegates repository tools plus the compact
+ * fact terminal to one continued AgentRuntime session. The diff ledger remains
+ * the source of truth throughout the run; no semantic extraction stage may
+ * replace it.
  *
- * Evidence compaction is re-run before every remote stage that embeds the diff
- * because each prompt has a different fixed cost and evidence budget.
+ * The planner and investigation agent receive the complete current diff
+ * representation. Downstream draft generation owns any evidence compaction
+ * required by its larger prompt.
  */
 export async function runChangeAnalysisPipeline(
     params: ChangeAnalysisPipelineParams
 ): Promise<ChangeAnalysisTrace> {
-    const { diffs, inputs, execution, getEvidence, compactFor, onStage } = params;
+    const { diffs, inputs, execution, getEvidence, onStage } = params;
 
-    const deterministic: DeterministicChangeExtraction = normalizeExtractionEvidenceRefs(
-        extractChangesDeterministically(diffs),
-        params.evidenceLedger,
-    );
-    safeRun('Chain.onStage.changeExtractionStart', () => onStage?.({
-        type: 'changeExtractionStart',
-        rawData: { input: { deterministic, evidence: getEvidence() } },
-    }));
-    const changeExtractionMessages = (current: DraftEvidence[]) => buildChangeExtractionMessages({
-        deterministic,
-        evidencePayload: current,
-    });
-    await compactFor('changeExtraction', changeExtractionMessages);
-    const changeExtraction = normalizeExtractionEvidenceRefs(await runEvidenceStage(
-        'changeExtraction',
-        changeExtractionMessages,
-        compactFor,
-        () => extractChanges(diffs, getEvidence(), execution, deterministic),
-    ), params.evidenceLedger);
-    safeRun('Chain.onStage.changeExtracted', () => onStage?.({
-        type: 'changeExtracted',
-        data: {
-            symbolCount: changeExtraction.changedSymbols.length,
-            symbols: changeExtraction.changedSymbols.map(symbol => `${symbol.name} (${symbol.changeKind})`),
-            configCount: changeExtraction.changedConfigs.length,
-            typeCount: changeExtraction.changedTypes.length,
-            dependencyCount: changeExtraction.changedDependencies.length,
-        },
-        rawData: { output: changeExtraction },
-    }));
+    const rawDiff = getEvidence();
+    const rawDiffContext = {
+        changedFiles: diffs.map(diff => ({ path: diff.fileName, changeType: diff.status })),
+        evidenceIds: rawDiff.flatMap(item => item.kind === 'raw' ? item.evidenceIds : item.coveredHunkIds),
+    };
 
     const settings: InvestigationSettings = {
         ...resolveInvestigationSettings(),
@@ -115,19 +74,13 @@ export async function runChangeAnalysisPipeline(
     let agentClaims: ChangeAnalysisTrace['agentClaims'] = [];
     let investigationPlan: InvestigationPlan | undefined;
     let memoryUsage: ChangeAnalysisTrace['memoryUsage'];
-    if (!settings.enabled) {
-        repositoryEvidence = emptyRepositoryEvidence('Repository investigation is disabled by configuration.');
-    } else if (!inputs.repositoryPath) {
-        repositoryEvidence = emptyRepositoryEvidence('No repository path was available for investigation.');
-    } else if (!isInvestigationWorthwhile(changeExtraction)) {
-        repositoryEvidence = emptyRepositoryEvidence('The diff alone determines the meaning of this change.');
-    } else {
+    const canInvestigate = settings.enabled && Boolean(inputs.repositoryPath && inputs.snapshot);
+    if (canInvestigate) {
         safeRun('Chain.onStage.investigationPlanStart', () => onStage?.({
             type: 'investigationPlanStart',
-            rawData: { input: { changeExtraction } },
+            rawData: { input: { evidence: rawDiff } },
         }));
-        const memoryQuery = { paths: changeExtraction.changedFiles.map(file => file.path),
-            symbols: changeExtraction.changedSymbols.map(symbol => symbol.name), keywords: [...changeExtraction.changedConfigs, ...changeExtraction.changedDependencies] };
+        const memoryQuery = { paths: diffs.map(diff => diff.fileName), symbols: [], keywords: [] };
         const memory = inputs.loadMemory ? await inputs.loadMemory(memoryQuery) : inputs.memory;
         memory?.setInputBudget(execution.tokenBudget.hardInputTokens);
         const navigation = memory?.retrieveNavigation(memoryQuery) ?? [];
@@ -136,7 +89,7 @@ export async function runChangeAnalysisPipeline(
                 data: { current: 0, tool: 'retrieveNavigation', trigger: 'agent', status: 'completed', summary: `Found ${navigation.length} historical navigation candidate(s).`, ok: true, budget: memory.budget },
                 rawData: { input: memoryQuery, output: { navigation, budget: memory.budget, settings: memory.settings } } }));
         }
-        const plan = await planInvestigation(changeExtraction, execution, navigation);
+        const plan = await planInvestigation(rawDiff, execution, navigation);
         if (memory) { memoryUsage = { ...memory.usage }; }
         investigationPlan = plan;
         safeRun('Chain.onStage.investigationPlanned', () => onStage?.({
@@ -152,15 +105,12 @@ export async function runChangeAnalysisPipeline(
             },
         }));
 
-        if (!plan.targets.length) {
-            repositoryEvidence = emptyRepositoryEvidence('No investigation target could be grounded in the change.');
-        } else {
-            safeRun('Chain.onStage.investigationStart', () => onStage?.({
+        safeRun('Chain.onStage.investigationStart', () => onStage?.({
                 type: 'investigationStart',
                 data: { maxSteps: settings.maxSteps },
                 rawData: {
                     input: {
-                        changeExtraction,
+                        rawDiff,
                         plan,
                         evidence: getEvidence(),
                         navigation,
@@ -168,24 +118,19 @@ export async function runChangeAnalysisPipeline(
                     },
                 },
             }));
-            if (!inputs.snapshot) { throw new Error('A captured repository snapshot is required for investigation.'); }
             try {
-                await compactFor('semanticAnalysis', current => [{
-                    role: 'user',
-                    content: JSON.stringify({ changeExtraction, plan, evidence: current }),
-                }]);
                 params.onAgentMilestone?.('start', Date.now());
                 const agentOutput = await runChangeAnalysisAgent({
                     snapshot: inputs.snapshot,
                     recorder: inputs.recorder,
                     memory,
                     navigation,
-                    extraction: changeExtraction,
+                    rawDiff,
                     plan,
-                    repositoryPath: inputs.repositoryPath,
+                    repositoryPath: inputs.repositoryPath ?? '',
                     excludePatterns: settings.excludePatterns,
                     execution,
-                    maxSteps: settings.maxSteps,
+                    maxSteps: plan.targets.length ? settings.maxSteps : 0,
                     evidence: getEvidence(),
                     evidenceLedger: params.evidenceLedger,
                     userTemplate: inputs.userTemplate,
@@ -252,19 +197,46 @@ export async function runChangeAnalysisPipeline(
                     memoryUsage = { ...memory.usage };
                 }
                 params.onAgentMilestone?.('terminal', Date.now());
-            } catch (error) {
-                if (!isContextWindowFailure(error)) {
-                    throw error;
-                }
-                repositoryEvidence = emptyRepositoryEvidence(
-                    'Repository investigation reached the configured context budget; continuing from diff evidence.',
-                );
-                semanticAnalysis = normalizeSemanticAnalysis({}, repositoryEvidence, params.evidenceLedger);
-                analysisIssues = [repositoryEvidence.stopReason];
             } finally {
                 if (memory) { memoryUsage = { ...memory.usage }; }
             }
-        }
+    } else {
+        // A disabled or unavailable repository branch still runs the same
+        // structured terminal with a zero-step, diff-only plan. This preserves
+        // observable facts without pretending that repository evidence exists.
+        investigationPlan = {
+            targets: [],
+            coverage: rawDiffContext.evidenceIds.map(diffEvidenceRef => ({
+                diffEvidenceRef,
+                decision: 'diff_sufficient' as const,
+                targetIds: [],
+            })),
+            notes: !settings.enabled
+                ? 'Repository investigation is disabled by configuration.'
+                : 'No captured repository snapshot is available for investigation.',
+        };
+        const agentOutput = await runChangeAnalysisAgent({
+            snapshot: inputs.snapshot,
+            recorder: inputs.recorder,
+            memory: undefined,
+            navigation: [],
+            rawDiff,
+            plan: investigationPlan,
+            repositoryPath: inputs.repositoryPath ?? '',
+            excludePatterns: settings.excludePatterns,
+            execution,
+            maxSteps: 0,
+            evidence: rawDiff,
+            evidenceLedger: params.evidenceLedger,
+            userTemplate: inputs.userTemplate,
+        });
+        repositoryEvidence = agentOutput.repositoryEvidence;
+        semanticAnalysis = agentOutput.semanticAnalysis;
+        informationSelection = agentOutput.informationSelection;
+        analysisStatus = agentOutput.analysisStatus;
+        analysisIssues = agentOutput.issues;
+        agentMetrics = agentOutput.runtimeMetrics;
+        agentClaims = agentOutput.claims;
     }
 
     if (analysisStatus === 'unavailable' && repositoryEvidence.degraded) {
@@ -285,7 +257,7 @@ export async function runChangeAnalysisPipeline(
         }));
     }
 
-    if (analysisStatus !== 'complete') {
+    if (analysisStatus === 'degraded' || analysisStatus === 'unavailable') {
         if (!analysisIssues.length) {
             analysisIssues = [repositoryEvidence.stopReason];
         }
@@ -342,53 +314,11 @@ export async function runChangeAnalysisPipeline(
         analysisIssues,
         ...(agentMetrics ? { agentMetrics } : {}),
         agentClaims,
-        changeExtraction,
+        rawDiff: rawDiffContext,
         ...(investigationPlan ? { investigationPlan } : {}),
         repositoryEvidence,
         semanticAnalysis,
         informationSelection,
         selectedInformation,
     };
-}
-
-function normalizeExtractionEvidenceRefs<T extends ChangeAnalysisTrace['changeExtraction']>(
-    extraction: T,
-    ledger: EvidenceLedger,
-): T {
-    return {
-        ...extraction,
-        changedSymbols: extraction.changedSymbols.map(symbol => ({
-            ...symbol,
-            evidenceRefs: Array.from(new Set(symbol.evidenceRefs.flatMap(ref => {
-                if (/^D\d+$/.test(ref) && ledger.has(ref)) {
-                    return [ref];
-                }
-                const match = ref.match(/^(.*):(\d+)$/);
-                if (!match) {
-                    return [];
-                }
-                const id = ledger.resolveDiffAnchor(match[1], Number(match[2]));
-                return id ? [id] : [];
-            }))),
-        })),
-    };
-}
-
-async function runEvidenceStage<T>(
-    target: EvidenceRouteTarget,
-    buildMessages: (current: DraftEvidence[]) => AIMessage[],
-    compactFor: ChangeAnalysisPipelineParams['compactFor'],
-    run: () => Promise<T>,
-): Promise<T> {
-    try {
-        return await run();
-    } catch (error) {
-        if (!isContextWindowFailure(error)) {
-            throw error;
-        }
-        await compactFor(target, buildMessages, true);
-        // Every stage action creates a new provider session, so the retry does not
-        // inherit the failed request or its partial assistant response.
-        return run();
-    }
 }

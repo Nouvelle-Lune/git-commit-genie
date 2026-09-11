@@ -93,7 +93,6 @@ function makeContext(root: string, snapshot: RepositorySnapshotReader): Investig
         repositoryPath: root,
         snapshot,
         excludePatterns: ['secret.txt'],
-        changedSymbols: [{ name: 'parse', file: 'src/parser.ts', symbolType: 'function', changeKind: 'function_body' }],
         allocateEvidence: evidence => ({ ...evidence, id: `E${++nextId}` }),
     };
 }

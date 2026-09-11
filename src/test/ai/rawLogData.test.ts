@@ -46,7 +46,7 @@ describe('raw Webview log data projection', () => {
             type: LogType.ToolCall,
             title: 'Commit stage: investigation step',
             rawData: {
-                input: { changeExtraction: { changedFiles: ['src/parser.ts'] } },
+                input: { rawDiff: [{ fileName: 'src/parser.ts', evidenceIds: ['D1'] }] },
                 toolCall: { name: 'readFileContent', arguments: { filePath: 'src/parser.ts', maxLines: 400 } },
                 toolResult: {
                     ok: false,

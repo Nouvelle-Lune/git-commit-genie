@@ -17,7 +17,6 @@ import { RepositorySnapshotReader } from '../../../git/repositorySnapshot';
 import { RepositoryEvidenceItem, RepositoryEvidenceKind } from '../types';
 
 export const CHANGE_ANALYSIS_TOOL_NAMES = [
-    'getChangedSymbols',
     'findSymbolDefinition',
     'findSymbolReferences',
     'findCallers',
@@ -58,8 +57,6 @@ export interface InvestigationToolContext {
     snapshot: RepositorySnapshotReader;
     repositoryPath: string;
     excludePatterns: string[];
-    /** Changed symbols from Stage 1, surfaced through getChangedSymbols. */
-    changedSymbols: Array<{ name: string; file: string; symbolType: string; changeKind: string }>;
     /** Allocates and records stable evidence ids (`E1`, `E2`, …) through AgentRuntime. */
     allocateEvidence: (evidence: Omit<RepositoryEvidenceItem, 'id'>) => RepositoryEvidenceItem;
 }
@@ -333,19 +330,6 @@ export async function runInvestigationTool(
     context = { ...context, side: call.side ?? 'after' };
     try {
         switch (call.tool) {
-            case 'getChangedSymbols': {
-                const listing = context.changedSymbols
-                    .map(symbol => `${symbol.name} (${symbol.symbolType}, ${symbol.changeKind}) in ${symbol.file}`)
-                    .join('; ');
-                return {
-                    ok: true,
-                    summary: context.changedSymbols.length
-                        ? `Changed symbols: ${listing}`
-                        : 'No changed symbols were extracted from the diff.',
-                    evidence: [],
-                };
-            }
-
             case 'findSymbolDefinition': {
                 const symbol = requireSymbol(call);
                 const matches = rankDefinitionCandidates(

@@ -2,9 +2,8 @@
 //
 // Every limit quoted below is read from AGENT_TERMINAL_LIMITS, the same
 // constants that build the exported JSON Schema and the local Zod validation.
-// The observed "nine refs in intentAnalysis.supportedBy" and "six refs in a
-// finding" failures happened because the prompt never stated a limit that only
-// existed in Zod, so the model had no way to respect it.
+// The observed oversized evidence arrays happened because the prompt never
+// stated limits that only existed in Zod, so the model had no way to respect them.
 
 import { AGENT_TERMINAL_LIMITS } from '../../../llm/providers/schemas/common';
 import { formatFieldIssuesForModel } from '../../../llm/structuredFieldIssues';
@@ -48,8 +47,7 @@ export function buildTerminalContractLines(): string[] {
     return [
         '<output_structure>',
         'Return exactly one JSON object with these top-level keys and nothing else:',
-        'investigation, changeTargets, dependencyContext, claims, behaviorAnalysis, capabilityContext,',
-        'intentAnalysis, changeClassification, suggestedScope, selectionNotes, uncertainties.',
+        'investigation, claims, behaviorAnalysis, changeClassification, suggestedScope, selectionNotes, uncertainties.',
         'investigation.findings holds only questions you answered from repository evidence; the rest belong in investigation.unresolvedQuestions.',
         'investigation.stopReason states in one sentence why the investigation ended.',
         '</output_structure>',
@@ -60,6 +58,7 @@ export function buildTerminalContractLines(): string[] {
         '- repository_fact: a fact a repository tool result showed. Requires at least one E* id.',
         '- supported_inference: a conclusion supported by one or more D* and/or E* evidence ids. Requires at least one id.',
         '- uncertain_inference: unproven. Use an empty evidenceRefs array and disposition "omit".',
+        'claims must contain at least one diff- or repository-grounded fact for every non-empty change.',
         'A diff-only fact is never a repository_fact. If no E* evidence exists, emit no repository_fact claim.',
         'Each claim also picks a disposition:',
         `- must_express: at most ${LIMITS.maxMustExpressClaims} claims the commit message must state.`,
@@ -76,7 +75,7 @@ export function buildTerminalContractLines(): string[] {
         '- repository_fact claim evidenceRefs: E* ids only.',
         '- supported_inference claim evidenceRefs: one or more D* and/or E* ids.',
         '- uncertain_inference claim evidenceRefs: [] and disposition "omit".',
-        '- changeTargets[*].evidenceRefs and intentAnalysis.supportedBy: D* and/or E* ids when they directly support that field.',
+        '- No other field may contain evidence references.',
         'Never copy the Diff evidence ids list into an investigation finding.',
         'If the diff alone answers a planned question, create no finding and put the question in unresolvedQuestions.',
         'If a conclusion combines diff and repository evidence, keep the repository observation in the finding with E* only and put the combined conclusion in a supported_inference claim.',
@@ -86,18 +85,16 @@ export function buildTerminalContractLines(): string[] {
         '<reference_counts>',
         `Every evidence reference array in this object holds at most ${LIMITS.maxEvidenceRefs} ids.`,
         `investigation.findings[*].evidenceRefs holds ${LIMITS.minFindingEvidenceRefs} to ${LIMITS.maxEvidenceRefs} E* ids and no D* id.`,
-        `intentAnalysis.supportedBy, claims[*].evidenceRefs, and changeTargets[*].evidenceRefs hold at most ${LIMITS.maxEvidenceRefs} D* or E* ids.`,
+        `claims[*].evidenceRefs hold at most ${LIMITS.maxEvidenceRefs} D* or E* ids.`,
         'Pick the ids that directly support the statement, in the order a reviewer would check them.',
         'When more than the allowed number of ids look relevant, the statement is too broad: split it or narrow it, do not truncate the meaning.',
         `Array limits elsewhere: findings ${LIMITS.maxFindings}, unresolvedQuestions ${LIMITS.maxUnresolvedQuestions},`,
-        `changeTargets ${LIMITS.maxChangeTargets}, claims ${LIMITS.maxClaims}, uncertainties ${LIMITS.maxUncertainties},`,
-        `each dependencyContext array ${LIMITS.maxDependencyEntries}.`,
+        `claims ${LIMITS.maxClaims}, uncertainties ${LIMITS.maxUncertainties}.`,
         '</reference_counts>',
         '',
         '<null_and_empty_rules>',
         'Nullable string fields take null when the evidence does not establish them: never a placeholder, an empty string, "unknown", or "N/A".',
         'Array fields take [] when nothing was observed. Never invent a member to make an array non-empty.',
-        'When primaryIntent is null, intentAnalysis.supportedBy is [] and confidence is "low".',
         'Anything you could not establish goes into uncertainties or investigation.unresolvedQuestions.',
         '</null_and_empty_rules>',
         '',
@@ -194,19 +191,6 @@ const TERMINAL_EXAMPLE = JSON.stringify({
         unresolvedQuestions: ['Whether any caller outside this repository depends on the previous unbounded delay.'],
         stopReason: 'The single call site answered the planned questions about resolveRetryDelay.',
     },
-    changeTargets: [{
-        symbol: 'resolveRetryDelay',
-        file: 'src/net/retry.ts',
-        role: 'Computes the delay applied before a retry attempt.',
-        evidenceRefs: ['D1', 'E2'],
-    }],
-    dependencyContext: {
-        callers: ['scheduleRetry'],
-        callees: [],
-        stateDependencies: [],
-        relatedConfigs: ['net.retryCeilingMs'],
-        relatedTypes: [],
-    },
     claims: [
         {
             category: 'observed_change',
@@ -231,15 +215,6 @@ const TERMINAL_EXAMPLE = JSON.stringify({
         before: 'A large configured delay was used unchanged.',
         after: 'The delay is capped at the configured ceiling.',
         observableEffect: 'A retry never waits longer than net.retryCeilingMs.',
-    },
-    capabilityContext: {
-        technicalCapability: 'Retry scheduling',
-        productCapability: null,
-    },
-    intentAnalysis: {
-        primaryIntent: 'Bound the retry delay by the configured ceiling.',
-        supportedBy: ['D1', 'E2'],
-        confidence: 'medium',
     },
     changeClassification: {
         existingBehaviorCorrected: true,

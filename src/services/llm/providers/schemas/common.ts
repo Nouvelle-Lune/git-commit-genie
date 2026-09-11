@@ -69,8 +69,14 @@ export const validateAndFixResponseSchema = z.object({
   status: z.enum(['valid', 'fixed']).default('valid'),
   commitMessage: z.string().min(1),
   violations: z.array(z.string().min(1)).default([]),
+  preservedFactIds: z.array(z.string().regex(/^C\d+$/)).default([]),
   notes: z.string().nullable().default(null)
-} as const);
+} as const).strict();
+
+export const factAwareCommitMessageSchema = z.object({
+  commitMessage: z.string().min(1),
+  preservedFactIds: z.array(z.string().regex(/^C\d+$/)).default([]),
+} as const).strict();
 
 export const ragRerankResponseSchema = z.object({
   selected: z.array(z.object({
@@ -82,45 +88,32 @@ export const ragRerankResponseSchema = z.object({
 
 // ----- Change-Conditioned Chain -----
 
-export const CHANGED_SYMBOL_TYPES = [
-  'function', 'method', 'class', 'interface', 'type',
-  'constant', 'variable', 'config_key', 'route', 'cli_flag', 'unknown'
-] as const;
-
-export const CHANGE_KINDS = [
-  'added', 'removed', 'signature', 'function_body',
-  'type_shape', 'value', 'renamed', 'moved', 'unknown'
-] as const;
-
 export const INVESTIGATION_TARGET_KINDS = [
-  'file', 'symbol', 'config', 'type', 'dependency', 'interface', 'cli_or_api'
+  'file', 'symbol', 'call', 'config', 'type', 'dependency', 'interface', 'cli_or_api', 'hunk', 'relation'
 ] as const;
 
-export const changeExtractionResponseSchema = z.object({
-  changedSymbols: z.array(z.object({
-    name: z.string().min(1),
-    file: z.string().min(1),
-    symbolType: z.enum(CHANGED_SYMBOL_TYPES),
-    changeKind: z.enum(CHANGE_KINDS),
-    evidenceRefs: z.array(z.string().min(1)),
-  } as const)),
-  introducedSymbols: z.array(z.string().min(1)),
-  removedSymbols: z.array(z.string().min(1)),
-  changedCalls: z.array(z.string().min(1)),
-  changedConfigs: z.array(z.string().min(1)),
-  changedTypes: z.array(z.string().min(1)),
-  changedDependencies: z.array(z.string().min(1)),
-} as const);
+export const INVESTIGATION_PLAN_LIMITS = {
+  maxTargets: 12,
+  maxDiffEvidenceRefsPerTarget: 8,
+  maxQuestionsPerTarget: 6,
+} as const;
 
 export const investigationPlanResponseSchema = z.object({
   targets: z.array(z.object({
+    id: z.string().min(1),
     target: z.string().min(1),
     kind: z.enum(INVESTIGATION_TARGET_KINDS),
     file: z.string().nullable(),
-    questions: z.array(z.string().min(1)).min(1).max(6),
-  } as const)).max(4),
+    diffEvidenceRefs: z.array(z.string().regex(/^D\d+$/)).min(1).max(INVESTIGATION_PLAN_LIMITS.maxDiffEvidenceRefsPerTarget),
+    questions: z.array(z.string().min(1)).min(1).max(INVESTIGATION_PLAN_LIMITS.maxQuestionsPerTarget),
+  } as const).strict()).max(INVESTIGATION_PLAN_LIMITS.maxTargets),
+  coverage: z.array(z.object({
+    diffEvidenceRef: z.string().regex(/^D\d+$/),
+    decision: z.enum(['investigate', 'diff_sufficient']),
+    targetIds: z.array(z.string().min(1)).max(12),
+  } as const).strict()),
   notes: z.string().nullable(),
-} as const);
+} as const).strict();
 
 export const AGENT_CLAIM_CATEGORIES = [
   'observed_change',
@@ -147,12 +140,10 @@ export const AGENT_TERMINAL_LIMITS = {
   minFindingEvidenceRefs: 1,
   maxFindings: 12,
   maxUnresolvedQuestions: 12,
-  maxChangeTargets: 12,
-  maxDependencyEntries: 20,
   maxClaims: 20,
   maxUncertainties: 12,
-  maxMustExpressClaims: 3,
-  maxOptionalClaims: 4,
+  maxMustExpressClaims: 12,
+  maxOptionalClaims: 12,
   /**
    * Per-disposition counts cannot be expressed in a JSON Schema, so all three
    * are enforced when the terminal is normalized. The must_express and optional
@@ -238,7 +229,7 @@ const agentClaimSchema = z.object({
   }
 });
 
-/** One terminal replaces the former investigation, semantic, and selection requests. */
+/** One compact terminal contains evidence findings and the generator-facing facts. */
 export const changeAnalysisAgentFinalResponseSchema = z.object({
   investigation: z.object({
     findings: z.array(z.object({
@@ -252,42 +243,13 @@ export const changeAnalysisAgentFinalResponseSchema = z.object({
       .describe('Planned questions the repository evidence could not answer. Leave them here instead of guessing.'),
     stopReason: z.string().min(1).describe('Why the investigation ended, in one sentence.'),
   } as const),
-  changeTargets: z.array(z.object({
-    symbol: z.string().min(1),
-    file: z.string().min(1),
-    role: z.string().min(1),
-    evidenceRefs: z.array(agentEvidenceReferenceSchema)
-      .max(AGENT_TERMINAL_LIMITS.maxEvidenceRefs)
-      .describe(`At most ${AGENT_TERMINAL_LIMITS.maxEvidenceRefs} D* or E* ids showing this symbol's role.`),
-  } as const)).max(AGENT_TERMINAL_LIMITS.maxChangeTargets),
-  dependencyContext: z.object({
-    callers: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
-    callees: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
-    stateDependencies: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
-    relatedConfigs: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
-    relatedTypes: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxDependencyEntries),
-  } as const).describe('Names observed in evidence. Use empty arrays when nothing was observed.'),
-  claims: z.array(agentClaimSchema).max(AGENT_TERMINAL_LIMITS.maxClaims)
+  claims: z.array(agentClaimSchema).min(1).max(AGENT_TERMINAL_LIMITS.maxClaims)
     .describe('Route evidenceRefs by category: observed_change=D* only, repository_fact=E* only, supported_inference=D*/E*, uncertain_inference=[] with disposition omit.'),
   behaviorAnalysis: z.object({
     before: z.string().nullable(),
     after: z.string().nullable(),
     observableEffect: z.string().nullable(),
   } as const).describe('Use null for any part the evidence does not establish.'),
-  capabilityContext: z.object({
-    technicalCapability: z.string().nullable(),
-    productCapability: z.string().nullable(),
-  } as const).describe('Use null rather than naming a capability the evidence does not connect to this change.'),
-  intentAnalysis: z.object({
-    primaryIntent: z.string().nullable().describe('One intent, or null when the evidence supports several equally.'),
-    supportedBy: z.array(agentEvidenceReferenceSchema)
-      .max(AGENT_TERMINAL_LIMITS.maxEvidenceRefs)
-      .describe(
-        `At most ${AGENT_TERMINAL_LIMITS.maxEvidenceRefs} D* or E* ids that establish the primary intent. `
-        + 'Cite the decisive evidence only, and use an empty array when primaryIntent is null.'
-      ),
-    confidence: z.enum(['low', 'medium', 'high']),
-  } as const),
   changeClassification: z.object({
     existingBehaviorCorrected: z.boolean(),
     newCapabilityAdded: z.boolean(),
@@ -297,6 +259,6 @@ export const changeAnalysisAgentFinalResponseSchema = z.object({
     reason: z.string().nullable(),
   } as const),
   suggestedScope: z.string().nullable().describe('A short scope token derived from the investigated code path, or null. Never an evidence id.'),
-  selectionNotes: z.string().nullable(),
+  selectionNotes: z.string().nullable().default(null),
   uncertainties: z.array(z.string().min(1)).max(AGENT_TERMINAL_LIMITS.maxUncertainties),
-} as const);
+} as const).strict();

@@ -59,79 +59,46 @@ export interface FileEvidence {
 
 export type DraftEvidence = RawDiffEvidence | FileEvidence;
 
-export type ChangeKind =
-    | 'added'
-    | 'removed'
-    | 'signature'
-    | 'function_body'
-    | 'type_shape'
-    | 'value'
-    | 'renamed'
-    | 'moved'
-    | 'unknown';
-
-export type ChangedSymbolType =
-    | 'function'
-    | 'method'
-    | 'class'
-    | 'interface'
-    | 'type'
-    | 'constant'
-    | 'variable'
-    | 'config_key'
-    | 'route'
-    | 'cli_flag'
-    | 'unknown';
-
 export interface ChangedFile {
     path: string;
     changeType: DiffData['status'];
 }
 
-export interface ChangedSymbol {
-    name: string;
-    file: string;
-    symbolType: ChangedSymbolType;
-    changeKind: ChangeKind;
-    /** Hunk ids or `path:line` anchors proving the symbol appears in the diff. */
-    evidenceRefs: string[];
-}
-
-/**
- * Stage 1 output. Answers "what changed?" and nothing else: no intent, no
- * commit type, no user impact. Producing intent here would anchor every later
- * stage before any repository evidence exists.
- */
-export interface ChangeExtraction {
+/** Diff metadata retained in the trace without introducing a semantic extraction stage. */
+export interface RawDiffContext {
     changedFiles: ChangedFile[];
-    changedSymbols: ChangedSymbol[];
-    introducedSymbols: string[];
-    removedSymbols: string[];
-    changedCalls: string[];
-    changedConfigs: string[];
-    changedTypes: string[];
-    changedDependencies: string[];
+    evidenceIds: string[];
 }
 
 export type InvestigationTargetKind =
     | 'file'
     | 'symbol'
+    | 'call'
     | 'config'
     | 'type'
     | 'dependency'
     | 'interface'
-    | 'cli_or_api';
+    | 'cli_or_api'
+    | 'hunk'
+    | 'relation';
 
 export interface InvestigationTarget {
+    id: string;
     target: string;
     kind: InvestigationTargetKind;
     file: string | null;
+    diffEvidenceRefs: string[];
     questions: string[];
 }
 
 /** Stage 2 output: what still needs to be known to explain the change. */
 export interface InvestigationPlan {
     targets: InvestigationTarget[];
+    coverage: Array<{
+        diffEvidenceRef: string;
+        decision: 'investigate' | 'diff_sufficient';
+        targetIds: string[];
+    }>;
     /** Model-supplied reasoning for the chosen targets, for logs only. */
     notes: string | null;
 }
@@ -196,7 +163,7 @@ export interface TracedAgentClaim extends AgentClaim {
     id: string;
 }
 
-export type ChangeAnalysisStatus = 'complete' | 'degraded' | 'unavailable';
+export type ChangeAnalysisStatus = 'complete' | 'degraded' | 'unavailable' | 'complete_diff_only';
 
 export interface ChangeTargetRole {
     symbol: string;
@@ -270,7 +237,7 @@ export interface InformationSelection {
 
 /** Compact payload handed to the commit generator. */
 export interface SelectedSemanticInformation {
-    analysisStatus: 'complete' | 'degraded' | 'unavailable';
+    analysisStatus: ChangeAnalysisStatus;
     analysisIssues: string[];
     primaryIntent: string | null;
     mustExpress: string[];
@@ -294,7 +261,7 @@ export interface ChangeAnalysisTrace {
     /** Runtime counters and per-request provider usage for benchmark collection. */
     agentMetrics?: AgentRunMetrics;
     agentClaims: TracedAgentClaim[];
-    changeExtraction: ChangeExtraction;
+    rawDiff: RawDiffContext;
     investigationPlan?: InvestigationPlan;
     repositoryEvidence: RepositoryEvidence;
     semanticAnalysis: SemanticChangeAnalysis;

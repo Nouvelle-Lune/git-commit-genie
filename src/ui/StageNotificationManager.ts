@@ -8,8 +8,6 @@ export type StageEventType =
   | 'summarizeStart'
   | 'summarizeProgress'
   | 'summarizeFailed'
-  | 'changeExtractionStart'
-  | 'changeExtracted'
   | 'investigationPlanStart'
   | 'investigationPlanned'
   | 'investigationStart'
@@ -30,8 +28,6 @@ export type StageEventType =
   | 'draftStart'
   | 'validateFix'
   | 'validationStart'
-  | 'strictFix'
-  | 'strictFixStart'
   | 'enforceLanguage'
   | 'enforceLanguageStart'
   | 'ragRetrieved'
@@ -50,7 +46,7 @@ export interface StageEventData {
   message?: string;
   finalMessage?: string;
   error?: string;
-  target?: 'changeExtraction' | 'semanticAnalysis' | 'draft';
+  target?: 'semanticAnalysis' | 'draft';
   maxInputTokens?: number;
   contextWindowTokens?: number;
   hardInputTokens?: number;
@@ -95,14 +91,7 @@ export interface StageEvent {
 
 /** Names the request an evidence handoff was compacted for. */
 function targetLabel(target: StageEventData['target']): string {
-  switch (target) {
-    case 'changeExtraction':
-      return I18N.pipeline.extractInput;
-    case 'semanticAnalysis':
-      return I18N.pipeline.analyzeInput;
-    default:
-      return I18N.pipeline.draftInput;
-  }
+  return target === 'semanticAnalysis' ? I18N.pipeline.analyzeInput : I18N.pipeline.draftInput;
 }
 
 class ProgressSession {
@@ -194,10 +183,6 @@ export class StageNotificationManager {
       case 'summarizeFailed':
         this.active.updateMessage(t(I18N.stages.summarizingFailed));
         break;
-      case 'changeExtractionStart':
-      case 'changeExtracted':
-        this.active.updateMessage(t(I18N.stages.changeExtraction));
-        break;
       case 'investigationPlanStart':
       case 'investigationPlanned':
         this.active.updateMessage(t(I18N.stages.investigationPlan));
@@ -269,12 +254,6 @@ export class StageNotificationManager {
         break;
       case 'validateFix':
         this.active.updateMessage(t(I18N.stages.validateFix));
-        break;
-      case 'strictFixStart':
-        this.active.updateMessage(t(I18N.stages.strictFixStart));
-        break;
-      case 'strictFix':
-        this.active.updateMessage(t(I18N.stages.strictFix));
         break;
       case 'enforceLanguageStart':
         this.active.updateMessage(t(I18N.stages.enforceLanguageStart));

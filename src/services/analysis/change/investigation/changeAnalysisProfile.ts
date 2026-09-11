@@ -24,7 +24,6 @@ import { normalizeSemanticAnalysis } from '../semanticAnalysis';
 import {
     AgentClaim,
     ChangeAnalysisStatus,
-    ChangeExtraction,
     DraftEvidence,
     InformationSelection,
     InvestigationFinding,
@@ -61,11 +60,11 @@ export interface InvestigationStepEvent {
 }
 
 export interface ChangeAnalysisAgentInput {
-    snapshot: RepositorySnapshotReader;
+    snapshot?: RepositorySnapshotReader;
     recorder?: EpisodeRecorder;
     memory?: MemoryRetriever;
     navigation?: MemoryNavigation[];
-    extraction: ChangeExtraction;
+    rawDiff: DraftEvidence[];
     plan: InvestigationPlan;
     repositoryPath: string;
     excludePatterns: string[];
@@ -93,7 +92,6 @@ const SYMBOL_PROPERTIES = {
 };
 
 const TOOL_PARAMETERS: Record<InvestigationToolName, Record<string, unknown>> = {
-    getChangedSymbols: objectSchema(REASON_PROPERTY, ['reason']),
     findSymbolDefinition: objectSchema(SYMBOL_PROPERTIES, ['reason', 'symbol', 'filePath', 'maxResults']),
     findSymbolReferences: objectSchema(SYMBOL_PROPERTIES, ['reason', 'symbol', 'filePath', 'maxResults']),
     findCallers: objectSchema(SYMBOL_PROPERTIES, ['reason', 'symbol', 'filePath', 'maxResults']),
@@ -168,8 +166,8 @@ export function createChangeAnalysisProfile(
     return {
         id: 'change-analysis',
         // Cached prompt identities must not reuse the former UUID-based Memory contract.
-        promptVersion: '7',
-        toolsetVersion: 'snapshot-memory-experience-1',
+        promptVersion: '8',
+        toolsetVersion: 'snapshot-memory-experience-2',
         requestType: 'investigation',
         finalName: 'changeAnalysisCompoundTerminal',
         finalSchema: changeAnalysisAgentFinalResponseSchema,
@@ -185,7 +183,7 @@ export function createChangeAnalysisProfile(
                     `Completed tool calls: ${state.steps}`,
                     `Published memory navigation (historical investigation experience): ${JSON.stringify(input.memory?.publishedNavigation ?? [])}`,
                     `Remaining memory budget: ${JSON.stringify(input.memory?.budget ?? null)}`,
-                    `Diff evidence representation: ${JSON.stringify(input.evidence)}`,
+                    `Raw diff evidence: ${JSON.stringify(input.rawDiff)}`,
                     `Repository evidence ledger: ${JSON.stringify(state.ledger.snapshot()
                         .filter(item => item.source === 'repository'))}`,
                     `Completed calls: ${JSON.stringify(state.observations.map(item => ({ tool: item.tool, arguments: item.arguments, ok: item.ok })))}`,
@@ -209,9 +207,8 @@ export function createChangeAnalysisProfile(
                 content: [
                     '<run_context>',
                     `Repository tool budget: ${profileInput.maxSteps} call(s). ${FINISH_INVESTIGATION_TOOL} is free and does not count against it.`,
-                    `Change extraction: ${JSON.stringify(profileInput.extraction)}`,
                     `Investigation plan: ${JSON.stringify(profileInput.plan)}`,
-                    `Diff evidence: ${JSON.stringify(profileInput.evidence)}`,
+                    `Raw diff evidence: ${JSON.stringify(profileInput.rawDiff)}`,
                     `Untrusted memory navigation (historical investigation experience): ${JSON.stringify(profileInput.navigation ?? [])}`,
                     `User template constraints: ${JSON.stringify(profileInput.userTemplate ?? null)}`,
                     '</run_context>',
@@ -223,14 +220,16 @@ export function createChangeAnalysisProfile(
                 ].join('\n'),
             }],
         }),
-        grantTools: profileInput => [...CHANGE_ANALYSIS_TOOL_NAMES, ...(profileInput.memory ? ['searchRepositoryMemory', 'readMemorySources'] : [])].map(name => ({
+        grantTools: profileInput => (!profileInput.snapshot || !profileInput.plan.targets.length)
+            ? []
+            : [...CHANGE_ANALYSIS_TOOL_NAMES, ...(profileInput.memory ? ['searchRepositoryMemory', 'readMemorySources'] : [])].map(name => ({
             name,
             allowedRoot: profileInput.repositoryPath,
             excludePatterns: [...profileInput.excludePatterns],
             maxResults: 50,
             maxLines: 400,
             maxDepth: 1,
-            allocateEvidence: !['getChangedSymbols', 'listDirectory', 'searchRepositoryMemory'].includes(name),
+            allocateEvidence: !['listDirectory', 'searchRepositoryMemory'].includes(name),
         })),
         buildToolDefinitions: (_profileInput, state) => [...CHANGE_ANALYSIS_TOOL_NAMES.map(name => (
             createExecutableDefinition(name, input, state, evidenceItems, openQuestions)
@@ -267,11 +266,10 @@ export function createChangeAnalysisProfile(
             content: buildCorrectionLines(failure, FINISH_INVESTIGATION_TOOL).join('\n'),
         }],
         normalizeFinal: (raw, state) => normalizeCompoundTerminal(raw, state, evidenceItems),
-        preservePartialResult: (state, error) => unavailableOutput(
-            state,
-            evidenceItems,
-            String((error as { message?: unknown })?.message ?? error),
-        ),
+        // Change analysis is a required chain stage. Exhausting the bounded
+        // AgentRuntime retries must fail the chain instead of manufacturing a
+        // file-name-only result that can be mistaken for a successful analysis.
+        preservePartialResult: (_state, error) => { throw error; },
     };
 }
 
@@ -311,16 +309,13 @@ function createExecutableDefinition(
         },
         execute: async (context, args) => {
             const toolName = name;
+            if (!input.snapshot) {
+                throw new Error('Repository snapshot is required for a repository tool call.');
+            }
             const toolContext: InvestigationToolContext = {
                 snapshot: input.snapshot,
                 repositoryPath: context.grant.allowedRoot,
                 excludePatterns: context.grant.excludePatterns,
-                changedSymbols: input.extraction.changedSymbols.map(symbol => ({
-                    name: symbol.name,
-                    file: symbol.file,
-                    symbolType: symbol.symbolType,
-                    changeKind: symbol.changeKind,
-                })),
                 allocateEvidence: evidence => context.allocateEvidence(evidence),
             };
             const started = performance.now();
@@ -376,8 +371,8 @@ function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRu
             const parsed = searchSchema.safeParse(args);
             if (!parsed.success) { return memory.reject('invalid_arguments', parsed.error.message); }
             const navigation = await memory.searchRepositoryMemory({
-                paths: input.extraction.changedFiles.map(file => file.path),
-                symbols: input.extraction.changedSymbols.map(symbol => symbol.name),
+                paths: rawDiffPaths(input.rawDiff),
+                symbols: [],
                 keywords: [parsed.data.query],
             });
             input.recorder?.record({ step: state.steps, tool: 'searchRepositoryMemory', arguments: args, ok: true,
@@ -433,7 +428,6 @@ function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRu
 
 function toolDescription(name: InvestigationToolName): string {
     const descriptions: Record<InvestigationToolName, string> = {
-        getChangedSymbols: 'List symbols already grounded in the diff extraction.',
         findSymbolDefinition: 'Locate and read up to 50 likely definitions of a changed symbol.',
         findSymbolReferences: 'Find up to 50 repository references to a changed symbol.',
         findCallers: 'Find up to 50 call sites of a changed function or method.',
@@ -447,6 +441,10 @@ function toolDescription(name: InvestigationToolName): string {
     return descriptions[name];
 }
 
+function rawDiffPaths(evidence: DraftEvidence[]): string[] {
+    return Array.from(new Set(evidence.map(item => item.fileName)));
+}
+
 function normalizeCompoundTerminal(
     raw: RawFinal,
     state: AgentRunState,
@@ -457,42 +455,35 @@ function normalizeCompoundTerminal(
     const claims = raw.claims.map(claim => normalizeClaim(claim, state, issues, degradations));
     const validClaims = claims.filter((claim): claim is AgentClaim => claim !== null);
     const tracedClaims = validClaims.map((claim, index) => ({ ...claim, id: `C${index + 1}` }));
-    const changeTargets = raw.changeTargets.map(target => ({
-        ...target,
-        evidenceRefs: filterKnownRefs(
-            `changeTargets['${target.symbol}'].evidenceRefs`,
-            target.evidenceRefs,
-            state,
-            issues,
-            degradations,
-        ),
-    }));
-    const intentAnalysis = {
-        ...raw.intentAnalysis,
-        supportedBy: filterKnownRefs(
-            'intentAnalysis.supportedBy',
-            raw.intentAnalysis.supportedBy,
-            state,
-            issues,
-            degradations,
-        ),
-    };
     const rawSemantic: SemanticChangeAnalysis = {
-        changeTargets,
-        dependencyContext: raw.dependencyContext,
+        changeTargets: [],
+        dependencyContext: {
+            callers: [],
+            callees: [],
+            stateDependencies: [],
+            relatedConfigs: [],
+            relatedTypes: [],
+        },
         observedChanges: validClaims.filter(claim => claim.category === 'observed_change'),
         repositoryFacts: validClaims.filter(claim => claim.category === 'repository_fact'),
         behaviorAnalysis: raw.behaviorAnalysis,
-        capabilityContext: raw.capabilityContext,
+        capabilityContext: {
+            technicalCapability: null,
+            productCapability: null,
+        },
         supportedInferences: validClaims.filter(claim => claim.category === 'supported_inference'),
         uncertainInferences: validClaims.filter(claim => claim.category === 'uncertain_inference'),
-        intentAnalysis,
+        intentAnalysis: {
+            primaryIntent: null,
+            supportedBy: [],
+            confidence: 'low',
+        },
         changeClassification: raw.changeClassification,
         uncertainties: [
             ...raw.uncertainties,
             ...validClaims
                 .filter(claim => claim.category === 'uncertain_inference')
-                .map(claim => claim.claim),
+            .map(claim => claim.claim),
         ],
     };
     const repositoryEvidence = normalizeRepositoryEvidence(raw, state, evidenceItems, issues, degradations);
@@ -516,11 +507,14 @@ function normalizeCompoundTerminal(
         suggestedScope: cleanText(raw.suggestedScope),
         notes: cleanText(raw.selectionNotes),
     };
+    const hasRepositoryEvidence = state.ledger.snapshot().some(item => item.source === 'repository');
     return {
         repositoryEvidence,
         semanticAnalysis,
         informationSelection: selection,
-        analysisStatus: degradations.length ? 'degraded' : 'complete',
+        analysisStatus: degradations.length
+            ? 'degraded'
+            : hasRepositoryEvidence ? 'complete' : 'complete_diff_only',
         issues,
         claims: tracedClaims,
     };
@@ -640,35 +634,6 @@ function filterKnownRefs(
         state.issues.push({ type: 'invalid_reference', message, step: state.steps });
     }
     return valid;
-}
-
-function unavailableOutput(
-    state: AgentRunState,
-    evidenceItems: RepositoryEvidenceItem[],
-    reason: string,
-): ChangeAnalysisAgentOutput {
-    const repositoryEvidence: RepositoryEvidence = {
-        items: [...evidenceItems],
-        findings: [],
-        unresolvedQuestions: [],
-        stopReason: reason,
-        steps: state.steps,
-        degraded: true,
-    };
-    return {
-        repositoryEvidence,
-        semanticAnalysis: normalizeSemanticAnalysis({}, repositoryEvidence, state.ledger),
-        informationSelection: {
-            mustExpress: [],
-            optional: [],
-            omit: [],
-            suggestedScope: null,
-            notes: reason,
-        },
-        analysisStatus: 'unavailable',
-        issues: [reason],
-        claims: [],
-    };
 }
 
 export async function runChangeAnalysisProfile(params: {

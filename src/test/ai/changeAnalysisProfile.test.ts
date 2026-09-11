@@ -285,14 +285,6 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
                 unresolvedQuestions: [],
                 stopReason: 'No repository evidence was needed.',
             },
-            changeTargets: [],
-            dependencyContext: {
-                callers: [],
-                callees: [],
-                stateDependencies: [],
-                relatedConfigs: [],
-                relatedTypes: [],
-            },
             claims: [{
                 category: 'supported_inference',
                 claim: 'improves product reliability',
@@ -300,8 +292,6 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
                 disposition: 'must_express',
             }],
             behaviorAnalysis: { before: null, after: null, observableEffect: null },
-            capabilityContext: { technicalCapability: null, productCapability: 'reliability' },
-            intentAnalysis: { primaryIntent: 'improve reliability', supportedBy: ['E404'], confidence: 'high' },
             changeClassification: {
                 existingBehaviorCorrected: false,
                 newCapabilityAdded: false,
@@ -445,11 +435,14 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         const input = makeInput();
         input.plan = {
             targets: [{
+                id: 'T1',
                 target: 'parse',
                 kind: 'symbol',
                 file: 'src/parser.ts',
+                diffEvidenceRefs: ['D1'],
                 questions: ['Who calls parse?'],
             }],
+            coverage: [{ diffEvidenceRef: 'D1', decision: 'investigate', targetIds: ['T1'] }],
             notes: null,
         };
         const profile = createChangeAnalysisProfile(input);
@@ -468,35 +461,39 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
     });
 
     it('allows finalization without repository evidence when the plan is empty', () => {
+        // Verify the diff-sufficient plan can enter structured finalization without repository evidence.
         const profile = createChangeAnalysisProfile(makeInput());
 
         assert.equal(profile.validateFinalizationPrecondition?.(makeState()), null);
     });
 
-    it('marks invalid references in targets and intent as degraded instead of silently dropping them', () => {
+    it('propagates an exhausted terminal failure instead of manufacturing degraded facts', () => {
+        // Verify finalization exhaustion remains an explicit chain failure and never becomes a file-name fallback claim.
+        const profile = createChangeAnalysisProfile(makeInput());
+        const error = new Error('terminal schema retries exhausted');
+
+        assert.throws(() => profile.preservePartialResult?.(makeState(), error), error);
+    });
+
+    it('marks invalid claim references as degraded instead of silently dropping the claim', () => {
+        // Verify an invalid final claim reference is visible as a degraded analysis result.
         const profile = createChangeAnalysisProfile(makeInput());
         const raw = changeAnalysisAgentFinalResponseSchema.parse({
             ...minimalRaw(),
-            changeTargets: [{
-                symbol: 'parse',
-                file: 'src/parser.ts',
-                role: 'changed function',
+            claims: [{
+                category: 'supported_inference',
+                claim: 'makes parsing deterministic',
                 evidenceRefs: ['D404'],
+                disposition: 'must_express',
             }],
-            intentAnalysis: {
-                primaryIntent: 'make parsing deterministic',
-                supportedBy: ['E404'],
-                confidence: 'high',
-            },
         });
 
         const output = profile.normalizeFinal(raw, makeState());
 
         assert.equal(output.analysisStatus, 'degraded');
-        assert.equal(output.semanticAnalysis.changeTargets[0].evidenceRefs.length, 0);
-        assert.deepEqual(output.semanticAnalysis.intentAnalysis.supportedBy, []);
-        assert.ok(output.issues.some(issue => issue.includes('changeTargets')));
-        assert.ok(output.issues.some(issue => issue.includes('supportedBy')));
+        assert.deepEqual(output.semanticAnalysis.supportedInferences, []);
+        assert.ok(output.informationSelection.omit.includes('makes parsing deterministic'));
+        assert.ok(output.issues.some(issue => issue.includes('D404')));
     });
 
     it('requires findings to cite repository evidence while preserving valid E* references', () => {
@@ -615,17 +612,18 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
 
 function makeInput(): ChangeAnalysisAgentInput {
     return {
-        extraction: {
-            changedFiles: [{ path: 'src/parser.ts', changeType: 'modified' }],
-            changedSymbols: [],
-            introducedSymbols: [],
-            removedSymbols: [],
-            changedCalls: [],
-            changedConfigs: [],
-            changedTypes: [],
-            changedDependencies: [],
+        rawDiff: [{
+            kind: 'raw',
+            fileName: 'src/parser.ts',
+            status: 'modified',
+            evidenceIds: ['D1'],
+            rawDiff: '@@ -1 +1 @@\n-old\n+new',
+        }],
+        plan: {
+            targets: [],
+            coverage: [{ diffEvidenceRef: 'D1', decision: 'diff_sufficient', targetIds: [] }],
+            notes: null,
         },
-        plan: { targets: [], notes: null },
         snapshot: {} as RepositorySnapshotReader,
         repositoryPath: '/tmp/repository',
         excludePatterns: [],
@@ -665,18 +663,13 @@ function minimalRaw() {
             unresolvedQuestions: [],
             stopReason: 'Enough evidence.',
         },
-        changeTargets: [],
-        dependencyContext: {
-            callers: [],
-            callees: [],
-            stateDependencies: [],
-            relatedConfigs: [],
-            relatedTypes: [],
-        },
-        claims: [],
+        claims: [{
+            category: 'observed_change' as const,
+            claim: 'the parser diff changes one branch',
+            evidenceRefs: ['D1'],
+            disposition: 'must_express' as const,
+        }],
         behaviorAnalysis: { before: null, after: null, observableEffect: null },
-        capabilityContext: { technicalCapability: null, productCapability: null },
-        intentAnalysis: { primaryIntent: null, supportedBy: [], confidence: 'low' as const },
         changeClassification: {
             existingBehaviorCorrected: false,
             newCapabilityAdded: false,

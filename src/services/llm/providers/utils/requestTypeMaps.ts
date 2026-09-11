@@ -5,8 +5,8 @@ import {
     classifyAndDraftResponseSchema,
     validateAndFixResponseSchema,
     commitMessageSchema,
+    factAwareCommitMessageSchema,
     ragRerankResponseSchema,
-    changeExtractionResponseSchema,
     investigationPlanResponseSchema,
 } from '../schemas/common';
 
@@ -16,10 +16,8 @@ const REQUEST_TYPE_LABELS: Record<RequestType, string> = {
     draft: 'draft',
     fix: 'validate-fix',
     ragRerank: 'rag-rerank',
-    changeExtraction: 'change-extract',
     investigationPlan: 'investigation-plan',
     investigation: 'investigation',
-    strictFix: 'strict-fix',
     enforceLanguage: 'lang-fix',
 };
 
@@ -29,10 +27,8 @@ const VALIDATION_SCHEMAS: Partial<Record<RequestType, z.ZodTypeAny>> = {
     draft: classifyAndDraftResponseSchema,
     fix: validateAndFixResponseSchema,
     ragRerank: ragRerankResponseSchema,
-    changeExtraction: changeExtractionResponseSchema,
     investigationPlan: investigationPlanResponseSchema,
-    strictFix: commitMessageSchema,
-    enforceLanguage: commitMessageSchema,
+    enforceLanguage: factAwareCommitMessageSchema,
 };
 
 /**

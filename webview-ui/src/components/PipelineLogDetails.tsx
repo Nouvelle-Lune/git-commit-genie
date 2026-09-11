@@ -104,8 +104,6 @@ function sourceLabel(source: CommitMessageSource, text: PipelineTextCatalog): st
             return text.sourceDraft;
         case 'validation':
             return text.sourceValidation;
-        case 'strictFix':
-            return text.sourceStrictFix;
         case 'languageEnforcement':
             return text.sourceLanguageEnforcement;
         case 'final':
@@ -347,12 +345,6 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
                     </DetailSection>
                     <DetailMetrics items={[{ label: text.detailSource, value: <SemanticTag value={sourceLabel(details.source, text)} /> }]} />
                 </>
-            );
-        case 'strictFixStart':
-            return (
-                <DetailSection title={text.detailProblems}>
-                    <StringList items={details.problems} emptyLabel={text.detailEmptyList} />
-                </DetailSection>
             );
         case 'structuredValidation':
             return (

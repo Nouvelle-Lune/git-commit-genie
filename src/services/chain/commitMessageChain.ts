@@ -15,11 +15,10 @@ import {
 import { ChainTokenBudget, estimateChatMessagesTokens, isContextWindowFailure } from "../llm/inputTokenBudget";
 import { buildChangeConditionedDraftMessages } from "./generation/prompts";
 import { InvestigationSettings } from "../analysis/change/investigation/config";
-import { EvidenceRouteTarget, runChangeAnalysisPipeline } from "../analysis/change/pipeline";
+import { runChangeAnalysisPipeline } from "../analysis/change/pipeline";
 import { generateDraft } from "./generation/draft";
 import {
 	checkConventionalCommitHeader,
-	enforceStrictCommitFormat,
 	validateAndFixCommit,
 } from "./validation/commitValidation";
 import { buildFileSummaries, summarizeFileEvidenceForDisplay } from "./evidence/fileSummaries";
@@ -83,7 +82,7 @@ export async function generateCommitMessageChain(
 	}));
 
 	const createCompactFor = (branch: { current: DraftEvidence[] }) => async (
-		target: EvidenceRouteTarget,
+		target: 'draft',
 		buildTargetMessages: (current: DraftEvidence[]) => AIMessage[],
 		force = false,
 	): Promise<void> => {
@@ -191,7 +190,6 @@ export async function generateCommitMessageChain(
 		inputs,
 		execution,
 		getEvidence: () => analysisEvidence.current,
-		compactFor,
 		investigationOverrides: options?.investigation,
 		evidenceLedger,
 		onStage: options?.onStage,
@@ -250,6 +248,14 @@ export async function generateCommitMessageChain(
 		rawData: { output: generatedDraft },
 	}));
 
+	const factContext = {
+		requiredFacts: trace.agentClaims
+			.filter(claim => claim.disposition === 'must_express' && trace.selectedInformation.mustExpress.includes(claim.claim))
+			.map(claim => ({ id: claim.id, text: claim.claim })),
+		optionalFacts: trace.agentClaims
+			.filter(claim => claim.disposition === 'optional' && trace.selectedInformation.optional.includes(claim.claim))
+			.map(claim => ({ id: claim.id, text: claim.claim })),
+	};
 	safeRun('Chain.onStage.validationStart', () => options?.onStage?.({
 		type: 'validationStart',
 		rawData: {
@@ -257,31 +263,39 @@ export async function generateCommitMessageChain(
 				draft,
 				validationChecklist: inputs.validationChecklist ?? '',
 				userTemplate: inputs.userTemplate,
+				factContext,
 			},
 		},
 	}));
-	const { validMessage, notes: validationNotes } = await validateAndFixCommit(draft, inputs.validationChecklist ?? '', execution, inputs.userTemplate);
+	let { validMessage, notes: validationNotes, preservedFactIds } = await validateAndFixCommit(
+		draft,
+		inputs.validationChecklist ?? '',
+		execution,
+		inputs.userTemplate,
+		factContext,
+	);
 	safeRun('Chain.onStage.validateFix', () => options?.onStage?.({
 		type: 'validateFix',
 		data: { validMessage },
-		rawData: { output: { validMessage, validationNotes } },
+		rawData: { output: { validMessage, validationNotes, preservedFactIds } },
 	}));
 
-	// Local strict check; if still not conforming, ask LLM for a minimal strict fix
+	// Reuse the fact-aware validator for any remaining format violation. A second
+	// request is bounded by the same execution retry policy and receives the full
+	// semantic contract, so no blind whole-message fixer can erase the body.
 	let finalMessage = validMessage;
 	const check = checkConventionalCommitHeader(finalMessage);
 	if (!check.ok) {
-		safeRun('Chain.onStage.strictFixStart', () => options?.onStage?.({
-			type: 'strictFixStart',
-			data: { problems: check.problems },
-			rawData: { input: { message: finalMessage, problems: check.problems, userTemplate: inputs.userTemplate } },
-		}));
-		finalMessage = await enforceStrictCommitFormat(finalMessage, check.problems, execution, inputs.userTemplate);
-		safeRun('Chain.onStage.strictFix', () => options?.onStage?.({
-			type: 'strictFix',
-			data: { message: finalMessage },
-			rawData: { output: { message: finalMessage } },
-		}));
+		const repaired = await validateAndFixCommit(
+			finalMessage,
+			[inputs.validationChecklist ?? '', ...check.problems].filter(Boolean).join('\n'),
+			execution,
+			inputs.userTemplate,
+			factContext,
+		);
+		finalMessage = repaired.validMessage;
+		preservedFactIds = repaired.preservedFactIds;
+		validationNotes = [validationNotes, repaired.notes].filter(Boolean).join(' | ') || undefined;
 	}
 
 	// Enforce target language strictly while preserving tokens/structure
@@ -297,12 +311,16 @@ export async function generateCommitMessageChain(
 				},
 			},
 		}));
-		finalMessage = await enforceCommitLanguage(finalMessage, inputs.targetLanguage, execution, inputs.userTemplate);
+		finalMessage = await enforceCommitLanguage(finalMessage, inputs.targetLanguage, execution, inputs.userTemplate, factContext);
 		safeRun('Chain.onStage.enforceLanguage', () => options?.onStage?.({
 			type: 'enforceLanguage',
 			data: { message: finalMessage },
 			rawData: { output: { message: finalMessage } },
 		}));
+	}
+	const finalCheck = checkConventionalCommitHeader(finalMessage);
+	if (!finalCheck.ok) {
+		throw new Error(`Final commit message failed Conventional Commit validation: ${finalCheck.problems.join(' | ')}`);
 	}
 
 	safeRun('Chain.onStage.done', () => options?.onStage?.({

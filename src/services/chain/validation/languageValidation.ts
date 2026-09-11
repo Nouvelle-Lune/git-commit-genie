@@ -1,12 +1,14 @@
 import { NormalizedLang } from "../types";
 import { LLMExecution } from '../../llm/llmTypes';
 import { buildEnforceLanguageMessages } from './prompts';
+import type { CommitFactContext } from './commitValidation';
 
 export async function enforceCommitLanguage(
     commitMessage: string,
     targetLanguage: string | undefined,
     execution: LLMExecution,
-    userTemplate?: string
+    userTemplate?: string,
+    factContext?: CommitFactContext,
 ): Promise<string> {
     const language = (targetLanguage || '').trim();
     if (!language) {
@@ -34,10 +36,31 @@ export async function enforceCommitLanguage(
         }
     }
 
-    const messages = buildEnforceLanguageMessages(commitMessage, language, userTemplate);
+    const messages = buildEnforceLanguageMessages(commitMessage, language, userTemplate, factContext);
     const session = execution.createSession(messages);
-    const parsed = await execution.run<any>(session, messages, { requestType: 'enforceLanguage' });
-    return parsed.commitMessage.trim();
+    let requestMessages = messages;
+    for (let attempt = 0; attempt <= execution.maxRetries; attempt += 1) {
+        const parsed = await execution.run<any>(session, requestMessages, { requestType: 'enforceLanguage' });
+        const requiredIds = factContext?.requiredFacts.map(fact => fact.id) ?? [];
+        const preservedIds = Array.isArray(parsed.preservedFactIds) ? parsed.preservedFactIds : [];
+        const missing = requiredIds.filter(id => !preservedIds.includes(id));
+        if (!missing.length) {
+            return parsed.commitMessage.trim();
+        }
+        if (attempt === execution.maxRetries) {
+            throw new Error(`Language fixer omitted required fact ids: ${missing.join(', ')}.`);
+        }
+        requestMessages = [{
+            role: 'user',
+            content: [
+                '<fact_binding_rejected>',
+                `Missing required fact ids: ${missing.join(', ')}.`,
+                'Return the complete JSON object again, preserve every required fact, and list all preserved ids.',
+                '</fact_binding_rejected>',
+            ].join('\n'),
+        }];
+    }
+    throw new Error('Language fixer exhausted its fact-binding retries.');
 }
 
 export function normalizeLanguageCode(input: string): NormalizedLang {

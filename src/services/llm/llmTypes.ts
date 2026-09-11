@@ -13,11 +13,8 @@ export type RequestType =
     | 'fix'
     | 'ragRerank'
     // Change-conditioned chain stages
-    | 'changeExtraction'
     | 'investigationPlan'
     | 'investigation'
-    // More granular chain stages for clearer logging
-    | 'strictFix'
     | 'enforceLanguage';
 
 export interface LLMRunOptions {

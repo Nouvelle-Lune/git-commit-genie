@@ -244,8 +244,6 @@ describe('pipeline display for parallel analysis events', () => {
     it('keeps interleaved RAG and agent events running until done', () => {
         const logs = [
             log('generationStart', { generationMode: 'thinking', repoPath: '/tmp/repository' }),
-            stage('changeExtractionStart'),
-            stage('changeExtracted', changeExtractedData()),
             stage('investigationStart', { maxSteps: 4 }),
             stage('investigationComplete', { steps: 2, evidenceCount: 3 }),
             stage('analysisFinalizing', {}),
@@ -268,8 +266,6 @@ describe('pipeline display for parallel analysis events', () => {
 
         const degraded = deriveLatestPipelineSnapshot([
             log('generationStart', { generationMode: 'thinking', repoPath: '/tmp/repository' }),
-            stage('changeExtractionStart'),
-            stage('changeExtracted', changeExtractedData()),
             stage('investigationStart', { maxSteps: 4 }),
             stage('investigationComplete', { steps: 1, evidenceCount: 0 }),
             stage('analysisFinalizing', {}),
@@ -308,8 +304,6 @@ describe('pipeline display for parallel analysis events', () => {
     it('keeps a completed generation ready when a later maintenance event is appended', () => {
         const snapshot = deriveLatestPipelineSnapshot([
             log('generationStart', { generationMode: 'thinking', repoPath: '/tmp/repository' }),
-            stage('changeExtractionStart'),
-            stage('changeExtracted', changeExtractedData()),
             stage('investigationStart', { maxSteps: 4 }),
             stage('investigationResolved', { findingCount: 1, unresolvedCount: 0, reason: 'Enough evidence.' }),
             stage('done', { finalMessage: 'feat(memory): publish handbook entry' }),
@@ -479,7 +473,6 @@ describe('pipeline event details', () => {
     it('omits details for start-only stages', () => {
         for (const stageName of [
             'summarizeStart',
-            'changeExtractionStart',
             'investigationPlanStart',
             'ragDisabled',
             'ragRetrievalStart',
@@ -665,16 +658,6 @@ describe('structured validation presentation', () => {
         );
     });
 });
-
-function changeExtractedData() {
-    return {
-        symbolCount: 1,
-        symbols: ['foo (modified)'],
-        configCount: 0,
-        typeCount: 0,
-        dependencyCount: 0,
-    };
-}
 
 function semanticAnalysisCompleteData() {
     return {

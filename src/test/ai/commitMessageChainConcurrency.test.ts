@@ -10,31 +10,31 @@ import { AIMessage, AISession } from '../../services/llm/providers';
 import { resolveChainTokenBudget } from '../../services/llm/inputTokenBudget';
 import * as changeAnalysisAgentModule from '../../services/analysis/change/investigation/agent';
 import { ChangeAnalysisAgentOutput } from '../../services/analysis/change/investigation/agent';
-import { RagRetrievalQuery } from '../../services/chain/types';
 
-describe('commit-message chain selection-driven RAG', () => {
-    it('starts RAG after selection and passes grounded query fields before draft', async () => {
+describe('commit-message chain with RAG disabled', () => {
+    it('runs the raw-diff planner and does not invoke RAG when RAG is disabled', async () => {
+        // Verify the chain reaches draft generation through raw-diff planning while the disabled RAG path stays inert.
         const ragConfig = vscode.workspace.getConfiguration('gitCommitGenie.rag');
         const previousRagEnabled = ragConfig.get<boolean>('enabled');
-        await ragConfig.update('enabled', true, vscode.ConfigurationTarget.Global);
+        await ragConfig.update('enabled', false, vscode.ConfigurationTarget.Global);
 
         let agentCompleted = false;
-        let observedQuery: RagRetrievalQuery | undefined;
         const requestTypes: string[] = [];
         const stages: string[] = [];
         const execution = createExecution(async requestType => {
             requestTypes.push(requestType);
             switch (requestType) {
-                case 'changeExtraction':
-                    return extractionResponse();
                 case 'investigationPlan':
                     return {
                         targets: [{
+                            id: 'T1',
                             target: 'parse',
                             kind: 'symbol',
                             file: 'src/parser.ts',
+                            diffEvidenceRefs: ['D1'],
                             questions: ['Who calls parse?'],
                         }],
+                        coverage: [{ diffEvidenceRef: 'D1', decision: 'investigate', targetIds: ['T1'] }],
                         notes: null,
                     };
                 case 'draft':
@@ -48,7 +48,7 @@ describe('commit-message chain selection-driven RAG', () => {
                         notes: null,
                     };
                 case 'fix':
-                    return { commitMessage: 'refactor(parser): simplify parse branch', notes: null };
+                    return { status: 'valid', commitMessage: 'refactor(parser): simplify parse branch', preservedFactIds: ['C1'], violations: [], notes: null };
                 default:
                     throw new Error(`Unexpected request type '${requestType}'.`);
             }
@@ -68,39 +68,19 @@ describe('commit-message chain selection-driven RAG', () => {
                 repositoryPath: '/tmp/repository',
             }, execution, {
                 investigation: { enabled: true, maxSteps: 2, excludePatterns: [] },
-                retrieveRagExamples: async query => {
-                    assert.equal(agentCompleted, true);
-                    observedQuery = query;
-                    return [{
-                        commitHash: 'abc123',
-                        message: 'refactor(parser): flatten parse flow',
-                        subject: 'refactor(parser): flatten parse flow',
-                        matchedBy: ['hybrid'],
-                        styleReason: 'Uses a concise scoped refactor header.',
-                        type: 'refactor',
-                        scope: 'parser',
-                    }];
-                },
                 onStage: event => stages.push(event.type),
             });
 
-            assert.deepEqual(observedQuery, {
-                mustExpress: ['simplifies parser branching'],
-                type: 'refactor',
-                scope: 'parser',
-            });
-            assert.ok(stages.indexOf('informationSelected') < stages.indexOf('ragPrepared'));
-            assert.ok(stages.indexOf('ragPrepared') < stages.indexOf('ragRetrievalStart'));
-            assert.ok(stages.indexOf('ragRetrievalStart') < stages.indexOf('ragRetrieved'));
-            assert.ok(stages.indexOf('ragPrepared') < stages.indexOf('draftStart'));
-            assert.ok(stages.indexOf('ragRetrieved') < stages.indexOf('draftStart'));
-            assert.deepEqual(requestTypes.filter(requestType => requestType.startsWith('rag')), []);
-            assert.equal(output.ragStyleReferences?.[0]?.styleReason, 'Uses a concise scoped refactor header.');
+            assert.equal(agentCompleted, true);
+            assert.deepEqual(requestTypes, ['investigationPlan', 'draft', 'fix']);
+            assert.equal(output.ragStyleReferences, undefined);
+            assert.equal(stages.includes('ragPrepared'), false);
+            assert.equal(stages.includes('ragRetrievalStart'), false);
+            assert.equal(stages.includes('ragRetrieved'), false);
             assert.ok(output.timings.agentStart !== undefined);
             assert.ok(output.timings.agentTerminal !== undefined);
-            assert.ok(output.timings.ragReady !== undefined);
-            assert.ok(output.timings.ragReady! <= output.timings.draftStart);
-            assert.ok(output.timings.draftStart <= output.timings.draftReady);
+            assert.ok(output.timings.draftStart !== undefined);
+            assert.ok(output.timings.draftReady !== undefined);
             assert.equal(output.timings.ttdMs, output.timings.draftReady - output.timings.chainStart);
         } finally {
             agentStub.restore();
@@ -141,25 +121,6 @@ function createExecution(
         accountCall: async () => ({ status: 'pricing-not-configured' as const }),
         getRecordedQuotes: () => [],
         notifyUsageCostIfEnabled: () => undefined,
-    };
-}
-
-function extractionResponse() {
-    return {
-        changedFiles: [{ path: 'src/parser.ts', changeType: 'modified' as const }],
-        changedSymbols: [{
-            name: 'parse',
-            file: 'src/parser.ts',
-            symbolType: 'function' as const,
-            changeKind: 'function_body' as const,
-            evidenceRefs: ['D1'],
-        }],
-        introducedSymbols: [],
-        removedSymbols: [],
-        changedCalls: [],
-        changedConfigs: [],
-        changedTypes: [],
-        changedDependencies: [],
     };
 }
 

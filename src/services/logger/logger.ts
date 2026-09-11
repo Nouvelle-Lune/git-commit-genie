@@ -359,8 +359,6 @@ export class Logger {
                 }
                 case 'searchInFiles':
                     return `Genie wants to search in files: ${parsedArgs.searchTerm || ''}`;
-                case 'getChangedSymbols':
-                    return 'Genie wants to review changed symbols';
                 case 'findSymbolDefinition': {
                     const symbol = parsedArgs.symbol;
                     return `Genie wants to look up definition: ${typeof symbol === 'string' && symbol.trim() ? symbol : 'symbol'}`;

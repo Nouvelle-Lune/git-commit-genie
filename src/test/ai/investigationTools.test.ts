@@ -4,21 +4,8 @@ import { runInvestigationTool, InvestigationToolContext } from '../../services/a
 import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
 
 describe('change investigation tools', () => {
-    it('returns changed symbols without allocating repository evidence', async () => {
-        let allocations = 0;
-        const context = makeContext(() => { allocations += 1; });
-
-        const result = await runInvestigationTool(context, {
-            tool: 'getChangedSymbols',
-        });
-
-        assert.equal(result.ok, true);
-        assert.match(result.summary, /parse/);
-        assert.equal(allocations, 0);
-        assert.deepEqual(result.evidence, []);
-    });
-
     it('reports a path escape as a failed tool outcome before reading or allocating evidence', async () => {
+        // Verify repository tools reject paths outside the captured snapshot before any evidence allocation.
         let allocations = 0;
         const context = makeContext(() => { allocations += 1; });
 
@@ -40,12 +27,6 @@ function makeContext(onAllocate: () => void): InvestigationToolContext {
         repositoryPath: '/tmp/repository',
         snapshot: {} as RepositorySnapshotReader,
         excludePatterns: [],
-        changedSymbols: [{
-            name: 'parse',
-            file: 'src/parser.ts',
-            symbolType: 'function',
-            changeKind: 'function_body',
-        }],
         allocateEvidence: evidence => {
             onAllocate();
             return { ...evidence, id: 'E1' };
