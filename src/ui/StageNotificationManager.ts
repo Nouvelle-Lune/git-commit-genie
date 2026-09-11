@@ -45,6 +45,12 @@ export interface StageEventData {
   validMessage?: string;
   message?: string;
   finalMessage?: string;
+  /** True when a failed fixer retained the message it received. */
+  retainedInput?: boolean;
+  /** Deterministic header violations still present after the stage. */
+  remainingViolations?: string[];
+  /** Combined fixer diagnostics retained for benchmark and raw-log inspection. */
+  validationNotes?: string;
   error?: string;
   target?: 'semanticAnalysis' | 'draft';
   maxInputTokens?: number;

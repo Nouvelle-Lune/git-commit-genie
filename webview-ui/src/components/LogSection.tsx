@@ -266,7 +266,7 @@ export const LogSection: React.FC = () => {
     };
 
     const isSuccessLog = (log: LogEntry) => {
-        return isCommitStageDone(log);
+        return isCommitStageDone(log) && getPipelinePresentation(log)?.tone !== 'warning';
     };
 
     const renderLogIcon = (log: LogEntry) => {

@@ -179,6 +179,7 @@ export interface PipelineTextCatalog {
     detailStyleReason: string;
     detailMatchedBy: string;
     detailCompleteCommitMessage: string;
+    detailRetainedInput: string;
     detailAttempt: string;
     detailTotalAttempts: string;
     detailMissingStructuredOutput: string;
@@ -381,6 +382,7 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     detailStyleReason: 'Style reason',
     detailMatchedBy: 'Matched by',
     detailCompleteCommitMessage: 'Complete commit message',
+    detailRetainedInput: 'Input retained after fixer failure',
     detailAttempt: 'Attempt',
     detailTotalAttempts: 'Total attempts',
     detailMissingStructuredOutput: 'Missing structured output',
@@ -542,7 +544,14 @@ export type PipelineEventDetails =
     | { kind: 'ragPrepared'; mustExpress: string[]; type: string | null; scope: string | null; changeSetSummary: string; retrievalFeatures: string[] }
     | { kind: 'ragRetrieved'; count: number; references: RagReferenceEntry[] }
     | { kind: 'ragRetrievalSkipped'; error: string }
-    | { kind: 'commitMessage'; message: string; source: CommitMessageSource }
+    | {
+        kind: 'commitMessage';
+        message: string;
+        source: CommitMessageSource;
+        retainedInput?: boolean;
+        error?: string;
+        remainingViolations?: string[];
+    }
     | {
         kind: 'structuredValidation';
         stage: string;
@@ -708,6 +717,68 @@ function formatInteger(value: number): string {
 
 function firstLine(value: unknown): string {
     return String(value || '').split(/\r?\n/, 1)[0].trim();
+}
+
+function optionalStringList(data: Record<string, unknown>, stage: string, field: string): string[] | undefined {
+    if (data[field] === undefined) {
+        return undefined;
+    }
+    return asFullStringList(data[field], stage, field);
+}
+
+function optionalBoolean(data: Record<string, unknown>, stage: string, field: string): boolean | undefined {
+    if (data[field] === undefined) {
+        return undefined;
+    }
+    return requireBooleanField(data, stage, field);
+}
+
+function optionalError(data: Record<string, unknown>, stage: string): string | undefined {
+    if (data.error === undefined) {
+        return undefined;
+    }
+    return requireStringField(data, stage, 'error');
+}
+
+function commitMessageDetails(
+    data: Record<string, unknown>,
+    stage: string,
+    message: string,
+    source: CommitMessageSource,
+): Extract<PipelineEventDetails, { kind: 'commitMessage' }> {
+    const retainedInput = optionalBoolean(data, stage, 'retainedInput');
+    const error = optionalError(data, stage);
+    const remainingViolations = optionalStringList(data, stage, 'remainingViolations');
+    return {
+        kind: 'commitMessage',
+        message,
+        source,
+        ...(retainedInput !== undefined ? { retainedInput } : {}),
+        ...(error ? { error } : {}),
+        ...(remainingViolations !== undefined ? { remainingViolations } : {}),
+    };
+}
+
+function hasFixerWarning(data: Record<string, unknown>): boolean {
+    if (data.retainedInput === true || (typeof data.error === 'string' && data.error.trim().length > 0)) {
+        return true;
+    }
+    return Array.isArray(data.remainingViolations)
+        && data.remainingViolations.some(item => typeof item === 'string' && item.trim().length > 0);
+}
+
+function fixerMessageDescription(data: Record<string, unknown>, message: unknown, text: PipelineTextCatalog): string {
+    const description = firstLine(message);
+    const error = asString(data.error);
+    if (error) {
+        return `${description} — ${text.detailError}: ${error}`;
+    }
+    const remainingViolations = Array.isArray(data.remainingViolations)
+        ? data.remainingViolations.filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        : [];
+    return remainingViolations.length
+        ? `${description} — ${text.detailProblems}: ${remainingViolations.join(' | ')}`
+        : description;
 }
 
 export function formatPipelineText(template: string, ...values: Array<string | number>): string {
@@ -1021,24 +1092,18 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
                 message: requireMessageField(data, stage, 'draft'),
                 source: 'draft',
             };
-        case 'validateFix':
-            return {
-                kind: 'commitMessage',
-                message: requireMessageField(data, stage, 'validMessage'),
-                source: 'validation',
-            };
-        case 'enforceLanguage':
-            return {
-                kind: 'commitMessage',
-                message: requireMessageField(data, stage, 'message'),
-                source: 'languageEnforcement',
-            };
-        case 'done':
-            return {
-                kind: 'commitMessage',
-                message: requireMessageField(data, stage, 'finalMessage'),
-                source: 'final',
-            };
+        case 'validateFix': {
+            const message = requireMessageField(data, stage, 'validMessage');
+            return commitMessageDetails(data, stage, message, 'validation');
+        }
+        case 'enforceLanguage': {
+            const message = requireMessageField(data, stage, 'message');
+            return commitMessageDetails(data, stage, message, 'languageEnforcement');
+        }
+        case 'done': {
+            const message = requireMessageField(data, stage, 'finalMessage');
+            return commitMessageDetails(data, stage, message, 'final');
+        }
         default:
             return undefined;
     }
@@ -1626,9 +1691,9 @@ function presentPipelineEventCore(
                 stage,
                 phase: text.phaseVerify,
                 title: text.validateFixTitle,
-                description: firstLine(data.validMessage),
+                description: fixerMessageDescription(data, data.validMessage, text),
                 metrics: [],
-                tone: 'success',
+                tone: hasFixerWarning(data) ? 'warning' : 'success',
                 data,
             };
         case 'enforceLanguageStart':
@@ -1648,9 +1713,9 @@ function presentPipelineEventCore(
                 stage,
                 phase: text.phaseVerify,
                 title: text.enforceLanguageTitle,
-                description: firstLine(data.message),
+                description: fixerMessageDescription(data, data.message, text),
                 metrics: [],
-                tone: 'success',
+                tone: hasFixerWarning(data) ? 'warning' : 'success',
                 data,
             };
         case 'done':
@@ -1658,9 +1723,9 @@ function presentPipelineEventCore(
                 stage,
                 phase: text.phaseOutput,
                 title: text.doneTitle,
-                description: firstLine(data.finalMessage),
+                description: fixerMessageDescription(data, data.finalMessage, text),
                 metrics: [],
-                tone: 'success',
+                tone: hasFixerWarning(data) ? 'warning' : 'success',
                 data,
             };
         default:
@@ -1826,11 +1891,21 @@ export function deriveLatestPipelineSnapshot(
                 break;
             case 'validateFix':
             case 'enforceLanguage':
-                stepStates.verify = 'complete';
+                if (hasFixerWarning(data) || stepStates.verify === 'warning') {
+                    stepStates.verify = 'warning';
+                    degraded = true;
+                } else {
+                    stepStates.verify = 'complete';
+                }
                 break;
             case 'done':
                 stepStates.draft = 'complete';
-                stepStates.verify = 'complete';
+                if (hasFixerWarning(data) || stepStates.verify === 'warning') {
+                    stepStates.verify = 'warning';
+                    degraded = true;
+                } else {
+                    stepStates.verify = 'complete';
+                }
                 break;
         }
     }

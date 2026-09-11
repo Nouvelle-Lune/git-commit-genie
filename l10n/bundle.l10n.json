@@ -329,6 +329,7 @@
 	"Style reason": "Style reason",
 	"Matched by": "Matched by",
 	"Complete commit message": "Complete commit message",
+	"Input retained after fixer failure": "Input retained after fixer failure",
 	"Attempt": "Attempt",
 	"Total attempts": "Total attempts",
 	"Missing structured output": "Missing structured output",

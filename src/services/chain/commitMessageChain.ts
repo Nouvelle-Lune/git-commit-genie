@@ -24,6 +24,23 @@ import {
 import { buildFileSummaries, summarizeFileEvidenceForDisplay } from "./evidence/fileSummaries";
 import { EvidenceLedger } from "../../agent/evidenceLedger";
 
+type FixerStage = 'validateFix' | 'enforceLanguage';
+
+interface FixerFailure {
+	stage: FixerStage;
+	error: string;
+	retainedMessage: string;
+	remainingViolations?: string[];
+}
+
+function fixerErrorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error);
+}
+
+function appendValidationNote(existing: string | undefined, note: string): string {
+	return [existing, note].filter(Boolean).join(' | ');
+}
+
 
 export async function generateCommitMessageChain(
 	inputs: ChainInputs,
@@ -267,38 +284,123 @@ export async function generateCommitMessageChain(
 			},
 		},
 	}));
-	let { validMessage, notes: validationNotes, preservedFactIds } = await validateAndFixCommit(
-		draft,
-		inputs.validationChecklist ?? '',
-		execution,
-		inputs.userTemplate,
-		factContext,
-	);
-	safeRun('Chain.onStage.validateFix', () => options?.onStage?.({
-		type: 'validateFix',
-		data: { validMessage },
-		rawData: { output: { validMessage, validationNotes, preservedFactIds } },
-	}));
+	let finalMessage = draft;
+	let validationNotes: string | undefined;
+	let preservedFactIds: string[] | undefined;
+	let retainedInputByFixer = false;
+	const fixerFailures: FixerFailure[] = [];
 
-	// Reuse the fact-aware validator for any remaining format violation. A second
-	// request is bounded by the same execution retry policy and receives the full
-	// semantic contract, so no blind whole-message fixer can erase the body.
-	let finalMessage = validMessage;
-	const check = checkConventionalCommitHeader(finalMessage);
-	if (!check.ok) {
-		const repaired = await validateAndFixCommit(
-			finalMessage,
-			[inputs.validationChecklist ?? '', ...check.problems].filter(Boolean).join('\n'),
+	// Fixers are quality improvements, not chain prerequisites. Keep the complete
+	// message that entered a failed fixer so a provider/protocol/fact-binding
+	// failure cannot discard the only real output or block later stages.
+	const validationInput = finalMessage;
+	let validationError: string | undefined;
+	try {
+		const validationResult = await validateAndFixCommit(
+			validationInput,
+			inputs.validationChecklist ?? '',
 			execution,
 			inputs.userTemplate,
 			factContext,
 		);
-		finalMessage = repaired.validMessage;
-		preservedFactIds = repaired.preservedFactIds;
-		validationNotes = [validationNotes, repaired.notes].filter(Boolean).join(' | ') || undefined;
+		finalMessage = validationResult.validMessage;
+		validationNotes = validationResult.notes;
+		preservedFactIds = validationResult.preservedFactIds;
+	} catch (error) {
+		if (execution.signal?.aborted) {
+			throw error;
+		}
+		validationError = fixerErrorMessage(error);
+		finalMessage = validationInput;
+		retainedInputByFixer = true;
+		validationNotes = appendValidationNote(validationNotes, `validateFix failed; retained input: ${validationError}`);
+		fixerFailures.push({ stage: 'validateFix', error: validationError, retainedMessage: validationInput });
+		logger.warn(`[Genie][Chain] validateFix failed after retries; retaining input and continuing. error=${validationError}`);
 	}
 
-	// Enforce target language strictly while preserving tokens/structure
+	let formatCheck = checkConventionalCommitHeader(finalMessage);
+	safeRun('Chain.onStage.validateFix', () => options?.onStage?.({
+		type: 'validateFix',
+		data: {
+			validMessage: finalMessage,
+			retainedInput: Boolean(validationError),
+			...(validationError ? { error: validationError } : {}),
+			remainingViolations: formatCheck.problems,
+		},
+		rawData: {
+			input: { message: validationInput, validationChecklist: inputs.validationChecklist ?? '', userTemplate: inputs.userTemplate, factContext },
+			output: {
+				validMessage: finalMessage,
+				validationNotes,
+				preservedFactIds,
+				retainedInput: Boolean(validationError),
+				...(validationError ? { error: validationError } : {}),
+				remainingViolations: formatCheck.problems,
+			},
+		},
+	}));
+
+	// Reuse the fact-aware validator for any remaining format violation. A second
+	// request is bounded by the same execution retry policy and receives the full
+	// semantic contract, so no blind whole-message fixer can erase the body. Its
+	// failure has the same non-blocking retention semantics as the first fixer.
+	if (!formatCheck.ok) {
+		const formatFixInput = finalMessage;
+		const formatViolationsBeforeFix = formatCheck.problems;
+		let formatFixError: string | undefined;
+		try {
+			const repaired = await validateAndFixCommit(
+				formatFixInput,
+				[inputs.validationChecklist ?? '', ...formatCheck.problems].filter(Boolean).join('\n'),
+				execution,
+				inputs.userTemplate,
+				factContext,
+			);
+			finalMessage = repaired.validMessage;
+			preservedFactIds = repaired.preservedFactIds;
+			validationNotes = appendValidationNote(validationNotes, repaired.notes ?? '');
+		} catch (error) {
+			if (execution.signal?.aborted) {
+				throw error;
+			}
+			formatFixError = fixerErrorMessage(error);
+			finalMessage = formatFixInput;
+			retainedInputByFixer = true;
+			validationNotes = appendValidationNote(validationNotes, `validateFix format repair failed; retained input: ${formatFixError}`);
+			fixerFailures.push({
+				stage: 'validateFix',
+				error: formatFixError,
+				retainedMessage: formatFixInput,
+				remainingViolations: formatViolationsBeforeFix,
+			});
+			logger.warn(`[Genie][Chain] validateFix format repair failed after retries; retaining input and continuing. error=${formatFixError}`);
+		}
+		formatCheck = checkConventionalCommitHeader(finalMessage);
+		safeRun('Chain.onStage.validateFix.formatRepair', () => options?.onStage?.({
+			type: 'validateFix',
+			data: {
+				validMessage: finalMessage,
+				retainedInput: Boolean(formatFixError),
+				...(formatFixError ? { error: formatFixError } : {}),
+				remainingViolations: formatCheck.problems,
+			},
+			rawData: {
+				input: { message: formatFixInput, validationChecklist: inputs.validationChecklist ?? '', userTemplate: inputs.userTemplate, factContext, remainingViolations: formatViolationsBeforeFix },
+				output: {
+					validMessage: finalMessage,
+					validationNotes,
+					preservedFactIds,
+					retainedInput: Boolean(formatFixError),
+					...(formatFixError ? { error: formatFixError } : {}),
+					remainingViolations: formatCheck.problems,
+				},
+			},
+		}));
+	}
+
+	// Enforce target language strictly while preserving tokens/structure. This is
+	// also a fixer: a failed request retains its input, except cancellation must
+	// still abort the operation instead of being reported as a successful chain.
 	if ((inputs.targetLanguage || '').trim()) {
 		safeRun('Chain.onStage.enforceLanguageStart', () => options?.onStage?.({
 			type: 'enforceLanguageStart',
@@ -311,22 +413,68 @@ export async function generateCommitMessageChain(
 				},
 			},
 		}));
-		finalMessage = await enforceCommitLanguage(finalMessage, inputs.targetLanguage, execution, inputs.userTemplate, factContext);
+		const languageInput = finalMessage;
+		let languageError: string | undefined;
+		try {
+			finalMessage = await enforceCommitLanguage(languageInput, inputs.targetLanguage, execution, inputs.userTemplate, factContext);
+		} catch (error) {
+			if (execution.signal?.aborted) {
+				throw error;
+			}
+			languageError = fixerErrorMessage(error);
+			finalMessage = languageInput;
+			retainedInputByFixer = true;
+			validationNotes = appendValidationNote(validationNotes, `enforceLanguage failed; retained input: ${languageError}`);
+			fixerFailures.push({ stage: 'enforceLanguage', error: languageError, retainedMessage: languageInput });
+			logger.warn(`[Genie][Chain] enforceLanguage failed after retries; retaining input and continuing. error=${languageError}`);
+		}
+		formatCheck = checkConventionalCommitHeader(finalMessage);
 		safeRun('Chain.onStage.enforceLanguage', () => options?.onStage?.({
 			type: 'enforceLanguage',
-			data: { message: finalMessage },
-			rawData: { output: { message: finalMessage } },
+			data: {
+				message: finalMessage,
+				retainedInput: Boolean(languageError),
+				...(languageError ? { error: languageError } : {}),
+				remainingViolations: formatCheck.problems,
+			},
+			rawData: {
+				input: { message: languageInput, targetLanguage: inputs.targetLanguage, userTemplate: inputs.userTemplate, factContext },
+				output: {
+					message: finalMessage,
+					retainedInput: Boolean(languageError),
+					...(languageError ? { error: languageError } : {}),
+					remainingViolations: formatCheck.problems,
+				},
+			},
 		}));
 	}
+
+	// The final deterministic check is diagnostic only. Never rewrite, truncate,
+	// synthesize, or throw here: the last real message is the chain's output even
+	// when a fixer could not satisfy Conventional Commit formatting.
 	const finalCheck = checkConventionalCommitHeader(finalMessage);
 	if (!finalCheck.ok) {
-		throw new Error(`Final commit message failed Conventional Commit validation: ${finalCheck.problems.join(' | ')}`);
+		validationNotes = appendValidationNote(validationNotes, `Final format check found remaining violations: ${finalCheck.problems.join(' | ')}`);
+		logger.warn(`[Genie][Chain] Final Conventional Commit check found remaining violations; returning the last real message. violations=${finalCheck.problems.join(' | ')}`);
 	}
 
 	safeRun('Chain.onStage.done', () => options?.onStage?.({
 		type: 'done',
-		data: { finalMessage },
-		rawData: { output: { finalMessage } },
+		data: {
+			finalMessage,
+			retainedInput: retainedInputByFixer,
+			remainingViolations: finalCheck.problems,
+			...(validationNotes ? { validationNotes } : {}),
+		},
+		rawData: {
+			output: {
+				finalMessage,
+				retainedInput: retainedInputByFixer,
+				remainingViolations: finalCheck.problems,
+				validationNotes,
+				fixerFailures,
+			},
+		},
 	}));
 
 	return {

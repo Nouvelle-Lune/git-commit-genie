@@ -330,6 +330,14 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
                         <DetailProse>{details.message}</DetailProse>
                     </DetailSection>
                     <DetailMetrics items={[{ label: text.detailSource, value: <SemanticTag value={sourceLabel(details.source, text)} /> }]} />
+                    <DetailFields rows={[
+                        ...(details.retainedInput ? [{ label: text.detailRetainedInput, value: <span className="pipeline-details-warning">{text.detailYes}</span> }] : []),
+                        ...(details.error ? [{ label: text.detailError, value: <span className="pipeline-details-warning">{details.error}</span> }] : []),
+                        ...(details.remainingViolations?.length ? [{
+                            label: text.detailProblems,
+                            value: <div className="pipeline-details-warning"><StringList items={details.remainingViolations} emptyLabel={text.detailEmptyList} /></div>,
+                        }] : []),
+                    ]} />
                 </>
             );
         case 'structuredValidation':

@@ -329,6 +329,7 @@
 	"Style reason": "風格原因",
 	"Matched by": "匹配方式",
 	"Complete commit message": "完整提交訊息",
+	"Input retained after fixer failure": "修復器失敗後保留輸入",
 	"Attempt": "嘗試",
 	"Total attempts": "總嘗試次數",
 	"Missing structured output": "缺少結構化輸出",
