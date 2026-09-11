@@ -162,20 +162,6 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
                     ]} />
                 </>
             );
-        case 'changeExtracted':
-            return (
-                <>
-                    <DetailSection title={text.detailSymbols}>
-                        <StringList items={details.symbols} emptyLabel={text.detailEmptyList} />
-                    </DetailSection>
-                    <DetailMetrics items={[
-                        { label: text.metricSymbols, value: String(details.symbolCount) },
-                        { label: text.detailConfigs, value: String(details.configCount) },
-                        { label: text.detailTypes, value: String(details.typeCount) },
-                        { label: text.detailDependencies, value: String(details.dependencyCount) },
-                    ]} />
-                </>
-            );
         case 'investigationPlanned':
             return (
                 <>

@@ -205,10 +205,6 @@ export interface PipelineTextCatalog {
     detailProgress: string;
     detailTarget: string;
     detailDidSummarize: string;
-    detailSymbols: string;
-    detailConfigs: string;
-    detailTypes: string;
-    detailDependencies: string;
     detailMaxSteps: string;
     detailSuccess: string;
     detailEvidence: string;
@@ -411,10 +407,6 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     detailProgress: 'Progress',
     detailTarget: 'Target',
     detailDidSummarize: 'Summarized',
-    detailSymbols: 'Symbols',
-    detailConfigs: 'Configs',
-    detailTypes: 'Types',
-    detailDependencies: 'Dependencies',
     detailMaxSteps: 'Max steps',
     detailSuccess: 'Success',
     detailEvidence: 'Evidence',
