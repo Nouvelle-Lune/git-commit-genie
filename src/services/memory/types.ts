@@ -23,11 +23,11 @@ export const recordedObservationSchema = z.object({
 }).strict();
 
 export const investigationEpisodeSchema = z.object({
-    version: z.literal(2), id: z.uuid(), createdAt: z.number().int().nonnegative(), snapshot: snapshotIdentitySchema,
-    changedPaths: z.array(safePath), changedSymbols: z.array(z.string()), questions: z.array(z.string()),
+    version: z.literal(3), id: z.uuid(), createdAt: z.number().int().nonnegative(), snapshot: snapshotIdentitySchema,
+    changedPaths: z.array(safePath), questions: z.array(z.string()),
     observations: z.array(recordedObservationSchema),
     claims: z.array(z.object({ claim: z.string(), evidenceRefs: z.array(z.string()), disposition: z.enum(['must_express', 'optional', 'omit']) }).strict()),
-    status: z.enum(['complete', 'degraded', 'unavailable', 'cancelled', 'error']),
+    status: z.enum(['complete', 'degraded', 'unavailable', 'complete_diff_only', 'cancelled', 'error']),
     // Pin the experience protocol used to record these immutable observations.
     // Old unreleased formats must be explicitly cleared, never migrated on read.
     model: z.string(), promptVersion: z.literal('memory-experience-1'), toolsetVersion: z.literal('snapshot-memory-experience-1'),
@@ -125,4 +125,4 @@ export interface MemoryUsage {
     sourceAttempts: number; invalidReferences: number; budgetRejections: number;
 }
 
-export interface MemoryQuery { paths: string[]; symbols: string[]; keywords: string[] }
+export interface MemoryQuery { paths: string[]; keywords: string[] }

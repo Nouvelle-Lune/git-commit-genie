@@ -60,7 +60,7 @@ export type ConsolidationResult = {
   | { status: 'memory-disabled' | 'foreground-busy' | 'already-running' | 'cancelled' | 'automatic-paused' };
 
 export function episodeTerms(episode: InvestigationEpisode): string[] {
-    return [...episode.changedPaths, ...episode.changedSymbols, ...episode.questions,
+    return [...episode.changedPaths, ...episode.questions,
         ...episode.observations.filter(isInvestigationObservation).flatMap(observation => [observation.summary,
             ...Object.values(observation.arguments).filter((value): value is string => typeof value === 'string'),
             ...observation.evidence.map(evidence => evidence.source.path)])];
@@ -78,7 +78,7 @@ function makeGroup(seed: InvestigationEpisode, episodes: InvestigationEpisode[],
         isInvestigationObservation(observation) ? [{ episode, observation, support: { episodeId: episode.id, observationIndex } }] : []));
     // IDs and recording timestamps do not make an identical investigation new evidence.
     const fingerprint = digestUuid(JSON.stringify([seed.snapshot.id, episodes.map(episode => ({
-        snapshot: episode.snapshot.id, questions: episode.questions, paths: episode.changedPaths, symbols: episode.changedSymbols,
+        snapshot: episode.snapshot.id, questions: episode.questions, paths: episode.changedPaths,
         observations: episode.observations.filter(isInvestigationObservation).map(({ durationMs, ...observation }) => observation), claims: episode.claims, status: episode.status,
     }))]));
     return { id: 'G1', seedId: seed.id, title: seed.questions[0] || seed.changedPaths.join(', ') || seed.id,
@@ -93,8 +93,7 @@ export function buildConsolidationGroups(episodes: InvestigationEpisode[], compl
         const words = episodeTerms(seed);
         const scores = bm25Scores(eligible.map(episodeTerms), words);
         const related = eligible.map((episode, index) => ({ episode, score: scores[index]
-            + episode.changedPaths.filter(file => seed.changedPaths.includes(file)).length * 100
-            + episode.changedSymbols.filter(symbol => seed.changedSymbols.includes(symbol)).length * 100 }))
+            + episode.changedPaths.filter(file => seed.changedPaths.includes(file)).length * 100 }))
             .filter(item => item.episode.id !== seed.id && item.score > 0)
             .sort((a, b) => b.score - a.score || a.episode.createdAt - b.episode.createdAt || a.episode.id.localeCompare(b.episode.id));
         const entryScores = bm25Scores(handbook.map(entryTerms), words);
@@ -132,7 +131,7 @@ export function projectConsolidation(groups: ConsolidationGroup[]): Consolidatio
     const projectedEpisodes = group.episodes.map((episode, episodeIndex) => ({
         id: `T${episodeIndex + 1}`, snapshot: `V${snapshotIds.indexOf(episode.snapshot.id) + 1}`,
         status: episode.status, questions: episode.questions,
-        claims: episode.claims.map((claim, index) => ({ index, text: claim.claim, disposition: claim.disposition })), changedPaths: episode.changedPaths, changedSymbols: episode.changedSymbols,
+        claims: episode.claims.map((claim, index) => ({ index, text: claim.claim, disposition: claim.disposition })), changedPaths: episode.changedPaths,
         observations: group.observations.filter(item => item.episode.id === episode.id).map(item => {
             const id = `O${observations.size + 1}`; observations.set(id, item);
             const evidence = item.observation.evidence.map(evidence => {

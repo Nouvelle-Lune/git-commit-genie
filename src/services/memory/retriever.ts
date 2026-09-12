@@ -85,9 +85,9 @@ export class MemoryRetriever {
                 if (!observations.length) { return []; }
                 return [{ origin: 'episode' as const,
                 situation: episode.questions.join(' · ') || episode.changedPaths.join(', '),
-                triggers: [...episode.changedPaths, ...episode.changedSymbols],
+                triggers: [...episode.changedPaths],
                 targetPaths: [...new Set(observations.flatMap(item => item.evidence.map(evidence => evidence.source.path)))],
-                terms: [...episode.questions, ...episode.changedPaths, ...episode.changedSymbols,
+                terms: [...episode.questions, ...episode.changedPaths,
                     ...observations.flatMap(item => [item.observation.summary,
                         ...Object.values(item.observation.arguments).filter((value): value is string => typeof value === 'string')])],
                 supports: observations.flatMap(item => item.evidence.length
@@ -100,10 +100,10 @@ export class MemoryRetriever {
                 steps: [], lessons: [] }];
             }),
         ];
-        const exact = new Set([...query.paths, ...query.symbols]);
-        const words = new Set([...query.keywords, ...query.symbols].flatMap(value => value.toLowerCase().split(/[^\p{L}\p{N}_]+/u)).filter(Boolean));
+        const exact = new Set(query.paths);
+        const words = new Set(query.keywords.flatMap(value => value.toLowerCase().split(/[^\p{L}\p{N}_]+/u)).filter(Boolean));
         const lexical = bm25Scores(entries.map(entry => entry.terms),
-            [...query.paths, ...query.symbols, ...query.keywords]);
+            [...query.paths, ...query.keywords]);
         const candidates = entries.map((entry, index) => {
             const targets = entry.targetPaths;
             const score = entry.triggers.reduce((total, trigger) => total + (exact.has(trigger) ? 100 : 0), 0)

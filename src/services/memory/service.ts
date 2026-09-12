@@ -160,7 +160,7 @@ export interface MemoryRun {
     store: MemoryStore; epoch: string; recorder: EpisodeRecorder;
     settings: MemorySettings;
     loadMemory: (query: MemoryQuery) => Promise<MemoryRetriever | undefined>;
-    seal: (input: Pick<InvestigationEpisode, 'changedPaths' | 'changedSymbols' | 'questions' | 'claims' | 'status'>) => InvestigationEpisode | undefined;
+    seal: (input: Pick<InvestigationEpisode, 'changedPaths' | 'questions' | 'claims' | 'status'>) => InvestigationEpisode | undefined;
 }
 
 /** Extension-host lifecycle; background work is never awaited by message delivery. */

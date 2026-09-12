@@ -90,7 +90,7 @@ export async function runChangeAnalysisPipeline(
             type: 'investigationPlanStart',
             rawData: { input: { evidence: rawDiff, maxToolCalls: settings.maxSteps, repositoryMap } },
         }));
-        const memoryQuery = { paths: diffs.map(diff => diff.fileName), symbols: [], keywords: [] };
+        const memoryQuery = { paths: diffs.map(diff => diff.fileName), keywords: [] };
         const memory = inputs.loadMemory ? await inputs.loadMemory(memoryQuery) : inputs.memory;
         memory?.setInputBudget(execution.tokenBudget.hardInputTokens);
         const navigation = memory?.retrieveNavigation(memoryQuery) ?? [];

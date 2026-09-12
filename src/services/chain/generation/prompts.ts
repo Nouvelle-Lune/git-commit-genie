@@ -102,7 +102,7 @@ export function buildChangeConditionedDraftMessages(input: {
         'no single area honestly covers the change.',
         'A scope must name a real module, package, component, feature, or code area that a developer would recognize.',
         'Never use an internal identifier such as C1, D2, E3, [D1], or D1/P2 as the scope.',
-        'When discarded_internal_scope is true, derive a real scope from changed symbols or paths; omit scope if none is clear.',
+        'When discarded_internal_scope is true, derive a real scope from the selected claims or changed paths; omit scope if none is clear.',
         '',
         'HARD RULES FOR DOCUMENTATION-ONLY CHANGES:',
         '- Do NOT infer new features or bug fixes from documentation changes.',

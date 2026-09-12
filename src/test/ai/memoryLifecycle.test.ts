@@ -197,7 +197,7 @@ describe('repository memory lifecycle', function () {
     });
 
     it('runs a real manual consolidation while automatic consolidation is paused and logs the published result', async () => {
-        // Verify a real version-2 consolidation publishes a handbook entry and reports its seed-scoped outcome.
+        // Verify a real version-3 consolidation publishes a handbook entry and reports its seed-scoped outcome.
         await withTempStorage(async storageRoot => {
             await withMemorySettings({ enabled: true, consolidationEnabled: false }, async () => {
                 const repositoryId = '9'.repeat(64);
@@ -405,7 +405,7 @@ describe('repository memory lifecycle', function () {
 
                     const config = vscode.workspace.getConfiguration('gitCommitGenie.memory');
                     await config.update('sources.maxChunks', 2, vscode.ConfigurationTarget.Global);
-                    const retriever = await first!.loadMemory({ paths: [], symbols: [], keywords: [] });
+                    const retriever = await first!.loadMemory({ paths: [], keywords: [] });
                     assert.equal(retriever?.settings['sources.maxChunks'], 1);
 
                     const second = await service.prepare(snapshot, 'model', []);
@@ -431,13 +431,13 @@ describe('repository memory lifecycle', function () {
                     const run = await service.prepare(snapshot, 'model', []);
                     assert.ok(run);
                     (run!.recorder as any).seal = () => { throw new Error('invalid recorder state'); };
-                    assert.equal(run!.seal({ changedPaths: [], changedSymbols: [], questions: [], claims: [], status: 'error' }), undefined);
+                    assert.equal(run!.seal({ changedPaths: [], questions: [], claims: [], status: 'error' }), undefined);
                     assert.equal(warning.calledOnce, true);
 
                     (run!.store as any).loadNavigation = () => new Promise<never>(() => undefined);
                     const clock = sinon.useFakeTimers();
                     try {
-                        const pending = run!.loadMemory({ paths: [], symbols: [], keywords: [] });
+                        const pending = run!.loadMemory({ paths: [], keywords: [] });
                         await clock.tickAsync(10_001);
                         assert.equal(await pending, undefined);
                     } finally {
@@ -473,10 +473,10 @@ describe('repository memory lifecycle', function () {
                     });
                     const config = vscode.workspace.getConfiguration('gitCommitGenie.memory');
                     await config.update('excludePatterns', ['secrets/**'], vscode.ConfigurationTarget.Global);
-                    const retriever = await run!.loadMemory({ paths: ['secrets/token.ts'], symbols: [], keywords: [] });
+                    const retriever = await run!.loadMemory({ paths: ['secrets/token.ts'], keywords: [] });
                     assert.ok(retriever);
                     assert.equal(retriever!.publishedNavigation.some(item => item.targetPaths.includes('secrets/token.ts')), false);
-                    assert.deepEqual(retriever!.retrieveNavigation({ paths: ['secrets/token.ts'], symbols: [], keywords: [] }), []);
+                    assert.deepEqual(retriever!.retrieveNavigation({ paths: ['secrets/token.ts'], keywords: [] }), []);
                 } finally {
                     disposeContext(context);
                     service.dispose();
@@ -869,8 +869,8 @@ function makeEpisode(repositoryId: string, sourcePath = 'src/safe.ts', snapshotI
     const excerpt = 'const value = 1;';
     const snapshot = { ...makeIdentity(repositoryId), id: snapshotId };
     return {
-        version: 2, id: `00000000-0000-4000-8000-${repositoryId.slice(0, 12)}`, createdAt: Date.now(), snapshot,
-        changedPaths: [sourcePath], changedSymbols: ['value'], questions: ['How is this used?'],
+        version: 3, id: `00000000-0000-4000-8000-${repositoryId.slice(0, 12)}`, createdAt: Date.now(), snapshot,
+        changedPaths: [sourcePath], questions: ['How is this used?'],
         observations: [{ step: 0, tool: 'readFileContent', arguments: { filePath: sourcePath }, ok: true, summary: 'read', durationMs: 1, truncated: false,
             evidence: [{ id: 'E1', source: { snapshotId: snapshot.id, path: sourcePath, side: 'after', blobOid: '1'.repeat(40), startLine: 1, endLine: 1, excerpt, contentHash: hashContent(excerpt), truncated: false, sourceType: 'text' } }] }],
         claims: [{ claim: 'value exists', evidenceRefs: ['E1'], disposition: 'must_express' }], status: 'complete', model: 'model', promptVersion: 'memory-experience-1', toolsetVersion: 'snapshot-memory-experience-1',

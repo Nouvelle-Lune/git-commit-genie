@@ -75,12 +75,11 @@ function makeEpisode(index: number, sources: Array<{ path: string; oid: string }
         contentHash: hashContent(`function parse${sourceIndex}() { return true; }`), truncated: false, sourceType: 'text' as const,
     } }));
     return {
-        version: 2,
+        version: 3,
         id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
         createdAt: index,
         snapshot,
         changedPaths: sources.map(item => item.path),
-        changedSymbols: ['parse'],
         questions: ['Which current source should be checked?'],
         observations: [{ step: 0, tool: 'readFileContent', arguments: { filePath: sources[0].path, reason: 'Check current source.' }, ok: true,
             summary: 'Read the historical source.', evidence, durationMs: 1, truncated: false }],

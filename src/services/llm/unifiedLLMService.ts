@@ -413,12 +413,9 @@ export class UnifiedLLMService extends BaseLLMService {
                         memoryUsage: out.changeAnalysis.memoryUsage,
                         episode: options?.memoryRun?.seal({
                             changedPaths: out.changeAnalysis.rawDiff.changedFiles.map(file => file.path),
-                            changedSymbols: [],
                             questions: out.changeAnalysis.investigationPlan?.targets.map(target => target.question) ?? [],
                             claims: out.changeAnalysis.agentClaims.map(claim => ({ claim: claim.claim, evidenceRefs: claim.evidenceRefs, disposition: claim.disposition })),
-                            status: out.changeAnalysis.analysisStatus === 'complete_diff_only'
-                                ? 'complete'
-                                : out.changeAnalysis.analysisStatus,
+                            status: out.changeAnalysis.analysisStatus,
                         }),
                         ragMetadata: {
                             fileSummaries: out.fileSummaries,

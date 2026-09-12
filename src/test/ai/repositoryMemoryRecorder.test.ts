@@ -14,7 +14,7 @@ import {
 
 describe('EpisodeRecorder', () => {
     it('seals detached observations bound to the same snapshot and valid excerpt hashes', () => {
-        // Verify a sealed episode records the version-2 experience protocol and detached source provenance.
+        // Verify a sealed episode records the version-3 experience protocol and detached source provenance.
         const snapshot = makeSnapshot();
         const recorder = new EpisodeRecorder(snapshot, 'test-model');
         const observation = makeObservation(snapshot);
@@ -82,8 +82,8 @@ describe('EpisodeRecorder', () => {
         assert.throws(() => recorder.seal(makeSealInput()), /too_small|positive|nonnegative/i);
     });
 
-    it('classifies complete, degraded, and unavailable episodes with non-memory observations as eligible', () => {
-        // Verify degraded and unavailable investigations remain eligible while cancelled, error, and memory-only episodes remain excluded.
+    it('classifies complete, degraded, unavailable, and diff-only episodes with non-memory observations as eligible', () => {
+        // Verify diff-only analysis is preserved as eligible only when at least one non-memory observation exists.
         const snapshot = makeSnapshot();
         const completeRecorder = new EpisodeRecorder(snapshot, 'test-model');
         completeRecorder.record(makeObservation(snapshot));
@@ -99,6 +99,18 @@ describe('EpisodeRecorder', () => {
         unavailableRecorder.record(makeObservation(snapshot));
         const unavailable = unavailableRecorder.seal(makeSealInput([], 'unavailable'));
         assert.equal(isEligibleEpisode(unavailable), true);
+
+        const diffOnlyRecorder = new EpisodeRecorder(snapshot, 'test-model');
+        diffOnlyRecorder.record(makeObservation(snapshot));
+        const diffOnly = diffOnlyRecorder.seal(makeSealInput([], 'complete_diff_only'));
+        assert.equal(diffOnly.status, 'complete_diff_only');
+        assert.equal(isEligibleEpisode(diffOnly), true);
+
+        const memoryOnlyDiffRecorder = new EpisodeRecorder(snapshot, 'test-model');
+        memoryOnlyDiffRecorder.record(makeObservation(snapshot, { tool: 'readMemorySources' }));
+        const memoryOnlyDiff = memoryOnlyDiffRecorder.seal(makeSealInput([], 'complete_diff_only'));
+        assert.equal(memoryOnlyDiff.status, 'complete_diff_only');
+        assert.equal(isEligibleEpisode(memoryOnlyDiff), false);
 
         const memoryRecorder = new EpisodeRecorder(snapshot, 'test-model');
         memoryRecorder.record(makeObservation(snapshot, { tool: 'readMemorySources' }));
@@ -178,10 +190,9 @@ function makeObservation(snapshot: SnapshotIdentity, overrides: Partial<Recorded
 function makeSealInput(
     evidenceRefs: string[] = ['E1'],
     status: InvestigationEpisode['status'] = 'complete',
-): Pick<InvestigationEpisode, 'changedPaths' | 'changedSymbols' | 'questions' | 'claims' | 'status'> {
+): Pick<InvestigationEpisode, 'changedPaths' | 'questions' | 'claims' | 'status'> {
     return {
         changedPaths: ['src/parser.ts'],
-        changedSymbols: ['parse'],
         questions: ['How does parsing change?'],
         claims: [{ claim: 'Parsing uses the updated value.', evidenceRefs, disposition: 'must_express' }],
         status,

@@ -12,9 +12,9 @@ export class EpisodeRecorder {
         this.observations.push(structuredClone(observation));
     }
 
-    seal(input: Pick<InvestigationEpisode, 'changedPaths' | 'changedSymbols' | 'questions' | 'claims' | 'status'>): InvestigationEpisode {
+    seal(input: Pick<InvestigationEpisode, 'changedPaths' | 'questions' | 'claims' | 'status'>): InvestigationEpisode {
         const episode = investigationEpisodeSchema.parse({
-            ...input, version: 2, id: randomUUID(), createdAt: Date.now(), snapshot: this.snapshot,
+            ...input, version: 3, id: randomUUID(), createdAt: Date.now(), snapshot: this.snapshot,
             // This unreleased format replaces old episodes; reset storage instead of migrating records.
             model: this.model, promptVersion: 'memory-experience-1', toolsetVersion: 'snapshot-memory-experience-1', observations: this.observations,
         });
@@ -43,7 +43,7 @@ export function validateEpisodeSources(episode: InvestigationEpisode): void {
 
 /** Completed local observations remain useful even when another analysis phase degraded. */
 export function isEligibleEpisode(episode: InvestigationEpisode): boolean {
-    return ['complete', 'degraded', 'unavailable'].includes(episode.status)
+    return ['complete', 'degraded', 'unavailable', 'complete_diff_only'].includes(episode.status)
         && episode.observations.some(isInvestigationObservation);
 }
 

@@ -1706,7 +1706,7 @@ describe('AgentRuntime contracts', () => {
         assert.equal(requests[4].toolChoice, 'none');
 
         const episode = recorder.seal({
-            changedPaths: ['src/parser.ts'], changedSymbols: ['parse'], questions: ['Where is parse used?'],
+            changedPaths: ['src/parser.ts'], questions: ['Where is parse used?'],
             claims: [], status: 'complete',
         });
         assert.deepEqual(episode.observations.map(observation => ({ tool: observation.tool, ok: observation.ok })), [
@@ -1732,7 +1732,11 @@ describe('AgentRuntime contracts', () => {
             consolidated: [],
             organizedSeeds: [],
         };
-        const access = { load: async () => view, epoch: async () => view.epoch };
+        const queries: Array<{ paths: string[]; keywords: string[] }> = [];
+        const access = { load: async (query: { paths: string[]; keywords: string[] }) => {
+            queries.push(query);
+            return view;
+        }, epoch: async () => view.epoch };
         const memory = new MemoryRetriever(view, snapshot, [], () => [], MEMORY_DEFAULTS, access);
         let published: Awaited<ReturnType<typeof memory.searchRepositoryMemory>> = [];
         const execution = createExecution([
@@ -1771,7 +1775,7 @@ describe('AgentRuntime contracts', () => {
                 description: 'Search historical navigation.',
                 parameters: { type: 'object' },
                 execute: async () => {
-                    published = await memory.searchRepositoryMemory({ paths: ['src/parser.ts'], symbols: [], keywords: ['parse'] });
+                    published = await memory.searchRepositoryMemory({ paths: ['src/parser.ts'], keywords: ['parse'] });
                     return { output: JSON.stringify(published), preserveOutput: true };
                 },
             }],
@@ -1785,13 +1789,14 @@ describe('AgentRuntime contracts', () => {
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'done');
         assert.deepEqual(published.map(item => item.id), ['M1']);
+        assert.deepEqual(queries, [{ paths: ['src/parser.ts'], keywords: ['parse'] }]);
         assert.equal(requests.length, 2);
         assert.equal(requests[1].messages?.[0].content, 'checkpoint:M1');
         assert.equal(requests[1].toolChoice, 'none');
 
         const nextRun = new MemoryRetriever(view, snapshot, []);
         assert.deepEqual(
-            nextRun.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: ['parse'] }).map(item => item.id),
+            nextRun.retrieveNavigation({ paths: ['src/parser.ts'], keywords: ['parse'] }).map(item => item.id),
             ['M1'],
         );
     });
@@ -1880,12 +1885,11 @@ function makeCheckpointEpisode(snapshot: RepositorySnapshotReader): Investigatio
         sourceType: 'text' as const,
     };
     return {
-        version: 2,
+        version: 3,
         id: '00000000-0000-4000-8000-000000000001',
         createdAt: 1,
         snapshot: snapshot.identity,
         changedPaths: ['src/parser.ts'],
-        changedSymbols: ['parse'],
         questions: ['Where is parse used?'],
         observations: [{
             step: 0,

@@ -15,7 +15,7 @@ describe('memory navigation retrieval', () => {
         const handbook = makeHandbook(episodes);
         const retriever = new MemoryRetriever(makeView(episodes, [handbook]), makeSnapshotReader(), []);
 
-        const result = retriever.retrieveNavigation({ paths: ['src/ui/memoryWebviewPolicy.ts'], symbols: ['filterMemoryLogsForWebview'], keywords: ['visibility'] });
+        const result = retriever.retrieveNavigation({ paths: ['src/ui/memoryWebviewPolicy.ts'], keywords: ['visibility'] });
 
         assert.equal(result.length, 1);
         assert.deepEqual(Object.keys(result[0]).sort(), ['availability', 'id', 'lessons', 'observationCount', 'origin', 'situation', 'snapshotCount', 'sourceCount', 'steps', 'targetPaths']);
@@ -44,7 +44,7 @@ describe('memory navigation retrieval', () => {
         handbook.lessons[0].observation = 'A persisted row is inert after a reload.';
         const retriever = new MemoryRetriever(makeView(episodes, [handbook]), makeSnapshotReader(), []);
 
-        const result = retriever.retrieveNavigation({ paths: [], symbols: [], keywords: ['stale', 'persistence', 'inert'] });
+        const result = retriever.retrieveNavigation({ paths: [], keywords: ['stale', 'persistence', 'inert'] });
 
         assert.deepEqual(result.map(item => item.id), ['M1']);
         assert.equal(result[0].situation, handbook.situation);
@@ -55,7 +55,7 @@ describe('memory navigation retrieval', () => {
         const episode = makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/episode-only.ts', questions: ['Where should this event be traced?'] });
         const retriever = new MemoryRetriever(makeView([episode], []), makeSnapshotReader(), []);
 
-        const result = retriever.retrieveNavigation({ paths: ['src/episode-only.ts'], symbols: [], keywords: [] });
+        const result = retriever.retrieveNavigation({ paths: ['src/episode-only.ts'], keywords: [] });
 
         assert.equal(result.length, 1);
         assert.equal(result[0].origin, 'episode');
@@ -76,7 +76,7 @@ describe('memory navigation retrieval', () => {
             triggers: ['src/primary.ts', 'primary source'],
         };
         const rawRetriever = new MemoryRetriever(makeView(episodes, [route]), makeSnapshotReader(), []);
-        const raw = rawRetriever.retrieveNavigation({ paths: ['history/secondary.xyz'], symbols: [], keywords: [] });
+        const raw = rawRetriever.retrieveNavigation({ paths: ['history/secondary.xyz'], keywords: [] });
 
         assert.equal(raw.length, 1);
         assert.equal(raw.every(item => item.origin === 'episode'), true);
@@ -94,7 +94,7 @@ describe('memory navigation retrieval', () => {
             triggers: ['secondary source search'],
         };
         const lessonRetriever = new MemoryRetriever(makeView(episodes, [lesson]), makeSnapshotReader(), []);
-        const lessonResult = lessonRetriever.retrieveNavigation({ paths: ['history/secondary.xyz'], symbols: [], keywords: [] });
+        const lessonResult = lessonRetriever.retrieveNavigation({ paths: ['history/secondary.xyz'], keywords: [] });
 
         assert.equal(lessonResult.length, 1);
         assert.equal(lessonResult[0].origin, 'handbook');
@@ -113,7 +113,7 @@ describe('memory navigation retrieval', () => {
         };
         const retriever = new MemoryRetriever(makeView(episodes, [handbook]), makeSnapshotReader(), []);
 
-        const navigation = retriever.retrieveNavigation({ paths: [], symbols: [], keywords: ['renderer caller'] });
+        const navigation = retriever.retrieveNavigation({ paths: [], keywords: ['renderer caller'] });
         assert.equal(navigation.length, 1);
         assert.equal(navigation[0].origin, 'handbook');
         assert.equal(navigation[0].sourceCount, 0);
@@ -135,7 +135,7 @@ describe('memory navigation retrieval', () => {
         duplicate.id = randomUUID();
         const retriever = new MemoryRetriever(makeView(episodes, [alpha, beta, duplicate]), makeSnapshotReader(), []);
 
-        const result = retriever.retrieveNavigation({ paths: ['src/memory.ts'], symbols: [], keywords: [] });
+        const result = retriever.retrieveNavigation({ paths: ['src/memory.ts'], keywords: [] });
 
         assert.equal(result.length, 2);
         assert.deepEqual(new Set(result.map(item => item.situation)), new Set([alpha.situation, beta.situation]));
@@ -149,30 +149,37 @@ describe('live repository memory search', () => {
         const initial = makeView([episode], []);
         const added = makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/newly-indexed.ts' });
         let loads = 0;
+        const queries: Array<{ paths: string[]; keywords: string[] }> = [];
         const access = {
-            load: async (query: { paths: string[]; symbols: string[]; keywords: string[] }) => {
+            load: async (query: { paths: string[]; keywords: string[] }) => {
                 loads += 1;
+                queries.push(query);
                 return query.paths.includes('src/newly-indexed.ts') ? makeView([added], []) : initial;
             },
             epoch: async () => initial.epoch,
         };
         const retriever = new MemoryRetriever(initial, makeSnapshotReader(), [], () => [], MEMORY_DEFAULTS, access);
 
-        const first = await retriever.searchRepositoryMemory({ paths: ['src/initial.ts'], symbols: [], keywords: [] });
-        const second = await retriever.searchRepositoryMemory({ paths: ['src/newly-indexed.ts'], symbols: [], keywords: [] });
-        const repeat = await retriever.searchRepositoryMemory({ paths: ['src/newly-indexed.ts'], symbols: [], keywords: [] });
+        const first = await retriever.searchRepositoryMemory({ paths: ['src/initial.ts'], keywords: [] });
+        const second = await retriever.searchRepositoryMemory({ paths: ['src/newly-indexed.ts'], keywords: [] });
+        const repeat = await retriever.searchRepositoryMemory({ paths: ['src/newly-indexed.ts'], keywords: [] });
 
         assert.equal(loads, 3);
         assert.deepEqual(first.map(item => item.id), ['M1']);
         assert.deepEqual(second.map(item => item.id), ['M2']);
         assert.deepEqual(repeat.map(item => item.id), ['M2']);
         assert.equal(retriever.budget.searchesUsed, 3);
+        assert.deepEqual(queries, [
+            { paths: ['src/initial.ts'], keywords: [] },
+            { paths: ['src/newly-indexed.ts'], keywords: [] },
+            { paths: ['src/newly-indexed.ts'], keywords: [] },
+        ]);
     });
 
     it('fails explicitly when async search is requested without a live store accessor', async () => {
         // Verify the live search contract cannot silently fall back to stale in-memory candidates.
         const retriever = new MemoryRetriever(makeView([], []), makeSnapshotReader(), []);
-        await assert.rejects(() => retriever.searchRepositoryMemory({ paths: [], symbols: [], keywords: ['anything'] }), /requires a live store/);
+        await assert.rejects(() => retriever.searchRepositoryMemory({ paths: [], keywords: ['anything'] }), /requires a live store/);
     });
 
     it('rejects a cleared epoch before replacing the current navigation view', async () => {
@@ -185,7 +192,7 @@ describe('live repository memory search', () => {
         };
         const retriever = new MemoryRetriever(makeView([], []), makeSnapshotReader(), [], () => [], MEMORY_DEFAULTS, access);
 
-        await assert.rejects(() => retriever.searchRepositoryMemory({ paths: ['src/parser.ts'], symbols: [], keywords: [] }), /cleared during investigation/);
+        await assert.rejects(() => retriever.searchRepositoryMemory({ paths: ['src/parser.ts'], keywords: [] }), /cleared during investigation/);
         assert.deepEqual(retriever.publishedNavigation, []);
         currentEpoch = 'epoch';
     });
@@ -199,9 +206,9 @@ describe('live repository memory search', () => {
         const access = { load: async () => view, epoch: async () => view.epoch };
         const retriever = new MemoryRetriever(view, makeSnapshotReader(), [], () => [], settings, access);
 
-        const first = await retriever.searchRepositoryMemory({ paths: ['src/large.ts'], symbols: [], keywords: [] });
+        const first = await retriever.searchRepositoryMemory({ paths: ['src/large.ts'], keywords: [] });
         assert.deepEqual(first, []);
-        await assert.rejects(() => retriever.searchRepositoryMemory({ paths: ['src/large.ts'], symbols: [], keywords: [] }), (error: unknown) =>
+        await assert.rejects(() => retriever.searchRepositoryMemory({ paths: ['src/large.ts'], keywords: [] }), (error: unknown) =>
             error instanceof MemoryRequestError && error.code === 'search_budget_exceeded');
     });
 });
@@ -212,7 +219,7 @@ describe('memory source expansion', () => {
         const episodes = [makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), sourcePath: 'src/parser.ts' }),
             makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), sourcePath: 'src/parser.ts' })];
         const retriever = new MemoryRetriever(makeView(episodes, []), makeSnapshotReader({ currentOid: '3'.repeat(40) }), []);
-        const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
+        const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], keywords: [] });
 
         const result = await retriever.readMemorySources([navigation[0].id]);
 
@@ -234,7 +241,7 @@ describe('memory source expansion', () => {
             targetPaths: [], triggers: ['empty search'],
         };
         const retriever = new MemoryRetriever(makeView(episodes, [lesson]), makeSnapshotReader(), []);
-        const navigation = retriever.retrieveNavigation({ paths: [], symbols: [], keywords: ['empty search'] });
+        const navigation = retriever.retrieveNavigation({ paths: [], keywords: ['empty search'] });
         assert.equal(navigation.length, 1);
         assert.equal(navigation[0].sourceCount, 0);
         assert.deepEqual(await retriever.readMemorySources([navigation[0].id]), []);
@@ -249,7 +256,7 @@ describe('memory source expansion', () => {
         let currentEpoch = 'epoch';
         const access = { load: async () => makeView(episodes, []), epoch: async () => currentEpoch };
         const retriever = new MemoryRetriever(makeView(episodes, []), makeSnapshotReader(), [], () => [], MEMORY_DEFAULTS, access);
-        const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], symbols: [], keywords: [] });
+        const navigation = retriever.retrieveNavigation({ paths: ['src/parser.ts'], keywords: [] });
         currentEpoch = 'cleared';
 
         await assert.rejects(() => retriever.readMemorySources([navigation[0].id]), /cleared during investigation/);
@@ -266,7 +273,7 @@ describe('memory source expansion', () => {
         beta.situation = 'A second historical route for the same source.';
         let observes = 0;
         const retriever = new MemoryRetriever(makeView(episodes, [alpha, beta]), makeSnapshotReader({ onObserve: () => { observes += 1; } }), []);
-        const first = retriever.retrieveNavigation({ paths: ['src/shared.ts'], symbols: [], keywords: [] });
+        const first = retriever.retrieveNavigation({ paths: ['src/shared.ts'], keywords: [] });
         assert.equal(first.length, 2);
 
         const result = await retriever.readMemorySources(first.map(item => item.id));
@@ -312,8 +319,8 @@ function makeEpisode(options: {
         step: 0, tool: options.failed ? 'searchCode' : 'readFileContent', arguments: { filePath: options.sourcePath, reason: options.summary ?? 'Inspect the source.' },
         ok: !options.failed, summary: options.summary ?? 'Read the source.', ...(options.failed ? { error: 'No matches' } : {}), evidence: options.failed ? [] : [{ id: 'E1', source: makeSource(snapshot, options.sourcePath) }], durationMs: 1, truncated: false,
     };
-    return { version: 2, id: options.episodeId, createdAt: Number(options.episodeId.slice(-2)), snapshot,
-        changedPaths: [options.sourcePath], changedSymbols: ['filterMemoryLogsForWebview'], questions: options.questions ?? ['Where should the changed source be inspected?'], observations: [observation],
+    return { version: 3, id: options.episodeId, createdAt: Number(options.episodeId.slice(-2)), snapshot,
+        changedPaths: [options.sourcePath], questions: options.questions ?? ['Where should the changed source be inspected?'], observations: [observation],
         claims: observation.evidence.length ? [{ claim: 'The source was inspected.', evidenceRefs: ['E1'], disposition: 'must_express' }] : [], status: 'complete', model: 'retriever-test', promptVersion: 'memory-experience-1', toolsetVersion: 'snapshot-memory-experience-1' };
 }
 

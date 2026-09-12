@@ -133,7 +133,7 @@ export class GenerateCommands {
                     await this.maybeCachePendingRagDocument(targetRepo, diffs, result);
                 } else {
                     if (memoryRun) {
-                        const episode = memoryRun.seal({ changedPaths: diffs.map(diff => diff.fileName), changedSymbols: [], questions: [], claims: [],
+                        const episode = memoryRun.seal({ changedPaths: diffs.map(diff => diff.fileName), questions: [], claims: [],
                             status: cts.token.isCancellationRequested ? 'cancelled' : 'error' });
                         if (episode) { memoryService.publish(memoryRun, episode, llmService); }
                     }

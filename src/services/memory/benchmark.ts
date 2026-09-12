@@ -153,7 +153,6 @@ export function createPipelineReplayAdapter(params: {
             if (recorder) {
                 const trace = output.changeAnalysis;
                 const episode = recorder.seal({ changedPaths: trace.rawDiff.changedFiles.map(file => file.path),
-                    changedSymbols: [],
                     questions: trace.investigationPlan?.targets.map(target => target.question) ?? [], status: trace.analysisStatus === 'complete_diff_only' ? 'complete' : trace.analysisStatus,
                     claims: trace.agentClaims.map(claim => ({ claim: claim.claim, evidenceRefs: claim.evidenceRefs, disposition: claim.disposition })) });
                 await store.recordEpisode(episode, await store.epoch());

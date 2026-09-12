@@ -12,7 +12,7 @@ import { HandbookEntry, InvestigationEpisode, MemorySupport } from '../../servic
 describe('MemoryStore', function () {
     this.timeout(20_000);
 
-    it('records v2 episodes, exposes v3 represented supports, and detects payload tampering', async () => {
+    it('records v3 episodes, exposes v4 represented supports, and detects payload tampering', async () => {
         // Verify durable episodes use the new protocol and manifest while shared store instances read the same clone data.
         await withTempStorage(async storageRoot => {
             const repositoryId = '1'.repeat(64);
@@ -23,16 +23,18 @@ describe('MemoryStore', function () {
 
             const view = await second.inspect();
             assert.deepEqual(view.episodes, [episode]);
+            assert.equal(Object.hasOwn(view.episodes[0], 'changedSymbols'), false);
             assert.deepEqual(view.representedSupports, []);
             assert.deepEqual(view.organizedSeeds, []);
             const manifestPath = path.join(first.directory, 'current.json');
-            const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as { version: number; organizedSeeds: string[]; episodes: Array<{ id: string; hash: string; bytes: number }> };
-            assert.equal(manifest.version, 3);
+            const manifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as { version: number; organizedSeeds: string[]; episodes: Array<Record<string, unknown>> };
+            assert.equal(manifest.version, 4);
             assert.deepEqual(manifest.organizedSeeds, []);
             const payloadPath = path.join(first.directory, `${episode.id}.json`);
             const bytes = await fs.readFile(payloadPath);
             const index = manifest.episodes.find(item => item.id === episode.id);
             assert.ok(index);
+            assert.equal(Object.hasOwn(index, 'symbols'), false);
             assert.equal(index?.bytes, bytes.length);
             assert.equal(index?.hash, hashContent(bytes));
 
@@ -88,9 +90,10 @@ describe('MemoryStore', function () {
             assert.deepEqual(cleared.representedSupports, []);
             assert.deepEqual(cleared.consolidated, []);
             assert.deepEqual(cleared.organizedSeeds, []);
-            const clearedManifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as { version: number; job: unknown };
-            assert.equal(clearedManifest.version, 3);
+            const clearedManifest = JSON.parse(await fs.readFile(manifestPath, 'utf8')) as { version: number; job: unknown; episodes: unknown[] };
+            assert.equal(clearedManifest.version, 4);
             assert.equal(clearedManifest.job, null);
+            assert.deepEqual(clearedManifest.episodes, []);
             await assert.rejects(() => fs.access(path.join(store.directory, `${episode.id}.json`)));
             await assert.rejects(() => store.recordEpisode(makeEpisode(repositoryId, 2), oldEpoch), /Memory was cleared during generation/);
         });
@@ -163,7 +166,7 @@ describe('MemoryStore', function () {
             await store.recordEpisode(unrelated, epoch);
             await fs.writeFile(path.join(store.directory, `${unrelated.id}.json`), '{corrupted payload');
 
-            const selected = await store.loadNavigation({ paths: ['src/wanted.ts'], symbols: [], keywords: [] });
+            const selected = await store.loadNavigation({ paths: ['src/wanted.ts'], keywords: [] });
             assert.deepEqual(selected.episodes.map(item => item.id), [wanted.id]);
             assert.deepEqual(selected.representedSupports, []);
         });
@@ -182,12 +185,11 @@ function makeEpisode(repositoryId: string, index: number, options: {
     const source = { snapshotId: snapshot.id, path: sourcePath, side: options.side ?? 'after' as const,
         blobOid: '1'.repeat(40), startLine: 1, endLine: 1, excerpt, contentHash: hashContent(excerpt), truncated: false, sourceType: 'text' as const };
     return {
-        version: 2,
+        version: 3,
         id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
         createdAt: Date.now() + index,
         snapshot,
         changedPaths: [sourcePath],
-        changedSymbols: ['parse'],
         questions: ['Which source should be inspected?'],
         observations: [{ step: 0, tool: options.tool ?? 'readFileContent', arguments: { filePath: sourcePath, reason: 'Inspect source.' }, ok: true,
             summary: options.summary ?? 'Read the source.', evidence: [{ id: 'E1', source }], durationMs: 1, truncated: false }],

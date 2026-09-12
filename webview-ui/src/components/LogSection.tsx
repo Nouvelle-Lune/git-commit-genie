@@ -404,8 +404,7 @@ export const LogSection: React.FC = () => {
 
             // Change-conditioned investigation tools
             if (title.includes('wants to look up')
-                || title.includes('wants to find ')
-                || title.includes('changed symbols')) {
+                || title.includes('wants to find ')) {
                 return { label: 'INVG', className: 'stage-badge-investigate' };
             }
 

@@ -24,7 +24,6 @@ describe('memory consolidation grouping and projection', () => {
         const episodes = Array.from({ length: 25 }, (_, index) => makeEpisode({
             episodeId: uuidFor(index + 1), snapshotId: digestFor(index + 1),
             changedPaths: index === 0 ? ['src/ui/memoryWebviewPolicy.ts'] : [`src/services/related-${index}.ts`],
-            changedSymbols: index === 0 ? ['filterMemoryLogsForWebview'] : [`filterMemoryLogsForWebview${index}`],
             questions: ['How does memory lifecycle filtering affect the investigation?'],
             summary: `Inspect memory lifecycle after filterMemoryLogsForWebview change ${index}.`,
         }));
@@ -41,8 +40,8 @@ describe('memory consolidation grouping and projection', () => {
         assert.equal(groups.every(group => group.id === 'G1'), true);
     });
 
-    it('excludes cancelled, error, and memory-only episodes while retaining degraded and unavailable investigations', () => {
-        // Verify eligibility accepts complete, degraded, and unavailable episodes only when a non-memory observation exists.
+    it('excludes cancelled, error, and memory-only episodes while retaining degraded, unavailable, and diff-only investigations', () => {
+        // Verify diff-only eligibility still requires at least one non-memory observation before grouping.
         const episodes = [
             makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), status: 'complete' }),
             makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), status: 'degraded' }),
@@ -51,6 +50,8 @@ describe('memory consolidation grouping and projection', () => {
             makeEpisode({ episodeId: uuidFor(5), snapshotId: digestFor(5), status: 'error' }),
             makeEpisode({ episodeId: uuidFor(6), snapshotId: digestFor(6), tool: 'readMemorySources' }),
             makeEpisode({ episodeId: uuidFor(7), snapshotId: digestFor(7), tool: 'searchRepositoryMemory' }),
+            makeEpisode({ episodeId: uuidFor(8), snapshotId: digestFor(8), status: 'complete_diff_only' }),
+            makeEpisode({ episodeId: uuidFor(9), snapshotId: digestFor(9), status: 'complete_diff_only', tool: 'readMemorySources' }),
         ];
 
         const groups = buildConsolidationGroups(episodes, []);
@@ -62,6 +63,8 @@ describe('memory consolidation grouping and projection', () => {
         }
         assert.equal(groups.some(group => group.episodes.some(episode => episode.id === uuidFor(2))), true);
         assert.equal(groups.some(group => group.episodes.some(episode => episode.id === uuidFor(3))), true);
+        assert.equal(groups.some(group => group.episodes.some(episode => episode.id === uuidFor(8))), true);
+        assert.equal(groups.some(group => group.episodes.some(episode => episode.id === uuidFor(9))), false);
     });
 
     it('projects T, V, O, S, and H handles with questions, reasons, results, and claims', () => {
@@ -90,6 +93,7 @@ describe('memory consolidation grouping and projection', () => {
         assert.equal(input.groups[0].id, 'G1');
         assert.equal(input.groups[0].seed, 'T1');
         assert.equal(input.groups[0].episodes.length, 2);
+        assert.equal(Object.hasOwn(input.groups[0].episodes[0], 'changedSymbols'), false);
         assert.equal(input.groups[0].episodes[0].id, 'T1');
         assert.equal(input.groups[0].episodes[0].snapshot, 'V1');
         assert.equal(input.groups[0].episodes[1].snapshot, 'V2');
@@ -129,8 +133,8 @@ describe('memory consolidation grouping and projection', () => {
         // Verify shared changed paths alone cannot authorize a positive route when each snapshot uses a different tool or target path.
         const targetPath = 'src/services/memory/consolidator.ts';
         const episodes = [
-            makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), changedPaths: [targetPath], changedSymbols: ['projectConsolidation'], sourcePath: targetPath, tool: 'readFileContent' }),
-            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), changedPaths: [targetPath], changedSymbols: ['projectConsolidation'], sourcePath: 'src/services/memory/service.ts', tool: 'searchCode' }),
+            makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), changedPaths: [targetPath], sourcePath: targetPath, tool: 'readFileContent' }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), changedPaths: [targetPath], sourcePath: 'src/services/memory/service.ts', tool: 'searchCode' }),
         ];
         const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id);
 
@@ -735,7 +739,7 @@ function makeClaimBoundEvidenceEpisodes(): InvestigationEpisode[] {
     const targetPath = 'src/ui/memoryWebviewPolicy.ts';
     return [1, 2].map(index => {
         const episode = makeEpisode({ episodeId: uuidFor(index), snapshotId: digestFor(index), changedPaths: [targetPath],
-            changedSymbols: ['filterMemoryLogsForWebview'], sourcePath: targetPath, tool: 'readFileContent', observations: [makeObservation({
+            sourcePath: targetPath, tool: 'readFileContent', observations: [makeObservation({
                 step: 0, tool: 'readFileContent', path: targetPath, excerpt: 'first excerpt without the selected claim marker',
                 summary: 'Read two excerpts from the filtering entry point.', symbol: 'filterMemoryLogsForWebview',
             })] });
@@ -769,7 +773,7 @@ function makeRouteEpisodes(options: {
         const failed = makeObservation({ step: 2, tool: 'searchCode', path: 'src/ui/memoryWebviewPolicy.ts', excerpt: '', summary: 'No renderer caller was found in this bounded search.', symbol: 'filterMemoryLogsForWebview', ok: false, error: 'No matches', evidence: [] });
         const observations = [...route, failed];
         return makeEpisode({ episodeId: uuidFor(index), snapshotId: digestFor(index), repositoryId,
-            changedPaths: ['src/ui/memoryWebviewPolicy.ts'], changedSymbols: ['filterMemoryLogsForWebview'],
+            changedPaths: ['src/ui/memoryWebviewPolicy.ts'],
             questions: ['Where should a new memory lifecycle log be inspected?'], observations });
     });
 }
@@ -792,7 +796,6 @@ function makeEpisode(options: {
     snapshotId?: string;
     repositoryId?: string;
     changedPaths?: string[];
-    changedSymbols?: string[];
     questions?: string[];
     sourcePath?: string;
     sourceExcerpt?: string;
@@ -808,7 +811,7 @@ function makeEpisode(options: {
     const observations = options.observations ?? Array.from({ length: options.observationCount ?? 1 }, (_, index) => makeObservation({
         step: index, tool: options.tool ?? 'readFileContent', path: sourcePath,
         excerpt: options.sourceExcerpt ?? `function parseMemoryLog${index}() { return true; }`,
-        summary: options.summary ?? 'Read the investigation source.', symbol: options.changedSymbols?.[0] ?? 'parseMemoryLog', snapshot,
+        summary: options.summary ?? 'Read the investigation source.', symbol: 'parseMemoryLog', snapshot,
     }));
     // Route fixtures are already bound to their target snapshots; generated fixtures bind each observation here.
     const rebound = observations.map(observation => ({
@@ -816,12 +819,11 @@ function makeEpisode(options: {
         evidence: observation.evidence.map(evidence => ({ ...evidence, source: { ...evidence.source, snapshotId: snapshot.id } })),
     }));
     return {
-        version: 2,
+        version: 3,
         id: options.episodeId ?? randomUUID(),
         createdAt: Date.now() + Number(options.episodeId?.slice(-2) ?? 0),
         snapshot,
         changedPaths: options.changedPaths ?? [sourcePath],
-        changedSymbols: options.changedSymbols ?? ['parseMemoryLog'],
         questions: options.questions ?? ['Where should the changed source be inspected?'],
         observations: rebound,
         claims: rebound.flatMap(observation => observation.evidence.map(evidence => ({

@@ -1074,7 +1074,7 @@ function makeRecheckEpisodes(): Array<Record<string, unknown>> {
         { sourcePath: 'src/unorganized.ts', index: 4, side: 'after', tool: 'searchCode', startLine: 40, endLine: 42, excerpt: 'after unorganized excerpt', truncated: false },
     ];
     return records.map(({ sourcePath, index, side, tool: recordedTool, startLine, endLine, excerpt, truncated }) => ({
-        version: 2,
+        version: 3,
         id: `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
         createdAt: index,
         status: 'complete',
@@ -1098,7 +1098,6 @@ function makeRecheckEpisodes(): Array<Record<string, unknown>> {
             } }] : [])],
         }],
         changedPaths: [sourcePath],
-        changedSymbols: [],
         questions: [`Where should ${sourcePath} be investigated?`],
         claims: [{ claim: 'The recorded source is available for historical inspection.', evidenceRefs: ['E1'], disposition: 'must_express' }],
         model: 'memory-test-model',

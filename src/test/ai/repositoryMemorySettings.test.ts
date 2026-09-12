@@ -120,12 +120,11 @@ function makeEpisode(repositoryId: string, options: { summary: string }): Invest
     };
     const excerpt = 'const value = 1;';
     return {
-        version: 2,
+        version: 3,
         id: randomUUID(),
         createdAt: Date.now(),
         snapshot,
         changedPaths: ['src/settings.ts'],
-        changedSymbols: ['value'],
         questions: ['How is the setting used?'],
         observations: [{
             step: 0,

@@ -326,7 +326,7 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     investigationPlannedTitle: 'Investigation plan ready',
     investigationPlannedDescription: 'Investigating: {0}.',
     investigationStartTitle: 'Investigating the repository',
-    investigationStartDescription: 'Definitions, callers, callees, types, configuration, and tests are being looked up for the changed symbols.',
+    investigationStartDescription: 'Definitions, callers, callees, types, configuration, and tests are being checked for the planned questions.',
     investigationStepTitle: 'Investigation step {0}: {1}',
     investigationStepDefault: 'Repository lookup completed.',
     memoryStepTitle: 'Memory step {0}: {1}',

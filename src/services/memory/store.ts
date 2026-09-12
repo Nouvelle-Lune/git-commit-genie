@@ -14,9 +14,9 @@ import { MEMORY_DEFAULTS, MemorySettings } from './settings';
 const consolidationAttemptSchema = z.object({ id: z.uuid(), at: z.number(), epoch: z.uuid() }).strict();
 
 const manifestSchema = z.object({
-    version: z.literal(3), epoch: z.uuid(), generation: z.number().int().nonnegative(),
+    version: z.literal(4), epoch: z.uuid(), generation: z.number().int().nonnegative(),
     episodes: z.array(z.object({ id: z.uuid(), hash: z.string(), bytes: z.number().int().positive(), createdAt: z.number(),
-        paths: z.array(z.string()), symbols: z.array(z.string()), targets: z.array(z.string()), terms: z.array(z.string()), eligible: z.boolean() }).strict()),
+        paths: z.array(z.string()), targets: z.array(z.string()), terms: z.array(z.string()), eligible: z.boolean() }).strict()),
     handbook: z.array(handbookEntrySchema),
     attempts: z.array(consolidationAttemptSchema),
     // Deterministic evidence-group fingerprints prevent identical source sets
@@ -83,7 +83,7 @@ export class MemoryStore {
             }
             catch (error) {
                 if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; }
-                state = { version: 3, epoch: randomUUID(), generation: 0, episodes: [], handbook: [], attempts: [], consolidated: [], organizedSeeds: [], job: null };
+                state = { version: 4, epoch: randomUUID(), generation: 0, episodes: [], handbook: [], attempts: [], consolidated: [], organizedSeeds: [], job: null };
                 assertOwned();
                 await writeFileAtomic(manifestPath, JSON.stringify(state), { fsync: true });
             }
@@ -125,17 +125,16 @@ export class MemoryStore {
     /** Rank experiences before loading payloads so semantic hits cannot be lost to an episode prefilter. */
     async loadNavigation(query: MemoryQuery): Promise<MemoryView> {
         return this.locked(async state => {
-            const words = [...query.paths, ...query.symbols, ...query.keywords];
+            const words = [...query.paths, ...query.keywords];
             const handbookScores = bm25Scores(state.handbook.map(entryTerms), words);
-            const episodeScores = bm25Scores(state.episodes.map(entry => [...entry.paths, ...entry.symbols, ...entry.targets, ...entry.terms]), words);
-            const exact = (paths: string[], symbols: string[]) => paths.filter(value => query.paths.includes(value)).length * 100
-                + symbols.filter(value => query.symbols.includes(value)).length * 100;
+            const episodeScores = bm25Scores(state.episodes.map(entry => [...entry.paths, ...entry.targets, ...entry.terms]), words);
+            const exact = (paths: string[]) => paths.filter(value => query.paths.includes(value)).length * 100;
             const candidates = [
                 ...state.handbook.map((entry, index) => ({ kind: 'handbook' as const, id: entry.id,
                     episodeIds: [...new Set(entrySupports(entry).map(support => support.episodeId))],
-                    score: handbookScores[index] + exact(entry.targetPaths, entry.triggers) })),
+                    score: handbookScores[index] + exact(entry.targetPaths) })),
                 ...state.episodes.filter(entry => entry.eligible).map(entry => ({ kind: 'episode' as const, id: entry.id,
-                    episodeIds: [entry.id], score: episodeScores[state.episodes.indexOf(entry)] + exact([...entry.paths, ...entry.targets], entry.symbols) })),
+                    episodeIds: [entry.id], score: episodeScores[state.episodes.indexOf(entry)] + exact([...entry.paths, ...entry.targets]) })),
             ].filter(item => item.score > 0).sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
             const selected = new Map<string, Manifest['episodes'][number]>();
             const handbook: HandbookEntry[] = [];
@@ -192,7 +191,7 @@ export class MemoryStore {
 
     private indexEpisode(episode: InvestigationEpisode, bytes: Buffer): Manifest['episodes'][number] {
         return { id: episode.id, hash: hashContent(bytes), bytes: bytes.length, createdAt: episode.createdAt,
-            paths: episode.changedPaths, symbols: episode.changedSymbols,
+            paths: episode.changedPaths,
             targets: [...new Set(episode.observations.flatMap(item => item.evidence.map(evidence => evidence.source.path)))],
             terms: [...episode.questions, ...episode.observations.filter(item => !['searchRepositoryMemory', 'readMemorySources'].includes(item.tool))
                 .flatMap(item => [item.summary, ...Object.values(item.arguments).filter((value): value is string => typeof value === 'string')])], eligible: isEligibleEpisode(episode) };
@@ -239,7 +238,7 @@ export class MemoryStore {
                 if ((error as NodeJS.ErrnoException).code !== 'ENOENT') { throw error; }
             }
             const state: Manifest = {
-                version: 3, epoch: randomUUID(), generation: preserved.generation,
+                version: 4, epoch: randomUUID(), generation: preserved.generation,
                 episodes: [], handbook: [], attempts: preserved.attempts,
                 consolidated: [], organizedSeeds: [], job: null,
             };

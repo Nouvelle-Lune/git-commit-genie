@@ -236,7 +236,7 @@ export function createChangeAnalysisProfile(
                     '</run_context>',
                     '<investigation_goal>',
                     'Resolve the highest-value planned uncertainties with the narrowest repository lookups that directly support an answer.',
-                    'Start from exact changed paths and symbols. Expand to consumers, callers, implementations, configuration, or tests only when that relation changes the factual commit-message claim.',
+                    'Start from the exact changed paths and planned questions. Expand to consumers, callers, implementations, configuration, or tests only when that relation changes the factual commit-message claim.',
                     'If the plan contains targets, at least one successful evidence-producing lookup must publish E* evidence before finishInvestigation can be accepted.',
                     'Treat unanswered or unanswerable questions as unresolved; never manufacture an answer to complete the checklist.',
                     'The structured change-analysis object is requested in a separate turn after the investigation is closed.',
@@ -425,7 +425,6 @@ function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRu
             if (!parsed.success) { return memory.reject('invalid_arguments', parsed.error.message); }
             const navigation = await memory.searchRepositoryMemory({
                 paths: rawDiffPaths(input.rawDiff),
-                symbols: [],
                 keywords: [parsed.data.query],
             });
             input.recorder?.record({ step: state.steps, tool: 'searchRepositoryMemory', arguments: args, ok: true,

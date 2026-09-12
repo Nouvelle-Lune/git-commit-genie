@@ -36,6 +36,8 @@ describe('change-conditioned generator prompt boundary', () => {
 
         assert.match(content, /changes parser branch/);
         assert.match(content, /\[D1\]/);
+        assert.match(content, /selected claims or changed paths/);
+        assert.doesNotMatch(content, /changed symbols or paths/);
         assert.doesNotMatch(content, /tool trajectory|investigation trajectory|Completed tool calls|Repository evidence ledger/);
         assert.match(content, /internal experiment/);
     });
