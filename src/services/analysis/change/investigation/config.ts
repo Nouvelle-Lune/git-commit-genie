@@ -8,6 +8,7 @@ export interface InvestigationSettings {
 }
 
 export const DEFAULT_INVESTIGATION_MAX_STEPS = 12;
+export const MIN_INVESTIGATION_MAX_STEPS = 3;
 
 export function resolveInvestigationSettings(): InvestigationSettings {
     const config = vscode.workspace.getConfiguration('gitCommitGenie.chain.investigation');
@@ -16,7 +17,7 @@ export function resolveInvestigationSettings(): InvestigationSettings {
 
     return {
         enabled: config.get<boolean>('enabled', true),
-        maxSteps: Number.isInteger(configuredSteps) && configuredSteps > 0
+        maxSteps: Number.isInteger(configuredSteps) && configuredSteps >= MIN_INVESTIGATION_MAX_STEPS
             ? configuredSteps
             : DEFAULT_INVESTIGATION_MAX_STEPS,
         excludePatterns: Array.from(new Set([

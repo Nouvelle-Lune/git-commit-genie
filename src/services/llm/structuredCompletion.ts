@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { AIMessage, AIRunResponse } from './providers';
+import { buildStructuredFieldIssues, formatFieldIssuesForModel } from './structuredFieldIssues';
 
 export type StructuredOutputFailureKind =
     | 'context_exhausted'
@@ -80,15 +81,23 @@ export async function runStructuredCompletion<T>(options: StructuredCompletionOp
         }
 
         callbacks?.onValidationFailed?.(attempt + 1, totalAttempts, response, parsed.error);
+        // Field-level feedback exposes the rejected value and the exact local
+        // contract. Replaying a serialized ZodError made small models infer the
+        // repair and repeatedly return the same invalid enum or oversized array.
+        const fieldIssueLines = formatFieldIssuesForModel(buildStructuredFieldIssues(parsed.error, structured));
         if (attempt < totalAttempts - 1) {
             delta = [{
                 role: 'user',
-                content: `The previous response failed schema validation: ${parsed.error}. Return one corrected JSON object matching the requested schema.`,
+                content: [
+                    `The previous response failed schema validation for ${label}. Fix exactly these fields:`,
+                    ...fieldIssueLines.map(line => `- ${line}`),
+                    'Return one complete corrected JSON object matching the requested schema. Do not add markdown or explanation.',
+                ].join('\n'),
             }];
             continue;
         }
 
-        throw new Error(`Structured result failed local validation for ${label} after ${totalAttempts} attempts: ${parsed.error}`);
+        throw new Error(`Structured result failed local validation for ${label} after ${totalAttempts} attempts:\n${fieldIssueLines.map(line => `- ${line}`).join('\n')}`);
     }
 
     throw new Error(`Structured request for ${label} exited retry loop unexpectedly.`);

@@ -14,6 +14,8 @@ const evidence: DraftEvidence[] = [{
     rawDiff: '@@ -1 +1 @@\n-old\n+new\n@@ -10 +10 @@\n-old2\n+new2',
 }];
 
+const MAX_TOOL_CALLS = 4;
+
 function executionForPlans(
     plans: InvestigationPlan[],
     requests: AIMessage[][] = [],
@@ -71,9 +73,12 @@ function validPlan(): InvestigationPlan {
 describe('raw-diff investigation planning contract', () => {
     it('accepts a target and exactly-once coverage entry for every D* item', async () => {
         // Verify a planner can bind an investigation target to one D* item while retaining a diff-sufficient hunk.
-        const plan = await planInvestigation(evidence, executionForPlans([validPlan()]));
+        const requests: AIMessage[][] = [];
+        const plan = await planInvestigation(evidence, executionForPlans([validPlan()], requests), MAX_TOOL_CALLS);
 
         assert.deepEqual(plan, validPlan());
+        const content = requests[0].map(message => message.content).join('\n');
+        assert.match(content, new RegExp(`The investigation agent has ${MAX_TOOL_CALLS} repository tool call`));
     });
 
     it('accepts the new target identifiers and coverage fields in the provider schema', () => {
@@ -95,13 +100,15 @@ describe('raw-diff investigation planning contract', () => {
             ],
         };
 
-        const plan = await planInvestigation(evidence, executionForPlans([invalid, validPlan()], requests));
+        const plan = await planInvestigation(evidence, executionForPlans([invalid, validPlan()], requests), 7);
 
         assert.deepEqual(plan, validPlan());
         assert.equal(requests.length, 2);
         assert.match(requests[1][0].content, /<plan_rejected>/);
         assert.match(requests[1][0].content, /Allowed diff evidence ids: \["D1","D2"\]/);
+        assert.match(requests[1][0].content, /Repository tool budget: 7/);
         assert.match(requests[1][0].content, /Every allowed D\* id must appear once in coverage/);
+        assert.match(requests[1][0].content, /each named target must contain that row's D\* id/i);
     });
 
     it('rejects a diff-sufficient entry that carries a target', async () => {
@@ -115,9 +122,129 @@ describe('raw-diff investigation planning contract', () => {
         };
 
         await assert.rejects(
-            planInvestigation(evidence, executionForPlans([invalid])),
+            planInvestigation(evidence, executionForPlans([invalid]), MAX_TOOL_CALLS),
             /diff-sufficient evidence 'D1' must not have investigation targets/,
         );
+    });
+
+    it('rejects an investigated D* item missing from its target reverse binding', async () => {
+        // Verify every investigate coverage row is represented in each named target's diffEvidenceRefs.
+        const invalid: InvestigationPlan = {
+            ...validPlan(),
+            coverage: [
+                { diffEvidenceRef: 'D1', decision: 'investigate', targetIds: ['T1'] },
+                { diffEvidenceRef: 'D2', decision: 'investigate', targetIds: ['T1'] },
+            ],
+        };
+
+        await assert.rejects(
+            planInvestigation(evidence, executionForPlans([invalid]), MAX_TOOL_CALLS),
+            /target 'T1' diffEvidenceRefs is missing investigated evidence ids \["D2"\]/,
+        );
+    });
+
+    it('rejects a target that is not attached to an investigate coverage row', async () => {
+        // Verify a target cannot smuggle repository work into a diff-sufficient coverage entry.
+        const invalid: InvestigationPlan = {
+            ...validPlan(),
+            coverage: [
+                { diffEvidenceRef: 'D1', decision: 'diff_sufficient', targetIds: [] },
+                { diffEvidenceRef: 'D2', decision: 'diff_sufficient', targetIds: [] },
+            ],
+        };
+
+        await assert.rejects(
+            planInvestigation(evidence, executionForPlans([invalid]), MAX_TOOL_CALLS),
+            /target 'T1' diff evidence ids \["D1"\] are not bound to investigate coverage rows for that target/,
+        );
+    });
+
+    it('rejects duplicate D* references inside one target instead of normalizing them away', async () => {
+        // A target must declare each D* reference once so the planner cannot hide an invalid binding through normalization.
+        const invalid: InvestigationPlan = {
+            ...validPlan(),
+            targets: [{ ...validPlan().targets[0], diffEvidenceRefs: ['D1', 'D1'] }],
+        };
+
+        await assert.rejects(
+            planInvestigation(evidence, executionForPlans([invalid]), MAX_TOOL_CALLS),
+            /target 'T1' repeats diff evidence 'D1'/,
+        );
+    });
+
+    it('rejects duplicate target ids inside one coverage row instead of normalizing them away', async () => {
+        // A coverage row must name each target once so duplicate bindings remain visible to the planner retry contract.
+        const invalid: InvestigationPlan = {
+            ...validPlan(),
+            coverage: [
+                { diffEvidenceRef: 'D1', decision: 'investigate', targetIds: ['T1', 'T1'] },
+                { diffEvidenceRef: 'D2', decision: 'diff_sufficient', targetIds: [] },
+            ],
+        };
+
+        await assert.rejects(
+            planInvestigation(evidence, executionForPlans([invalid]), MAX_TOOL_CALLS),
+            /coverage for diff evidence 'D1' repeats a target id/,
+        );
+    });
+
+    it('rejects a target reference whose coverage decision is diff-sufficient', async () => {
+        // A target D* reference is valid only when its coverage row investigates and names that same target.
+        const invalid: InvestigationPlan = {
+            ...validPlan(),
+            targets: [{ ...validPlan().targets[0], diffEvidenceRefs: ['D1', 'D2'] }],
+        };
+
+        await assert.rejects(
+            planInvestigation(evidence, executionForPlans([invalid]), MAX_TOOL_CALLS),
+            /target 'T1' diff evidence ids \["D2"\] are not bound to investigate coverage rows for that target/,
+        );
+    });
+
+    it('instructs retries to merge duplicate investigate coverage rows without dropping D*', async () => {
+        // A duplicate investigate row must be repaired as one deduplicated row while preserving its target bindings.
+        const requests: AIMessage[][] = [];
+        const invalid: InvestigationPlan = {
+            ...validPlan(),
+            coverage: [
+                { diffEvidenceRef: 'D1', decision: 'investigate', targetIds: ['T1', 'T1'] },
+                { diffEvidenceRef: 'D1', decision: 'investigate', targetIds: ['T1'] },
+                { diffEvidenceRef: 'D2', decision: 'diff_sufficient', targetIds: [] },
+            ],
+        };
+
+        await planInvestigation(
+            evidence,
+            executionForPlans([invalid, validPlan()], requests),
+            MAX_TOOL_CALLS,
+        );
+
+        assert.match(requests[1][0].content, /coverage repeats diff evidence 'D1'/);
+        assert.match(requests[1][0].content, /keep exactly one row for that id/i);
+        assert.match(requests[1][0].content, /Merge and deduplicate its targetIds when the rows agree on investigate/i);
+        assert.match(requests[1][0].content, /do not silently change a conflicting decision/i);
+    });
+
+    it('warns retries not to silently resolve conflicting duplicate coverage decisions', async () => {
+        // Conflicting duplicate decisions must remain explicit for the planner to resolve rather than being changed by the validator.
+        const requests: AIMessage[][] = [];
+        const invalid: InvestigationPlan = {
+            ...validPlan(),
+            coverage: [
+                { diffEvidenceRef: 'D1', decision: 'investigate', targetIds: ['T1'] },
+                { diffEvidenceRef: 'D1', decision: 'diff_sufficient', targetIds: [] },
+                { diffEvidenceRef: 'D2', decision: 'diff_sufficient', targetIds: [] },
+            ],
+        };
+
+        await planInvestigation(
+            evidence,
+            executionForPlans([invalid, validPlan()], requests),
+            MAX_TOOL_CALLS,
+        );
+
+        assert.match(requests[1][0].content, /do not silently change a conflicting decision/i);
+        assert.match(requests[1][0].content, /Return the complete corrected plan/i);
     });
 
     it('fails explicitly after maxRetries when coverage is incomplete', async () => {
@@ -129,7 +256,7 @@ describe('raw-diff investigation planning contract', () => {
         };
 
         await assert.rejects(
-            planInvestigation(evidence, executionForPlans([invalid, invalid])),
+            planInvestigation(evidence, executionForPlans([invalid, invalid]), MAX_TOOL_CALLS),
             /missing from coverage/,
         );
     });
@@ -146,7 +273,7 @@ describe('raw-diff investigation planning contract', () => {
             notes: 'The complete diff is sufficient.',
         };
 
-        const result = await planInvestigation(evidence, executionForPlans([plan]));
+        const result = await planInvestigation(evidence, executionForPlans([plan]), MAX_TOOL_CALLS);
 
         assert.deepEqual(result.targets, []);
         assert.deepEqual(result.coverage, plan.coverage);

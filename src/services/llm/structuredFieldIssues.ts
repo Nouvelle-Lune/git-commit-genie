@@ -67,7 +67,7 @@ export function formatFieldIssuesForModel(issues: StructuredFieldIssue[]): strin
     return issues.map(issue => {
         switch (issue.kind) {
             case 'tooManyItems':
-                return `${issue.path}: contains ${issue.count} items but at most ${issue.limit} are allowed. Keep only the ${issue.limit} most directly supporting entries.`;
+                return `${issue.path}: contains ${issue.count} items but at most ${issue.limit} are allowed. Narrow or split the containing item while preserving every required coverage or evidence reference.`;
             case 'tooFewItems':
                 return `${issue.path}: contains ${issue.count} items but at least ${issue.limit} are required.`;
             case 'invalidFormat':

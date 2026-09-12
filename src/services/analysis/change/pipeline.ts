@@ -78,7 +78,7 @@ export async function runChangeAnalysisPipeline(
     if (canInvestigate) {
         safeRun('Chain.onStage.investigationPlanStart', () => onStage?.({
             type: 'investigationPlanStart',
-            rawData: { input: { evidence: rawDiff } },
+            rawData: { input: { evidence: rawDiff, maxToolCalls: settings.maxSteps } },
         }));
         const memoryQuery = { paths: diffs.map(diff => diff.fileName), symbols: [], keywords: [] };
         const memory = inputs.loadMemory ? await inputs.loadMemory(memoryQuery) : inputs.memory;
@@ -89,7 +89,7 @@ export async function runChangeAnalysisPipeline(
                 data: { current: 0, tool: 'retrieveNavigation', trigger: 'agent', status: 'completed', summary: `Found ${navigation.length} historical navigation candidate(s).`, ok: true, budget: memory.budget },
                 rawData: { input: memoryQuery, output: { navigation, budget: memory.budget, settings: memory.settings } } }));
         }
-        const plan = await planInvestigation(rawDiff, execution, navigation);
+        const plan = await planInvestigation(rawDiff, execution, settings.maxSteps, navigation);
         if (memory) { memoryUsage = { ...memory.usage }; }
         investigationPlan = plan;
         safeRun('Chain.onStage.investigationPlanned', () => onStage?.({

@@ -119,6 +119,7 @@ export interface AgentRuntimeIssue {
     | 'missing_structured_output'
     | 'schema_mismatch'
     | 'evidence_precondition'
+    | 'evidence_precondition_degraded'
     | 'output_exhausted'
     | 'provider_error'
     | 'invalid_reference'
@@ -158,7 +159,7 @@ export interface AgentRunState {
 }
 
 /** Why the run left the investigation phase. */
-export type FinalizationTrigger = 'finishTool' | 'budgetExhausted' | 'noBudget';
+export type FinalizationTrigger = 'finishTool' | 'budgetExhausted' | 'noBudget' | 'preconditionUnmet';
 
 export type AgentRuntimeEvent =
     | { type: 'toolStart'; step: number; tool: string; args: Record<string, unknown> }
@@ -215,6 +216,13 @@ export interface AgentProfile<Input, RawFinal, Output> {
      * tool budget runs out, because evidence cannot change afterwards.
      */
     validateFinalizationPrecondition?(state: AgentRunState): string | null;
+    /**
+     * Controls the terminal behavior when an evidence precondition remains
+     * unmet after its repair turns or repository lookup budget are exhausted.
+     * `degrade` closes tools and requests an explicit partial terminal instead
+     * of failing the caller-visible generation workflow.
+     */
+    finalizationPreconditionPolicy?: 'fail' | 'degrade';
     /** Complete terminal contract, sent once with the tools closed. */
     buildFinalizationRequest(input: Input, state: AgentRunState, reason: string | null): AIMessage[];
     /** Correction for a rejected turn, sent in the same session. */
@@ -414,22 +422,35 @@ export class AgentRuntime {
                             // keeps ending without evidence would otherwise loop
                             // forever, spending one paid turn per attempt.
                             preconditionRejections += 1;
-                            this.reportFailure(
-                                state,
-                                profile,
-                                { stage: 'investigation', category: 'evidencePrecondition', message: blocked, fieldIssues: [] },
-                                preconditionRejections,
-                                totalAttempts,
-                            );
-                            if (preconditionRejections >= totalAttempts) {
+                            const degrading = preconditionRejections >= totalAttempts
+                                && profile.finalizationPreconditionPolicy === 'degrade';
+                            if (degrading) {
+                                recordEvidencePrecondition(state, blocked);
+                            } else {
+                                this.reportFailure(
+                                    state,
+                                    profile,
+                                    { stage: 'investigation', category: 'evidencePrecondition', message: blocked, fieldIssues: [] },
+                                    preconditionRejections,
+                                    totalAttempts,
+                                );
+                            }
+                            if (preconditionRejections >= totalAttempts && !degrading) {
                                 throw new Error(blocked);
                             }
                             toolResults.push({
                                 callId: call.id,
                                 name: call.name,
-                                output: buildPreconditionRejectionOutput(blocked),
+                                output: degrading
+                                    ? buildPreconditionDegradationOutput(blocked)
+                                    : buildPreconditionRejectionOutput(blocked),
                                 isError: true,
                             });
+                            if (degrading) {
+                                // The missing evidence remains visible in state.issues,
+                                // but the profile can still produce a diff-only terminal.
+                                finished = { trigger: 'preconditionUnmet', reason: null };
+                            }
                             continue;
                         }
                         finished = { trigger: 'finishTool', reason: readFinishReason(call) };
@@ -443,7 +464,6 @@ export class AgentRuntime {
                     if (state.steps >= maxSteps) {
                         // Providers require one tool_result per pending tool_use,
                         // so overflow calls are refused in-band instead of run.
-                        recordBudgetExhausted(state, profile.id, maxSteps);
                         toolResults.push({
                             callId: call.id,
                             name: call.name,
@@ -476,22 +496,28 @@ export class AgentRuntime {
                 if (state.steps >= maxSteps) {
                     // The last permitted lookup has run. Finalize now rather than
                     // spending another paid turn waiting for an over-budget call.
-                    recordBudgetExhausted(state, profile.id, maxSteps);
                     transition = { trigger: 'budgetExhausted', reason: null };
                 }
             }
 
-            if (transition.trigger !== 'finishTool') {
+            if (transition.trigger !== 'finishTool' && transition.trigger !== 'preconditionUnmet') {
                 const blocked = profile.validateFinalizationPrecondition?.(state) ?? null;
                 if (blocked) {
-                    this.reportFailure(
-                        state,
-                        profile,
-                        { stage: 'investigation', category: 'evidencePrecondition', message: blocked, fieldIssues: [] },
-                        1,
-                        1,
-                    );
-                    throw new Error(blocked);
+                    if (profile.finalizationPreconditionPolicy === 'degrade') {
+                        // Reaching the configured lookup limit is a normal phase
+                        // boundary. Preserve the missing-evidence diagnostic without
+                        // emitting a final-failure retry event to the UI.
+                        recordEvidencePrecondition(state, blocked);
+                    } else {
+                        this.reportFailure(
+                            state,
+                            profile,
+                            { stage: 'investigation', category: 'evidencePrecondition', message: blocked, fieldIssues: [] },
+                            1,
+                            1,
+                        );
+                        throw new Error(blocked);
+                    }
                 }
             }
 
@@ -920,26 +946,33 @@ function buildPreconditionRejectionOutput(reason: string): string {
     ].join('\n');
 }
 
-/** Stable tool_result body used when a call is refused after the step budget is spent. */
-function buildBudgetExhaustedToolOutput(profileId: string, maxSteps: number): string {
+/** Terminal rejection result used when the profile continues as diff-only. */
+function buildPreconditionDegradationOutput(reason: string): string {
     return [
-        '<budget_exhausted>',
-        `Agent profile '${profileId}' exhausted its ${maxSteps} tool-step budget.`,
-        'This call was not executed and no further tool call is possible.',
-        'Repository investigation is closed; answer the terminal contract with the evidence already collected.',
-        '</budget_exhausted>',
+        '<finish_rejected>',
+        reason,
+        'Repository investigation is now closed because no repair turn remains.',
+        'Continue with the finalization request using diff evidence only. Never present a diff-only fact as a repository fact.',
+        '</finish_rejected>',
     ].join('\n');
 }
 
-function recordBudgetExhausted(state: AgentRunState, profileId: string, maxSteps: number): void {
-    if (state.issues.some(issue => issue.type === 'budget_exhausted')) {
+/** Stable tool_result body used when a call is refused after the step budget is spent. */
+function buildBudgetExhaustedToolOutput(profileId: string, maxSteps: number): string {
+    return [
+        '<investigation_closed>',
+        `Agent profile '${profileId}' reached its ${maxSteps} permitted repository lookups.`,
+        'This call was not executed and no further tool call is possible.',
+        'Repository investigation is closed; answer the terminal contract with the evidence already collected.',
+        '</investigation_closed>',
+    ].join('\n');
+}
+
+function recordEvidencePrecondition(state: AgentRunState, message: string): void {
+    if (state.issues.some(issue => issue.type === 'evidence_precondition_degraded' && issue.message === message)) {
         return;
     }
-    state.issues.push({
-        type: 'budget_exhausted',
-        message: `Agent profile '${profileId}' exhausted its ${maxSteps} tool-step budget.`,
-        step: state.steps,
-    });
+    state.issues.push({ type: 'evidence_precondition_degraded', message, step: state.steps });
 }
 
 function countRepositoryEvidence(state: AgentRunState): number {

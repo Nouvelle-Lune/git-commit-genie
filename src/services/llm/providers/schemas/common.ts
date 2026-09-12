@@ -69,13 +69,13 @@ export const validateAndFixResponseSchema = z.object({
   status: z.enum(['valid', 'fixed']).default('valid'),
   commitMessage: z.string().min(1),
   violations: z.array(z.string().min(1)).default([]),
-  preservedFactIds: z.array(z.string().regex(/^C\d+$/)).default([]),
+  preservedFactIds: z.array(z.string().regex(/^C[0-9]+$/)).default([]),
   notes: z.string().nullable().default(null)
 } as const).strict();
 
 export const factAwareCommitMessageSchema = z.object({
   commitMessage: z.string().min(1),
-  preservedFactIds: z.array(z.string().regex(/^C\d+$/)).default([]),
+  preservedFactIds: z.array(z.string().regex(/^C[0-9]+$/)).default([]),
 } as const).strict();
 
 export const ragRerankResponseSchema = z.object({
@@ -104,11 +104,11 @@ export const investigationPlanResponseSchema = z.object({
     target: z.string().min(1),
     kind: z.enum(INVESTIGATION_TARGET_KINDS),
     file: z.string().nullable(),
-    diffEvidenceRefs: z.array(z.string().regex(/^D\d+$/)).min(1).max(INVESTIGATION_PLAN_LIMITS.maxDiffEvidenceRefsPerTarget),
+    diffEvidenceRefs: z.array(z.string().regex(/^D[0-9]+$/)).min(1).max(INVESTIGATION_PLAN_LIMITS.maxDiffEvidenceRefsPerTarget),
     questions: z.array(z.string().min(1)).min(1).max(INVESTIGATION_PLAN_LIMITS.maxQuestionsPerTarget),
   } as const).strict()).max(INVESTIGATION_PLAN_LIMITS.maxTargets),
   coverage: z.array(z.object({
-    diffEvidenceRef: z.string().regex(/^D\d+$/),
+    diffEvidenceRef: z.string().regex(/^D[0-9]+$/),
     decision: z.enum(['investigate', 'diff_sufficient']),
     targetIds: z.array(z.string().min(1)).max(12),
   } as const).strict()),
@@ -155,12 +155,12 @@ export const AGENT_TERMINAL_LIMITS = {
 } as const;
 
 const agentEvidenceReferenceSchema = z.string().regex(
-  /^[DE]\d+$/,
+  /^[DE][0-9]+$/,
   'Evidence references must be ledger-owned D* diff ids or E* repository ids.'
 );
 
 const repositoryEvidenceIdSchema = z.string().regex(
-  /^E\d+$/,
+  /^E[0-9]+$/,
   'Investigation findings must cite E* repository evidence ids returned by repository tools.'
 );
 

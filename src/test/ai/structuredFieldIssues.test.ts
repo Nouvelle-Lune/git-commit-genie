@@ -3,6 +3,9 @@ import { describe, it } from 'mocha';
 import { z } from 'zod';
 import {
     AGENT_TERMINAL_LIMITS,
+    factAwareCommitMessageSchema,
+    investigationPlanResponseSchema,
+    validateAndFixResponseSchema,
     changeAnalysisAgentFinalResponseSchema,
 } from '../../services/llm/providers/schemas/common';
 import { buildTerminalContractLines } from '../../services/analysis/change/investigation/terminalContract';
@@ -15,18 +18,13 @@ function minimalTerminal(overrides: Record<string, unknown> = {}) {
             unresolvedQuestions: [],
             stopReason: 'Enough evidence.',
         },
-        changeTargets: [],
-        dependencyContext: {
-            callers: [],
-            callees: [],
-            stateDependencies: [],
-            relatedConfigs: [],
-            relatedTypes: [],
-        },
-        claims: [],
+        claims: [{
+            category: 'observed_change' as const,
+            claim: 'the diff changes one parser branch',
+            evidenceRefs: ['D1'],
+            disposition: 'must_express' as const,
+        }],
         behaviorAnalysis: { before: null, after: null, observableEffect: null },
-        capabilityContext: { technicalCapability: null, productCapability: null },
-        intentAnalysis: { primaryIntent: null, supportedBy: [], confidence: 'low' as const },
         changeClassification: {
             existingBehaviorCorrected: false,
             newCapabilityAdded: false,
@@ -43,14 +41,15 @@ function minimalTerminal(overrides: Record<string, unknown> = {}) {
 }
 
 describe('structured field issue diagnostics', () => {
-    it('reports intentAnalysis.supportedBy overflow as tooManyItems', () => {
-        // An intent evidence array above the shared limit must produce one structured overflow diagnostic.
+    it('reports claim evidence overflow as tooManyItems', () => {
+        // An evidence reference array above the shared limit must produce one field-level overflow diagnostic.
         const input = minimalTerminal({
-            intentAnalysis: {
-                primaryIntent: 'Improve reliability',
-                supportedBy: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9'],
-                confidence: 'high',
-            },
+            claims: [{
+                category: 'observed_change',
+                claim: 'changes many parser branches',
+                evidenceRefs: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9'],
+                disposition: 'must_express',
+            }],
         });
         const parsed = changeAnalysisAgentFinalResponseSchema.safeParse(input);
         assert.equal(parsed.success, false);
@@ -61,14 +60,14 @@ describe('structured field issue diagnostics', () => {
         const issues = buildStructuredFieldIssues(parsed.error, input);
 
         assert.deepEqual(issues, [{
-            path: 'intentAnalysis.supportedBy',
+            path: 'claims[0].evidenceRefs',
             kind: 'tooManyItems',
             count: 9,
             limit: 8,
         }]);
     });
 
-    it('reports six simultaneous evidence ref overflows with exact paths', () => {
+    it('reports simultaneous evidence ref overflows with exact paths', () => {
         // Every evidence-bearing terminal field must report its own overflow path without truncating diagnostics.
         const input = minimalTerminal({
             investigation: {
@@ -81,37 +80,12 @@ describe('structured field issue diagnostics', () => {
                 unresolvedQuestions: [],
                 stopReason: 'Enough evidence.',
             },
-            changeTargets: [{
-                symbol: 'parse',
-                file: 'src/parser.ts',
-                role: 'changed function',
-                evidenceRefs: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9'],
-            }],
-            claims: [
-                {
+            claims: Array.from({ length: 6 }, (_, index) => ({
                     category: 'observed_change',
-                    claim: 'changes branch one',
+                    claim: `changes branch ${index + 1}`,
                     evidenceRefs: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9'],
                     disposition: 'must_express',
-                },
-                {
-                    category: 'repository_fact',
-                    claim: 'has callers one',
-                    evidenceRefs: ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9'],
-                    disposition: 'optional',
-                },
-                {
-                    category: 'supported_inference',
-                    claim: 'has callers two',
-                    evidenceRefs: ['E1', 'E2', 'E3', 'E4', 'E5', 'E6', 'E7', 'E8', 'E9'],
-                    disposition: 'optional',
-                },
-            ],
-            intentAnalysis: {
-                primaryIntent: 'Improve reliability',
-                supportedBy: ['D1', 'D2', 'D3', 'D4', 'D5', 'D6', 'D7', 'D8', 'D9'],
-                confidence: 'high',
-            },
+            })),
         });
         const parsed = changeAnalysisAgentFinalResponseSchema.safeParse(input);
         assert.equal(parsed.success, false);
@@ -124,11 +98,12 @@ describe('structured field issue diagnostics', () => {
 
         assert.deepEqual(tooMany.map(issue => issue.path), [
             'investigation.findings[0].evidenceRefs',
-            'changeTargets[0].evidenceRefs',
             'claims[0].evidenceRefs',
             'claims[1].evidenceRefs',
             'claims[2].evidenceRefs',
-            'intentAnalysis.supportedBy',
+            'claims[3].evidenceRefs',
+            'claims[4].evidenceRefs',
+            'claims[5].evidenceRefs',
         ]);
         for (const issue of tooMany) {
             assert.equal(issue.count, 9);
@@ -161,7 +136,7 @@ describe('structured field issue diagnostics', () => {
 
         assert.ok(invalid);
         assert.equal(invalid?.path, 'investigation.findings[0].evidenceRefs[0]');
-        assert.match(String(invalid?.expected), /\^E\\d\+\$/);
+        assert.equal(invalid?.expected, '/^E[0-9]+$/');
         assert.equal(invalid?.actual, '"D1"');
     });
 });
@@ -192,7 +167,22 @@ describe('exported finding evidence schema', () => {
 
         assert.equal(evidenceRefs.minItems, AGENT_TERMINAL_LIMITS.minFindingEvidenceRefs);
         assert.equal(evidenceRefs.maxItems, AGENT_TERMINAL_LIMITS.maxEvidenceRefs);
-        assert.equal(evidenceRefs.items.pattern, '^E\\d+$');
+        assert.equal(evidenceRefs.items.pattern, '^E[0-9]+$');
+    });
+
+    it('exports digit-class ledger patterns without JavaScript shorthand escapes', () => {
+        // Provider-facing schemas must spell ledger id digits as [0-9] so every JSON Schema consumer sees the same contract.
+        const schemas = [
+            investigationPlanResponseSchema,
+            validateAndFixResponseSchema,
+            factAwareCommitMessageSchema,
+            changeAnalysisAgentFinalResponseSchema,
+        ];
+
+        for (const schema of schemas) {
+            const serialized = JSON.stringify(z.toJSONSchema(schema));
+            assert.doesNotMatch(serialized, /\\\\d/);
+        }
     });
 
     it('agrees with Zod on legal E*, empty, D-only, mixed, and overflow arrays', () => {
@@ -247,7 +237,7 @@ describe('claim category visibility contract', () => {
         const dispositionDescription = exported.properties.claims.items.properties.disposition.description;
 
         assert.equal(claimEvidenceRefs.maxItems, AGENT_TERMINAL_LIMITS.maxEvidenceRefs);
-        assert.equal(claimEvidenceRefs.items.pattern, '^[DE]\\d+$');
+        assert.equal(claimEvidenceRefs.items.pattern, '^[DE][0-9]+$');
 
         for (const category of [
             'observed_change',

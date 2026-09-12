@@ -1,7 +1,11 @@
 import { strict as assert } from 'assert';
 import { describe, it } from 'mocha';
 import { createChangeAnalysisProfile } from '../../services/analysis/change/investigation/changeAnalysisProfile';
-import { buildCorrectionLines, terminalContractExample } from '../../services/analysis/change/investigation/terminalContract';
+import {
+    buildCorrectionLines,
+    buildInvestigationProtocolLines,
+    terminalContractExample,
+} from '../../services/analysis/change/investigation/terminalContract';
 import { changeAnalysisAgentFinalResponseSchema } from '../../services/llm/providers/schemas/common';
 import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
 
@@ -17,12 +21,28 @@ describe('terminal contract regression', () => {
         const input = makeInput();
         const profile = createChangeAnalysisProfile(input);
 
-        assert.equal(profile.promptVersion, '8');
+        assert.equal(profile.promptVersion, '9');
         assert.equal(profile.toolsetVersion, 'snapshot-memory-experience-2');
         assert.match(
             `agent:${profile.id}:${profile.promptVersion}:${profile.toolsetVersion}:gpt-5`,
-            /^agent:change-analysis:8:snapshot-memory-experience-2:/,
+            /^agent:change-analysis:9:snapshot-memory-experience-2:/,
         );
+    });
+
+    it('teaches the investigation agent a bounded evidence-first exploration route', () => {
+        // The investigation protocol must guide narrow repository exploration without claiming that search alone proves absence.
+        const protocol = buildInvestigationProtocolLines('finishInvestigation').join('\n');
+
+        assert.match(protocol, /plan targets in their listed priority order/i);
+        assert.match(protocol, /exact changed symbol/i);
+        assert.match(protocol, /callers, callees, implementations, configuration, or tests/i);
+        assert.match(protocol, /after snapshot by default/i);
+        assert.match(protocol, /before only when/i);
+        assert.match(protocol, /empty search is not proof/i);
+        assert.match(protocol, /Do not repeat the same tool call, tour unrelated directories/i);
+        assert.match(protocol, /Successful evidence-producing reads and searches publish E\*/i);
+        assert.match(protocol, /empty, failed, or navigation-only results publish none/i);
+        assert.match(protocol, /searchCode with searchType "name" (?:is|are) navigation-only/i);
     });
 
     it('keeps investigation prompts free of terminal JSON contract text', () => {
@@ -66,7 +86,7 @@ describe('terminal contract regression', () => {
             fieldIssues: [{
                 path: 'investigation.findings[0].evidenceRefs[0]',
                 kind: 'invalidFormat',
-                expected: '^E\\d+$',
+                expected: '^E[0-9]+$',
                 actual: '"D1"',
             }],
         }, 'finishInvestigation').join('\n');

@@ -158,7 +158,7 @@ function toToolCall(name: InvestigationToolName, args: Record<string, unknown>):
 export function createChangeAnalysisProfile(
     input: ChangeAnalysisAgentInput,
 ): AgentProfile<ChangeAnalysisAgentInput, RawFinal, ChangeAnalysisAgentOutput> {
-    const openQuestions = input.plan.targets.flatMap(target =>
+    const plannedQuestions = input.plan.targets.flatMap(target =>
         target.questions.map(question => `${target.target}: ${question}`)
     );
     const evidenceItems: RepositoryEvidenceItem[] = [];
@@ -166,7 +166,7 @@ export function createChangeAnalysisProfile(
     return {
         id: 'change-analysis',
         // Cached prompt identities must not reuse the former UUID-based Memory contract.
-        promptVersion: '8',
+        promptVersion: '9',
         toolsetVersion: 'snapshot-memory-experience-2',
         requestType: 'investigation',
         finalName: 'changeAnalysisCompoundTerminal',
@@ -187,8 +187,8 @@ export function createChangeAnalysisProfile(
                     `Repository evidence ledger: ${JSON.stringify(state.ledger.snapshot()
                         .filter(item => item.source === 'repository'))}`,
                     `Completed calls: ${JSON.stringify(state.observations.map(item => ({ tool: item.tool, arguments: item.arguments, ok: item.ok })))}`,
-                    `Open questions: ${openQuestions.join(' | ') || 'none'}`,
-                    `Use the unchanged tool contract. Call ${FINISH_INVESTIGATION_TOOL} once the open questions are answered or are unanswerable.`,
+                    `Planned-question checklist (not automatically marked complete): ${plannedQuestions.join(' | ') || 'none'}`,
+                    `Use the unchanged tool contract and the evidence already collected to decide which questions remain material. Call ${FINISH_INVESTIGATION_TOOL} once they are answered or unanswerable.`,
                     '</context_checkpoint>',
                 ].join('\n'),
             }),
@@ -213,7 +213,10 @@ export function createChangeAnalysisProfile(
                     `User template constraints: ${JSON.stringify(profileInput.userTemplate ?? null)}`,
                     '</run_context>',
                     '<investigation_goal>',
-                    'Answer the planned questions with repository evidence, then end the investigation.',
+                    'Resolve the highest-value planned uncertainties with the narrowest repository lookups that directly support an answer.',
+                    'Start from exact changed paths and symbols. Expand to consumers, callers, implementations, configuration, or tests only when that relation changes the factual commit-message claim.',
+                    'If the plan contains targets, at least one successful evidence-producing lookup must publish E* evidence before finishInvestigation can be accepted.',
+                    'Treat unanswered or unanswerable questions as unresolved; never manufacture an answer to complete the checklist.',
                     'The structured change-analysis object is requested in a separate turn after the investigation is closed.',
                     'Do not assemble it now, and do not describe its fields in this phase.',
                     '</investigation_goal>',
@@ -232,7 +235,7 @@ export function createChangeAnalysisProfile(
             allocateEvidence: !['listDirectory', 'searchRepositoryMemory'].includes(name),
         })),
         buildToolDefinitions: (_profileInput, state) => [...CHANGE_ANALYSIS_TOOL_NAMES.map(name => (
-            createExecutableDefinition(name, input, state, evidenceItems, openQuestions)
+            createExecutableDefinition(name, input, state, evidenceItems, plannedQuestions)
         )), ...createMemoryDefinitions(input, state, evidenceItems)],
         validateFinalizationPrecondition: state => {
             if (!input.plan.targets.length) {
@@ -244,31 +247,38 @@ export function createChangeAnalysisProfile(
                 : 'The investigation plan contains targets, but no E* repository evidence has been collected yet.'
                 + ' A non-empty plan must produce at least one real repository evidence item before the investigation can end.';
         },
-        buildFinalizationRequest: (profileInput, state, reason) => [{
-            role: 'user',
-            content: [
-                '<investigation_closed>',
-                `Repository lookups used: ${state.steps} of ${profileInput.maxSteps}.`,
-                reason
-                    ? `Your stated reason for stopping: ${reason}`
-                    : 'The repository tool budget ended the investigation.',
-                `Diff evidence ids: ${JSON.stringify(diffEvidenceIds(state))}`,
-                `Repository evidence ids: ${JSON.stringify(repositoryEvidenceIndex(state))}`,
-                `Planned questions: ${openQuestions.join(' | ') || 'none'}`,
-                'Only the ids listed above exist. Any other id is invalid and will be rejected.',
-                '</investigation_closed>',
-                '',
-                ...buildTerminalContractLines(),
-            ].join('\n'),
-        }],
+        // Missing repository evidence is observable degradation, not a reason
+        // to discard the D* facts and prevent the downstream draft stage.
+        finalizationPreconditionPolicy: 'degrade',
+        buildFinalizationRequest: (profileInput, state, reason) => {
+            const hasRepositoryEvidence = state.ledger.snapshot().some(item => item.source === 'repository');
+            return [{
+                role: 'user',
+                content: [
+                    '<investigation_closed>',
+                    `Repository lookups used: ${state.steps} of ${profileInput.maxSteps}.`,
+                    reason
+                        ? `Your stated reason for stopping: ${reason}`
+                        : hasRepositoryEvidence
+                            ? 'The repository lookup limit ended the investigation normally.'
+                            : 'No repository evidence was collected before investigation closed. Produce an explicit diff-only analysis so the draft stage can continue; never present a diff-only fact as a repository fact.',
+                    `Diff evidence ids: ${JSON.stringify(diffEvidenceIds(state))}`,
+                    `Repository evidence ids: ${JSON.stringify(repositoryEvidenceIndex(state))}`,
+                    `Planned questions: ${plannedQuestions.join(' | ') || 'none'}`,
+                    'Only the ids listed above exist. Any other id is invalid and will be rejected.',
+                    '</investigation_closed>',
+                    '',
+                    ...buildTerminalContractLines(),
+                ].join('\n'),
+            }];
+        },
         buildCorrectionRequest: (_profileInput, _state, failure) => [{
             role: 'user',
             content: buildCorrectionLines(failure, FINISH_INVESTIGATION_TOOL).join('\n'),
         }],
         normalizeFinal: (raw, state) => normalizeCompoundTerminal(raw, state, evidenceItems),
-        // Change analysis is a required chain stage. Exhausting the bounded
-        // AgentRuntime retries must fail the chain instead of manufacturing a
-        // file-name-only result that can be mistaken for a successful analysis.
+        // Terminal schema failures remain fatal. Only the explicit no-E*
+        // precondition uses the typed diff-only path above.
         preservePartialResult: (_state, error) => { throw error; },
     };
 }
@@ -297,7 +307,7 @@ function createExecutableDefinition(
     input: ChangeAnalysisAgentInput,
     state: AgentRunState,
     evidenceItems: RepositoryEvidenceItem[],
-    openQuestions: string[],
+    plannedQuestions: string[],
 ): AgentToolDefinition<ChangeAnalysisAgentInput> {
     return {
         name,
@@ -332,8 +342,9 @@ function createExecutableDefinition(
                 tool: toolName,
                 summary: outcome.summary,
                 evidence: outcome.evidence,
+                repositoryEvidenceCount: state.ledger.snapshot().filter(item => item.source === 'repository').length,
                 remainingSteps: Math.max(0, input.maxSteps - state.steps),
-                openQuestions,
+                plannedQuestions,
             }).content;
             return {
                 ok: outcome.ok,
@@ -350,7 +361,7 @@ function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRu
     if (!memory) { return []; }
     const cachedEvidence = new Map<string, RepositoryEvidenceItem>();
     const searchSchema = z.object({ query: z.string().trim().min(1) }).strict();
-    const readSchema = z.object({ memoryIds: z.array(z.string().regex(/^M\d+$/)).min(1) }).strict();
+    const readSchema = z.object({ memoryIds: z.array(z.string().regex(/^M[0-9]+$/)).min(1) }).strict();
     const guarded = (name: string, execute: AgentToolDefinition<ChangeAnalysisAgentInput>['execute']): AgentToolDefinition<ChangeAnalysisAgentInput>['execute'] => async (context, args) => {
         const started = performance.now();
         try { return await execute(context, args); }
@@ -428,15 +439,15 @@ function createMemoryDefinitions(input: ChangeAnalysisAgentInput, state: AgentRu
 
 function toolDescription(name: InvestigationToolName): string {
     const descriptions: Record<InvestigationToolName, string> = {
-        findSymbolDefinition: 'Locate and read up to 50 likely definitions of a changed symbol.',
-        findSymbolReferences: 'Find up to 50 repository references to a changed symbol.',
-        findCallers: 'Find up to 50 call sites of a changed function or method.',
-        findCallees: 'Inspect up to 50 direct calls made by a changed function or method.',
-        findImplementations: 'Find up to 50 implementations or consumers of a changed interface or type.',
-        findTypeDefinition: 'Locate and read up to 50 matching type definitions.',
-        searchCode: 'Search repository file names or contents for up to 50 focused results.',
-        readFileContent: 'Read at most 400 lines from one repository file.',
-        listDirectory: 'List one repository directory at depth one.',
+        findSymbolDefinition: 'Locate and read likely definitions of one exact symbol. Use first when a planned question depends on what the changed symbol does or declares; regex-based candidates still require judgment.',
+        findSymbolReferences: 'Find repository references to one exact symbol. Use to identify consumers or integration points, not to prove an exhaustive call graph.',
+        findCallers: 'Find likely call sites of one exact function or method. Use when caller context determines the changed behavior or scope.',
+        findCallees: 'Inspect likely direct calls made by one exact function or method. Use when downstream effects are not visible in the changed body.',
+        findImplementations: 'Find likely implementations or consumers of one exact interface or type. Use when a contract change may affect multiple implementations.',
+        findTypeDefinition: 'Locate and read matching type definitions. Use when field, variant, or compatibility constraints matter to the change.',
+        searchCode: 'Search file names or contents for one focused exact token or narrow regex. searchType "name" is navigation only and publishes no E*; use content search or read source context when evidence is required.',
+        readFileContent: 'Read a bounded region from one known repository file. Use for surrounding control flow, declarations, tests, or config consumers near a known location.',
+        listDirectory: 'List one repository directory at depth one for navigation only. This tool publishes no E* evidence; do not use it when an exact path or symbol is already known.',
     };
     return descriptions[name];
 }
@@ -508,6 +519,8 @@ function normalizeCompoundTerminal(
         notes: cleanText(raw.selectionNotes),
     };
     const hasRepositoryEvidence = state.ledger.snapshot().some(item => item.source === 'repository');
+    const endedWithoutRepositoryEvidence = !hasRepositoryEvidence
+        && state.issues.some(issue => issue.type === 'evidence_precondition_degraded');
     return {
         repositoryEvidence,
         semanticAnalysis,
@@ -515,7 +528,9 @@ function normalizeCompoundTerminal(
         analysisStatus: degradations.length
             ? 'degraded'
             : hasRepositoryEvidence ? 'complete' : 'complete_diff_only',
-        issues,
+        issues: endedWithoutRepositoryEvidence
+            ? [...issues, 'Repository investigation ended without E* evidence; downstream generation continues from diff evidence only.']
+            : issues,
         claims: tracedClaims,
     };
 }

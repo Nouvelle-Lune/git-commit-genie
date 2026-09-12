@@ -124,4 +124,56 @@ describe('structured completion termination policy', () => {
         assert.deepEqual(result.data, { value: 'ok' });
         assert.equal(calls, 2);
     });
+
+    it('retries schema mismatches with field-level path, expected, and actual feedback', async () => {
+        // A rejected structured object must produce actionable field diagnostics instead of a serialized ZodError dump.
+        const requests: string[] = [];
+        let calls = 0;
+        const contract = z.object({
+            kind: z.enum(['valid', 'other']),
+            items: z.array(z.string()).max(1),
+        });
+
+        const result = await runStructuredCompletion({
+            run: async messages => {
+                requests.push(messages.map(message => message.content).join('\n'));
+                calls += 1;
+                return calls === 1
+                    ? response({ structured: { kind: 'unsupported', items: ['one', 'two'] } })
+                    : response({ structured: { kind: 'valid', items: ['one'] } });
+            },
+            schema: contract,
+            initialMessages: [{ role: 'user', content: 'return JSON' }],
+            maxRetries: 1,
+            label: 'planner',
+        });
+
+        assert.deepEqual(result.data, { kind: 'valid', items: ['one'] });
+        assert.equal(requests.length, 2);
+        assert.match(requests[1], /kind/);
+        assert.match(requests[1], /unsupported/);
+        assert.match(requests[1], /items/);
+        assert.match(requests[1], /contains 2 items but at most 1 are allowed\. Narrow or split the containing item while preserving every required coverage or evidence reference/);
+        assert.doesNotMatch(requests[1], /Keep only the 1 most directly supporting entries/);
+        assert.doesNotMatch(requests[1], /ZodError|invalid_value|too_big/);
+    });
+
+    it('reports field-level diagnostics in the final schema error after retries are exhausted', async () => {
+        // The final failure must retain exact field feedback while avoiding the raw provider-specific validation dump.
+        const contract = z.object({ items: z.array(z.string()).max(1) });
+
+        await assert.rejects(
+            runStructuredCompletion({
+                run: async () => response({ structured: { items: ['x', 'y'] } }),
+                schema: contract,
+                initialMessages: [{ role: 'user', content: 'return JSON' }],
+                maxRetries: 1,
+                label: 'terminal',
+            }),
+            (error: unknown) => error instanceof Error
+                && /items/.test(error.message)
+                && /contains 2 items but at most 1 are allowed\. Narrow or split the containing item while preserving every required coverage or evidence reference/.test(error.message)
+                && !/ZodError|too_small/.test(error.message),
+        );
+    });
 });

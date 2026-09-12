@@ -256,10 +256,6 @@ describe('AgentRuntime contracts', () => {
                     unresolvedQuestions: [],
                     stopReason: 'enough evidence',
                 },
-                changeTargets: [],
-                dependencyContext: {
-                    callers: [], callees: [], stateDependencies: [], relatedConfigs: [], relatedTypes: [],
-                },
                 claims: [
                     {
                         category: 'observed_change',
@@ -275,8 +271,6 @@ describe('AgentRuntime contracts', () => {
                     },
                 ],
                 behaviorAnalysis: { before: null, after: null, observableEffect: null },
-                capabilityContext: { technicalCapability: null, productCapability: null },
-                intentAnalysis: { primaryIntent: null, supportedBy: [], confidence: 'low' },
                 changeClassification: {
                     existingBehaviorCorrected: false,
                     newCapabilityAdded: false,
@@ -848,6 +842,98 @@ describe('AgentRuntime contracts', () => {
         assert.equal(result.metrics.toolSteps, 0);
     });
 
+    it('degrades to finalization after evidence precondition repair turns are exhausted', async () => {
+        // A degrade-policy profile must close tools after bounded finish retries and complete from the available evidence.
+        const requests: AIRunRequest[] = [];
+        const events: string[] = [];
+        const execution = createExecution([
+            finishInvestigationResponse('missing evidence'),
+            finishInvestigationResponse('still missing'),
+            response({ structured: { value: 'diff-only' }, text: '{"value":"diff-only"}' }),
+        ], requests, []);
+        const profile: AgentProfile<null, { value: string }, string> = {
+            id: 'terminal-degrade-test',
+            promptVersion: '1',
+            toolsetVersion: '1',
+            requestType: 'investigation',
+            finalName: 'terminalDegradeTestFinal',
+            finalSchema: z.object({ value: z.string() }),
+            contextPolicy: {
+                maxSteps: 1,
+                maxEpochs: 0,
+                maxObservationChars: 100,
+                buildCheckpoint: () => ({ role: 'user', content: 'checkpoint' }),
+            },
+            buildPrompt: () => ({ stable: [], opening: [] }),
+            grantTools: () => [],
+            buildToolDefinitions: () => [],
+            finalizationPreconditionPolicy: 'degrade',
+            ...profileRequestHooks({
+                validateFinalizationPrecondition: () => 'Repository evidence is required.',
+            }),
+            normalizeFinal: raw => raw.value,
+            preservePartialResult: () => 'partial',
+        };
+
+        const result = await new AgentRuntime({
+            onEvent: event => {
+                if (event.type === 'retry' || event.type === 'stageChanged') {
+                    events.push(event.type === 'retry'
+                        ? `retry:${event.category}:${event.attempt}`
+                        : `stage:${event.trigger}`);
+                }
+            },
+        }).run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'diff-only');
+        assert.deepEqual(events, ['retry:evidencePrecondition:1', 'stage:preconditionUnmet']);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'evidence_precondition_degraded').length, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'evidence_precondition').length, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'terminal_failure').length, 0);
+        assert.equal(result.metrics.toolSteps, 0);
+        assert.equal(requests.length, 3);
+        assert.match(requests[1].toolResults?.[0].output ?? '', /still open/);
+        assert.match(requests[2].toolResults?.[0].output ?? '', /diff-only/);
+        assert.match(requests[2].toolResults?.[0].output ?? '', /never present a diff-only fact as a repository fact/i);
+    });
+
+    it('records a distinct degradation when the normal lookup budget ends without E* evidence', async () => {
+        // A normal budget boundary must finalize without a terminal retry and classify missing evidence as an explicit degradation.
+        const requests: AIRunRequest[] = [];
+        const events: string[] = [];
+        const execution = createExecution([
+            inspectToolResponse('budgeted-lookup', 'check the changed symbol'),
+            response({ structured: { value: 'budget-done' }, text: '{"value":"budget-done"}' }),
+        ], requests, []);
+        const profile = {
+            ...buildInspectProfile(1, () => ({ output: 'navigation-only result' })),
+            finalizationPreconditionPolicy: 'degrade' as const,
+            validateFinalizationPrecondition: () => 'Repository evidence is required.',
+        };
+
+        const result = await new AgentRuntime({
+            onEvent: event => {
+                if (event.type === 'retry' || event.type === 'stageChanged') {
+                    events.push(event.type === 'retry'
+                        ? `retry:${event.category}`
+                        : `stage:${event.trigger}`);
+                }
+            },
+        }).run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'budget-done');
+        assert.deepEqual(events, ['stage:budgetExhausted']);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'evidence_precondition_degraded').length, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'evidence_precondition').length, 0);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'terminal_failure').length, 0);
+        assert.equal(result.state.steps, 1);
+        assert.equal(result.metrics.toolSteps, 1);
+        assert.equal(requests.length, 2);
+        assert.equal(requests[1].toolChoice, 'none');
+    });
+
     it('soft-rejects over-budget tool calls then completes on forced terminal', async () => {
         // Verify soft-rejects over-budget tool calls then completes on forced terminal.
         const requests: AIRunRequest[] = [];
@@ -891,14 +977,16 @@ describe('AgentRuntime contracts', () => {
 
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'forced-done');
-        assert.equal(result.metrics.issues.filter(issue => issue.type === 'budget_exhausted').length, 1);
+        assert.equal(result.state.steps, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'budget_exhausted').length, 0);
         assert.equal(requests.length, 2);
         assert.equal(requests[0].toolChoice, 'auto');
         assert.equal(requests[1].toolChoice, 'none');
         assert.ok(requests[1].responseFormat);
         assert.equal(requests[1].toolResults?.length, 2);
         assert.equal(requests[1].toolResults?.[1].isError, true);
-        assert.match(requests[1].toolResults?.[1].output ?? '', /budget_exhausted/);
+        assert.match(requests[1].toolResults?.[1].output ?? '', /<investigation_closed>/);
+        assert.match(requests[1].toolResults?.[1].output ?? '', /not executed/);
     });
 
     it('executes the first tool in a batch then soft-rejects the rest before forced terminal', async () => {
@@ -949,7 +1037,8 @@ describe('AgentRuntime contracts', () => {
         assert.equal(executeCount, 1);
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'after-batch');
-        assert.equal(result.metrics.issues.filter(issue => issue.type === 'budget_exhausted').length, 1);
+        assert.equal(result.state.steps, 1);
+        assert.equal(result.metrics.issues.filter(issue => issue.type === 'budget_exhausted').length, 0);
         assert.equal(requests.length, 2);
         assert.equal(requests[0].toolChoice, 'auto');
         assert.equal(requests[1].toolChoice, 'none');
@@ -957,7 +1046,8 @@ describe('AgentRuntime contracts', () => {
         assert.equal(requests[1].toolResults?.[0].output, 'executed-once');
         assert.notEqual(requests[1].toolResults?.[0].isError, true);
         assert.equal(requests[1].toolResults?.[1].isError, true);
-        assert.match(requests[1].toolResults?.[1].output ?? '', /budget_exhausted/);
+        assert.match(requests[1].toolResults?.[1].output ?? '', /<investigation_closed>/);
+        assert.match(requests[1].toolResults?.[1].output ?? '', /not executed/);
     });
 
     it('returns partial when forced finalize turn still requests tools', async () => {

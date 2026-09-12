@@ -158,7 +158,7 @@
           "order": 5.3,
           "type": "integer",
           "default": 12,
-          "minimum": 1,
+          "minimum": 3,
           "maximum": 40,
           "markdownDescription": "%config.chain.investigation.maxSteps.desc%"
         },

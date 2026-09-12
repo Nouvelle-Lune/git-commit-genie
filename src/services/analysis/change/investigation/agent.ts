@@ -41,9 +41,10 @@ function dedupeStrings(values: unknown): string[] {
 export async function planInvestigation(
     evidence: DraftEvidence[],
     execution: LLMExecution,
+    maxToolCalls: number,
     navigation?: import('../../../memory/types').MemoryNavigation[],
 ): Promise<InvestigationPlan> {
-    const messages = buildInvestigationPlanMessages({ evidence, navigation });
+    const messages = buildInvestigationPlanMessages({ evidence, maxToolCalls, navigation });
     const session = execution.createSession(messages);
     let requestMessages = messages;
 
@@ -60,7 +61,7 @@ export async function planInvestigation(
         }
         requestMessages = [{
             role: 'user',
-            content: buildPlanCorrectionMessage(evidence, parsed, invalid),
+            content: buildPlanCorrectionMessage(evidence, parsed, invalid, maxToolCalls),
         }];
     }
 
@@ -74,13 +75,13 @@ function normalizeInvestigationPlan(parsed: InvestigationPlan): InvestigationPla
             id: target.id.trim(),
             target: target.target.trim(),
             file: target.file?.trim() || null,
-            diffEvidenceRefs: Array.from(new Set(target.diffEvidenceRefs.map(ref => ref.trim()))),
+            diffEvidenceRefs: target.diffEvidenceRefs.map(ref => ref.trim()),
             questions: dedupeStrings(target.questions),
         })),
         coverage: parsed.coverage.map(entry => ({
             diffEvidenceRef: entry.diffEvidenceRef.trim(),
             decision: entry.decision,
-            targetIds: Array.from(new Set(entry.targetIds.map(id => id.trim()))),
+            targetIds: entry.targetIds.map(id => id.trim()),
         })),
         notes: parsed.notes?.trim() || null,
     };
@@ -94,18 +95,27 @@ function validateInvestigationPlan(
     const errors: string[] = [];
     const targetIds = new Set<string>();
     for (const target of parsed.targets) {
-        if (!target.id.trim() || targetIds.has(target.id.trim())) {
+        const targetId = target.id.trim();
+        if (!targetId || targetIds.has(targetId)) {
             errors.push(`target id '${target.id}' is empty or duplicated`);
         }
-        targetIds.add(target.id.trim());
+        targetIds.add(targetId);
         if (!target.target.trim()) { errors.push(`target '${target.id}' is empty`); }
         if (!target.diffEvidenceRefs.length) { errors.push(`target '${target.id}' has no diff evidence`); }
+        const seenTargetRefs = new Set<string>();
         for (const ref of target.diffEvidenceRefs) {
-            if (!allowed.has(ref)) { errors.push(`target '${target.id}' references unknown diff evidence '${ref}'`); }
+            const normalizedRef = ref.trim();
+            if (seenTargetRefs.has(normalizedRef)) {
+                errors.push(`target '${target.id}' repeats diff evidence '${normalizedRef}'`);
+            }
+            seenTargetRefs.add(normalizedRef);
+            if (!allowed.has(normalizedRef)) { errors.push(`target '${target.id}' references unknown diff evidence '${normalizedRef}'`); }
         }
     }
     const seenCoverage = new Set<string>();
+    const missingRefsByTarget = new Map<string, string[]>();
     for (const entry of parsed.coverage) {
+        const normalizedTargetIds = entry.targetIds.map(id => id.trim());
         if (!allowed.has(entry.diffEvidenceRef)) {
             errors.push(`coverage references unknown diff evidence '${entry.diffEvidenceRef}'`);
         }
@@ -119,6 +129,9 @@ function validateInvestigationPlan(
         if (entry.decision === 'investigate' && !entry.targetIds.length) {
             errors.push(`investigated evidence '${entry.diffEvidenceRef}' has no target`);
         }
+        if (new Set(normalizedTargetIds).size !== normalizedTargetIds.length) {
+            errors.push(`coverage for diff evidence '${entry.diffEvidenceRef}' repeats a target id`);
+        }
         if (entry.decision === 'diff_sufficient' && entry.targetIds.length) {
             errors.push(`diff-sufficient evidence '${entry.diffEvidenceRef}' must not have investigation targets`);
         }
@@ -126,17 +139,30 @@ function validateInvestigationPlan(
             for (const targetId of entry.targetIds) {
                 const target = parsed.targets.find(candidate => candidate.id.trim() === targetId.trim());
                 if (target && !target.diffEvidenceRefs.includes(entry.diffEvidenceRef)) {
-                    errors.push(`target '${targetId}' does not cover investigated evidence '${entry.diffEvidenceRef}'`);
+                    const missing = missingRefsByTarget.get(targetId) ?? [];
+                    missing.push(entry.diffEvidenceRef);
+                    missingRefsByTarget.set(targetId, missing);
                 }
             }
         }
+    }
+    for (const [targetId, missingRefs] of missingRefsByTarget) {
+        errors.push(`target '${targetId}' diffEvidenceRefs is missing investigated evidence ids ${JSON.stringify(missingRefs)}`);
     }
     for (const ref of allowed) {
         if (!seenCoverage.has(ref)) { errors.push(`diff evidence '${ref}' is missing from coverage`); }
     }
     for (const target of parsed.targets) {
-        if (!parsed.coverage.some(entry => entry.decision === 'investigate' && entry.targetIds.includes(target.id))) {
-            errors.push(`target '${target.id}' is not attached to an investigated diff evidence item`);
+        const targetId = target.id.trim();
+        const unboundRefs = target.diffEvidenceRefs
+            .map(ref => ref.trim())
+            .filter(ref => !parsed.coverage.some(entry => (
+                entry.diffEvidenceRef.trim() === ref
+                && entry.decision === 'investigate'
+                && entry.targetIds.some(id => id.trim() === targetId)
+            )));
+        if (unboundRefs.length) {
+            errors.push(`target '${targetId}' diff evidence ids ${JSON.stringify(unboundRefs)} are not bound to investigate coverage rows for that target`);
         }
     }
     return errors;
@@ -146,15 +172,21 @@ function buildPlanCorrectionMessage(
     evidence: DraftEvidence[],
     parsed: InvestigationPlan,
     errors: string[],
+    maxToolCalls: number,
 ): string {
     const allowed = evidence.flatMap(item => item.kind === 'raw' ? item.evidenceIds : item.coveredHunkIds);
     return [
         '<plan_rejected>',
         ...errors.map(error => `- ${error}`),
         `Allowed diff evidence ids: ${JSON.stringify(allowed)}`,
+        `Repository tool budget: ${maxToolCalls}`,
         `Previous plan: ${JSON.stringify(parsed)}`,
         'Return the complete corrected plan. Every allowed D* id must appear once in coverage.',
+        'If coverage repeats a D* id, keep exactly one row for that id. Merge and deduplicate its targetIds when the rows agree on investigate; do not silently change a conflicting decision.',
         'Do not remove a hunk from coverage. Use diff_sufficient when no repository lookup is necessary.',
+        'For every investigate row, each named target must contain that row\'s D* id in diffEvidenceRefs.',
+        'For every D* id in a target, that D* coverage row must use decision investigate and name that target. Remove a ref from the target when its coverage row is diff_sufficient.',
+        'If adding the missing ids would exceed 8 diffEvidenceRefs on one target, split it into additional targets and update the affected coverage targetIds in the same response.',
         '</plan_rejected>',
     ].join('\n');
 }

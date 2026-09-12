@@ -75,6 +75,9 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         const read = definitions.find(definition => definition.name === 'readMemorySources');
         assert.ok(search);
         assert.ok(read);
+        const memoryIdSchema = (read!.parameters.properties as Record<string, any>).memoryIds;
+        assert.equal(memoryIdSchema.items.pattern, '^M[0-9]+$');
+        assert.doesNotMatch(JSON.stringify(read!.parameters), /\\\\d/);
 
         const context = {
             input,
@@ -432,6 +435,7 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
     });
 
     it('requires repository evidence before accepting a terminal for a non-empty plan', () => {
+        // A non-empty investigation plan must expose its missing E* precondition until repository evidence is recorded.
         const input = makeInput();
         input.plan = {
             targets: [{
@@ -448,6 +452,7 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         const profile = createChangeAnalysisProfile(input);
         const state = makeState();
 
+        assert.equal(profile.finalizationPreconditionPolicy, 'degrade');
         assert.match(profile.validateFinalizationPrecondition?.(state) ?? '', /no E\* repository evidence/);
 
         state.ledger.recordRepositoryEvidence({
@@ -465,6 +470,40 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         const profile = createChangeAnalysisProfile(makeInput());
 
         assert.equal(profile.validateFinalizationPrecondition?.(makeState()), null);
+    });
+
+    it('normalizes an evidence-precondition degradation as complete_diff_only without repository facts', () => {
+        // A non-empty plan that exhausted evidence repair must preserve diff claims and expose a diff-only status to the draft stage.
+        const input = makeInput();
+        input.plan = {
+            targets: [{
+                id: 'T1',
+                target: 'parse',
+                kind: 'symbol',
+                file: 'src/parser.ts',
+                diffEvidenceRefs: ['D1'],
+                questions: ['Who calls parse?'],
+            }],
+            coverage: [{ diffEvidenceRef: 'D1', decision: 'investigate', targetIds: ['T1'] }],
+            notes: null,
+        };
+        const profile = createChangeAnalysisProfile(input);
+        const state = makeState();
+        state.issues.push({
+            type: 'evidence_precondition_degraded',
+            message: 'The plan has no E* evidence.',
+            step: 0,
+        });
+
+        const output = profile.normalizeFinal(minimalRaw(), state);
+
+        assert.equal(output.analysisStatus, 'complete_diff_only');
+        assert.equal(output.semanticAnalysis.repositoryFacts.length, 0);
+        assert.deepEqual(output.repositoryEvidence.items, []);
+        assert.ok(output.issues.some(issue => issue.includes('downstream generation continues from diff evidence only')));
+        const finalization = profile.buildFinalizationRequest(input, state, null)[0].content;
+        assert.match(finalization, /Produce an explicit diff-only analysis/i);
+        assert.match(finalization, /never present a diff-only fact as a repository fact/i);
     });
 
     it('propagates an exhausted terminal failure instead of manufacturing degraded facts', () => {
