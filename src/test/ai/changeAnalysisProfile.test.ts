@@ -1,10 +1,19 @@
 import { strict as assert } from 'assert';
+import { spawn } from 'child_process';
+import * as fs from 'fs/promises';
+import * as os from 'os';
+import * as path from 'path';
 import { describe, it } from 'mocha';
 import { AgentRunState, EvidenceLedger } from '../../agent';
 import {
     ChangeAnalysisAgentInput,
     createChangeAnalysisProfile,
 } from '../../services/analysis/change/investigation/changeAnalysisProfile';
+import {
+    InvestigationLookup,
+    InvestigationPlan,
+    RepositoryEvidenceItem,
+} from '../../services/analysis/change/types';
 import { RepositorySnapshotReader } from '../../services/git/repositorySnapshot';
 import {
     AGENT_TERMINAL_LIMITS,
@@ -442,11 +451,11 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
                 id: 'T1',
                 target: 'parse',
                 kind: 'symbol',
+                lookup: 'callers',
                 file: 'src/parser.ts',
-                diffEvidenceRefs: ['D1'],
-                questions: ['Who calls parse?'],
+                question: 'Who calls parse?',
             }],
-            coverage: [{ diffEvidenceRef: 'D1', decision: 'investigate', targetIds: ['T1'] }],
+            coverage: { D1: { decision: 'investigate', targetIds: ['T1'] } },
             notes: null,
         };
         const profile = createChangeAnalysisProfile(input);
@@ -454,6 +463,16 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
 
         assert.equal(profile.finalizationPreconditionPolicy, 'degrade');
         assert.match(profile.validateFinalizationPrecondition?.(state) ?? '', /no E\* repository evidence/);
+    });
+
+    it('refuses finalization when evidence arrived without any tool resolving the declared lookup', () => {
+        // The ledger records evidence, not its producer, so E* written outside the tool definitions (memory
+        // expansion, or a caller recording evidence directly) satisfies the first precondition but not the second:
+        // the plan declared a lookup and no locating tool ever ran.
+        const input = makeInput();
+        input.plan = investigatePlan('callers');
+        const profile = createChangeAnalysisProfile(input);
+        const state = makeState();
 
         state.ledger.recordRepositoryEvidence({
             id: 'E1',
@@ -462,7 +481,144 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
             ref: 'src/client.ts:4',
             excerpt: 'parse(input)',
         });
-        assert.equal(profile.validateFinalizationPrecondition?.(state), null);
+
+        assert.match(
+            profile.validateFinalizationPrecondition?.(state) ?? '',
+            /^No locating lookup has published E\* evidence yet\./,
+        );
+        assert.match(profile.validateFinalizationPrecondition?.(state) ?? '', /Call at least one of findSymbolDefinition/);
+    });
+
+    it('keeps finalization blocked while only a read published evidence and unblocks it after a locating lookup', async () => {
+        // readFileContent publishes evidence but resolves no relation the diff does not already show, so on its own
+        // it cannot satisfy a plan whose targets declare a locating lookup; the same run stops being blocked once a
+        // content search publishes.
+        await withTempRepo(async root => {
+            await fs.mkdir(path.join(root, 'src'), { recursive: true });
+            await fs.writeFile(path.join(root, 'src', 'parser.ts'), 'export function parse(input) {\n  return input;\n}\n');
+            await fs.writeFile(path.join(root, 'src', 'client.ts'), 'import { parse } from "./parser";\nparse("x");\n');
+            await commitAll(root, 'files');
+
+            const snapshot = await RepositorySnapshotReader.capture(root, 'git');
+            // The snapshot resolves the repository to its real path, and the tools contain every argument inside
+            // it, so the grant has to carry that same root rather than the symlinked temporary directory.
+            const input = { ...makeInput(), snapshot, repositoryPath: snapshot.root, plan: investigatePlan('callers') };
+            const state = makeState();
+            const profile = createChangeAnalysisProfile(input);
+            const definitions = profile.buildToolDefinitions(input, state);
+            const context = toolContext(snapshot.root, state);
+
+            const read = definitions.find(definition => definition.name === 'readFileContent');
+            assert.ok(read);
+            const readOutcome = await read.execute(context, { filePath: 'src/parser.ts', startLine: 1, maxLines: 3 });
+            assert.equal(readOutcome.ok, true, readOutcome.output);
+            assert.ok((readOutcome.evidenceCount ?? 0) > 0, 'The read must publish evidence for this precondition to be the only one left.');
+            assert.match(
+                profile.validateFinalizationPrecondition?.(state) ?? '',
+                /^No locating lookup has published E\* evidence yet\./,
+            );
+
+            const search = definitions.find(definition => definition.name === 'searchCode');
+            assert.ok(search);
+            const searchOutcome = await search.execute(context, { query: 'parse', searchType: 'content', maxResults: 5 });
+            assert.equal(searchOutcome.ok, true);
+            assert.ok((searchOutcome.evidenceCount ?? 0) > 0, 'The content search must publish evidence.');
+            assert.equal(profile.validateFinalizationPrecondition?.(state), null);
+            assert.equal(state.steps, 0, 'The precondition reads the ledger and the tool set, never the step counter.');
+        });
+    });
+
+    it('renders each planned question with the tool its lookup resolves to in the checkpoint, the tool result, and the finalization request', async () => {
+        // The plan JSON appears only in the opening prompt, so the planned-question checklist is the channel the
+        // declared verb survives compaction through: every surface that repeats a question must name the tool.
+        await withTempRepo(async root => {
+            await fs.mkdir(path.join(root, 'src'), { recursive: true });
+            await fs.writeFile(path.join(root, 'src', 'parser.ts'), 'export function parse(input) {\n  return input;\n}\n');
+            await commitAll(root, 'files');
+
+            // One question per target, so a multi-entry checklist needs two targets rather than two questions.
+            const checklist = 'parse (findCallers): Who calls parse? | parse (readFileContent): What does parse return?';
+            const snapshot = await RepositorySnapshotReader.capture(root, 'git');
+            const input = {
+                ...makeInput(),
+                snapshot,
+                repositoryPath: snapshot.root,
+                plan: {
+                    targets: [{
+                        id: 'T1',
+                        target: 'parse',
+                        kind: 'symbol' as const,
+                        lookup: 'callers' as const,
+                        file: 'src/parser.ts',
+                        question: 'Who calls parse?',
+                    }, {
+                        id: 'T2',
+                        target: 'parse',
+                        kind: 'symbol' as const,
+                        lookup: 'read' as const,
+                        file: 'src/parser.ts',
+                        question: 'What does parse return?',
+                    }],
+                    coverage: { D1: { decision: 'investigate' as const, targetIds: ['T1', 'T2'] } },
+                    notes: null,
+                },
+            };
+            const profile = createChangeAnalysisProfile(input);
+            const state = makeState();
+
+            const checkpoint = profile.contextPolicy.buildCheckpoint(state).content;
+            assert.ok(checkpoint.includes(`Planned-question checklist (not automatically marked complete): ${checklist}`), checkpoint);
+
+            const read = profile.buildToolDefinitions(input, state).find(definition => definition.name === 'readFileContent');
+            assert.ok(read);
+            const outcome = await read.execute(toolContext(snapshot.root, state), { filePath: 'src/parser.ts', startLine: 1, maxLines: 3 });
+            assert.ok(outcome.output.includes(`Planned-question checklist: ${checklist}`), outcome.output);
+
+            const finalization = profile.buildFinalizationRequest(input, state, null)[0].content;
+            assert.ok(finalization.includes(`Planned questions: ${checklist}`), finalization);
+        });
+    });
+
+    it('embeds the repository map in the opening prompt and the checkpoint only when one is supplied', () => {
+        // The map is an optional caller input; when present it orients the agent in the run context and survives
+        // compaction, and when absent no empty <repository_map> block is rendered.
+        const repositoryMap = '12 files, 2 directories (.ts 10, .md 2)\nsrc  10 files   [1 changed]';
+        const withMap = createChangeAnalysisProfile({ ...makeInput(), repositoryMap });
+        const withoutMap = createChangeAnalysisProfile(makeInput());
+        const state = makeState();
+
+        const opening = withMap.buildPrompt({ ...makeInput(), repositoryMap }).opening.map(message => message.content).join('\n');
+        assert.match(opening, /<repository_map>\n12 files, 2 directories \(\.ts 10, \.md 2\)\nsrc  10 files {3}\[1 changed\]\nThis map locates structure outside the diff\. It is an inventory, not evidence: nothing in it has been read, and it never answers a question by itself\.\n<\/repository_map>/);
+        assert.ok(
+            opening.indexOf('<repository_map>') < opening.indexOf('Raw diff evidence:'),
+            'The map must precede the diff so a repository-wide lookup stays choosable.',
+        );
+        assert.ok(withMap.contextPolicy.buildCheckpoint(state).content.includes(`Repository map: ${repositoryMap}`));
+        assert.doesNotMatch(withoutMap.buildPrompt(makeInput()).opening.map(message => message.content).join('\n'), /<repository_map>/);
+        assert.doesNotMatch(withoutMap.contextPolicy.buildCheckpoint(state).content, /Repository map:/);
+    });
+
+    it('embeds the keyed coverage plan in the investigation prompt without the removed target field', () => {
+        // The investigation prompt hands the plan to the tool-using agent verbatim, so it must show coverage as a
+        // D*-keyed object and must not carry the retired diffEvidenceRefs copy of the hunk relation.
+        const input = makeInput();
+        input.plan = investigatePlan('callers');
+        const profile = createChangeAnalysisProfile(input);
+        const opening = profile.buildPrompt(input).opening.map(message => message.content).join('\n');
+        const planLine = opening.split('\n').find(line => line.startsWith('Investigation plan: '));
+
+        assert.ok(planLine, 'The investigation prompt must embed the plan.');
+        const embedded = JSON.parse(planLine.slice('Investigation plan: '.length)) as {
+            targets: Array<Record<string, unknown>>;
+            coverage: Record<string, unknown>;
+        };
+        assert.deepEqual(embedded.coverage, { D1: { decision: 'investigate', targetIds: ['T1'] } });
+        assert.deepEqual(
+            Object.keys(embedded.targets[0]),
+            ['id', 'target', 'kind', 'lookup', 'file', 'question'],
+        );
+        assert.equal(embedded.targets[0].lookup, 'callers');
+        assert.doesNotMatch(opening, /diffEvidenceRefs/);
     });
 
     it('allows finalization without repository evidence when the plan is empty', () => {
@@ -475,18 +631,7 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
     it('normalizes an evidence-precondition degradation as complete_diff_only without repository facts', () => {
         // A non-empty plan that exhausted evidence repair must preserve diff claims and expose a diff-only status to the draft stage.
         const input = makeInput();
-        input.plan = {
-            targets: [{
-                id: 'T1',
-                target: 'parse',
-                kind: 'symbol',
-                file: 'src/parser.ts',
-                diffEvidenceRefs: ['D1'],
-                questions: ['Who calls parse?'],
-            }],
-            coverage: [{ diffEvidenceRef: 'D1', decision: 'investigate', targetIds: ['T1'] }],
-            notes: null,
-        };
+        input.plan = investigatePlan('callers');
         const profile = createChangeAnalysisProfile(input);
         const state = makeState();
         state.issues.push({
@@ -649,6 +794,69 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
     });
 });
 
+/** A non-empty plan whose single target investigates D1 through one declared lookup verb. */
+function investigatePlan(lookup: InvestigationLookup): InvestigationPlan {
+    return {
+        targets: [{
+            id: 'T1',
+            target: 'parse',
+            kind: 'symbol',
+            lookup,
+            file: 'src/parser.ts',
+            question: 'Who calls parse?',
+        }],
+        coverage: { D1: { decision: 'investigate', targetIds: ['T1'] } },
+        notes: null,
+    };
+}
+
+/**
+ * The tool context the runtime hands a definition: the grant owns the repository
+ * root, and allocation goes through the ledger so a published item is both
+ * allocated and recorded.
+ */
+function toolContext(root: string, state: AgentRunState): any {
+    return {
+        input: undefined,
+        grant: { name: 'test', allowedRoot: root, excludePatterns: [], allocateEvidence: true },
+        ledger: state.ledger,
+        state,
+        allocateEvidence: (evidence: Omit<RepositoryEvidenceItem, 'id'>) => state.ledger.allocateRepositoryEvidence(evidence),
+    };
+}
+
+async function withTempRepo<T>(action: (root: string) => Promise<T>): Promise<T> {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'genie-change-analysis-test-'));
+    try {
+        await runGit(root, ['init', '--quiet']);
+        await runGit(root, ['config', 'user.name', 'Change Analysis Test']);
+        await runGit(root, ['config', 'user.email', 'change-analysis-test@example.invalid']);
+        return await action(root);
+    } finally {
+        await fs.rm(root, { recursive: true, force: true });
+    }
+}
+
+async function commitAll(root: string, message: string): Promise<void> {
+    await runGit(root, ['add', '-A']);
+    await runGit(root, ['commit', '--quiet', '-m', message]);
+}
+
+function runGit(root: string, args: string[]): Promise<Buffer> {
+    return new Promise((resolve, reject) => {
+        const child = spawn('git', args, { cwd: root, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+        const stdout: Buffer[] = [];
+        const stderr: Buffer[] = [];
+        child.stdout.on('data', chunk => stdout.push(Buffer.from(chunk)));
+        child.stderr.on('data', chunk => stderr.push(Buffer.from(chunk)));
+        child.on('error', reject);
+        child.on('close', code => code === 0
+            ? resolve(Buffer.concat(stdout))
+            : reject(new Error(`git ${args.join(' ')} failed (${code}): ${Buffer.concat(stderr).toString('utf8')}`)));
+        child.stdin.end();
+    });
+}
+
 function makeInput(): ChangeAnalysisAgentInput {
     return {
         rawDiff: [{
@@ -660,7 +868,7 @@ function makeInput(): ChangeAnalysisAgentInput {
         }],
         plan: {
             targets: [],
-            coverage: [{ diffEvidenceRef: 'D1', decision: 'diff_sufficient', targetIds: [] }],
+            coverage: { D1: { decision: 'diff_sufficient', targetIds: [] } },
             notes: null,
         },
         snapshot: {} as RepositorySnapshotReader,

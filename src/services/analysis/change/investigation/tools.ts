@@ -14,7 +14,26 @@
 import * as path from 'path';
 import { listSnapshotDirectory, readSnapshotFile, searchSnapshot } from '../../../git/snapshotTools';
 import { RepositorySnapshotReader } from '../../../git/repositorySnapshot';
-import { RepositoryEvidenceItem, RepositoryEvidenceKind } from '../types';
+import { InvestigationLookup, RepositoryEvidenceItem, RepositoryEvidenceKind } from '../types';
+
+/**
+ * The repository tool each declared lookup resolves to.
+ *
+ * The planner names a verb; the agent needs a tool. Keeping the mapping next to
+ * the tool list it maps onto means a lookup can never name a capability the
+ * investigation does not have, and it is what lets the tool result and the
+ * compaction checkpoint tell the agent which lookup a target is waiting for.
+ */
+export const INVESTIGATION_LOOKUP_TOOLS: Record<InvestigationLookup, InvestigationToolName> = {
+    definition: 'findSymbolDefinition',
+    references: 'findSymbolReferences',
+    callers: 'findCallers',
+    callees: 'findCallees',
+    implementations: 'findImplementations',
+    type: 'findTypeDefinition',
+    search: 'searchCode',
+    read: 'readFileContent',
+};
 
 export const CHANGE_ANALYSIS_TOOL_NAMES = [
     'findSymbolDefinition',

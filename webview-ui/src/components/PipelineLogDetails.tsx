@@ -170,7 +170,6 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
                     </DetailSection>
                     <DetailMetrics items={[
                         { label: text.metricTargets, value: String(details.targetCount) },
-                        { label: text.detailQuestions, value: String(details.questionCount) },
                     ]} />
                 </>
             );

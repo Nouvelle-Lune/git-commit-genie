@@ -85,7 +85,6 @@ export interface PipelineTextCatalog {
     metricScope: string;
     metricReferences: string;
     metricTargets: string;
-    metricQuestions: string;
     metricSteps: string;
     metricEvidence: string;
     metricFindings: string;
@@ -97,6 +96,8 @@ export interface PipelineTextCatalog {
     metricOmitted: string;
     schemaValidationRetryTitle: string;
     schemaValidationFailedTitle: string;
+    contractViolationRetryTitle: string;
+    contractViolationFailedTitle: string;
     structuredOutputRetryTitle: string;
     structuredOutputFailedTitle: string;
     protocolViolationRetryTitle: string;
@@ -171,7 +172,6 @@ export interface PipelineTextCatalog {
     detailFacts: string;
     detailUncertainties: string;
     detailInvestigationTargets: string;
-    detailQuestions: string;
     detailFindings: string;
     detailOptional: string;
     detailOmitted: string;
@@ -184,6 +184,7 @@ export interface PipelineTextCatalog {
     detailTotalAttempts: string;
     detailMissingStructuredOutput: string;
     detailSchemaMismatch: string;
+    detailContractViolation: string;
     detailProtocolViolation: string;
     detailEvidencePrecondition: string;
     detailOutputExhausted: string;
@@ -288,7 +289,6 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     metricScope: 'Scope',
     metricReferences: 'References',
     metricTargets: 'Targets',
-    metricQuestions: 'Questions',
     metricSteps: 'Steps',
     metricEvidence: 'Evidence',
     metricFindings: 'Findings',
@@ -300,6 +300,8 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     metricOmitted: 'Omitted',
     schemaValidationRetryTitle: 'Schema validation retry: {0}',
     schemaValidationFailedTitle: 'Schema validation failed: {0}',
+    contractViolationRetryTitle: 'Plan contract retry: {0}',
+    contractViolationFailedTitle: 'Plan contract failed: {0}',
     structuredOutputRetryTitle: 'Empty structured output, retrying: {0}',
     structuredOutputFailedTitle: 'Structured output failed: {0}',
     protocolViolationRetryTitle: 'Protocol violation, retrying: {0}',
@@ -374,7 +376,6 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     detailFacts: 'Facts',
     detailUncertainties: 'Uncertainties',
     detailInvestigationTargets: 'Investigation targets',
-    detailQuestions: 'Questions',
     detailFindings: 'Findings',
     detailOptional: 'Optional',
     detailOmitted: 'Omitted',
@@ -387,6 +388,7 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     detailTotalAttempts: 'Total attempts',
     detailMissingStructuredOutput: 'Missing structured output',
     detailSchemaMismatch: 'Schema mismatch',
+    detailContractViolation: 'Plan contract violation',
     detailProtocolViolation: 'Protocol violation',
     detailEvidencePrecondition: 'Repository evidence precondition unmet',
     detailOutputExhausted: 'Output or context budget exhausted',
@@ -479,6 +481,14 @@ export type StructuredFailureKind =
     | 'protocolViolation'
     | 'missingOutput'
     | 'schemaMismatch'
+    /**
+     * The response satisfied its schema but broke a cross-reference rule the
+     * schema cannot express — an investigate entry naming an unknown target, a
+     * diff_sufficient entry carrying targets, an unattached target. Kept apart
+     * from `schemaMismatch` because the two need different repairs, and the
+     * planner retries both kinds under a single attempt budget.
+     */
+    | 'contractViolation'
     | 'evidencePrecondition'
     | 'outputExhausted'
     | 'providerError';
@@ -530,7 +540,7 @@ export type PipelineEventDetails =
     | { kind: 'summarizeProgress'; file: string; summary: string; breaking: boolean; current: number; total: number }
     | { kind: 'summarizeFailed'; target: string; error: string }
     | { kind: 'evidenceRouted'; target: string; rawFiles: number; summarizedFiles: number; initialEstimatedInputTokens: number; estimatedInputTokens: number; maxInputTokens: number; didSummarize: boolean; forced?: boolean }
-    | { kind: 'investigationPlanned'; targets: string[]; targetCount: number; questionCount: number }
+    | { kind: 'investigationPlanned'; targets: string[]; targetCount: number }
     | { kind: 'investigationStart'; maxSteps: number }
     | { kind: 'investigationStep'; current: number; total: number; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number }
     | { kind: 'memoryStep'; current: number; total?: number; trigger?: string; status?: string; tool: string; reason?: string; summary?: string; ok: boolean; evidenceCount?: number; sourceStatuses?: string[]; attempt?: number; totalAttempts?: number; issues?: string[] }
@@ -958,7 +968,6 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
                 kind: 'investigationPlanned',
                 targets: asFullStringList(data.targets, stage, 'targets'),
                 targetCount: requireNumberField(data, stage, 'targetCount'),
-                questionCount: requireNumberField(data, stage, 'questionCount'),
             };
         case 'investigationStart':
             return {
@@ -1124,6 +1133,7 @@ const STRUCTURED_FAILURE_KINDS = new Set<string>([
     'protocolViolation',
     'missingOutput',
     'schemaMismatch',
+    'contractViolation',
     'evidencePrecondition',
     'outputExhausted',
     'providerError',
@@ -1151,6 +1161,8 @@ export function structuredFailureKindLabel(
             return text.detailMissingStructuredOutput;
         case 'schemaMismatch':
             return text.detailSchemaMismatch;
+        case 'contractViolation':
+            return text.detailContractViolation;
         case 'evidencePrecondition':
             return text.detailEvidencePrecondition;
         case 'outputExhausted':
@@ -1183,6 +1195,11 @@ export function structuredValidationTitle(
         case 'schemaMismatch':
             return formatPipelineText(
                 payload.finalFailure ? text.schemaValidationFailedTitle : text.schemaValidationRetryTitle,
+                label,
+            );
+        case 'contractViolation':
+            return formatPipelineText(
+                payload.finalFailure ? text.contractViolationFailedTitle : text.contractViolationRetryTitle,
                 label,
             );
         case 'evidencePrecondition':
@@ -1411,9 +1428,6 @@ function presentPipelineEventCore(
                 description: formatPipelineText(text.investigationPlannedDescription, targets.join(', ')),
                 metrics: [
                     { label: text.metricTargets, value: String(asNumber(data.targetCount) ?? targets.length) },
-                    ...(asNumber(data.questionCount) !== undefined
-                        ? [{ label: text.metricQuestions, value: String(asNumber(data.questionCount)) }]
-                        : []),
                 ],
                 tone: 'success',
                 data,

@@ -13,12 +13,20 @@ export function structuredOutputInstructionBlock(): string {
     ].join('\n');
 }
 
-/** Injects the JSON Schema into the prompt when structured output is unavailable. */
+/**
+ * Injects the JSON Schema into the prompt when structured output is unavailable.
+ *
+ * Minified on purpose: a request-scoped schema can carry one required property
+ * per diff hunk, and pretty-printing it cost roughly 2.4x its size on every
+ * request. The injection is a fallback contract for endpoints that enforce
+ * `response_format` loosely, so it has to stay complete — it just does not have
+ * to be indented.
+ */
 export function structuredOutputPromptInjection(schema: Record<string, unknown>): string {
     return [
         'Return exactly one JSON object matching this JSON Schema. Use the exact camelCase keys.',
         'Do not add keys, wrap the object, use markdown, or replace primitive values with objects.',
-        JSON.stringify(schema, null, 2),
+        JSON.stringify(schema),
     ].join('\n');
 }
 

@@ -7,6 +7,7 @@ import {
     pipelineStageBadge,
     presentPipelineEvent,
     presentStructuredValidationLog,
+    structuredFailureKindLabel,
 } from '../../ui/pipelineDisplay';
 
 describe('pipeline display for parallel analysis events', () => {
@@ -549,6 +550,39 @@ describe('structured validation presentation', () => {
         assert.equal(retry.details.status, 'retrying');
         assert.equal(failed.details.status, 'failed');
         assert.equal(failed.details.error, 'invalid enum');
+    });
+
+    it('maps contract violation retry and final failure combinations', () => {
+        // Verify the planner's local contract rejections get their own retry and failed titles, so a coverage
+        // violation is never presented to the user as a schema mismatch, and that the schema size a payload
+        // carries for diagnostics stays out of the title and the display details.
+        const payload = {
+            stage: 'investigationPlan',
+            failureKind: 'contractViolation' as const,
+            error: "investigated evidence 'D1' references unknown target 'T9'",
+            schemaBytes: 22_019,
+        };
+        const retry = presentStructuredValidationLog(validationLog({
+            ...payload, attempt: 1, totalAttempts: 2, finalFailure: false,
+        }));
+        const failed = presentStructuredValidationLog(validationLog({
+            ...payload, attempt: 2, totalAttempts: 2, finalFailure: true,
+        }));
+
+        assert.ok(retry);
+        assert.ok(failed);
+        assert.equal(structuredFailureKindLabel('contractViolation'), 'Plan contract violation');
+        assert.equal(retry.title, 'Plan contract retry: investigationPlan');
+        assert.equal(failed.title, 'Plan contract failed: investigationPlan');
+        assert.equal(retry.details.failureKind, 'contractViolation');
+        assert.equal(retry.details.status, 'retrying');
+        assert.equal(failed.details.status, 'failed');
+        assert.equal(failed.details.error, payload.error);
+        assert.deepEqual(failed.details.fieldIssues, []);
+        assert.equal('schemaBytes' in retry.details, false);
+        assert.equal('schemaBytes' in failed.details, false);
+        assert.equal(retry.title.includes('22019'), false);
+        assert.equal(failed.title.includes('22019'), false);
     });
 
     it('parses structured validation fieldIssues and renders them for display', () => {

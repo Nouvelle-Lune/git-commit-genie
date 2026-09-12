@@ -76,6 +76,12 @@ export interface StageEventData {
 export interface StageRawData {
   input?: unknown;
   output?: unknown;
+  /**
+   * Payload rejected by a local contract check. Kept in the raw envelope
+   * because a rejected planner plan is thousands of characters and must not
+   * inflate the ordinary log line.
+   */
+  rejectedPlan?: unknown;
   toolCall?: {
     name: string;
     arguments: Record<string, unknown>;

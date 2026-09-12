@@ -32,7 +32,7 @@ import {
     ChainTokenBudget,
 } from './inputTokenBudget';
 import { commitMessageSchema } from './providers/schemas/common';
-import { getRequestTypeLabel, getValidationSchemaFor } from './providers/utils/requestTypeMaps';
+import { getRequestTypeLabel, getValidationSchemaFor, requiresRequestScopedSchema } from './providers/utils/requestTypeMaps';
 import { runStructuredCompletion } from './structuredCompletion';
 import { buildStructuredFieldIssues } from './structuredFieldIssues';
 import {
@@ -194,8 +194,18 @@ export class UnifiedLLMService extends BaseLLMService {
         accountCall: (usage: AIUsage | undefined) => Promise<CostQuote>,
     ): Promise<T> {
         const requestType = runOptions.requestType;
-        const schema = getValidationSchemaFor(requestType);
-        const maxRetries = vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.maxRetries', 2);
+        const schema = runOptions.validationSchema ?? getValidationSchemaFor(requestType);
+        if (!schema && requiresRequestScopedSchema(requestType)) {
+            // Falling through would send an unconstrained JSON request for a
+            // stage whose whole contract lives in the schema.
+            throw new Error(`Request type '${requestType}' requires a request-scoped validation schema.`);
+        }
+        // A caller-owned loop runs each request once and reports rejections
+        // against its own budget; the inner loop would only multiply attempts.
+        const callerRetry = runOptions.callerOwnedRetry;
+        const maxRetries = callerRetry
+            ? 0
+            : vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.maxRetries', 2);
         const temperature = runOptions.temperature
             ?? vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.temperature', 1);
         const maxOutputTokens = runOptions.maxOutputTokens ?? tokenBudget.maxOutputTokens;
@@ -209,6 +219,15 @@ export class UnifiedLLMService extends BaseLLMService {
         const budgetMessages = [...messages];
         let lastCostQuote: CostQuote | undefined;
 
+        // Converted once per request rather than once per attempt: the same
+        // object feeds every `response_format` and is measured for the retry
+        // logs, which is data a future change to the schema's representation
+        // can be compared against instead of estimated.
+        const jsonSchema = schema
+            ? z.toJSONSchema(schema) as Record<string, unknown>
+            : undefined;
+        const schemaBytes = jsonSchema ? JSON.stringify(jsonSchema).length : undefined;
+
         const runMessages = async (runDelta: AIMessage[]) => {
             if (!firstRun) {
                 budgetMessages.push(...runDelta);
@@ -220,9 +239,9 @@ export class UnifiedLLMService extends BaseLLMService {
                 // Thinking stays session-bound; do not override per request or stage.
                 const response = await session.run({
                     messages: runDelta,
-                    responseFormat: schema ? {
+                    responseFormat: jsonSchema ? {
                         name: requestType,
-                        schema: z.toJSONSchema(schema) as Record<string, unknown>,
+                        schema: jsonSchema,
                     } : undefined,
                     temperature,
                     maxOutputTokens,
@@ -255,6 +274,13 @@ export class UnifiedLLMService extends BaseLLMService {
             }
         };
 
+        // Rejections belong to the caller's budget when it owns the loop, so
+        // every report below names the attempt the caller is really on.
+        const reportedAttempt = (attempt: number, attempts: number) => ({
+            attempt: callerRetry?.attempt ?? attempt,
+            totalAttempts: callerRetry?.totalAttempts ?? attempts,
+        });
+
         if (!schema) {
             const response = await runMessages(delta);
             const result = response.structured ?? response.text;
@@ -269,32 +295,35 @@ export class UnifiedLLMService extends BaseLLMService {
                 initialMessages: delta,
                 maxRetries,
                 label: requestType,
+                callerOwnedRetry: callerRetry,
                 callbacks: {
                     onMissingStructured: (attempt, attempts, response) => {
-                        if (attempt < attempts) {
-                            logger.warn(`[Genie][${this.getProviderName()}] Provider returned no structured output for ${requestType} (attempt ${attempt}/${attempts}). Retrying...`);
+                        const reported = reportedAttempt(attempt, attempts);
+                        if (reported.attempt < reported.totalAttempts) {
+                            logger.warn(`[Genie][${this.getProviderName()}] Provider returned no structured output for ${requestType} (attempt ${reported.attempt}/${reported.totalAttempts}). Retrying...`);
                         }
                         logStructuredValidationToWebview(repoPath, {
                             stage: requestType,
                             failureKind: 'missingOutput',
-                            attempt,
-                            totalAttempts: attempts,
-                            finalFailure: attempt === attempts,
+                            ...reported,
+                            finalFailure: reported.attempt === reported.totalAttempts,
+                            ...(schemaBytes === undefined ? {} : { schemaBytes }),
                         });
                         completeApiRequestLog(currentLogId!, provider, model, undefined, response, requestType, repoPath, lastCostQuote);
                     },
                     onValidationFailed: (attempt, attempts, response, error) => {
-                        if (attempt < attempts) {
-                            logger.warn(`[Genie][${this.getProviderName()}] Schema validation failed for ${requestType} (attempt ${attempt}/${attempts}). Retrying...`);
+                        const reported = reportedAttempt(attempt, attempts);
+                        if (reported.attempt < reported.totalAttempts) {
+                            logger.warn(`[Genie][${this.getProviderName()}] Schema validation failed for ${requestType} (attempt ${reported.attempt}/${reported.totalAttempts}). Retrying...`);
                         }
                         logStructuredValidationToWebview(repoPath, {
                             stage: requestType,
                             failureKind: 'schemaMismatch',
-                            attempt,
-                            totalAttempts: attempts,
-                            finalFailure: attempt === attempts,
+                            ...reported,
+                            finalFailure: reported.attempt === reported.totalAttempts,
                             fieldIssues: buildStructuredFieldIssues(error, response.structured),
                             error: String(error.message),
+                            ...(schemaBytes === undefined ? {} : { schemaBytes }),
                         });
                         completeApiRequestLog(currentLogId!, provider, model, response.structured, response, requestType, repoPath, lastCostQuote);
                     },
@@ -385,7 +414,7 @@ export class UnifiedLLMService extends BaseLLMService {
                         episode: options?.memoryRun?.seal({
                             changedPaths: out.changeAnalysis.rawDiff.changedFiles.map(file => file.path),
                             changedSymbols: [],
-                            questions: out.changeAnalysis.investigationPlan?.targets.flatMap(target => target.questions) ?? [],
+                            questions: out.changeAnalysis.investigationPlan?.targets.map(target => target.question) ?? [],
                             claims: out.changeAnalysis.agentClaims.map(claim => ({ claim: claim.claim, evidenceRefs: claim.evidenceRefs, disposition: claim.disposition })),
                             status: out.changeAnalysis.analysisStatus === 'complete_diff_only'
                                 ? 'complete'

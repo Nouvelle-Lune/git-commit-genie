@@ -21,6 +21,23 @@ export interface LLMRunOptions {
     requestType: RequestType;
     temperature?: number;
     maxOutputTokens?: number;
+    /**
+     * Request-scoped schema, used instead of the request type's registered
+     * schema. The investigation planner builds one per request from the current
+     * D* ids, so its contract cannot be expressed in a static table.
+     */
+    validationSchema?: import('zod').z.ZodTypeAny;
+    /**
+     * Set when the caller owns this request's retry loop.
+     *
+     * The investigation planner spends one budget across both schema
+     * rejections and plan-contract rejections, so each of its calls must
+     * perform exactly one provider request. Passing the caller's counters also
+     * keeps the Webview honest: without them a rejected attempt inside a
+     * single-request budget is logged as a final failure even though the
+     * caller is about to retry and may still succeed.
+     */
+    callerOwnedRetry?: { attempt: number; totalAttempts: number };
 }
 
 /** Request-scoped access to provider-neutral sessions. */

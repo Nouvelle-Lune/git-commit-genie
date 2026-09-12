@@ -21,6 +21,7 @@ import {
     InvestigationPlan,
 } from './types';
 import { EvidenceLedger } from '../../../agent/evidenceLedger';
+import { buildRepositoryMap } from './repositoryMap';
 
 export interface ChangeAnalysisPipelineParams {
     diffs: DiffData[];
@@ -74,11 +75,20 @@ export async function runChangeAnalysisPipeline(
     let agentClaims: ChangeAnalysisTrace['agentClaims'] = [];
     let investigationPlan: InvestigationPlan | undefined;
     let memoryUsage: ChangeAnalysisTrace['memoryUsage'];
-    const canInvestigate = settings.enabled && Boolean(inputs.repositoryPath && inputs.snapshot);
-    if (canInvestigate) {
+    const snapshot = inputs.snapshot;
+    const canInvestigate = settings.enabled && Boolean(inputs.repositoryPath && snapshot);
+    if (canInvestigate && snapshot) {
+        // Built once, from the same manifest and the same exclusion rules the
+        // repository tools read through, so the map can never point at a file
+        // the agent is unable to open. The planner and the investigation agent
+        // receive this exact text.
+        const repositoryMap = buildRepositoryMap(
+            snapshot.entries('after', settings.excludePatterns),
+            new Set(diffs.map(diff => diff.fileName)),
+        );
         safeRun('Chain.onStage.investigationPlanStart', () => onStage?.({
             type: 'investigationPlanStart',
-            rawData: { input: { evidence: rawDiff, maxToolCalls: settings.maxSteps } },
+            rawData: { input: { evidence: rawDiff, maxToolCalls: settings.maxSteps, repositoryMap } },
         }));
         const memoryQuery = { paths: diffs.map(diff => diff.fileName), symbols: [], keywords: [] };
         const memory = inputs.loadMemory ? await inputs.loadMemory(memoryQuery) : inputs.memory;
@@ -89,7 +99,14 @@ export async function runChangeAnalysisPipeline(
                 data: { current: 0, tool: 'retrieveNavigation', trigger: 'agent', status: 'completed', summary: `Found ${navigation.length} historical navigation candidate(s).`, ok: true, budget: memory.budget },
                 rawData: { input: memoryQuery, output: { navigation, budget: memory.budget, settings: memory.settings } } }));
         }
-        const plan = await planInvestigation(rawDiff, execution, settings.maxSteps, navigation);
+        const plan = await planInvestigation({
+            evidence: rawDiff,
+            execution,
+            maxToolCalls: settings.maxSteps,
+            repositoryPath: inputs.repositoryPath ?? '',
+            repositoryMap,
+            navigation,
+        });
         if (memory) { memoryUsage = { ...memory.usage }; }
         investigationPlan = plan;
         safeRun('Chain.onStage.investigationPlanned', () => onStage?.({
@@ -97,7 +114,6 @@ export async function runChangeAnalysisPipeline(
             data: {
                 targetCount: plan.targets.length,
                 targets: plan.targets.map(target => target.target),
-                questionCount: plan.targets.reduce((total, target) => total + target.questions.length, 0),
             },
             rawData: {
                 input: { memoryQuery, navigation },
@@ -129,6 +145,7 @@ export async function runChangeAnalysisPipeline(
                     plan,
                     repositoryPath: inputs.repositoryPath ?? '',
                     excludePatterns: settings.excludePatterns,
+                    repositoryMap,
                     execution,
                     maxSteps: plan.targets.length ? settings.maxSteps : 0,
                     evidence: getEvidence(),
@@ -206,11 +223,10 @@ export async function runChangeAnalysisPipeline(
         // observable facts without pretending that repository evidence exists.
         investigationPlan = {
             targets: [],
-            coverage: rawDiffContext.evidenceIds.map(diffEvidenceRef => ({
-                diffEvidenceRef,
-                decision: 'diff_sufficient' as const,
-                targetIds: [],
-            })),
+            coverage: Object.fromEntries(rawDiffContext.evidenceIds.map(diffEvidenceId => [
+                diffEvidenceId,
+                { decision: 'diff_sufficient' as const, targetIds: [] },
+            ])),
             notes: !settings.enabled
                 ? 'Repository investigation is disabled by configuration.'
                 : 'No captured repository snapshot is available for investigation.',

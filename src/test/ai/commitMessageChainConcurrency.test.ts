@@ -21,6 +21,7 @@ describe('commit-message chain with RAG disabled', () => {
         let agentCompleted = false;
         const requestTypes: string[] = [];
         const stages: string[] = [];
+        const stageRawData: Array<{ type: string; rawData?: { input?: { repositoryMap?: string } } }> = [];
         const execution = createExecution(async requestType => {
             requestTypes.push(requestType);
             switch (requestType) {
@@ -30,11 +31,11 @@ describe('commit-message chain with RAG disabled', () => {
                             id: 'T1',
                             target: 'parse',
                             kind: 'symbol',
+                            lookup: 'callers',
                             file: 'src/parser.ts',
-                            diffEvidenceRefs: ['D1'],
-                            questions: ['Who calls parse?'],
+                            question: 'Who calls parse?',
                         }],
-                        coverage: [{ diffEvidenceRef: 'D1', decision: 'investigate', targetIds: ['T1'] }],
+                        coverage: { D1: { decision: 'investigate', targetIds: ['T1'] } },
                         notes: null,
                     };
                 case 'draft':
@@ -53,7 +54,11 @@ describe('commit-message chain with RAG disabled', () => {
                     throw new Error(`Unexpected request type '${requestType}'.`);
             }
         });
-        const snapshot = {} as RepositorySnapshotReader;
+        // The chain builds the planner's repository map from the snapshot manifest, so the fake has to expose one:
+        // the map is what tells the planner which directories exist outside the changed file.
+        const snapshot = {
+            entries: () => [{ path: 'src/parser.ts', mode: '100644', oid: 'b'.repeat(40) }],
+        } as unknown as RepositorySnapshotReader;
         const agentStub = sinon.stub(changeAnalysisAgentModule, 'runChangeAnalysisAgent').callsFake(
             async (): Promise<ChangeAnalysisAgentOutput> => {
                 agentCompleted = true;
@@ -68,12 +73,33 @@ describe('commit-message chain with RAG disabled', () => {
                 repositoryPath: '/tmp/repository',
             }, execution, {
                 investigation: { enabled: true, maxSteps: 2, excludePatterns: [] },
-                onStage: event => stages.push(event.type),
+                onStage: event => {
+                    stages.push(event.type);
+                    stageRawData.push(event as unknown as { type: string; rawData?: { input?: { repositoryMap?: string } } });
+                },
             });
 
             assert.equal(agentCompleted, true);
             assert.deepEqual(requestTypes, ['investigationPlan', 'draft', 'fix']);
-            assert.equal(output.ragStyleReferences, undefined);
+            // The chain trace keeps the plan the planner normalized: coverage is the D*-keyed object produced by
+            // the request-scoped schema, and a target carries no second copy of the hunk relation.
+            const plannedTrace = output.changeAnalysis.investigationPlan;
+            assert.ok(plannedTrace, 'The chain trace must carry the investigation plan.');
+            assert.deepEqual(plannedTrace.coverage, { D1: { decision: 'investigate', targetIds: ['T1'] } });
+            assert.deepEqual(
+                Object.keys(plannedTrace.targets[0]),
+                ['id', 'target', 'kind', 'lookup', 'file', 'question'],
+            );
+            assert.equal('diffEvidenceRefs' in plannedTrace.targets[0], false);
+            // The planner receives the map built from the same manifest the repository tools read, so the stage
+            // payload carries the directory inventory of the snapshot rather than an empty placeholder.
+            const planStart = stageRawData.find(event => event.type === 'investigationPlanStart');
+            assert.equal(planStart?.rawData?.input?.repositoryMap, '1 file, 1 directory (.ts 1)\nsrc  1 file   [1 changed]');
+            // `ragStyleReferences` is a collection, so "RAG enabled but nothing recalled" and "RAG disabled"
+            // both mean "this run produced no style reference"; the disabled branch owes the same stable
+            // result shape as the enabled one. Distinguishing "RAG never ran" is the job of a dedicated
+            // status field, not of an implicit undefined-vs-[] encoding.
+            assert.deepEqual(output.ragStyleReferences, []);
             assert.equal(stages.includes('ragPrepared'), false);
             assert.equal(stages.includes('ragRetrievalStart'), false);
             assert.equal(stages.includes('ragRetrieved'), false);

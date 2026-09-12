@@ -20,6 +20,43 @@ export class StructuredOutputTerminatedError extends Error {
     }
 }
 
+/**
+ * A response that arrived but failed local schema validation on the final
+ * attempt of its own retry budget.
+ *
+ * `fieldIssueLines` is the same field-level repair list the retry prompt uses.
+ * A caller that owns a longer-lived retry loop — the investigation planner
+ * spans both schema and contract rejections under one budget — runs this with
+ * `maxRetries: 0` and reuses the lines instead of parsing them back out of the
+ * message. The message itself is unchanged so existing log text stays stable.
+ */
+export class StructuredFieldRejectionError extends Error {
+    constructor(
+        readonly fieldIssueLines: string[],
+        message: string,
+    ) {
+        super(message);
+        this.name = 'StructuredFieldRejectionError';
+    }
+}
+
+/**
+ * A response that arrived without any final JSON object, whose termination the
+ * provider did not classify as unrecoverable.
+ *
+ * Typed separately from the transport and budget failures that share this code
+ * path because it is the one non-schema failure that asking again can fix: the
+ * documented repair is to restate the JSON requirement. A caller that owns its
+ * own retry loop has to tell this apart from the failures that will not answer
+ * differently the second time.
+ */
+export class MissingStructuredOutputError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'MissingStructuredOutputError';
+    }
+}
+
 export type StructuredCompletionRun = (messages: AIMessage[]) => Promise<AIRunResponse>;
 
 export interface StructuredCompletionCallbacks {
@@ -38,6 +75,15 @@ export interface StructuredCompletionOptions<T> {
     initialMessages: AIMessage[];
     maxRetries: number;
     label?: string;
+    /**
+     * The retry budget this request belongs to, when a caller owns the loop.
+     *
+     * Terminal messages name that budget instead of the single request each
+     * call performs. Without it, a planner that ran three requests and gave up
+     * would report "after 1 attempts", which is the number a reader would use
+     * to attribute the failure.
+     */
+    callerOwnedRetry?: { attempt: number; totalAttempts: number };
     callbacks?: StructuredCompletionCallbacks;
 }
 
@@ -57,6 +103,9 @@ export async function runStructuredCompletion<T>(options: StructuredCompletionOp
     }
 
     const totalAttempts = maxRetries + 1;
+    // Only the wording of the terminal messages uses this; loop control stays
+    // on `totalAttempts`, which this call really does run.
+    const reportedTotalAttempts = options.callerOwnedRetry?.totalAttempts ?? totalAttempts;
     let delta = initialMessages;
 
     for (let attempt = 0; attempt < totalAttempts; attempt += 1) {
@@ -72,7 +121,9 @@ export async function runStructuredCompletion<T>(options: StructuredCompletionOp
                 delta = [{ role: 'user', content: MISSING_STRUCTURED_RETRY }];
                 continue;
             }
-            throw new Error(`Provider returned no structured output for ${label} after ${totalAttempts} attempts`);
+            throw new MissingStructuredOutputError(
+                `Provider returned no structured output for ${label} after ${reportedTotalAttempts} attempts`,
+            );
         }
 
         const parsed = schema.safeParse(structured);
@@ -97,7 +148,10 @@ export async function runStructuredCompletion<T>(options: StructuredCompletionOp
             continue;
         }
 
-        throw new Error(`Structured result failed local validation for ${label} after ${totalAttempts} attempts:\n${fieldIssueLines.map(line => `- ${line}`).join('\n')}`);
+        throw new StructuredFieldRejectionError(
+            fieldIssueLines,
+            `Structured result failed local validation for ${label} after ${reportedTotalAttempts} attempts:\n${fieldIssueLines.map(line => `- ${line}`).join('\n')}`,
+        );
     }
 
     throw new Error(`Structured request for ${label} exited retry loop unexpectedly.`);

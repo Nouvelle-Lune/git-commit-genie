@@ -7,7 +7,6 @@ import {
     commitMessageSchema,
     factAwareCommitMessageSchema,
     ragRerankResponseSchema,
-    investigationPlanResponseSchema,
 } from '../schemas/common';
 
 const REQUEST_TYPE_LABELS: Record<RequestType, string> = {
@@ -27,9 +26,16 @@ const VALIDATION_SCHEMAS: Partial<Record<RequestType, z.ZodTypeAny>> = {
     draft: classifyAndDraftResponseSchema,
     fix: validateAndFixResponseSchema,
     ragRerank: ragRerankResponseSchema,
-    investigationPlan: investigationPlanResponseSchema,
     enforceLanguage: factAwareCommitMessageSchema,
 };
+
+/**
+ * Request types whose schema is built per request and passed through
+ * `LLMRunOptions.validationSchema`. Listing them here is what turns a missing
+ * schema into a configuration error instead of a silently unconstrained JSON
+ * request: these stages have no meaningful behaviour without their contract.
+ */
+const REQUEST_SCOPED_SCHEMAS = new Set<RequestType>(['investigationPlan']);
 
 /**
  * Map a chain request type to a short, human-readable label used in logs and
@@ -56,4 +62,9 @@ export function getValidationSchemaFor(reqType?: string): z.ZodTypeAny | undefin
     return reqType in VALIDATION_SCHEMAS
         ? VALIDATION_SCHEMAS[reqType as RequestType]
         : undefined;
+}
+
+/** True when the request type is only valid with a caller-supplied schema. */
+export function requiresRequestScopedSchema(reqType?: string): boolean {
+    return Boolean(reqType) && REQUEST_SCOPED_SCHEMAS.has(reqType as RequestType);
 }

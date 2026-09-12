@@ -8,6 +8,15 @@
 
 import { DiffData } from '../../git/gitTypes';
 import type { AgentRunMetrics } from '../../../agent/runtime';
+import type { InvestigationLookup } from '../../llm/providers/schemas/common';
+
+/**
+ * The retrieval verb a target declares, re-exported from the schema module so
+ * the union, the constrained-decoding enum, and the prompt's literal list stay
+ * one definition instead of three that can drift apart.
+ */
+export type { InvestigationLookup };
+
 export interface ChangeAnalysisInputs {
     snapshot?: import('../../git/repositorySnapshot').RepositorySnapshotReader;
     memory?: import('../../memory/retriever').MemoryRetriever;
@@ -86,19 +95,30 @@ export interface InvestigationTarget {
     id: string;
     target: string;
     kind: InvestigationTargetKind;
+    lookup: InvestigationLookup;
     file: string | null;
-    diffEvidenceRefs: string[];
-    questions: string[];
+    question: string;
+}
+
+/** One hunk's decision: investigate it through a target, or accept the diff as sufficient. */
+export interface InvestigationCoverageEntry {
+    decision: 'investigate' | 'diff_sufficient';
+    targetIds: string[];
 }
 
 /** Stage 2 output: what still needs to be known to explain the change. */
 export interface InvestigationPlan {
     targets: InvestigationTarget[];
-    coverage: Array<{
-        diffEvidenceRef: string;
-        decision: 'investigate' | 'diff_sufficient';
-        targetIds: string[];
-    }>;
+    /**
+     * Keyed by diff evidence id, one entry per D* of the current diff.
+     *
+     * The D* → target relation is stored here and nowhere else. The planner's
+     * response schema declares one required key per D* of the request, so the
+     * key set is a structural guarantee rather than something a model has to
+     * reproduce; a target's own hunks are recovered by reading this map, which
+     * is why `InvestigationTarget` carries no second copy of the relation.
+     */
+    coverage: Record<string, InvestigationCoverageEntry>;
     /** Model-supplied reasoning for the chosen targets, for logs only. */
     notes: string | null;
 }

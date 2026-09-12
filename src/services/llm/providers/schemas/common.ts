@@ -92,28 +92,110 @@ export const INVESTIGATION_TARGET_KINDS = [
   'file', 'symbol', 'call', 'config', 'type', 'dependency', 'interface', 'cli_or_api', 'hunk', 'relation'
 ] as const;
 
+/**
+ * The retrieval verb a target declares, one literal per repository tool that
+ * publishes evidence.
+ *
+ * `listDirectory` is deliberately absent: it is granted as navigation only and
+ * never publishes an E* item, so a target served by listing a directory is a
+ * hunk the diff already covers — a `diff_sufficient` decision, not an
+ * investigation target. Declaring the verb is what stops the investigation from
+ * defaulting to re-reading the changed file: the agent's first move per target
+ * is the declared lookup, and `findCallers`-style tools return the location
+ * instead of requiring the planner to predict a path.
+ */
+export const INVESTIGATION_LOOKUPS = [
+  'definition', 'references', 'callers', 'callees', 'implementations', 'type', 'search', 'read'
+] as const;
+
+/** Derived from the array so the type and the constrained-decoding enum cannot drift apart. */
+export type InvestigationLookup = typeof INVESTIGATION_LOOKUPS[number];
+
 export const INVESTIGATION_PLAN_LIMITS = {
+  /**
+   * Ceiling on plan granularity, independent of the tool budget: past this many
+   * targets the plan stops being a route and becomes a tour.
+   */
   maxTargets: 12,
-  maxDiffEvidenceRefsPerTarget: 8,
-  maxQuestionsPerTarget: 6,
+  /** Targets one hunk may be investigated through before the plan is too coarse. */
+  maxTargetIdsPerCoverageEntry: 12,
 } as const;
 
-export const investigationPlanResponseSchema = z.object({
-  targets: z.array(z.object({
-    id: z.string().min(1),
-    target: z.string().min(1),
-    kind: z.enum(INVESTIGATION_TARGET_KINDS),
-    file: z.string().nullable(),
-    diffEvidenceRefs: z.array(z.string().regex(/^D[0-9]+$/)).min(1).max(INVESTIGATION_PLAN_LIMITS.maxDiffEvidenceRefsPerTarget),
-    questions: z.array(z.string().min(1)).min(1).max(INVESTIGATION_PLAN_LIMITS.maxQuestionsPerTarget),
-  } as const).strict()).max(INVESTIGATION_PLAN_LIMITS.maxTargets),
-  coverage: z.array(z.object({
-    diffEvidenceRef: z.string().regex(/^D[0-9]+$/),
-    decision: z.enum(['investigate', 'diff_sufficient']),
-    targetIds: z.array(z.string().min(1)).max(12),
-  } as const).strict()),
-  notes: z.string().nullable(),
-} as const).strict();
+/** Well-formed diff evidence id. `[0-9]` rather than `\d` keeps the exported JSON Schema GBNF-convertible. */
+const DIFF_EVIDENCE_ID_PATTERN = /^D[0-9]+$/;
+
+/**
+ * Builds the planner response schema for one request from that request's D* ids.
+ *
+ * The coverage contract is why this schema is built per request instead of
+ * being registered statically. Every D* id of the current diff becomes a
+ * required property of `coverage` with `additionalProperties: false`, so
+ * constrained decoding — not the model's bookkeeping — guarantees that no hunk
+ * is dropped, none is invented, and none is listed twice. That removes the
+ * whole class of "the plan disagrees with its own coverage list" rejections and
+ * frees the model to spend its capacity on the decision that actually needs
+ * judgement: investigate or diff_sufficient, and through which targets.
+ *
+ * The tool budget is enforced the same way. A plan spends one repository call
+ * per target, and JSON Schema cannot express "the questions of every target sum
+ * to at most N", so the only decoder-enforceable form of that rule bounds the
+ * target count instead: the array's `maxItems` is the smaller of the
+ * granularity ceiling and the call budget. A plan that promises more lookups
+ * than the agent can pay for is then unsamplable rather than a contract
+ * violation discovered after a complete generation, when the only repair left
+ * is asking the model to redo arithmetic it just got wrong.
+ *
+ * The input is rejected rather than repaired: a schema built from ambiguous ids
+ * would hand the model a contract that cannot be satisfied.
+ */
+export function createInvestigationPlanResponseSchema(
+  diffEvidenceIds: readonly string[],
+  maxToolCalls: number,
+): z.ZodTypeAny {
+  if (!diffEvidenceIds.length) {
+    throw new Error('An investigation plan schema needs at least one diff evidence id.');
+  }
+  const maxPlanTargets = Math.min(INVESTIGATION_PLAN_LIMITS.maxTargets, maxToolCalls);
+  const seen = new Set<string>();
+  for (const id of diffEvidenceIds) {
+    if (!DIFF_EVIDENCE_ID_PATTERN.test(id)) {
+      throw new Error(`Diff evidence id '${id}' is not a well-formed D* id.`);
+    }
+    if (seen.has(id)) {
+      throw new Error(`Diff evidence id '${id}' is supplied more than once.`);
+    }
+    seen.add(id);
+  }
+
+  const coverageShape: Record<string, z.ZodTypeAny> = {};
+  for (const id of diffEvidenceIds) {
+    coverageShape[id] = z.object({
+      decision: z.enum(['investigate', 'diff_sufficient']),
+      // Bounded by the plan's own target cap as well: a coverage entry cannot
+      // name more targets than the plan is allowed to declare, so a small model
+      // cannot spend a repair attempt listing an id the schema never let it
+      // declare in the first place.
+      targetIds: z.array(z.string().min(1))
+        .max(Math.min(INVESTIGATION_PLAN_LIMITS.maxTargetIdsPerCoverageEntry, maxPlanTargets)),
+    } as const).strict();
+  }
+
+  return z.object({
+    targets: z.array(z.object({
+      id: z.string().min(1),
+      target: z.string().min(1),
+      kind: z.enum(INVESTIGATION_TARGET_KINDS),
+      lookup: z.enum(INVESTIGATION_LOOKUPS),
+      file: z.string().nullable(),
+      // One question per target: the declared lookup is a single verb, and a
+      // target carrying several questions would spend one call on work the plan
+      // described as several.
+      question: z.string().min(1),
+    } as const).strict()).max(maxPlanTargets),
+    coverage: z.object(coverageShape).strict(),
+    notes: z.string().nullable(),
+  } as const).strict();
+}
 
 export const AGENT_CLAIM_CATEGORIES = [
   'observed_change',

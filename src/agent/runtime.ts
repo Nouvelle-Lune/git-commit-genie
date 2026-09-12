@@ -118,6 +118,7 @@ export interface AgentRuntimeIssue {
     | 'protocol_violation'
     | 'missing_structured_output'
     | 'schema_mismatch'
+    | 'plan_contract_violation'
     | 'evidence_precondition'
     | 'evidence_precondition_degraded'
     | 'output_exhausted'
@@ -896,6 +897,7 @@ const TERMINAL_RETRY_ISSUES = new Set<AgentRuntimeIssue['type']>([
     'protocol_violation',
     'missing_structured_output',
     'schema_mismatch',
+    'plan_contract_violation',
     'evidence_precondition',
 ]);
 
@@ -907,6 +909,8 @@ function issueTypeForCategory(category: AgentFailureCategory): AgentRuntimeIssue
             return 'missing_structured_output';
         case 'schemaMismatch':
             return 'schema_mismatch';
+        case 'contractViolation':
+            return 'plan_contract_violation';
         case 'evidencePrecondition':
             return 'evidence_precondition';
         case 'outputExhausted':

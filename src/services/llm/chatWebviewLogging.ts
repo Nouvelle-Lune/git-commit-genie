@@ -106,6 +106,21 @@ export interface StructuredValidationLogPayload {
     finalFailure: boolean;
     fieldIssues?: StructuredFieldIssue[];
     error?: string;
+    /**
+     * The rejected payload, kept out of the ordinary log line. A planner plan
+     * serializes to thousands of characters, so it travels only in the raw-data
+     * envelope that the Webview already gates behind an explicit setting.
+     */
+    rejectedPlan?: unknown;
+    /**
+     * Size of the compact JSON Schema this request was validated against.
+     *
+     * A request-scoped schema grows with the diff, so its size belongs next to
+     * the failure it may have caused. Recording it on real runs is what lets a
+     * later change to the schema's representation — `$ref`, a keyed record, a
+     * positional array — be compared on measured cost instead of estimates.
+     */
+    schemaBytes?: number;
 }
 
 /**
@@ -128,13 +143,16 @@ export function logStructuredValidationToWebview(
         finalFailure: payload.finalFailure,
         ...(payload.fieldIssues?.length ? { fieldIssues: payload.fieldIssues } : {}),
         ...(payload.error ? { error: payload.error } : {}),
+        ...(payload.schemaBytes === undefined ? {} : { schemaBytes: payload.schemaBytes }),
     };
     safeRun('LLM.logStructuredValidation', () => logger.logToolCall(
         'schemaValidation',
         JSON.stringify(content),
         STRUCTURED_VALIDATION_LOG_REASON,
         repoPath,
-        { output: content },
+        payload.rejectedPlan === undefined
+            ? { output: content }
+            : { output: content, rejectedPlan: payload.rejectedPlan },
     ));
 }
 

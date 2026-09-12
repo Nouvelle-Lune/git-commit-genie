@@ -17,16 +17,45 @@ describe('terminal contract regression', () => {
     });
 
     it('uses the two-phase short-memory-ID profile version and cache identity', () => {
-        // The finalization profile must retain its two-phase prompt and cache identity contract.
+        // The finalization profile must retain its two-phase prompt and cache identity contract; the version is
+        // bumped whenever the investigation prompt contract changes, so a cached prompt is never reused across it.
         const input = makeInput();
         const profile = createChangeAnalysisProfile(input);
 
-        assert.equal(profile.promptVersion, '9');
+        assert.equal(profile.promptVersion, '11');
         assert.equal(profile.toolsetVersion, 'snapshot-memory-experience-2');
         assert.match(
             `agent:${profile.id}:${profile.promptVersion}:${profile.toolsetVersion}:gpt-5`,
-            /^agent:change-analysis:9:snapshot-memory-experience-2:/,
+            /^agent:change-analysis:11:snapshot-memory-experience-2:/,
         );
+    });
+
+    it('asks for a locating lookup in the evidence precondition correction and offers readFileContent only as a caveat', () => {
+        // A read-only investigation cannot satisfy a plan that declared a locating lookup, so the correction lists
+        // the locating tools as the repair and demotes readFileContent to the explanation of why a read is not one.
+        const lines = buildCorrectionLines({
+            stage: 'investigation',
+            category: 'evidencePrecondition',
+            message: 'No locating lookup has published E* evidence yet.',
+            fieldIssues: [],
+        }, 'finishInvestigation');
+        const correction = lines.join('\n');
+        const toolListLine = lines.find(line => line.startsWith('Use the highest-priority concrete path or symbol'));
+
+        assert.ok(toolListLine, correction);
+        assert.match(toolListLine, /findSymbolDefinition/);
+        assert.match(toolListLine, /findSymbolReferences/);
+        assert.match(toolListLine, /findCallers/);
+        assert.match(toolListLine, /findCallees/);
+        assert.match(toolListLine, /findImplementations/);
+        assert.match(toolListLine, /findTypeDefinition/);
+        assert.match(toolListLine, /searchCode\.$/);
+        assert.doesNotMatch(toolListLine, /readFileContent/);
+        assert.match(
+            correction,
+            /readFileContent publishes E\* evidence too, but it returns no relation the diff does not already show, so on its own it cannot satisfy a plan whose targets declare a locating lookup\./,
+        );
+        assert.match(correction, /listDirectory, searchRepositoryMemory, and searchCode with searchType "name" are navigation-only/);
     });
 
     it('teaches the investigation agent a bounded evidence-first exploration route', () => {
@@ -110,7 +139,7 @@ function makeInput() {
         }],
         plan: {
             targets: [],
-            coverage: [{ diffEvidenceRef: 'D1', decision: 'diff_sufficient' as const, targetIds: [] }],
+            coverage: { D1: { decision: 'diff_sufficient' as const, targetIds: [] } },
             notes: null,
         },
         snapshot: {} as RepositorySnapshotReader,

@@ -36,6 +36,7 @@ import {
 import { buildInvestigationToolResultMessage } from '../prompts';
 import {
     CHANGE_ANALYSIS_TOOL_NAMES,
+    INVESTIGATION_LOOKUP_TOOLS,
     InvestigationToolCall,
     InvestigationToolContext,
     InvestigationToolName,
@@ -68,6 +69,8 @@ export interface ChangeAnalysisAgentInput {
     plan: InvestigationPlan;
     repositoryPath: string;
     excludePatterns: string[];
+    /** Directory-level inventory of the captured snapshot, built by the caller. */
+    repositoryMap?: string;
     evidence: DraftEvidence[];
     userTemplate?: string;
     maxSteps: number;
@@ -158,15 +161,25 @@ function toToolCall(name: InvestigationToolName, args: Record<string, unknown>):
 export function createChangeAnalysisProfile(
     input: ChangeAnalysisAgentInput,
 ): AgentProfile<ChangeAnalysisAgentInput, RawFinal, ChangeAnalysisAgentOutput> {
-    const plannedQuestions = input.plan.targets.flatMap(target =>
-        target.questions.map(question => `${target.target}: ${question}`)
+    // The planned lookup is rendered as the tool it resolves to: the plan JSON
+    // appears only in the opening prompt, so this checklist is the channel the
+    // declared verb survives compaction through, and it tells the agent which
+    // tool a target is waiting for instead of leaving a verb to map by hand.
+    const plannedQuestions = input.plan.targets.map(target =>
+        `${target.target} (${INVESTIGATION_LOOKUP_TOOLS[target.lookup]}): ${target.question}`
     );
     const evidenceItems: RepositoryEvidenceItem[] = [];
+    // Which tools actually published evidence. The ledger records the evidence,
+    // not its producer, and the evidence kind cannot stand in for the tool: a
+    // caller lookup whose only hit is a test file is recorded as kind 'tests'.
+    const evidenceProducingTools = new Set<InvestigationToolName>();
 
     return {
         id: 'change-analysis',
         // Cached prompt identities must not reuse the former UUID-based Memory contract.
-        promptVersion: '9',
+        // 11: the embedded plan now carries one `question` per target instead of a
+        // `questions` array, and the planned-question checklist renders from it.
+        promptVersion: '11',
         toolsetVersion: 'snapshot-memory-experience-2',
         requestType: 'investigation',
         finalName: 'changeAnalysisCompoundTerminal',
@@ -183,6 +196,7 @@ export function createChangeAnalysisProfile(
                     `Completed tool calls: ${state.steps}`,
                     `Published memory navigation (historical investigation experience): ${JSON.stringify(input.memory?.publishedNavigation ?? [])}`,
                     `Remaining memory budget: ${JSON.stringify(input.memory?.budget ?? null)}`,
+                    ...(input.repositoryMap ? [`Repository map: ${input.repositoryMap}`] : []),
                     `Raw diff evidence: ${JSON.stringify(input.rawDiff)}`,
                     `Repository evidence ledger: ${JSON.stringify(state.ledger.snapshot()
                         .filter(item => item.source === 'repository'))}`,
@@ -208,6 +222,14 @@ export function createChangeAnalysisProfile(
                     '<run_context>',
                     `Repository tool budget: ${profileInput.maxSteps} call(s). ${FINISH_INVESTIGATION_TOOL} is free and does not count against it.`,
                     `Investigation plan: ${JSON.stringify(profileInput.plan)}`,
+                    ...(profileInput.repositoryMap ? [
+                        '<repository_map>',
+                        profileInput.repositoryMap,
+                        // An inventory invites a repository tour. The map orients
+                        // a lookup; it never substitutes for one.
+                        'This map locates structure outside the diff. It is an inventory, not evidence: nothing in it has been read, and it never answers a question by itself.',
+                        '</repository_map>',
+                    ] : []),
                     `Raw diff evidence: ${JSON.stringify(profileInput.rawDiff)}`,
                     `Untrusted memory navigation (historical investigation experience): ${JSON.stringify(profileInput.navigation ?? [])}`,
                     `User template constraints: ${JSON.stringify(profileInput.userTemplate ?? null)}`,
@@ -235,17 +257,33 @@ export function createChangeAnalysisProfile(
             allocateEvidence: !['listDirectory', 'searchRepositoryMemory'].includes(name),
         })),
         buildToolDefinitions: (_profileInput, state) => [...CHANGE_ANALYSIS_TOOL_NAMES.map(name => (
-            createExecutableDefinition(name, input, state, evidenceItems, plannedQuestions)
+            createExecutableDefinition(name, input, state, evidenceItems, plannedQuestions, evidenceProducingTools)
         )), ...createMemoryDefinitions(input, state, evidenceItems)],
         validateFinalizationPrecondition: state => {
             if (!input.plan.targets.length) {
                 return null;
             }
             const hasRepositoryEvidence = state.ledger.snapshot().some(item => item.source === 'repository');
-            return hasRepositoryEvidence
-                ? null
-                : 'The investigation plan contains targets, but no E* repository evidence has been collected yet.'
+            if (!hasRepositoryEvidence) {
+                return 'The investigation plan contains targets, but no E* repository evidence has been collected yet.'
                 + ' A non-empty plan must produce at least one real repository evidence item before the investigation can end.';
+            }
+            // `read` is a legal lookup, but it only returns regions of files the
+            // diff already describes, so a run whose entire evidence came from
+            // re-reading changed files has not left the diff — and the diff was
+            // in its context before the first call. An empty set means the same
+            // thing and is not a gap: evidence published outside the tool
+            // definitions (memory expansion) never resolves a relation either.
+            // The message names no producer, because "nothing located" is true
+            // both when every read came from readFileContent and when none of
+            // these tools ran at all.
+            if ([...evidenceProducingTools].every(tool => tool === 'readFileContent')) {
+                return 'No locating lookup has published E* evidence yet.'
+                + ' Reading a changed file, or expanding a memory entry, publishes E* evidence without resolving a declared lookup.'
+                + ' Call at least one of findSymbolDefinition, findSymbolReferences, findCallers, findCallees, findImplementations,'
+                + ' findTypeDefinition, or searchCode with searchType "content" before the investigation can end.';
+            }
+            return null;
         },
         // Missing repository evidence is observable degradation, not a reason
         // to discard the D* facts and prevent the downstream draft stage.
@@ -308,6 +346,7 @@ function createExecutableDefinition(
     state: AgentRunState,
     evidenceItems: RepositoryEvidenceItem[],
     plannedQuestions: string[],
+    evidenceProducingTools: Set<InvestigationToolName>,
 ): AgentToolDefinition<ChangeAnalysisAgentInput> {
     return {
         name,
@@ -330,6 +369,9 @@ function createExecutableDefinition(
             };
             const started = performance.now();
             const outcome = await runInvestigationTool(toolContext, toToolCall(toolName, args));
+            if (outcome.ok && outcome.evidence.length) {
+                evidenceProducingTools.add(toolName);
+            }
             input.recorder?.record({ step: state.steps, tool: toolName, arguments: args, ok: outcome.ok,
                 summary: outcome.summary, ...(outcome.error ? { error: outcome.error } : {}), evidence: outcome.evidence.map(evidence => {
                     if (!evidence.provenance) { throw new Error('Snapshot tool returned evidence without provenance.'); }

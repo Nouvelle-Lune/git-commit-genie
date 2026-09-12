@@ -153,8 +153,9 @@ export function buildCorrectionLines(failure: AgentTerminalFailure, finishToolNa
         return [
             '<finish_rejected>',
             failure.message,
-            'Use the highest-priority concrete path or symbol in the plan and call an evidence-producing tool such as findSymbolDefinition, findSymbolReferences, findCallers, findCallees, findImplementations, findTypeDefinition, searchCode, or readFileContent.',
+            'Use the highest-priority concrete path or symbol in the plan and call an evidence-producing tool such as findSymbolDefinition, findSymbolReferences, findCallers, findCallees, findImplementations, findTypeDefinition, or searchCode.',
             'listDirectory, searchRepositoryMemory, and searchCode with searchType "name" are navigation-only and cannot satisfy this requirement. An empty or failed lookup also publishes no E* evidence.',
+            'readFileContent publishes E* evidence too, but it returns no relation the diff does not already show, so on its own it cannot satisfy a plan whose targets declare a locating lookup.',
             'After a real E* item is published, continue only if another material planned question still changes the factual commit-message claim; otherwise end the investigation.',
             '</finish_rejected>',
         ];

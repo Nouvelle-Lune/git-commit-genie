@@ -3,8 +3,8 @@ import { describe, it } from 'mocha';
 import { z } from 'zod';
 import {
     AGENT_TERMINAL_LIMITS,
+    createInvestigationPlanResponseSchema,
     factAwareCommitMessageSchema,
-    investigationPlanResponseSchema,
     validateAndFixResponseSchema,
     changeAnalysisAgentFinalResponseSchema,
 } from '../../services/llm/providers/schemas/common';
@@ -173,7 +173,7 @@ describe('exported finding evidence schema', () => {
     it('exports digit-class ledger patterns without JavaScript shorthand escapes', () => {
         // Provider-facing schemas must spell ledger id digits as [0-9] so every JSON Schema consumer sees the same contract.
         const schemas = [
-            investigationPlanResponseSchema,
+            createInvestigationPlanResponseSchema(['D1', 'D2'], 4),
             validateAndFixResponseSchema,
             factAwareCommitMessageSchema,
             changeAnalysisAgentFinalResponseSchema,
