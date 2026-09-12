@@ -71,18 +71,47 @@ describe('memory consolidation grouping and projection', () => {
         const existing = makeHandbook(episodes);
         const projection = projectConsolidation([{ ...group, existing: [existing] }]);
         const input = JSON.parse(projection.input) as {
-            groups: Array<{ id: string; seed: string; episodes: Array<Record<string, unknown>>; existing: Array<Record<string, unknown>> }>;
+            groups: Array<{
+                id: string;
+                seed: string;
+                eligibleStepRoutes: Array<{
+                    operation: string;
+                    path: string;
+                    findings: Array<{ observationId: string; snapshot: string; sourceIds: string[]; claimIndices: number[] }>;
+                }>;
+                episodes: Array<{ id: string; snapshot: string; observations: Array<{ id: string; snapshot: string }> }>;
+                existing: Array<Record<string, unknown>>;
+            }>;
         };
 
         assert.deepEqual(Object.keys(input), ['groups']);
         assert.equal(input.groups.length, 1);
-        assert.deepEqual(Object.keys(input.groups[0]), ['id', 'seed', 'episodes', 'existing']);
+        assert.deepEqual(Object.keys(input.groups[0]), ['id', 'seed', 'eligibleStepRoutes', 'episodes', 'existing']);
         assert.equal(input.groups[0].id, 'G1');
         assert.equal(input.groups[0].seed, 'T1');
         assert.equal(input.groups[0].episodes.length, 2);
         assert.equal(input.groups[0].episodes[0].id, 'T1');
         assert.equal(input.groups[0].episodes[0].snapshot, 'V1');
         assert.equal(input.groups[0].episodes[1].snapshot, 'V2');
+        assert.equal(input.groups[0].episodes.every(episode => episode.observations.every(observation => observation.snapshot === episode.snapshot)), true);
+        assert.equal(input.groups[0].eligibleStepRoutes.length, 2);
+        assert.equal(input.groups[0].eligibleStepRoutes.every(route => route.path === 'src/ui/memoryWebviewPolicy.ts'), true);
+        assert.deepEqual(input.groups[0].eligibleStepRoutes.map(route => route.operation).sort(), ['readFileContent', 'searchCode']);
+        assert.equal(input.groups[0].eligibleStepRoutes.every(route => {
+            return new Set(route.findings.map(finding => finding.snapshot)).size >= 2
+                && route.findings.every(finding => finding.observationId.startsWith('O')
+                    && finding.sourceIds.length > 0 && finding.claimIndices.length > 0
+                    && finding.sourceIds.every(sourceId => projection.sources.get(sourceId)?.observationId === finding.observationId)
+                    && finding.claimIndices.every(claimIndex => {
+                        const item = projection.observations.get(finding.observationId);
+                        const claim = item?.episode.claims[claimIndex];
+                        if (!claim || claim.disposition === 'omit') { return false; }
+                        return claim.evidenceRefs.some(evidenceId => finding.sourceIds.some(sourceId =>
+                            projection.sources.get(sourceId)?.evidence.id === evidenceId));
+                    })
+                    && finding.snapshot === `V${[...new Set(group.episodes.map(episode => episode.snapshot.id))]
+                        .indexOf(projection.observations.get(finding.observationId)!.episode.snapshot.id) + 1}`);
+        }), true);
         assert.match(JSON.stringify(input.groups[0].episodes), /Where should a new memory lifecycle log be inspected/);
         assert.match(JSON.stringify(input.groups[0].episodes), /Read the filtering predicate/);
         assert.match(JSON.stringify(input.groups[0].episodes), /filterMemoryLogsForWebview/);
@@ -93,6 +122,51 @@ describe('memory consolidation grouping and projection', () => {
         assert.equal(JSON.stringify(input).includes(episodes[0].snapshot.id), false);
         assert.equal([...projection.observations.keys()].every(id => /^O\d+$/.test(id)), true);
         assert.equal([...projection.sources.keys()].every(id => /^S\d+$/.test(id)), true);
+        assert.deepEqual(projection.eligibleStepRoutes, input.groups[0].eligibleStepRoutes);
+    });
+
+    it('exposes no eligible step routes when related episodes lack a shared successful claimed tool-path route', () => {
+        // Verify shared changed paths alone cannot authorize a positive route when each snapshot uses a different tool or target path.
+        const targetPath = 'src/services/memory/consolidator.ts';
+        const episodes = [
+            makeEpisode({ episodeId: uuidFor(1), snapshotId: digestFor(1), changedPaths: [targetPath], changedSymbols: ['projectConsolidation'], sourcePath: targetPath, tool: 'readFileContent' }),
+            makeEpisode({ episodeId: uuidFor(2), snapshotId: digestFor(2), changedPaths: [targetPath], changedSymbols: ['projectConsolidation'], sourcePath: 'src/services/memory/service.ts', tool: 'searchCode' }),
+        ];
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id);
+
+        assert.ok(group);
+        const projection = projectConsolidation([group!]);
+        const input = JSON.parse(projection.input) as { groups: Array<{ eligibleStepRoutes: unknown[] }> };
+        assert.deepEqual(projection.eligibleStepRoutes, []);
+        assert.deepEqual(input.groups[0].eligibleStepRoutes, []);
+    });
+
+    it('requires successful observations and retained claims that cite matching source evidence before exposing a route', () => {
+        // Verify failed observations and omit or unrelated claims cannot contribute route bases even when tool and path match across snapshots.
+        const baseEpisodes = makeRouteEpisodes().map(episode => ({
+            ...episode,
+            observations: [episode.observations[0]],
+            claims: [{ claim: 'The source was inspected.', evidenceRefs: ['E1'], disposition: 'must_express' as const }],
+        }));
+        const failedEpisodes = baseEpisodes.map(episode => ({
+            ...episode,
+            observations: [{ ...episode.observations[0], ok: false, error: 'No matches', evidence: [] }],
+            claims: [],
+        }));
+        const omittedEpisodes = baseEpisodes.map(episode => ({
+            ...episode,
+            claims: [{ claim: 'The source was inspected.', evidenceRefs: [], disposition: 'omit' as const }],
+        }));
+        const unrelatedClaimEpisodes = baseEpisodes.map(episode => ({
+            ...episode,
+            claims: [{ claim: 'An unrelated source was inspected.', evidenceRefs: ['E999'], disposition: 'must_express' as const }],
+        }));
+
+        for (const episodes of [failedEpisodes, omittedEpisodes, unrelatedClaimEpisodes]) {
+            const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id);
+            assert.ok(group);
+            assert.deepEqual(projectConsolidation([group!]).eligibleStepRoutes, []);
+        }
     });
 
     it('does not create a group when the selected seed has fewer than two snapshots', () => {
@@ -189,6 +263,49 @@ describe('memory consolidation validation', () => {
         assert.deepEqual(lesson.entries[0].targetPaths, ['src/ui/memoryWebviewPolicy.ts', 'src/services/unrelated.ts']);
     });
 
+    it('binds a step support to the evidence cited by its selected claim when one path has multiple excerpts', () => {
+        // Verify claim provenance selects the matching cited excerpt instead of the first same-path evidence item.
+        const episodes = makeClaimBoundEvidenceEpisodes();
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const observationIds = [...projection.observations.keys()];
+        const findings = observationIds.map(observationId => findingForEvidence(projection, observationId, 'E2'));
+        const validated = validateConsolidation({ groups: [finding(group, {
+            existingEntryId: null,
+            situation: 'When repeated excerpts share a path, preserve the claim-selected source.',
+            steps: [{ sourceId: sourceForObservationEvidence(projection, observationIds[0], 'E1'), symbol: null,
+                purpose: 'Inspect the excerpt that the final claim actually cites.', findings }],
+            lessons: [],
+        })] }, projection);
+
+        assert.deepEqual(validated.issues, []);
+        assert.deepEqual(validated.entries[0].steps[0].supports.map(support => support.evidenceId), ['E2', 'E2']);
+        assert.deepEqual(validated.entries[0].targetPaths, ['src/ui/memoryWebviewPolicy.ts']);
+    });
+
+    it('rejects a same-path step when the selected claim cites no matching evidence instead of binding the first excerpt', () => {
+        // Verify same-path evidence without claim provenance fails the step and does not produce a fallback support binding.
+        const episodes = makeClaimBoundEvidenceEpisodes().map(episode => ({
+            ...episode,
+            claims: episode.claims.map(claim => ({ ...claim, evidenceRefs: ['E999'] })),
+        }));
+        const group = buildConsolidationGroups(episodes, []).find(item => item.seedId === episodes[0].id)!;
+        const projection = projectConsolidation([group]);
+        const observationIds = [...projection.observations.keys()];
+        const invalid = validateConsolidation({ groups: [finding(group, {
+            existingEntryId: null,
+            situation: 'A step cannot use an evidence item that its claim does not cite.',
+            steps: [{ sourceId: sourceForObservationEvidence(projection, observationIds[0], 'E1'), symbol: null,
+                purpose: 'Require explicit source provenance for the selected claim.',
+                findings: observationIds.map(observationId => ({ observationId, questionIndex: 0, claimIndex: 0 })) }],
+            lessons: [],
+        })] }, projection);
+
+        assert.equal(invalid.entries.length, 0);
+        assert.match(invalid.issues.join('\n'), /entries\.0\.steps\.0\.findings\.0: route support O1\(V1\) requires a recorded questionIndex and a retained non-omit claimIndex citing its matching source evidence/);
+        assert.equal(invalid.issues.some(issue => issue.includes('must be a successful matching tool observation')), false);
+    });
+
     it('requires each step and lesson to cite two distinct snapshots', () => {
         // Verify repeated observations from one snapshot cannot satisfy the independent support rule.
         const episodes = [
@@ -208,7 +325,18 @@ describe('memory consolidation validation', () => {
             lessons: [],
         })] }, projection);
         assert.equal(invalid.entries.length, 0);
-        assert.match(invalid.issues.join('\n'), /at least two independent V\* snapshots/);
+        assert.match(invalid.issues.join('\n'), /entries\.0\.steps\.0\.findings: selected O1\(V1\), O2\(V1\) cover 1\/2 independent V\* snapshots/);
+        assert.doesNotMatch(invalid.issues.join('\n'), /Too small: expected number to be >=2/);
+
+        const invalidLesson = validateConsolidation({ groups: [finding(group, {
+            existingEntryId: null,
+            situation: 'A single snapshot must not become a durable lesson.',
+            steps: [],
+            lessons: [lessonFor(projection)],
+        })] }, projection);
+        assert.equal(invalidLesson.entries.length, 0);
+        assert.match(invalidLesson.issues.join('\n'), /entries\.0\.lessons\.0\.observationIds: selected O1\(V1\), O2\(V1\) cover 1\/2 independent V\* snapshots/);
+        assert.doesNotMatch(invalidLesson.issues.join('\n'), /Too small: expected number to be >=2/);
     });
 
     it('requires successful matching source path, symbol, and tool for every step finding', () => {
@@ -218,6 +346,15 @@ describe('memory consolidation validation', () => {
         const projection = projectConsolidation([group]);
         const observations = observationsFor(projection, 'searchCode');
         const sourceId = sourceForObservation(projection, observations[0]);
+        const mismatched = projection.observations.get(observations[1])!;
+        mismatched.observation = {
+            ...mismatched.observation,
+            tool: 'readFileContent',
+            arguments: { ...mismatched.observation.arguments, filePath: 'src/services/memory/service.ts', symbol: 'actualSymbol' },
+            evidence: mismatched.observation.evidence.map(evidence => ({
+                ...evidence, source: { ...evidence.source, path: 'src/services/memory/service.ts', excerpt: 'actual excerpt' },
+            })),
+        };
         const invalid = validateConsolidation({ groups: [finding(group, {
             existingEntryId: null,
             situation: 'Invalid source matching must fail validation.',
@@ -225,7 +362,10 @@ describe('memory consolidation validation', () => {
                 findings: findingsFor(projection, observations) }], lessons: [],
         })] }, projection);
         assert.equal(invalid.entries.length, 0);
-        assert.match(invalid.issues.join('\n'), /successful matching tool observation/);
+        const issues = invalid.issues.join('\n');
+        assert.match(issues, /entries\.0\.steps\.0\.findings\.0: O2\(V1\).*expected path "src\/ui\/memoryWebviewPolicy\.ts", symbol "missingSymbol", and tool "searchCode"; actual paths are \["src\/ui\/memoryWebviewPolicy\.ts"\], actual symbol argument is "filterMemoryLogsForWebview", and actual tool is "searchCode"/);
+        assert.match(issues, /entries\.0\.steps\.0\.findings\.1: O5\(V2\).*expected path "src\/ui\/memoryWebviewPolicy\.ts", symbol "missingSymbol", and tool "searchCode"; actual paths are \["src\/services\/memory\/service\.ts"\], actual symbol argument is "actualSymbol", and actual tool is "readFileContent"/);
+        assert.doesNotMatch(invalid.issues.join('\n'), /Too small: expected number to be >=2/);
     });
 
     it('requires the complete ordered route to occur in two independent investigations', () => {
@@ -246,7 +386,7 @@ describe('memory consolidation validation', () => {
         });
         const invalid = validateConsolidation({ groups: [raw] }, projection);
         assert.equal(invalid.entries.length, 0);
-        assert.match(invalid.issues.join('\n'), /complete route must occur in order/);
+        assert.match(invalid.issues.join('\n'), /entries\.0\.steps: the complete route must occur in order within investigations from two independent snapshots; matched 1\/2/);
     });
 
     it('rejects non-final or unrelated claims for a positive step', () => {
@@ -265,7 +405,7 @@ describe('memory consolidation validation', () => {
             }], lessons: [],
         })] }, projection);
         assert.equal(invalid.entries.length, 0);
-        assert.match(invalid.issues.join('\n'), /claim.*reference|claim.*source|non-omit/i);
+        assert.match(invalid.issues.join('\n'), /entries\.0\.steps\.0\.findings\.0: route support O2\(V1\) requires a recorded questionIndex and a retained non-omit claimIndex citing its matching source evidence/);
     });
 
     it('rejects legacy concerns, oversized arrays, unknown handles, and empty experiences', () => {
@@ -288,11 +428,13 @@ describe('memory consolidation validation', () => {
                 { observationId: 'O1', questionIndex: 0, claimIndex: 0 }, { observationId: 'O999', questionIndex: 0, claimIndex: 0 },
             ],
         }], lessons: [] })] }, projection);
-        assert.match(unknown.issues.join('\n'), /Unknown observation O999/);
+        assert.match(unknown.issues.join('\n'), /entries\.0\.steps\.0\.findings\.1: unknown observation O999\./);
+        assert.doesNotMatch(unknown.issues.join('\n'), /Too small: expected number to be >=2/);
         assert.equal(validateConsolidation({ groups: [{ groupId: group.id, outcome: 'findings', rationale: 'No entries is invalid.', entries: [], retirements: [] }] }, projection).issues.length > 0, true);
 
         const empty = validateConsolidation({ groups: [finding(group, { existingEntryId: null, situation: 'No step or lesson.', steps: [], lessons: [] })] }, projection);
-        assert.match(empty.issues.join('\n'), /needs steps or lessons/);
+        assert.deepEqual(empty.issues, ['entries.0: an experience needs at least one step or lesson.']);
+        assert.doesNotMatch(empty.issues.join('\n'), /Too small: expected number to be >=2/);
     });
 
     it('updates an existing H1 entry while preserving its persistent identifier', () => {
@@ -365,7 +507,15 @@ describe('memory retirement validation', () => {
                 findings: [{ ...validFindings[0], sourceId: 'S999' }, validFindings[1]] }],
         }] }, projection);
         assert.equal(unknownSource.entries.length, 0);
-        assert.match(unknownSource.issues.join('\n'), /counterevidence.*bind/i);
+        assert.match(unknownSource.issues.join('\n'), /retirements\.0\.findings\.0: retirement counterevidence O1\(V1\) must bind to one of its S\* sources; S999 was not supplied\./);
+
+        const mismatchedOwner = validateConsolidation({ groups: [{
+            groupId: group.id, outcome: 'findings', rationale: 'The source owner must match the observation.', entries: [],
+            retirements: [{ existingEntryId: 'H1', reason: 'A source owned by another observation is invalid.', replacementEntryIndex: null,
+                findings: [{ ...validFindings[0], sourceId: validFindings[1].sourceId }, validFindings[1]] }],
+        }] }, projection);
+        assert.equal(mismatchedOwner.entries.length, 0);
+        assert.match(mismatchedOwner.issues.join('\n'), /retirements\.0\.findings\.0: retirement counterevidence O1\(V1\) must bind to one of its S\* sources; S3 belongs to O4\(V2\) at path "src\/ui\/memoryWebviewPolicy\.ts" on side "after"/);
 
         const unrelatedClaim = validateConsolidation({ groups: [{
             groupId: group.id, outcome: 'findings', rationale: 'Unrelated claim must be rejected.', entries: [],
@@ -373,7 +523,7 @@ describe('memory retirement validation', () => {
                 findings: [{ ...validFindings[0], claimIndex: 1 }, validFindings[1]] }],
         }] }, projection);
         assert.equal(unrelatedClaim.entries.length, 0);
-        assert.match(unrelatedClaim.issues.join('\n'), /counterevidence.*claim|retirement.*claim/i);
+        assert.match(unrelatedClaim.issues.join('\n'), /retirements\.0\.findings\.0: retirement support O1\(V1\) requires successful after-tree counterevidence with a recorded question and retained claim citing S1 at path "src\/ui\/memoryWebviewPolicy\.ts"; actual side is "after" and actual tool is "readFileContent"/);
 
         const oneSnapshot = validateConsolidation({ groups: [{
             groupId: group.id, outcome: 'findings', rationale: 'One snapshot must be rejected.', entries: [],
@@ -382,7 +532,7 @@ describe('memory retirement validation', () => {
                     { ...findingsFor(projection, [observations[0]])[0], sourceId: sourceForObservation(projection, observations[0]) }] }],
         }] }, projection);
         assert.equal(oneSnapshot.entries.length, 0);
-        assert.match(oneSnapshot.issues.join('\n'), /two independent V\* snapshots/);
+        assert.match(oneSnapshot.issues.join('\n'), /retirements\.0\.findings: selected O1\(V1\), O1\(V1\) cover 1\/2 independent V\* snapshots/);
     });
 
     it('links a retirement to a replacement entry from the same proposal', () => {
@@ -563,6 +713,42 @@ function findingsFor(projection: ReturnType<typeof projectConsolidation>, observ
 
 function sourceForObservation(projection: ReturnType<typeof projectConsolidation>, observationId: string): string {
     return [...projection.sources.entries()].find(([, value]) => value.observationId === observationId)![0];
+}
+
+function findingForEvidence(projection: ReturnType<typeof projectConsolidation>, observationId: string, evidenceId: string): {
+    observationId: string; questionIndex: number; claimIndex: number;
+} {
+    const item = projection.observations.get(observationId);
+    if (!item) { throw new Error(`Missing test observation ${observationId}.`); }
+    const claimIndex = item.episode.claims.findIndex(claim => claim.disposition !== 'omit' && claim.evidenceRefs.includes(evidenceId));
+    if (claimIndex < 0) { throw new Error(`Test observation ${observationId} has no claim for ${evidenceId}.`); }
+    return { observationId, questionIndex: 0, claimIndex };
+}
+
+function sourceForObservationEvidence(projection: ReturnType<typeof projectConsolidation>, observationId: string, evidenceId: string): string {
+    const source = [...projection.sources.entries()].find(([, value]) => value.observationId === observationId && value.evidence.id === evidenceId);
+    if (!source) { throw new Error(`Missing source for ${observationId}/${evidenceId}.`); }
+    return source[0];
+}
+
+function makeClaimBoundEvidenceEpisodes(): InvestigationEpisode[] {
+    const targetPath = 'src/ui/memoryWebviewPolicy.ts';
+    return [1, 2].map(index => {
+        const episode = makeEpisode({ episodeId: uuidFor(index), snapshotId: digestFor(index), changedPaths: [targetPath],
+            changedSymbols: ['filterMemoryLogsForWebview'], sourcePath: targetPath, tool: 'readFileContent', observations: [makeObservation({
+                step: 0, tool: 'readFileContent', path: targetPath, excerpt: 'first excerpt without the selected claim marker',
+                summary: 'Read two excerpts from the filtering entry point.', symbol: 'filterMemoryLogsForWebview',
+            })] });
+        const secondEvidence = { id: 'E2', source: makeSource(episode.snapshot, targetPath, 'second excerpt cited by the selected final claim') };
+        return {
+            ...episode,
+            observations: [{ ...episode.observations[0], evidence: [...episode.observations[0].evidence, secondEvidence] }],
+            claims: [
+                { claim: 'The first excerpt provides context.', evidenceRefs: ['E1'], disposition: 'must_express' as const },
+                { claim: 'The second excerpt supports the selected finding.', evidenceRefs: ['E2'], disposition: 'must_express' as const },
+            ],
+        };
+    });
 }
 
 function makeRouteEpisodes(options: {

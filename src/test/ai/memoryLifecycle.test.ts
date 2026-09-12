@@ -596,11 +596,16 @@ describe('repository memory lifecycle', function () {
     it('records validation-failed attempt metadata before a successful consolidation retry', async () => {
         // A validation failure before the final attempt must report attempt less than totalAttempts before the successful retry.
         let sessionRuns = 0;
+        let initialMessages: Array<{ role: string; content: string }> = [];
+        const requests: AIRunRequest[] = [];
         const attempts: Array<{ attempt: number; totalAttempts: number; issues: string[] }> = [];
         const execution = makeExecution(16_000, {
             maxRetries: 1,
-            createSession: () => ({
-                run: async (): Promise<any> => {
+            createSession: messages => {
+                initialMessages = messages;
+                return {
+                run: async (request: AIRunRequest): Promise<any> => {
+                    requests.push(request);
                     sessionRuns += 1;
                     return {
                         text: '',
@@ -612,7 +617,8 @@ describe('repository memory lifecycle', function () {
                         raw: {},
                     };
                 },
-            }) as any,
+                } as any;
+            },
             accountCall: async () => ({ status: 'usage-not-reported' as const }),
         });
         const runner = createConsolidationRunner(execution, undefined, (attempt, totalAttempts, issues) => {
@@ -634,6 +640,17 @@ describe('repository memory lifecycle', function () {
             { attempt: 2, totalAttempts: 2, issues: [] },
         ]);
         assert.ok(attempts[0].attempt < attempts[0].totalAttempts);
+        const systemPrompt = initialMessages.find(message => message.role === 'system')?.content ?? '';
+        assert.match(systemPrompt, /eligibleStepRoutes is application-derived/);
+        assert.match(systemPrompt, /Create a step only from one listed same-tool\/same-path route/);
+        assert.match(systemPrompt, /If eligibleStepRoutes is empty, steps must be empty/);
+        assert.equal(requests.length, 2);
+        const retryPrompt = requests[1].messages?.map(message => message.content).join('\n') ?? '';
+        assert.match(retryPrompt, /Treat each reported entries\.N\.steps\.M, entries\.N\.lessons\.M, or retirements\.N path as the exact invalid item/);
+        assert.match(retryPrompt, /Delete that item unless the supplied data contains a directly valid correction/);
+        assert.match(retryPrompt, /Do not add replacement steps merely to preserve the previous narrative/);
+        assert.match(retryPrompt, /After deleting invalid items, delete any entry with no remaining step or lesson/);
+        assert.match(retryPrompt, /If no supported entry or retirement remains, return no-findings with empty entries and retirements/);
     });
 
     it('reuses execution-bound thinking for consolidation and never puts thinking on the run request', async () => {

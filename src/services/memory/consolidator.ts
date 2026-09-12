@@ -27,6 +27,11 @@ export interface ConsolidationProjection {
     observations: Map<string, GroupObservation>;
     sources: Map<string, { observationId: string; evidence: RecordedObservation['evidence'][number] }>;
     existing: Map<string, HandbookEntry>;
+    eligibleStepRoutes: Array<{
+        operation: string;
+        path: string;
+        findings: Array<{ observationId: string; snapshot: string; sourceIds: string[]; claimIndices: number[] }>;
+    }>;
 }
 export interface ConsolidationValidation {
     entries: HandbookEntry[];
@@ -138,11 +143,44 @@ export function projectConsolidation(groups: ConsolidationGroup[]): Consolidatio
                     usedByClaims: episode.claims.flatMap((claim, index) => claim.evidenceRefs.includes(evidence.id)
                         ? [{ index, text: claim.claim, disposition: claim.disposition }] : []) };
             });
-            return { id, step: item.observation.step, tool: item.observation.tool, arguments: item.observation.arguments,
+            return { id, snapshot: `V${snapshotIds.indexOf(episode.snapshot.id) + 1}`,
+                step: item.observation.step, tool: item.observation.tool, arguments: item.observation.arguments,
                 ok: item.observation.ok, summary: item.observation.summary, error: item.observation.error,
                 truncated: item.observation.truncated, evidence };
         }),
     }));
+    // Expose only route bases that already have source-backed retained claims in
+    // two snapshots. The model still decides question relevance and any symbol,
+    // but it no longer has to infer whether a same-tool/same-path route exists.
+    const routeCandidates = new Map<string, Map<string, {
+        observationId: string; snapshot: string; sourceIds: Set<string>; claimIndices: Set<number>;
+    }>>();
+    for (const [sourceId, source] of sources) {
+        const item = observations.get(source.observationId)!;
+        if (!item.observation.ok) { continue; }
+        const claimIndices = item.episode.claims.flatMap((claim, index) =>
+            claim.disposition !== 'omit' && claim.evidenceRefs.includes(source.evidence.id) ? [index] : []);
+        if (!claimIndices.length) { continue; }
+        const key = JSON.stringify([item.observation.tool, source.evidence.source.path]);
+        const findings = routeCandidates.get(key) ?? new Map();
+        const snapshot = `V${snapshotIds.indexOf(item.episode.snapshot.id) + 1}`;
+        const finding = findings.get(source.observationId) ?? {
+            observationId: source.observationId, snapshot, sourceIds: new Set<string>(), claimIndices: new Set<number>(),
+        };
+        finding.sourceIds.add(sourceId);
+        for (const claimIndex of claimIndices) { finding.claimIndices.add(claimIndex); }
+        findings.set(source.observationId, finding);
+        routeCandidates.set(key, findings);
+    }
+    const eligibleStepRoutes = [...routeCandidates].flatMap(([key, findings]) => {
+        const [operation, targetPath] = JSON.parse(key) as [string, string];
+        const values = [...findings.values()];
+        if (new Set(values.map(value => value.snapshot)).size < REQUIRED_INDEPENDENT_SNAPSHOTS) { return []; }
+        return [{ operation, path: targetPath, findings: values.map(value => ({
+            observationId: value.observationId, snapshot: value.snapshot,
+            sourceIds: [...value.sourceIds], claimIndices: [...value.claimIndices],
+        })) }];
+    });
     const oldEntries = group.existing.map(entry => {
         const id = `H${existing.size + 1}`; existing.set(id, entry);
         const supportHandles = (supports: MemorySupport[]) => supports.map(support => {
@@ -160,8 +198,9 @@ export function projectConsolidation(groups: ConsolidationGroup[]): Consolidatio
                 replacementEntryId: entry.retirement.replacementEntryId,
             } : null };
     });
-    return { input: JSON.stringify({ groups: [{ id: group.id, seed: 'T1', episodes: projectedEpisodes, existing: oldEntries }] }),
-        groups, observations, sources, existing };
+    return { input: JSON.stringify({ groups: [{ id: group.id, seed: 'T1',
+        eligibleStepRoutes, episodes: projectedEpisodes, existing: oldEntries }] }),
+        groups, observations, sources, existing, eligibleStepRoutes };
 }
 
 export function validateConsolidation(raw: unknown, projection: ConsolidationProjection): ConsolidationValidation {
@@ -169,6 +208,9 @@ export function validateConsolidation(raw: unknown, projection: ConsolidationPro
     const parsed = consolidationProposalSchema.safeParse(raw);
     if (!parsed.success) { result.issues = parsed.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`); return result; }
     const group = projection.groups[0];
+    const snapshotIds = [...new Set(group.episodes.map(episode => episode.snapshot.id))];
+    const snapshotFor = (item: GroupObservation): string => `V${snapshotIds.indexOf(item.episode.snapshot.id) + 1}`;
+    const describeObservation = (id: string, item: GroupObservation): string => `${id}(${snapshotFor(item)})`;
     const proposal = parsed.data.groups[0];
     if (proposal.groupId !== group.id) { result.issues.push('The supplied seed group ID must be returned.'); return result; }
     if ((proposal.outcome === 'findings') !== (proposal.entries.length + proposal.retirements.length > 0)) {
@@ -178,43 +220,63 @@ export function validateConsolidation(raw: unknown, projection: ConsolidationPro
     const duplicate = new Set<string>();
     const validatedByProposalIndex = new Map<number, HandbookEntry>();
     for (const [index, entry] of proposal.entries.entries()) {
+        const entryLabel = `entries.${index}`;
         const issues: string[] = [];
-        const resolve = (handles: string[]): GroupObservation[] => {
-            if (new Set(handles).size !== handles.length) { issues.push('Repeated observation handles are not independent support.'); }
-            const selected = handles.flatMap(id => {
-                const source = projection.observations.get(id);
-                if (!source) { issues.push(`Unknown observation ${id}.`); return []; }
-                return [source];
+        const resolve = (label: string, handles: string[]): Array<{
+            observationId: string; item: GroupObservation; selectionIndex: number;
+        }> => {
+            if (new Set(handles).size !== handles.length) {
+                issues.push(`${label}: repeated observation handles are not independent support.`);
+            }
+            const selected = handles.flatMap((id, selectionIndex) => {
+                const item = projection.observations.get(id);
+                if (!item) { issues.push(`${label}.${selectionIndex}: unknown observation ${id}.`); return []; }
+                return [{ observationId: id, item, selectionIndex }];
             });
-            if (new Set(selected.map(item => item.episode.snapshot.id)).size < 2) { issues.push('Each item requires at least two independent V* snapshots.'); }
+            const snapshots = new Set(selected.map(value => value.item.episode.snapshot.id));
+            if (snapshots.size < REQUIRED_INDEPENDENT_SNAPSHOTS) {
+                const handlesBySnapshot = selected.map(value => describeObservation(value.observationId, value.item)).join(', ') || 'none';
+                issues.push(`${label}: selected ${handlesBySnapshot} cover ${snapshots.size}/${REQUIRED_INDEPENDENT_SNAPSHOTS} independent V* snapshots; each item requires at least two independent V* snapshots.`);
+            }
             return selected;
         };
         const routeObservations: GroupObservation[][] = [];
-        const steps = entry.steps.map(step => {
+        const steps = entry.steps.map((step, stepIndex) => {
+            const stepLabel = `${entryLabel}.steps.${stepIndex}`;
             const handles = step.findings.map(finding => finding.observationId);
-            const selected = resolve(handles); routeObservations.push(selected);
+            const selected = resolve(`${stepLabel}.findings`, handles);
+            routeObservations.push(selected.map(value => value.item));
             const source = projection.sources.get(step.sourceId);
-            if (!source || !handles.includes(source.observationId)) { issues.push(`Step source ${step.sourceId} must belong to its supporting observations.`); }
+            if (!source || !handles.includes(source.observationId)) {
+                issues.push(`${stepLabel}.sourceId: step source ${step.sourceId} must belong to its supporting observations.`);
+            }
             const target = source?.evidence.source.path ?? '';
             const tool = source ? projection.observations.get(source.observationId)!.observation.tool : '';
-            const supports = selected.map((item, supportIndex) => {
-                const matching = item.observation.evidence.find(evidence => evidence.source.path === target
-                    && (!step.symbol || evidence.source.excerpt.includes(step.symbol)
-                        || Object.values(item.observation.arguments).includes(step.symbol)));
-                if (!item.observation.ok || !matching || item.observation.tool !== tool) { issues.push('Every route support must be a successful matching tool observation of the target and symbol.'); }
-                const finding = step.findings[supportIndex];
+            const supports = selected.map(({ observationId, item, selectionIndex }) => {
+                const findingLabel = `${stepLabel}.findings.${selectionIndex}`;
+                const finding = step.findings[selectionIndex];
                 const question = item.episode.questions[finding.questionIndex];
                 const claim = item.episode.claims[finding.claimIndex];
+                const matchingEvidence = item.observation.evidence.filter(evidence => evidence.source.path === target
+                    && (!step.symbol || evidence.source.excerpt.includes(step.symbol)
+                        || Object.values(item.observation.arguments).includes(step.symbol)));
+                const matching = matchingEvidence.find(evidence => claim?.evidenceRefs.includes(evidence.id));
+                if (!item.observation.ok || !matchingEvidence.length || item.observation.tool !== tool) {
+                    const actualPaths = [...new Set(item.observation.evidence.map(evidence => evidence.source.path))];
+                    const actualSymbol = typeof item.observation.arguments.symbol === 'string'
+                        ? item.observation.arguments.symbol : null;
+                    issues.push(`${findingLabel}: ${describeObservation(observationId, item)} must be a successful matching tool observation with expected path ${JSON.stringify(target)}, symbol ${JSON.stringify(step.symbol)}, and tool ${JSON.stringify(tool)}; actual paths are ${JSON.stringify(actualPaths)}, actual symbol argument is ${JSON.stringify(actualSymbol)}, and actual tool is ${JSON.stringify(item.observation.tool)}.`);
+                }
                 // This proves a recorded question/source/finding association, not semantic correctness.
                 if (!question?.trim() || !claim?.claim.trim() || claim.disposition === 'omit'
                     || !matching || !claim.evidenceRefs.includes(matching.id)) {
-                    issues.push('A route support requires a recorded question and a retained final claim citing its source evidence.');
+                    issues.push(`${findingLabel}: route support ${describeObservation(observationId, item)} requires a recorded questionIndex and a retained non-omit claimIndex citing its matching source evidence.`);
                 }
                 return { ...item.support, ...(matching ? { evidenceId: matching.id } : {}),
                     questionIndex: finding.questionIndex, claimIndex: finding.claimIndex };
             });
             return { path: target, ...(step.symbol ? { symbol: step.symbol } : {}), purpose: step.purpose, operation: tool,
-                supports, snapshotCount: new Set(selected.map(item => item.episode.snapshot.id)).size };
+                supports, snapshotCount: new Set(selected.map(value => value.item.episode.snapshot.id)).size };
         });
         if (steps.length > 1) {
             const routeSnapshots = new Set<string>();
@@ -228,18 +290,28 @@ export function validateConsolidation(raw: unknown, projection: ConsolidationPro
                 });
                 if (ordered) { routeSnapshots.add(episode.snapshot.id); }
             }
-            if (routeSnapshots.size < 2) { issues.push('The complete route must occur in order within investigations from two independent snapshots.'); }
+            if (routeSnapshots.size < 2) {
+                issues.push(`${entryLabel}.steps: the complete route must occur in order within investigations from two independent snapshots; matched ${routeSnapshots.size}/${REQUIRED_INDEPENDENT_SNAPSHOTS}.`);
+            }
         }
-        const lessons = entry.lessons.map(lesson => {
-            const selected = resolve(lesson.observationIds);
+        const lessons = entry.lessons.map((lesson, lessonIndex) => {
+            const selected = resolve(`${entryLabel}.lessons.${lessonIndex}.observationIds`, lesson.observationIds);
             return { observation: lesson.observation, implication: lesson.implication, limitation: lesson.limitation,
-                supports: selected.map(item => item.support), snapshotCount: new Set(selected.map(item => item.episode.snapshot.id)).size };
+                supports: selected.map(value => value.item.support),
+                snapshotCount: new Set(selected.map(value => value.item.episode.snapshot.id)).size };
         });
+        if (!steps.length && !lessons.length) {
+            issues.push(`${entryLabel}: an experience needs at least one step or lesson.`);
+        }
         const old = entry.existingEntryId === null ? undefined : projection.existing.get(entry.existingEntryId);
-        if (entry.existingEntryId && (!old || updated.has(old.id))) { issues.push('An update requires a supplied, uniquely selected H* entry.'); }
+        if (entry.existingEntryId && (!old || updated.has(old.id))) {
+            issues.push(`${entryLabel}.existingEntryId: an update requires a supplied, uniquely selected H* entry.`);
+        }
         if (old) { updated.add(old.id); }
         const all = [...steps, ...lessons].flatMap(item => item.supports);
-        if (!all.some(support => support.episodeId === group.seedId)) { issues.push('An experience must be grounded in the seed investigation.'); }
+        if (all.length && !all.some(support => support.episodeId === group.seedId)) {
+            issues.push(`${entryLabel}: an experience must be grounded in the seed investigation T1.`);
+        }
         const referenced = all.map(support => ({ support, item: group.observations.find(item =>
             item.support.episodeId === support.episodeId && item.support.observationIndex === support.observationIndex)! }));
         const targetPaths = [...new Set(referenced.flatMap(({ support, item }) => item.observation.evidence
@@ -248,53 +320,75 @@ export function validateConsolidation(raw: unknown, projection: ConsolidationPro
         const triggers = [...new Set([...targetPaths, ...referenced.flatMap(({ item }) => ['symbol', 'query', 'filePath', 'dirPath']
             .flatMap(key => typeof item.observation.arguments[key] === 'string' && item.observation.arguments[key]
                 ? [item.observation.arguments[key] as string] : []))])];
-        const checked = handbookEntrySchema.safeParse({ id: old?.id ?? randomUUID(), situation: entry.situation,
-            retirement: null, steps, lessons, targetPaths, triggers });
-        if (!checked.success) { issues.push(...checked.error.issues.map(issue => issue.message)); }
         const identity = JSON.stringify([entry.situation.toLowerCase(), entry.steps, entry.lessons]);
-        if (duplicate.has(identity)) { issues.push('Duplicate experience in the same result.'); }
+        if (duplicate.has(identity)) { issues.push(`${entryLabel}: duplicate experience in the same result.`); }
         duplicate.add(identity);
-        if (issues.length) { result.issues.push(...issues.map(issue => `entries.${index}: ${issue}`)); }
-        else if (checked.success) { result.entries.push(checked.data); validatedByProposalIndex.set(index, checked.data); }
+        const checked = issues.length ? undefined : handbookEntrySchema.safeParse({
+            id: old?.id ?? randomUUID(), situation: entry.situation,
+            retirement: null, steps, lessons, targetPaths, triggers,
+        });
+        if (checked && !checked.success) {
+            issues.push(...checked.error.issues.map(issue => `${entryLabel}${issue.path.length ? `.${issue.path.join('.')}` : ''}: ${issue.message}`));
+        }
+        if (issues.length) { result.issues.push(...issues); }
+        else if (checked?.success) { result.entries.push(checked.data); validatedByProposalIndex.set(index, checked.data); }
     }
     for (const [index, retirement] of proposal.retirements.entries()) {
+        const retirementLabel = `retirements.${index}`;
         const issues: string[] = [];
         const old = projection.existing.get(retirement.existingEntryId);
-        if (!old || updated.has(old.id)) { issues.push('A retirement requires a supplied H* entry that is not updated or retired elsewhere in the result.'); }
+        if (!old || updated.has(old.id)) {
+            issues.push(`${retirementLabel}.existingEntryId: a retirement requires a supplied H* entry that is not updated or retired elsewhere in the result.`);
+        }
         const seen = new Set<string>();
-        const selected = retirement.findings.flatMap(finding => {
-            if (seen.has(finding.observationId)) { issues.push('Repeated observation handles are not independent retirement support.'); }
+        const selected = retirement.findings.flatMap((finding, findingIndex) => {
+            const findingLabel = `${retirementLabel}.findings.${findingIndex}`;
+            if (seen.has(finding.observationId)) {
+                issues.push(`${findingLabel}.observationId: repeated observation handles are not independent retirement support.`);
+            }
             seen.add(finding.observationId);
             const item = projection.observations.get(finding.observationId);
             const source = projection.sources.get(finding.sourceId);
             if (!item || !source || source.observationId !== finding.observationId) {
-                issues.push('Retirement counterevidence must bind an O* observation to one of its S* sources.'); return [];
+                const observation = item ? describeObservation(finding.observationId, item) : `${finding.observationId}(unknown snapshot)`;
+                const sourceOwner = source ? projection.observations.get(source.observationId) : undefined;
+                const sourceContext = source
+                    ? `${finding.sourceId} belongs to ${sourceOwner ? describeObservation(source.observationId, sourceOwner) : source.observationId} at path ${JSON.stringify(source.evidence.source.path)} on side ${JSON.stringify(source.evidence.source.side)}`
+                    : `${finding.sourceId} was not supplied`;
+                issues.push(`${findingLabel}: retirement counterevidence ${observation} must bind to one of its S* sources; ${sourceContext}.`); return [];
             }
             const evidence = source.evidence;
             const question = item.episode.questions[finding.questionIndex];
             const claim = item.episode.claims[finding.claimIndex];
             if (!item.observation.ok || evidence.source.side !== 'after' || !question?.trim() || !claim?.claim.trim()
                 || claim.disposition === 'omit' || !claim.evidenceRefs.includes(evidence.id)) {
-                issues.push('Retirement requires successful after-tree counterevidence with a recorded question and retained claim citing that source.');
+                issues.push(`${findingLabel}: retirement support ${describeObservation(finding.observationId, item)} requires successful after-tree counterevidence with a recorded question and retained claim citing ${finding.sourceId} at path ${JSON.stringify(evidence.source.path)}; actual side is ${JSON.stringify(evidence.source.side)} and actual tool is ${JSON.stringify(item.observation.tool)}.`);
             }
-            return [{ item, support: { ...item.support, evidenceId: evidence.id,
+            return [{ observationId: finding.observationId, item, support: { ...item.support, evidenceId: evidence.id,
                 questionIndex: finding.questionIndex, claimIndex: finding.claimIndex } }];
         });
         const snapshotCount = new Set(selected.map(value => value.item.episode.snapshot.id)).size;
-        if (snapshotCount < REQUIRED_INDEPENDENT_SNAPSHOTS) { issues.push('Retirement requires counterevidence from two independent V* snapshots.'); }
-        if (!selected.some(value => value.item.episode.id === group.seedId)) { issues.push('Retirement must be grounded in the seed investigation.'); }
+        if (snapshotCount < REQUIRED_INDEPENDENT_SNAPSHOTS) {
+            const handlesBySnapshot = selected.map(value => describeObservation(value.observationId, value.item)).join(', ') || 'none';
+            issues.push(`${retirementLabel}.findings: selected ${handlesBySnapshot} cover ${snapshotCount}/${REQUIRED_INDEPENDENT_SNAPSHOTS} independent V* snapshots; retirement requires two independent V* snapshots.`);
+        }
+        if (!selected.some(value => value.item.episode.id === group.seedId)) {
+            issues.push(`${retirementLabel}: retirement must be grounded in the seed investigation T1.`);
+        }
         const replacement = retirement.replacementEntryIndex === null ? undefined
             : validatedByProposalIndex.get(retirement.replacementEntryIndex);
         if (retirement.replacementEntryIndex !== null && !replacement) {
-            issues.push('Retirement replacementEntryIndex must select a valid entry from this result.');
+            issues.push(`${retirementLabel}.replacementEntryIndex: must select a valid entry from this result.`);
         }
-        if (old && replacement?.id === old.id) { issues.push('A retired experience cannot replace itself.'); }
-        const checked = old ? handbookEntrySchema.safeParse({ ...old, retirement: {
+        if (old && replacement?.id === old.id) { issues.push(`${retirementLabel}: a retired experience cannot replace itself.`); }
+        const checked = old && !issues.length ? handbookEntrySchema.safeParse({ ...old, retirement: {
             reason: retirement.reason, supports: selected.map(value => value.support), snapshotCount,
             replacementEntryId: replacement?.id ?? null,
         } }) : undefined;
-        if (checked && !checked.success) { issues.push(...checked.error.issues.map(issue => issue.message)); }
-        if (issues.length) { result.issues.push(...issues.map(issue => `retirements.${index}: ${issue}`)); }
+        if (checked && !checked.success) {
+            issues.push(...checked.error.issues.map(issue => `${retirementLabel}${issue.path.length ? `.${issue.path.join('.')}` : ''}: ${issue.message}`));
+        }
+        if (issues.length) { result.issues.push(...issues); }
         else if (checked?.success) { updated.add(checked.data.id); result.entries.push(checked.data); }
     }
     // Independent entries may publish after the final retry; invalid entries never replace history.
