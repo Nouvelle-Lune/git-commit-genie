@@ -1,171 +1,148 @@
 <div align="center">
 
+<img src="./media/Genie.png" width="112" alt="Git Commit Genie" />
+
 # Git Commit Genie
 
-Chinese version: [中文说明](./docs/README.zh-CN.md)
+Generates a commit message from your staged Git changes and writes it into the Source Control input box.
+
+[![Marketplace version](https://vsmarketplacebadges.dev/version/Lune-99.git-commit-genie.svg?label=marketplace&color=007ec6)](https://marketplace.visualstudio.com/items?itemName=Lune-99.git-commit-genie)
+[![Marketplace installs](https://vsmarketplacebadges.dev/installs/Lune-99.git-commit-genie.svg?label=installs&color=4c1)](https://marketplace.visualstudio.com/items?itemName=Lune-99.git-commit-genie)
+[![Marketplace rating](https://vsmarketplacebadges.dev/rating-star/Lune-99.git-commit-genie.svg?label=rating&color=dfb317)](https://marketplace.visualstudio.com/items?itemName=Lune-99.git-commit-genie)
+[![Open VSX version](https://img.shields.io/open-vsx/v/Lune-99/git-commit-genie?label=open-vsx&color=007ec6)](https://open-vsx.org/extension/Lune-99/git-commit-genie)
+[![Open VSX downloads](https://img.shields.io/open-vsx/dt/Lune-99/git-commit-genie?label=downloads&color=4c1)](https://open-vsx.org/extension/Lune-99/git-commit-genie)
+[![Open VSX rating](https://img.shields.io/open-vsx/rating/Lune-99/git-commit-genie?label=rating&color=dfb317)](https://open-vsx.org/extension/Lune-99/git-commit-genie)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
+English | [简体中文](https://github.com/Nouvelle-Lune/git-commit-genie/blob/main/docs/README.zh-CN.md)
+
+<img src="./media/demo1.gif" width="820" alt="Generating a commit message from staged changes" />
 
 </div>
 
-## Overview
+## What it does
 
-Git Commit Genie analyzes your staged Git diff and generates high‑quality Conventional Commits style messages using supported LLM adapters (OpenAI, Anthropic, Google Gemini, and custom endpoints implementing OpenAI Chat Completions). Features intelligent repository analysis that understands your project structure and tech stack to provide better context for commit generation. Supports optional multi‑step Thinking mode and user template strategy to improve structural consistency and style alignment.
+Git Commit Genie generates a commit message from the changes you have staged, using OpenAI, Anthropic Claude, Google Gemini or any OpenAI-compatible endpoint. Messages follow [Conventional Commits 1.0.0](https://www.conventionalcommits.org/en/v1.0.0/) by default, and can follow a template kept in your repository.
 
-<table style="width: 100%; border-spacing: 10px;">
-  <tr>
-    <td width="50%" align="center" style="vertical-align: top;">
-      <strong>Commit message generate</strong><br/><br/>
-      <img src="./media/demo1.gif" width="100%" alt="Usage Demo" style="display: block;"/>
-    </td>
-    <td width="50%" rowspan="2" align="center" style="vertical-align: top;">
-      <strong>Log dashboard</strong><br/><br/>
-      <img src="./media/dashboard-view.png" width="100%" alt="Dashboard view" style="display: block;"/>
-    </td>
-  </tr>
-  <tr>
-    <td align="center" style="vertical-align: top;">
-      <strong>Status Bar Display</strong><br/><br/>
-      <img src="./media/status-bar.png" width="100%" alt="Status Bar" style="display: block;"/>
-    </td>
-  </tr>
-</table>
+Generation runs as a pipeline:
 
-## Format
+| Stage | Description |
+| --- | --- |
+| Evidence | Summarizes each staged file in parallel, together with repository context. |
+| Investigation | Plans questions about the change and answers them with lookups for definitions, callers, callees, types, configuration and tests. |
+| Draft | Writes one message from the evidence, your template, repository memory and RAG style references. |
+| Verify | Checks the draft against Conventional Commits and your template, applies minimal fixes and enforces the target language. |
 
-By default, generated commit messages follow the Conventional Commits 1.0.0 specification. See the spec: https://www.conventionalcommits.org/en/v1.0.0/
+The pipeline is controlled by `gitCommitGenie.chain.enabled` and is enabled by default. Disabling it generates the message from a single prompt, which is faster and cheaper for small commits.
 
-Basic format:
-```
-<type>[optional scope]: <description>
+The pipeline is independent from the model's own reasoning level: the pipeline decides how many stages run, while `gitCommitGenie.defaultThinkingLevel` decides how much the model reasons inside each call.
 
-[optional body]
+## Installation
 
-[optional footer(s)]
+Install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=Lune-99.git-commit-genie) or [Open VSX](https://open-vsx.org/extension/Lune-99/git-commit-genie), or run:
+
+```bash
+code --install-extension Lune-99.git-commit-genie
 ```
 
-## Tips
+Editors that use Open VSX instead of the Microsoft Marketplace, such as VSCodium, Cursor, Windsurf and Trae, can install the Open VSX build from their Extensions view.
 
-- Small or trivial commits: prefer a lightweight, fast model to speed up generation and reduce token usage.
-- Large, multi‑file commits: consider switching to a stronger model for better analysis and structure.
-- You can switch models anytime via "Git Commit Genie: Manage Models".
-- Toggle Thinking quickly via "Git Commit Genie: Enable / Disable thinking mode".
+Requirements: VS Code 1.103 or newer, the built-in Git extension, and an API key for the provider or endpoint you choose.
 
-## Core Features
+## Usage
 
-| Feature                         | Description                                                                                                                                                                                                                                                                                                            |
-| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Multi‑provider LLM support      | Supports OpenAI, Anthropic, Google Gemini, and custom providers that implement OpenAI Chat Completions.                                                                                                                                                                                                               |
-| Repository Intelligence         | AI-powered repository analysis agent that autonomously explores your codebase using intelligent tools; automatically understands project structure, tech stack, and architecture to provide contextual insights for better commit messages; supports manual refresh, real-time updates, and editable analysis reports. |
-| RAG (Retrieval-Augmented Generation) | Builds a local index of historical commit messages and retrieves style references via hybrid search (dense embeddings + BM25 keyword) to keep generated commit message style consistent with the repository. Requires an OpenAI-compatible embedding API. Supports incremental indexing and background repair. |
-| Thinking Mode                   | Optional multi‑step pipeline: per‑file summaries → structured synthesis → validation & minimal fix‑ups (improves accuracy & template adherence).                                                                                                                                                                       |
-| User Template Strategy          | Built-in template selection and creation, supports workspace and user data directory storage, extracts strategy affecting structure, required footers, and vocabulary preferences.                                                                                                                                     |
-| Conventional Commit Enforcement | Header validation (type, optional scope, optional `!`, ≤ 72 chars, imperative, no trailing period).                                                                                                                                                                                                                    |
-| Diff Awareness                  | Only staged changes are analyzed; intelligently classifies type (`feat`, `fix`, `docs`, `refactor`, etc.).                                                                                                                                                                                                             |
-| Status Bar Integration          | Shows current model and analysis status, click to access feature menu.                                                                                                                                                                                                                                                 |
-| Cancellation                    | Cancel in‑progress generation directly from the SCM title bar button.                                                                                                                                                                                                                                                  |
-| Secure Secret Storage           | API keys stored in VS Code secret storage (not in settings JSON).                                                                                                                                                                                                                                                      |
-| Internationalization            | Built‑in English, Simplified Chinese, Traditional Chinese, and more.                                                                                                                                                                                                                                                   |
-| Stage Progress                  | Status-bar progress that shows the current Thinking stage without opening a notification.                                                                                                                                                                                                                              |
+1. Run `Git Commit Genie: Manage Models`, add a provider and paste its API key. Keys are stored in VS Code SecretStorage, not in `settings.json`.
+2. Stage your changes.
+3. Click the Genie icon in the Source Control title bar, or run `Git Commit Genie: Generate commit message`.
+4. Review the message in the commit box, edit it if needed, and commit.
 
-## How It Works
+`Git Commit Genie: Menu` opens the pipeline toggle, model management and repository memory.
 
-1. You stage your changes.
-2. Run command: `Git Commit Genie: Generate commit message` (SCM toolbar button or Command Palette).
-3. Result is injected into the repository input box—review / tweak / commit.
+## Features
 
+- Conventional Commits output, validated before it is written to the commit box.
+- Providers: OpenAI, Anthropic Claude and Google Gemini, plus custom OpenAI-compatible endpoints such as DeepSeek, Qwen, GLM, Kimi, OpenRouter and local vLLM, SGLang or llama.cpp servers.
+- Thinking levels from `off` to `max`, set globally or per model.
+- Commit message languages: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`.
+- Extension UI in English, Simplified Chinese and Traditional Chinese.
+- Generate and cancel from the Source Control title bar; progress is shown in the status bar.
+- Optional repository investigation, repository memory and RAG style index (see [Advanced features](#advanced-features)).
+- Per-repository cost tracking (see [Panel and cost](#panel-and-cost)).
+- Templates for body structure, footers and vocabulary (see [Templates](#templates)).
+
+### Example output
+
+```
+feat(scm): add per-repository cost tracking to the Genie panel
+
+- Record token usage and estimated cost for every generation
+- Show accumulated spend next to each repository in the panel
+- Keep the pipeline log available for the current session
+
+Refs: #142
+```
+
+The structure depends on your template. Without a template, Genie follows Conventional Commits 1.0.0.
+
+## Panel and cost
+
+The Genie panel in the Source Control sidebar lists the repositories in your workspace with their accumulated cost, and a log of pipeline stages and model calls.
+
+<img src="./media/dashboard-view.png" width="430" alt="Genie panel with repository list, costs and pipeline log" />
+
+While a message is generating, the status bar shows the current model and stage.
+
+<img src="./media/status-bar.png" width="430" alt="Status bar showing the current model and generation stage" />
+
+## Templates
+
+Templates are Markdown files stored in `.gitgenie/templates` in the workspace, or in your user template folder. Genie extracts the body layout, required footers and vocabulary preferences from the template and applies them while drafting and validating the message.
+
+<img src="./media/demo2.gif" width="600" alt="Creating and selecting a commit template" />
+
+Guides: [English](https://github.com/Nouvelle-Lune/git-commit-genie/blob/main/docs/user-template-guide.md) and [中文](https://github.com/Nouvelle-Lune/git-commit-genie/blob/main/docs/user-template-guide.zh-CN.md).
+
+## Advanced features
+
+**Repository investigation** is enabled by default. When the diff alone is ambiguous, the pipeline plans questions about the change and answers them from the repository: definitions, callers, configuration and tests. The number of lookups is bounded by `gitCommitGenie.chain.investigation.maxSteps`, and paths can be excluded with `gitCommitGenie.chain.investigation.excludePatterns`.
+
+**Repository memory** is off by default. With `gitCommitGenie.memory.enabled`, Genie records what its investigations learned into local, per-repository storage and recalls it for similar changes later. Consolidation runs while the editor is idle. Use `Git Commit Genie: Manage Repository Memory` to inspect, rebuild or clear it.
+
+**RAG style index** is off by default. With `gitCommitGenie.rag.enabled`, Genie indexes your historical commit messages locally and retrieves style references for new messages. It requires an OpenAI-compatible embeddings endpoint; configure it with `Git Commit Genie: Configure RAG Embedding API Key`.
 
 ## Configuration
 
-All settings are under: `Git Commit Genie`.
+Commonly changed settings:
 
-| Setting                                             | Type    | Default   | Description                                                                                                                                                                                                                                                         |
-| --------------------------------------------------- | ------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `gitCommitGenie.autoStageAllForDiff`                | boolean | false     | Only when the staging area is empty: temporarily stage all changes to build the diff, then restore your staging state. Use with caution—this may include unrelated changes in the prompt.                                                                           |
-| `gitCommitGenie.chain.enabled`                      | boolean | false     | Enable multi-step Thinking mode for commit generation (more detailed and accurate, better template adherence, but higher latency and token usage).                                                                                                                  |
-| `gitCommitGenie.chain.maxParallel`                  | number  | 2         | Maximum parallel LLM calls used by Thinking mode across all providers. Increase carefully to avoid provider rate limits.                                                                                                                                            |
-| `gitCommitGenie.chain.contextWindowTokens`          | integer | 128000    | Model context window for Thinking mode. Built-in models are detected automatically and clamped to their registered limit; change only for Custom endpoints. Input, output, and safety margins are allocated from this single budget.                                                                       |
-| `gitCommitGenie.defaultThinkingLevel`               | enum    | `off`     | Global thinking level applied to every foreground and background model call for supported models. Models without configurable thinking stay off. Custom OpenAI-compatible models inherit it automatically; only non-standard endpoints need Manage Models → Advanced thinking compatibility. Unsupported official levels fail instead of being rewritten. |
-| `gitCommitGenie.modelThinkingLevels`                | object  | `{}`      | Optional per-model overrides. Keys use `provider/model`; values use a thinking level. Example: `{ "openai/gpt-5.4": "high", "custom/Qwen3.5-9B": "low" }`. Missing keys inherit the global level. Once an execution starts, that model's resolved level is reused for every stage. Custom models may also use a provider-native non-empty value such as `VERY_HIGH`. |
-| `gitCommitGenie.thinkingBudgets`                    | object  | see below | Numeric token budgets used by Anthropic/Google and custom endpoints explicitly configured with an advanced local-engine budget field. Ordinary OpenAI-compatible provider models do not need this setting. Defaults: `1024/4096/10240/32768/65536/131072`. |
-| `gitCommitGenie.llm.maxRetries`                     | number  | 2         | Max retry attempts for API request failures.                                                                                                                                                                                                                        |
-| `gitCommitGenie.llm.temperature`                    | number  | 1         | Temperature (0–2). Default 1. Some provider/model combinations only accept 1; changing this value may trigger invalid-temperature errors or less stable outputs.                                                                                                  |
-| `gitCommitGenie.rag.enabled`                        | boolean | false     | Enable RAG to keep commit message generation style consistent (requires sufficient historical commits to build a local style index). Configure the embedding API key first via the "Configure RAG Embedding API Key" command.                                   |
-| `gitCommitGenie.rag.embedding.baseUrl`              | string  | `""`      | Base URL for the embeddings API used by RAG. Must be compatible with OpenAI SDK format.                                                                                                                                                                        |
-| `gitCommitGenie.rag.embedding.model`                | string  | `""`      | Embedding model used by RAG.                                                                                                                                                                                                                                    |
-| `gitCommitGenie.rag.embedding.dimensions`           | number  | 0         | Optional embedding dimensions used by RAG (0 = auto-detect).                                                                                                                                                                                                     |
-| `gitCommitGenie.rag.embedding.batchSize`            | number  | 10        | Batch size used when RAG generates embeddings (1–512).                                                                                                                                                                                                           |
-| `gitCommitGenie.repositoryAnalysis.enabled`         | boolean | true      | Enable repository analysis to provide better context for commit message generation.                                                                                                                                                                                 |
-| `gitCommitGenie.repositoryAnalysis.excludePatterns` | array   | []        | File patterns to exclude from repository analysis scanning (gitignore-style).                                                                                                                                                                                       |
-| `gitCommitGenie.repositoryAnalysis.updateThreshold` | number  | 10        | Number of commits after which to update the repository analysis.                                                                                                                                                                                                    |
-| `gitCommitGenie.repositoryAnalysis.MaxCount`        | number  | unlimited | Maximum number of analysis steps allowed during repository exploration. Set to -1 for unlimited steps (default).                                                                                                                                                    |
-| `gitCommitGenie.repositoryAnalysis.model`           | enum    | general   | Model used for repository analysis. Pick any supported model across providers; the provider automatically switches to match your selection. Choose "Use default model" to reuse your main commit message model. You can configure this via "Manage Models" command. |
-| `gitCommitGenie.commitLanguage`                     | string  | `auto`    | Target language for generated commit messages. Options: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`.                                                                                                                             |
-| `gitCommitGenie.typingAnimationSpeed`               | number  | 15        | Speed of the commit message box typing animation in milliseconds per character. Set to -1 to disable the animation.                                                                                                                                                 |
-| `gitCommitGenie.showUsageCost`                      | boolean | true      | When enabled, a brief notification displays the estimated total cost for the current generation.                                                                                                                                                                    |
-| `gitCommitGenie.ui.stageNotifications.enabled`      | boolean | true      | Show Thinking stage progress in the VS Code status bar.                                                                                                                                                                                                            |
+| Setting | Default | Description |
+| --- | --- | --- |
+| `gitCommitGenie.chain.enabled` | `true` | Multi-stage pipeline; disable for single-prompt generation |
+| `gitCommitGenie.commitLanguage` | `auto` | Target language for commit messages |
+| `gitCommitGenie.defaultThinkingLevel` | `off` | Thinking level for supported models |
+| `gitCommitGenie.memory.enabled` | `false` | Repository memory |
+| `gitCommitGenie.rag.enabled` | `false` | RAG style index |
+| `gitCommitGenie.autoStageAllForDiff` | `false` | Stage all changes when the staging area is empty |
 
-Native model reasoning and the extension's `gitCommitGenie.chain.enabled` multi-step commit-generation pipeline are independent settings. The model level controls provider request parameters; the chain setting controls how many plugin stages run.
+All commands and every setting are documented in the [Commands & Settings reference](https://github.com/Nouvelle-Lune/git-commit-genie/blob/main/docs/reference.md).
 
-Custom OpenAI Chat Completions endpoints use one adapter with a Pi-style thinking format. Select `Off / unsupported` for a model without thinking support; it sends no native thinking parameter. The default `openai` format sends `reasoning_effort`; local Qwen/vLLM endpoints can use `qwen` (`enable_thinking`) or `qwen-chat-template` (`chat_template_kwargs.enable_thinking`); generic local templates can use `chat-template`. DeepSeek, OpenRouter, Together, z.ai, Baseten, string-thinking, and AntLing formats are also available when editing a custom model. Thinking levels remain global or per-model settings; the format is only the endpoint's serialization rule.
+## Privacy
 
-Thinking mode uses one resolved level for the whole execution: every chain stage, agent turn, schema retry, RAG call, and repository-memory consolidation reuses the same session-bound config. Official models reject unsupported levels instead of rewriting them; Custom endpoints keep the configured value verbatim and surface provider errors if the endpoint rejects it. Oversized raw evidence is summarized only after the measured prompt crosses the compression trigger; those summaries are reused, and secondary tightening is deterministic. This limits repeated LLM compression cost. A provider-reported output-length failure is never treated as an input problem: reasoning exhaustion asks you to raise `chain.contextWindowTokens` or lower thinking, while an ambiguous Custom `finish_reason=length` stops without a blind retry.
+- API keys are stored in VS Code SecretStorage and are not written to `settings.json` or the logs.
+- Only staged changes are analyzed. `gitCommitGenie.autoStageAllForDiff` is the exception; it restores your staging state afterwards.
+- With investigation enabled, Genie reads files inside the repository and sends the findings it selects to the model provider you configured. Build outputs, dependency directories and lockfiles are excluded by default, and you can add exclusions.
+- RAG sends historical commit messages to the embeddings endpoint you configure.
+- Repository memory is stored in VS Code's local global storage and is not uploaded.
+- The extension collects no analytics or telemetry.
 
+## Contributing
 
-## Commands
-
-Search these in the Command Palette:
-
-- Git Commit Genie: Generate commit message
-- Git Commit Genie: Stop generate (visible during generation)
-- Git Commit Genie: Manage Models
-- Git Commit Genie: Enable / Disable thinking mode
-- Git Commit Genie: Select/Create Template
-- Git Commit Genie: View Repository Analysis (opens analysis as editable Markdown)
-- Git Commit Genie: Refresh Repository Analysis (triggers new analysis)
-- Git Commit Genie: Clear Repository Analysis Cache (clears analysis cache)
-- Git Commit Genie: Cancel Repository Analysis (cancels analysis process)
-- Git Commit Genie: Configure RAG Embedding API Key (stores embedding API key in SecretStorage)
-- Git Commit Genie: Clear RAG Embedding API Key (removes embedding API key)
-- Git Commit Genie: Start RAG Indexing (indexes all historical commits for style retrieval)
-- Git Commit Genie: Stop RAG Indexing (cancels in-progress indexing)
-- Git Commit Genie: Menu
-- Git Commit Genie: Show Repository Cost
-- Git Commit Genie: Reset Repository Cost
-
-SCM Title Bar shows “Generate commit message” or “Stop generate” depending on state.
-
-## Template Authoring
-Using command `Git Commit Genie: Select/Create Template`to select or create a template file.
-
-<img src="./media/demo2.gif" width="600"/>
-
-When present & non‑empty, Genie attempts to extract a "Template Policy".
-
-Full guides: [English](./docs/user-template-guide.md) | [中文](./docs/user-template-guide.zh-CN.md)
-
-Minimum example:
-```
-Minimal Template
-- Always include a body with Summary and Changes.
-- Use imperative, no trailing period.
-- Always include a `Refs` footer (use `Refs: N/A` when missing).
-- Prefer: add, fix, refactor; Avoid: update.
-```
-
-## Security & Privacy
-
-- API keys stored via VS Code SecretStorage (not written to disk config in plain text).
-- Only staged diffs (file names & hunks) are sent; no untracked or unstaged changes.
-- No analytics/telemetry are collected by this extension.
+Issues and pull requests: https://github.com/Nouvelle-Lune/git-commit-genie.
 
 ## License
 
-MIT
+[MIT](./LICENSE)
 
 ## Acknowledgements
 
-- [Conventional Commits](https://conventionalcommits.org/) - https://github.com/conventional-commits/conventionalcommits.org
-- OpenAI / Anthropic / Google Gemini / OpenAI Chat Completions-compatible model ecosystems.
-
----
-
-Never suffer through writing commit messages again.
+- [Conventional Commits](https://www.conventionalcommits.org/)
+- OpenAI, Anthropic and Google Gemini, and the OpenAI-compatible model ecosystem.
