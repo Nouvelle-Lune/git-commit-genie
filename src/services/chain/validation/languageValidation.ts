@@ -55,7 +55,7 @@ export async function enforceCommitLanguage(
             content: [
                 '<fact_binding_rejected>',
                 `Missing required fact ids: ${missing.join(', ')}.`,
-                'Return the complete JSON object again, preserve every required fact, and list all preserved ids.',
+                'Return the complete JSON object again. Add only the meaning of an id that no part of the translated message entails, and list all preserved ids.',
                 '</fact_binding_rejected>',
             ].join('\n'),
         }];

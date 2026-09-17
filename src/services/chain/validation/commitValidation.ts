@@ -40,7 +40,7 @@ export async function validateAndFixCommit(
             content: [
                 '<fact_binding_rejected>',
                 `The previous response did not bind every required fact. Missing ids: ${missing.join(', ')}.`,
-                'Return the complete JSON object again. Preserve the current message wording where possible, repair only the missing fact coverage, and list every required id in preservedFactIds.',
+                'Return the complete JSON object again. Preserve the current message wording where possible, add only the meaning of an id that no part of the message entails, and list every required id in preservedFactIds.',
                 '</fact_binding_rejected>',
             ].join('\n'),
         }];
@@ -63,6 +63,17 @@ function firstLine(text: string): string {
     return index === -1 ? text : text.slice(0, index);
 }
 
+/**
+ * Checks the part of a commit header that code can settle: its Conventional
+ * Commits shape.
+ *
+ * The 72-character limit is deliberately NOT checked here. It is a style
+ * preference that the generation and validation prompts already carry, and
+ * enforcing it in code turned a preference into a hard outcome: a second
+ * validate-fix request plus a warning badge on a message that was otherwise
+ * correct. Length is left to the prompts' judgement, where a slightly long
+ * header costs a nudge rather than a repair round.
+ */
 export function checkConventionalCommitHeader(message: string): { ok: boolean; problems: string[] } {
     const problems: string[] = [];
     const header = firstLine(message).trim();
@@ -70,9 +81,6 @@ export function checkConventionalCommitHeader(message: string): { ok: boolean; p
 
     if (!headerPattern.test(header)) {
         problems.push('Header must match <type>[optional scope][!]: <description>.');
-    }
-    if (header.length > 72) {
-        problems.push('Header length must be <= 72 characters.');
     }
 
     return { ok: problems.length === 0, problems };

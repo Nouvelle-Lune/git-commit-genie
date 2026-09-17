@@ -41,6 +41,33 @@ describe('commit language fixer fact preservation', () => {
         assert.match(messages[1][0].content, /Missing required fact ids: C1/);
     });
 
+    it('authorizes the language fixer to restore only facts no part of the message entails', async () => {
+        // Verify the retry request keeps the literal missing-id list and authorizes adding the meaning of a fact
+        // that no part of the translated message entails, while still forbidding wording expansion. The previous
+        // tail sentence "preserve the meaning of every required fact without expanding the wording" was replaced
+        // by the reviewer fix: a retry only happens when a fact really is missing, so "preserve without expanding"
+        // plus "list every id" left the fixer no legal move and the meaning was dropped while the id was reported.
+        const messages: AIMessage[][] = [];
+        const execution = executionFor([
+            { commitMessage: 'fix(parser): 输入规范化', preservedFactIds: [] },
+            { commitMessage: 'fix(parser): 将输入规范化', preservedFactIds: ['C1'] },
+        ], undefined, messages);
+
+        await enforceCommitLanguage(
+            'fix(parser): normalize input',
+            'zh',
+            execution,
+            undefined,
+            { requiredFacts: [{ id: 'C1', text: 'normalizes input' }], optionalFacts: [] },
+        );
+
+        const retry = messages[1][0].content;
+        assert.match(retry, /Missing required fact ids: C1/);
+        assert.match(retry, /Add only the meaning of an id that no part of the translated message entails, and list all preserved ids\./);
+        assert.doesNotMatch(retry, /preserve the meaning of every required fact without expanding the wording/);
+        assert.doesNotMatch(retry, /preserve every required fact, and list all preserved ids/);
+    });
+
     it('throws when language-fixer retries are exhausted without preserved ids', async () => {
         // Verify an unbound required fact is an explicit language-stage failure rather than a silent rewrite.
         const execution = executionFor([

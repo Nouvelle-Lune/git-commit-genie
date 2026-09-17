@@ -4,7 +4,7 @@
 - Header: imperative, concise, no trailing period, length <= 72 chars
 - Blank lines: exactly one between header/body and between body/footers (when present)
 - Language policy: narrative text (description, body, footer values) follows target language; do NOT translate `<type>` or footer tokens
-- Body: optional, plain text or bullets; keep bullets concise; if a template specifies sections or bullet style, follow it
+- Body: omitted by default; justified only by a distinct fact the header cannot carry, or by a user template that mandates one. When present, plain text or bullets, keep bullets concise; if a template specifies sections or bullet style, follow it. Flag a body that only restates the header unless a template requires a body
 - Footers: `Token: value` format; use `-` in tokens (except `BREAKING CHANGE`)
 - Breaking change: either `!` in header or `BREAKING CHANGE: <details>` footer
 - Multiple footers allowed; `BREAKING-CHANGE` is synonymous with `BREAKING CHANGE`
