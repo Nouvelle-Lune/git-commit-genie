@@ -55,7 +55,6 @@ export class OpenAIService extends BaseLLMService {
 
     public listSupportedModels(): string[] {
         return [
-            'gpt-6-astra',
             'gpt-5.4-mini',
             'gpt-5.6-sol',
             'gpt-5.6-terra',

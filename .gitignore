@@ -37,7 +37,6 @@ src/test/
 !src/test/chain/chainChatPrompts.test.ts
 !src/test/llm/
 !src/test/llm/providers/
-!src/test/llm/providers.modelTables.test.ts
 !src/test/llm/providers/schemas/
 !src/test/llm/providers/schemas/common.test.ts
 !src/test/llm/providers/schemas/anthropicSchemas.test.ts

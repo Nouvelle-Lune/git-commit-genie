@@ -1,14 +1,5 @@
 # Changelog
 
-## [3.3.0]
-- feat: Added the latest supported OpenAI GPT-6 Astra / GPT-5.6, Claude Fable 5.1, Gemini 3.8/3.7 Flash, DeepSeek V4.1 Flash, Qwen 3.8 Max/Flash, GLM 5.3/5.3-Flash, and Kimi K2.7 Code Highspeed models.
-- fix: Removed retired or scheduled-for-retirement Gemini 3 Flash preview, Qwen 3.6 Flash, and DeepSeek V4 Flash model entries.
-- fix: Updated provider context limits, OpenRouter aliases, and official token pricing. DeepSeek peak/off-peak rates are recorded at the off-peak price, and OpenAI long-context requests are priced with the 2x input / 1.5x output multiplier above 272K tokens.
-- fix: Repository analysis model settings now list only models the providers currently serve, dropping retired Claude Opus 4.1, Gemini 3 Pro preview, Qwen 3 Max/Coder Plus, GLM 4.5, and Kimi K2/K2.5 entries.
-- feat: Added budget-aware evidence compaction and pipeline visibility, keeping raw diffs within the configured input budget while preserving deterministic RAG features and exposing localized pipeline stages in the webview.
-- fix: Hardened structured output handling and retries across Anthropic, Gemini, and OpenAI responses.
-- fix: Separated evidence compaction failures from RAG preparation failures so the pipeline reports each stage accurately.
-
 ## [3.2.2]
 - fix: Prevented duplicate `Repository Analysis Summary` headings when generated or synchronized analysis content already contains the file title.
 

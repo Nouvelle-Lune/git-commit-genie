@@ -87,11 +87,10 @@ export class QwenService extends OpenAIChatCompletionsService {
 
     public listSupportedModels(): string[] {
         return [
-            'qwen3.8-max',
-            'qwen3.8-flash',
             'qwen3.7-max',
             'qwen3.7-plus',
             'qwen3.7-flash',
+            'qwen3.6-flash',
             'qwen3.5-plus',
             'qwen3.5-flash',
             'qwen-plus',
