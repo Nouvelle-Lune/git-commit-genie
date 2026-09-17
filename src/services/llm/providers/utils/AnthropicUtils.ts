@@ -12,6 +12,7 @@ import { ProviderError } from '../errors/providerError';
  * required instead of sending the extension-wide configured value.
  */
 export const ANTHROPIC_FIXED_SAMPLING_MODELS: ReadonlySet<string> = new Set([
+    'claude-fable-5-1',
     'claude-fable-5',
     'claude-opus-5',
     'claude-sonnet-5',

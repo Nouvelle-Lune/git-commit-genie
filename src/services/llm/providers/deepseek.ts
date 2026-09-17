@@ -20,7 +20,7 @@ export class DeepSeekService extends OpenAIChatCompletionsService {
 
     public listSupportedModels(): string[] {
         return [
-            'deepseek-v4-flash',
+            'deepseek-flash',
             'deepseek-v4-pro'
         ];
     }
