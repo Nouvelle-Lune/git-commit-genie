@@ -51,10 +51,7 @@ export const OPENROUTER_MODEL_ALIAS_MAP: Readonly<Record<string, string>> = Obje
     'google/gemini-2.5-pro': 'gemini-2.5-pro',
 
     // Qwen family
-    // OpenRouter serves the dated Qwen3.8 Max snapshot (1M context); it never listed a
-    // plain `qwen/qwen3.8-max`, and a key that no request can match would show up in the
-    // model picker as a selectable id that always fails upstream.
-    'qwen/qwen3.8-max-0902': 'qwen3.8-max',
+    'qwen/qwen3.8-max': 'qwen3.8-max',
     'qwen/qwen3.8-flash': 'qwen3.8-flash',
     'qwen/qwen3.7-max': 'qwen3.7-max',
     'qwen/qwen3.7-plus': 'qwen3.7-plus',
@@ -76,10 +73,8 @@ export const OPENROUTER_MODEL_ALIAS_MAP: Readonly<Record<string, string>> = Obje
 
     // Kimi family
     'moonshotai/kimi-k3': 'kimi-k3',
-    // `kimi-k2.7-code-highspeed` is served by Moonshot's own platform and by other
-    // gateways, but OpenRouter does not carry it, so it is absent here on purpose:
-    // every key in this map is an OpenRouter request id offered in the picker.
     'moonshotai/kimi-k2.7-code': 'kimi-k2.7-code',
+    'moonshotai/kimi-k2.7-code-highspeed': 'kimi-k2.7-code-highspeed',
     'moonshotai/kimi-k2.6': 'kimi-k2.6'
 });
 
