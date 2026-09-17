@@ -6,13 +6,7 @@
 
 根据已暂存的 Git 改动生成提交信息，并写入源代码管理输入框。
 
-[![Marketplace version](https://vsmarketplacebadges.dev/version/Lune-99.git-commit-genie.svg?label=marketplace&color=007ec6)](https://marketplace.visualstudio.com/items?itemName=Lune-99.git-commit-genie)
-[![Marketplace installs](https://vsmarketplacebadges.dev/installs/Lune-99.git-commit-genie.svg?label=installs&color=4c1)](https://marketplace.visualstudio.com/items?itemName=Lune-99.git-commit-genie)
-[![Marketplace rating](https://vsmarketplacebadges.dev/rating-star/Lune-99.git-commit-genie.svg?label=rating&color=dfb317)](https://marketplace.visualstudio.com/items?itemName=Lune-99.git-commit-genie)
-[![Open VSX version](https://img.shields.io/open-vsx/v/Lune-99/git-commit-genie?label=open-vsx&color=007ec6)](https://open-vsx.org/extension/Lune-99/git-commit-genie)
-[![Open VSX downloads](https://img.shields.io/open-vsx/dt/Lune-99/git-commit-genie?label=downloads&color=4c1)](https://open-vsx.org/extension/Lune-99/git-commit-genie)
-[![Open VSX rating](https://img.shields.io/open-vsx/rating/Lune-99/git-commit-genie?label=rating&color=dfb317)](https://open-vsx.org/extension/Lune-99/git-commit-genie)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/Nouvelle-Lune/git-commit-genie/blob/main/LICENSE)
+[![Marketplace version](https://vsmarketplacebadges.dev/version/Lune-99.git-commit-genie.png?label=marketplace&color=007ec6)](https://marketplace.visualstudio.com/items?itemName=Lune-99.git-commit-genie) [![Marketplace installs](https://vsmarketplacebadges.dev/installs/Lune-99.git-commit-genie.png?label=installs&color=4c1)](https://marketplace.visualstudio.com/items?itemName=Lune-99.git-commit-genie) [![Marketplace rating](https://vsmarketplacebadges.dev/rating-star/Lune-99.git-commit-genie.png?label=rating&color=dfb317)](https://marketplace.visualstudio.com/items?itemName=Lune-99.git-commit-genie) [![Open VSX version](https://img.shields.io/open-vsx/v/Lune-99/git-commit-genie.png?label=open-vsx&color=007ec6)](https://open-vsx.org/extension/Lune-99/git-commit-genie) [![Open VSX downloads](https://img.shields.io/open-vsx/dt/Lune-99/git-commit-genie.png?label=downloads&color=4c1)](https://open-vsx.org/extension/Lune-99/git-commit-genie) [![Open VSX rating](https://img.shields.io/open-vsx/rating/Lune-99/git-commit-genie.png?label=rating&color=dfb317)](https://open-vsx.org/extension/Lune-99/git-commit-genie) [![License: MIT](https://img.shields.io/badge/license-MIT-blue.png)](https://github.com/Nouvelle-Lune/git-commit-genie/blob/main/LICENSE)
 
 [English](https://github.com/Nouvelle-Lune/git-commit-genie/blob/main/README.md) | 简体中文
 

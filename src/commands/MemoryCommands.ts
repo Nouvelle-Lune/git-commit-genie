@@ -9,7 +9,9 @@ import { buildConsolidationGroups } from '../services/memory/consolidator';
 import type { ConsolidationGroup, GroupOutcome } from '../services/memory/consolidator';
 import { resolveInvestigationSettings } from '../services/analysis/change/investigation/config';
 import type { HandbookEntry, InvestigationEpisode } from '../services/memory/types';
+import type { MemoryView } from '../services/memory/store';
 import { formatRecheckGroupReport } from '../ui/memoryExperienceReport';
+import { formatMemoryOverviewReport } from '../ui/memoryOverviewReport';
 
 interface RecheckGroupItem extends vscode.QuickPickItem {
     path: string;
@@ -18,14 +20,11 @@ interface RecheckGroupItem extends vscode.QuickPickItem {
 
 /** Read-only inspection plus explicit repository-scoped maintenance commands. */
 export class MemoryCommands {
-    private readonly documents = new Map<string, string>();
     private readonly evidencePanels = new Map<string, vscode.WebviewPanel>();
+    private readonly overviewPanels = new Map<string, vscode.WebviewPanel>();
     constructor(private readonly context: vscode.ExtensionContext, private readonly services: ServiceRegistry) {}
 
     register(): void {
-        this.context.subscriptions.push(vscode.workspace.registerTextDocumentContentProvider('genie-memory', {
-            provideTextDocumentContent: uri => this.documents.get(uri.toString()) ?? '',
-        }));
         this.context.subscriptions.push(vscode.commands.registerCommand('git-commit-genie.manageMemory', async () => {
             try { await this.manage(); } catch (error) {
                 const message = vscode.l10n.t('Memory operation failed: {0}', error instanceof Error ? error.message : String(error));
@@ -150,6 +149,29 @@ export class MemoryCommands {
         panel.onDidDispose(() => this.evidencePanels.delete(panelKey), undefined, this.context.subscriptions);
     }
 
+    /** One overview panel per repository so repeated inspection keeps the reader's scroll position. */
+    private openMemoryOverview(repositoryId: string, repository: { label: string; root: string; storage: string }, view: MemoryView): void {
+        const content = formatMemoryOverviewReport(view, {
+            repositoryLabel: repository.label, repositoryRoot: repository.root, repositoryId, storageDirectory: repository.storage,
+        });
+        const existing = this.overviewPanels.get(repositoryId);
+        if (existing) {
+            existing.webview.html = content;
+            existing.reveal(vscode.ViewColumn.Beside, true);
+            return;
+        }
+        const panel = vscode.window.createWebviewPanel(
+            'gitCommitGenie.memoryOverview',
+            vscode.l10n.t('Repository Memory: {0}', repository.label),
+            { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+            { enableScripts: false, retainContextWhenHidden: false },
+        );
+        panel.webview.html = content;
+        this.overviewPanels.set(repositoryId, panel);
+        this.context.subscriptions.push(panel);
+        panel.onDidDispose(() => this.overviewPanels.delete(repositoryId), undefined, this.context.subscriptions);
+    }
+
     private async manage(): Promise<void> {
         const repositories = this.services.getRepoService().getRepositories();
         if (!repositories.length) { throw new Error(vscode.l10n.t('No Git repository is open.')); }
@@ -233,10 +255,10 @@ export class MemoryCommands {
         try {
             if (action.id === 'inspect') {
                 const view = await store.inspect();
-                const uri = vscode.Uri.parse(`genie-memory:/${identity.repositoryId}/${view.generation}.json`);
-                this.documents.clear(); this.documents.set(uri.toString(), JSON.stringify(view, null, 2));
-                await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(uri));
-                message = vscode.l10n.t('Opened {0} episodes and {1} handbook entries (read-only).', view.episodes.length, view.handbook.length);
+                this.openMemoryOverview(identity.repositoryId, {
+                    label: this.services.getRepoService().getRepositoryLabel(selected), root, storage: store.directory,
+                }, view);
+                message = vscode.l10n.t('Opened repository memory: {0} investigation records and {1} long-term memories (read-only).', view.episodes.length, view.handbook.length);
             } else if (action.id === 'clear') {
                 memory.cancel(store.repositoryId); await store.clear();
                 message = vscode.l10n.t('Repository memory permanently cleared. Source files are unchanged; the 24-hour consolidation start allowance was not reset.');

@@ -127,30 +127,85 @@ describe('MemoryCommands repository maintenance', () => {
         }
     });
 
-    it('opens read-only inspection output and releases its spinner before success notification', async () => {
-        // Verify opens read-only inspection output and releases its spinner before success notification.
+    it('opens the read-only memory report and releases its spinner before success notification', async () => {
+        // Inspecting a repository opens the script-free overview webview beside the editor with the stored memory inside it, and the spinner is released before the success notification.
+        const episodes = makeRecheckEpisodes();
+        const handbook = makeRecheckHandbook(episodes);
         const store = makeStore();
-        const view = {
-            epoch: 'epoch', generation: 7, episodes: [{ id: 'episode-1' }], handbook: [{ id: 'entry-1' }], representedSupports: [], consolidated: [], organizedSeeds: [],
-        };
-        store.inspect.resolves(view);
+        store.inspect.resolves({ epoch: 'epoch', generation: 7, episodes, handbook,
+            representedSupports: entrySupports(handbook[0] as unknown as HandbookEntry), consolidated: [], organizedSeeds: [] });
         const memory = makeMemoryService(store);
         const { context } = makeContext();
         stubIdentity(sandbox);
         stubAction(sandbox, 'inspect');
         const statuses = stubStatusBar(sandbox);
         const information = stubInformation(sandbox);
-        sandbox.stub(vscode.workspace, 'openTextDocument').resolves({ uri: vscode.Uri.parse('genie-memory:/test/7.json') } as never);
-        sandbox.stub(vscode.window, 'showTextDocument').resolves(undefined as never);
+        const webview = stubOverviewWebview(sandbox);
+        const openTextDocument = sandbox.stub(vscode.workspace, 'openTextDocument').rejects(new Error('inspection must not open a text document'));
+        const showTextDocument = sandbox.stub(vscode.window, 'showTextDocument').rejects(new Error('inspection must not open a text document'));
 
         await invokeManage(new MemoryCommands(context, makeRegistry(store, memory) as never));
 
         assert.equal(store.inspect.calledOnce, true);
+        assert.equal(openTextDocument.called, false);
+        assert.equal(showTextDocument.called, false);
+        assert.equal(webview.create.calledOnce, true);
+        assert.equal(webview.create.firstCall.args[0], 'gitCommitGenie.memoryOverview');
+        assert.equal(webview.create.firstCall.args[1], 'Repository Memory: memory-command-repository');
+        assert.deepEqual(webview.create.firstCall.args[2], { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true });
+        assert.deepEqual(webview.create.firstCall.args[3], { enableScripts: false, retainContextWhenHidden: false });
+        const report = webview.html();
+        assert.match(report, /<title>Repository Memory: memory-command-repository<\/title>/);
+        assert.match(report, /<h1>memory-command-repository<\/h1>/);
+        assert.match(report, /<strong>4<\/strong><span>Investigation records<\/span>/);
+        assert.match(report, /<strong>1<\/strong><span>Long-term memory<\/span>/);
+        assert.match(report, /Parser handbook conclusion/);
+        assert.match(report, new RegExp(`<dt>Repository ID<\\/dt><dd><code>${escapeRegExp('r'.repeat(64))}<\\/code><\\/dd>`));
+        assert.match(report, new RegExp(`<dt>Repository path<\\/dt><dd><code>${escapeRegExp('/tmp/memory-command-repository')}<\\/code><\\/dd>`));
+        assert.match(report, new RegExp(`<dt>Memory storage<\\/dt><dd><code>${escapeRegExp(store.directory)}<\\/code><\\/dd>`));
+        assert.match(report, new RegExp(`Newest record saved ${escapeRegExp(formatTestRecordedAt(4))}\\.`));
         assert.equal(information.length, 1);
-        assert.match(information[0], /Opened 1 episodes and 1 handbook entries/);
+        assert.match(information[0], /Opened repository memory: 4 investigation records and 1 long-term memories \(read-only\)\./);
         assert.equal(statuses.length, 2);
         assert.equal(statuses[0].message.startsWith('$(sync~spin)'), true);
         assert.equal(statuses[0].disposed, true);
+    });
+
+    it('reuses one overview panel per repository and replaces a disposed one', async () => {
+        // A repeated inspection refreshes the existing panel instead of stacking another tab, a disposed panel is replaced by the next inspection, and both paths still notify the stored counts.
+        const episodes = makeRecheckEpisodes();
+        const handbook = makeRecheckHandbook(episodes);
+        const view = { epoch: 'epoch', generation: 7, episodes, handbook,
+            representedSupports: entrySupports(handbook[0] as unknown as HandbookEntry), consolidated: [], organizedSeeds: [] };
+        const store = makeStore();
+        store.inspect.onFirstCall().resolves(view);
+        store.inspect.onSecondCall().resolves({ ...view, generation: 8 });
+        store.inspect.onThirdCall().resolves({ ...view, generation: 9 });
+        const memory = makeMemoryService(store);
+        const { context } = makeContext();
+        stubIdentity(sandbox);
+        stubAction(sandbox, 'inspect');
+        stubStatusBar(sandbox);
+        const information = stubInformation(sandbox);
+        const webview = stubOverviewWebview(sandbox);
+        const commands = new MemoryCommands(context, makeRegistry(store, memory) as never);
+
+        await invokeManage(commands);
+        assert.equal(webview.create.calledOnce, true);
+        assert.equal(webview.reveal.called, false);
+        assert.match(webview.html(), /<dt>Published generation<\/dt><dd>7<\/dd>/);
+
+        await invokeManage(commands);
+        assert.equal(webview.create.calledOnce, true, 'the second inspection must reuse the open panel');
+        assert.equal(webview.reveal.calledOnce, true);
+        assert.deepEqual(webview.reveal.firstCall.args, [vscode.ViewColumn.Beside, true]);
+        assert.match(webview.html(), /<dt>Published generation<\/dt><dd>8<\/dd>/);
+
+        webview.dispose();
+        await invokeManage(commands);
+        assert.equal(webview.create.calledTwice, true, 'a disposed panel must be replaced on the next inspection');
+        assert.match(webview.html(), /<dt>Published generation<\/dt><dd>9<\/dd>/);
+        assert.equal(information.length, 3);
     });
 
     it('surfaces a structured not-ready consolidation result and releases its spinner', async () => {
@@ -315,6 +370,11 @@ describe('MemoryCommands repository maintenance', () => {
         assert.match(report, /&lt;script&gt;alert\(&quot;x&quot;\)&lt;\/script&gt;/);
         assert.doesNotMatch(report, /<script>alert/);
         assert.match(report, /Truncated result/);
+        assert.match(report, /<dt>Truncated result<\/dt><dd>No<\/dd>/);
+        assert.doesNotMatch(report, /<dt>Truncated result<\/dt><dd>(true|false)<\/dd>/);
+        assert.match(report, /<h4 class="evidence-source">src\/parser\.ts:10–12 · Recorded before the change<\/h4>/);
+        assert.match(report, /<h4 class="evidence-source">src\/parser\.ts:20–22 · Recorded after the change<\/h4>/);
+        assert.doesNotMatch(report, /<h4>src\/parser\.ts:10–12 · before<\/h4>/);
         assert.match(report, /Repository snapshot/);
         assert.match(report, /Recorded arguments/);
 
@@ -599,7 +659,6 @@ describe('MemoryCommands repository maintenance', () => {
             return undefined;
         }) as unknown as typeof vscode.window.showErrorMessage);
         const registered = new Map<string, (...args: unknown[]) => unknown>();
-        sandbox.stub(vscode.workspace, 'registerTextDocumentContentProvider').returns({ dispose() { /* no-op */ } });
         sandbox.stub(vscode.commands, 'registerCommand').callsFake(((id: string, handler: (...args: unknown[]) => unknown) => {
             registered.set(id, handler);
             return { dispose() { /* no-op */ } };
@@ -608,7 +667,7 @@ describe('MemoryCommands repository maintenance', () => {
         new MemoryCommands(context, makeRegistry(store, memory) as never).register();
         await registered.get('git-commit-genie.manageMemory')?.();
 
-        assert.equal(subscriptions.length, 3);
+        assert.equal(subscriptions.length, 2);
         assert.deepEqual(information, []);
         assert.deepEqual(errors, ['Memory operation failed: provider unavailable']);
         assert.match(statuses[statuses.length - 1].message, /Memory operation failed: provider unavailable/);
@@ -674,7 +733,7 @@ describe('MemoryCommands repository maintenance', () => {
             return undefined;
         }) as unknown as typeof vscode.window.showErrorMessage);
         const registered = new Map<string, (...args: unknown[]) => unknown>();
-        sandbox.stub(vscode.workspace, 'registerTextDocumentContentProvider').returns({ dispose() { /* no-op */ } });
+        const contentProvider = sandbox.stub(vscode.workspace, 'registerTextDocumentContentProvider').returns({ dispose() { /* no-op */ } });
         sandbox.stub(vscode.commands, 'registerCommand').callsFake(((id: string, handler: (...args: unknown[]) => unknown) => {
             registered.set(id, handler);
             return { dispose() { /* no-op */ } };
@@ -683,7 +742,9 @@ describe('MemoryCommands repository maintenance', () => {
         new MemoryCommands(context, registry as never).register();
         await registered.get('git-commit-genie.manageMemory')?.();
 
-        assert.equal(subscriptions.length, 3);
+        assert.equal(subscriptions.length, 2);
+        assert.deepEqual([...registered.keys()], ['git-commit-genie.manageMemory', 'git-commit-genie.benchmarkMemory']);
+        assert.equal(contentProvider.called, false, 'inspection no longer publishes read-only documents');
         assert.equal(errors.length, 1);
         assert.match(errors[0], /Memory operation failed: inspect failed/);
         assert.equal(statuses[0].disposed, true, 'the operation spinner must be released on failure');
@@ -920,7 +981,6 @@ function stubRecheckWebview(sandbox: sinon.SinonSandbox): {
         reveal,
         dispose: () => disposeEmitter.fire(),
     } as unknown as vscode.WebviewPanel;
-    sandbox.stub(vscode.workspace, 'registerTextDocumentContentProvider').returns({ dispose() { /* no-op */ } } as never);
     const create = sandbox.stub(vscode.window, 'createWebviewPanel').returns(panel);
     return {
         panel,
@@ -930,37 +990,51 @@ function stubRecheckWebview(sandbox: sinon.SinonSandbox): {
     };
 }
 
+function stubOverviewWebview(sandbox: sinon.SinonSandbox): {
+    panel: vscode.WebviewPanel;
+    create: sinon.SinonStub;
+    reveal: sinon.SinonStub;
+    html(): string;
+    dispose(): void;
+} {
+    const disposeEmitter = new vscode.EventEmitter<void>();
+    const messageEmitter = new vscode.EventEmitter<unknown>();
+    const webview = {
+        html: '',
+        options: { enableScripts: false, retainContextWhenHidden: false },
+        cspSource: 'vscode-webview:',
+        asWebviewUri: (uri: vscode.Uri) => uri,
+        postMessage: async () => true,
+        onDidReceiveMessage: messageEmitter.event,
+    } as unknown as vscode.Webview;
+    const reveal = sandbox.stub();
+    const panel = {
+        viewType: 'gitCommitGenie.memoryOverview',
+        title: '',
+        webview,
+        viewColumn: vscode.ViewColumn.Beside,
+        active: true,
+        visible: true,
+        onDidDispose: disposeEmitter.event,
+        reveal,
+        dispose: () => disposeEmitter.fire(),
+    } as unknown as vscode.WebviewPanel;
+    const create = sandbox.stub(vscode.window, 'createWebviewPanel').returns(panel);
+    return {
+        panel,
+        create,
+        reveal,
+        html: () => panel.webview.html,
+        dispose: () => disposeEmitter.fire(),
+    };
+}
+
 function stubCommandRegistration(sandbox: sinon.SinonSandbox): void {
     sandbox.stub(vscode.commands, 'registerCommand').callsFake((() => ({ dispose() { /* no-op */ } })) as unknown as typeof vscode.commands.registerCommand);
 }
 
 async function flushAsync(): Promise<void> {
     await new Promise<void>(resolve => setImmediate(resolve));
-}
-
-function assertHtmlSupportTrace(
-    report: string,
-    episodeId: string,
-    evidenceId: string,
-    createdAt: number,
-    tool: string,
-    sourcePath: string,
-    startLine: number,
-    endLine: number,
-    snapshotId: string,
-): void {
-    const episodeMarker = `<dd><code>${episodeId}</code></dd>`;
-    const markerIndex = report.indexOf(episodeMarker);
-    assert.ok(markerIndex >= 0, `Missing support episode '${episodeId}'.`);
-    const recordStart = report.lastIndexOf('<details class="evidence-record">', markerIndex);
-    const nextRecord = report.indexOf('<details class="evidence-record">', markerIndex);
-    const block = report.slice(recordStart, nextRecord >= 0 ? nextRecord : undefined);
-    assert.match(block, new RegExp(escapeRegExp(formatTestRecordedAt(createdAt))));
-    assert.match(block, new RegExp(escapeRegExp(`<dd><code>${evidenceId}</code></dd>`)));
-    assert.match(block, new RegExp(escapeRegExp(tool)));
-    assert.match(block, new RegExp(escapeRegExp(`${sourcePath}`)));
-    assert.match(block, new RegExp(escapeRegExp(`lines ${startLine}-${endLine}`)));
-    assert.match(block, new RegExp(escapeRegExp(snapshotId)));
 }
 
 async function readRecheckDetailsHtml(
@@ -1041,6 +1115,7 @@ function makeContext(): { context: vscode.ExtensionContext; subscriptions: { dis
 function makeStore(): any {
     return {
         repositoryId: 'r'.repeat(64),
+        directory: `/tmp/git-commit-genie-memory-command-tests/repository-memory/${'r'.repeat(64)}`,
         inspect: sinon.stub(),
         clear: sinon.stub().resolves(),
         deleteEpisodes: sinon.stub().resolves(1),

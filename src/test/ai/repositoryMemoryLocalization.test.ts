@@ -5,11 +5,13 @@ import { describe, it } from 'mocha';
 
 describe('Repository Memory localization catalogs', () => {
     it('contains every literal Memory command and service message in all locale catalogs', () => {
-        // Verify command, service, and report localization literals are present with identical placeholders in every catalog.
+        // Verify command, service, and report localization literals are present with identical placeholders in every catalog; both the recheck report and the repository overview read their copy from the shared rendering layer, so all three report modules are scanned.
         const sourceFiles = [
             path.resolve(__dirname, '../../../src/commands/MemoryCommands.ts'),
             path.resolve(__dirname, '../../../src/services/memory/service.ts'),
             path.resolve(__dirname, '../../../src/ui/memoryExperienceReport.ts'),
+            path.resolve(__dirname, '../../../src/ui/memoryReportDocument.ts'),
+            path.resolve(__dirname, '../../../src/ui/memoryOverviewReport.ts'),
         ];
         const sourceKeys = new Set<string>();
         for (const sourceFile of sourceFiles) {
