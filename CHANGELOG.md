@@ -1,5 +1,8 @@
 # Changelog
 
+## [3.3.1]
+- fix: Corrected two OpenRouter entries that pointed at model ids OpenRouter does not serve, so the picker no longer offers a selection that always fails upstream. `qwen/qwen3.8-max` is served there as the dated snapshot `qwen/qwen3.8-max-0902`, and `kimi-k2.7-code-highspeed` is not carried by OpenRouter at all — it stays available through the Kimi provider.
+
 ## [3.3.0]
 - feat: Added the latest supported OpenAI GPT-6 Astra / GPT-5.6, Claude Fable 5.1, Gemini 3.8/3.7 Flash, DeepSeek V4.1 Flash, Qwen 3.8 Max/Flash, GLM 5.3/5.3-Flash, and Kimi K2.7 Code Highspeed models.
 - fix: Removed retired or scheduled-for-retirement Gemini 3 Flash preview, Qwen 3.6 Flash, and DeepSeek V4 Flash model entries.

@@ -116,7 +116,7 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'google/gemini-3.1-pro-preview': 1_048_576,
   'google/gemini-2.5-flash': 1_048_576,
   'google/gemini-2.5-pro': 1_048_576,
-  'qwen/qwen3.8-max': 1_000_000,
+  'qwen/qwen3.8-max-0902': 1_000_000,
   'qwen/qwen3.8-flash': 1_000_000,
   'qwen/qwen3.7-max': 1_000_000,
   'qwen/qwen3.7-plus': 1_000_000,
@@ -135,7 +135,6 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'z-ai/glm-4.5-air': 128_000,
   'moonshotai/kimi-k3': 1_000_000,
   'moonshotai/kimi-k2.7-code': 256_000,
-  'moonshotai/kimi-k2.7-code-highspeed': 256_000,
   'moonshotai/kimi-k2.6': 256_000,
 };
 
