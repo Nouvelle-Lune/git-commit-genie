@@ -55,7 +55,6 @@ export function buildValidateAndFixMessages(
             '<user_template>',
             'USER TEMPLATE - HIGHEST PRIORITY:',
             '- Follow the user template with highest priority',
-            '- Maintain Conventional Commits header format',
             '- Apply template requirements for body, footers, and formatting',
             '',
             userTemplate,
