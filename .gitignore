@@ -74,8 +74,6 @@ webpack.config.js
 
 # Scripts
 scripts/*
-!scripts/build_repo_analysis_sft.py
-!scripts/build_github_eval_corpus.py
 
 .mydocs/**
 
@@ -108,7 +106,7 @@ coverage/
 __pycache__/
 
 .eval/
-./sft/
+.sft/
 
 test/
 !src/test/

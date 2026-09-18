@@ -2,19 +2,31 @@
 .vscode-test/**
 src/**
 out/**
+# Ship only the two webpack bundles and their license notices. tsconfig.json also emits
+# per-module CommonJS into dist/, and those stale files used to be packaged into the vsix.
+dist/**
+!dist/extension.js
+!dist/webview.js
+!dist/extension.js.LICENSE.txt
+!dist/webview.js.LICENSE.txt
 webview-ui/**
 node_modules/**
-!node_modules/@vscode/codicons/dist/**
+# vsce gives every "!" pattern absolute priority over the positive rules, so this must list
+# exactly the files WebviewProvider.ts loads (the css pulls the font in). A broader
+# "!node_modules/@vscode/codicons/dist/**" would drag the demo page and icon list back in.
+!node_modules/@vscode/codicons/dist/codicon.css
+!node_modules/@vscode/codicons/dist/codicon.ttf
 .gitignore
 .yarnrc
 vsc-extension-quickstart.md
-**/tsconfig.json
+**/tsconfig*.json
 **/eslint.config.mjs
 **/*.map
 **/*.ts
 **/.vscode-test.*
 
 webpack.config.js
+vscode-test.config.mjs
 .bmad-core/**
 .clinerules/**
 .gemini/**
@@ -23,7 +35,6 @@ webpack.config.js
 .idea/**
 .kilocodemodes
 .vsixmanifest
-.DS_Store
 
 .env
 .env.*
@@ -36,7 +47,6 @@ uv.lock
 *.log
 coverage/
 
-CHANGELOG.md
 docs_/**
 
 DEVELOPMENT.md
@@ -45,8 +55,10 @@ TODO.md
 # Scripts directory
 scripts/**
 
-# Explicitly include media directory for README images
-!media/**
+# No positive rule matches media/**, so the README images ship as-is. Do not add a
+# "!media/**" negation here: vsce negations always win, and it would re-include the
+# macOS metadata that this rule is meant to keep out.
+**/.DS_Store
 
 # Ignore Git Commit Genie templates
 .gitgenie/**
@@ -54,10 +66,6 @@ scripts/**
 draft.json
 
 .mydocs/**
-# Exclude RAG testing module (internal use only, not for end users)
-# This module is used to evaluate RAG effectiveness during development
-src/services/testing/**
-src/commands/RagTestCommands.ts
 
 # Exclude all test artifacts
 test/**

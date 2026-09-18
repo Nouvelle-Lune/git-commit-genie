@@ -2,6 +2,10 @@
   "name": "git-commit-genie",
   "displayName": "%displayName%",
   "publisher": "Lune-99",
+  "author": {
+    "name": "Nouvelle-Lune",
+    "url": "https://github.com/Nouvelle-Lune"
+  },
   "description": "%description%",
   "version": "3.3.0",
   "license": "MIT",
@@ -31,14 +35,13 @@
     "commit message",
     "git workflow",
     "source control",
-    "commit message generater",
+    "commit message generator",
     "code review",
     "openai",
     "chatgpt",
     "conventional commits",
     "git commit",
     "scm",
-    "source control",
     "productivity",
     "developer tools",
     "ai assistant",
@@ -95,8 +98,8 @@
           "fontCharacter": "\\e004"
         }
       },
-      "genie-noRope": {
-        "description": "Genie no rope icon",
+      "genie-noRepo": {
+        "description": "Genie no repo icon",
         "default": {
           "fontPath": "./media/genie.woff",
           "fontCharacter": "\\e005"
@@ -545,7 +548,7 @@
       },
       {
         "command": "git-commit-genie.genieMenu",
-        "title": "Git Commit Genie: Menu",
+        "title": "%command.genieMenu%",
         "category": "%category.title%",
         "icon": "$(menu)"
       },
@@ -601,7 +604,7 @@
     "vscode:prepublish": "npm run package",
     "compile": "webpack --mode development",
     "watch": "webpack --mode development --watch",
-    "package": "webpack --mode production --devtool hidden-source-map",
+    "package": "npm run clean && webpack --mode production --devtool hidden-source-map",
     "lint": "eslint src"
   },
   "devDependencies": {
