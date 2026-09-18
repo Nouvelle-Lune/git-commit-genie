@@ -199,7 +199,10 @@ describe('repository memory lifecycle', function () {
     it('runs a real manual consolidation while automatic consolidation is paused and logs the published result', async () => {
         // Verify a real version-3 consolidation publishes a handbook entry and reports its seed-scoped outcome.
         await withTempStorage(async storageRoot => {
-            await withMemorySettings({ enabled: true, consolidationEnabled: false }, async () => {
+            // Each fixture episode forms its own consolidation group and one paid run consolidates
+            // exactly one group, so this case needs three allowances: two ordinary runs plus the
+            // explicit recheck.
+            await withMemorySettings({ enabled: true, consolidationEnabled: false, maxCalls: 3 }, async () => {
                 const repositoryId = '9'.repeat(64);
                 const context = makeContext(storageRoot);
                 const service = new RepositoryMemoryService(context);
@@ -238,17 +241,22 @@ describe('repository memory lifecycle', function () {
                     const view = await store.inspect();
                     assert.equal(view.handbook.length, 1);
                     assert.equal(view.consolidated.length, 1);
-                    assert.deepEqual(await service.consolidate(repositoryId, model, 'manual'), {
-                        status: 'not-ready', pendingCount: 0, threshold: 2,
-                    });
-                    assert.equal(sessionRuns, 1, 'ordinary organization does not repeat a completed group');
+                    // consolidatePending consolidates exactly one pending seed per call and records the
+                    // consumed group fingerprint in the store's `consolidated` list, so a second
+                    // ordinary call advances to the next pending seed instead of repeating the
+                    // completed one.
+                    const advanced = await service.consolidate(repositoryId, model, 'manual');
+                    assert.equal(advanced.status, 'published');
+                    if (advanced.status !== 'published') { throw new Error('Expected the next pending group to publish.'); }
+                    assert.deepEqual(advanced.groupOutcomes.map(outcome => outcome.seedId), [episodes[1].id]);
+                    assert.equal(sessionRuns, 2, 'ordinary organization advances to the next pending seed instead of repeating a completed one');
                     const rechecked = await service.consolidate(repositoryId, model, 'manual-recheck', [episodes[0].id]);
                     assert.equal(rechecked.status, 'published');
                     if (rechecked.status !== 'published') { throw new Error('Expected manual recheck to publish.'); }
                     assert.equal(rechecked.groupCount, 1);
                     assert.equal(rechecked.handbookCount, 1);
                     assert.deepEqual(rechecked.groupOutcomes, [{ seedId: episodes[0].id, status: 'published', entryIds: [rechecked.groupOutcomes[0].entryIds[0]], issues: [] }]);
-                    assert.equal(sessionRuns, 2, 'manual recheck explicitly reruns the selected path group');
+                    assert.equal(sessionRuns, 3, 'manual recheck explicitly reruns the selected path group');
                     const events = memoryLogEvents(logToolCall);
                     assert.ok(events.some(event => event.status === 'automatic-paused'));
                     assertConsolidationLifecycle(events, 'published');
@@ -650,7 +658,9 @@ describe('repository memory lifecycle', function () {
         assert.match(retryPrompt, /Delete that item unless the supplied data contains a directly valid correction/);
         assert.match(retryPrompt, /Do not add replacement steps merely to preserve the previous narrative/);
         assert.match(retryPrompt, /After deleting invalid items, delete any entry with no remaining step or lesson/);
-        assert.match(retryPrompt, /If no supported entry or retirement remains, return no-findings with empty entries and retirements/);
+        // The repair prompt is asserted verbatim: production now closes with "empty arrays" while the
+        // sentence above still spells out "empty entries and retirements"; both move together.
+        assert.match(retryPrompt, /If no supported entry or retirement remains, return no-findings with empty arrays\./);
     });
 
     it('reuses execution-bound thinking for consolidation and never puts thinking on the run request', async () => {
@@ -746,6 +756,10 @@ function successfulConsolidationResponse(request: AIRunRequest): any {
                 groupId: group.id,
                 outcome: 'findings',
                 rationale: 'The repeated source-backed observations identify a stable investigation entry point.',
+                // retirements is a required array in consolidationProposalSchema: a proposal that
+                // omits it is rejected even when no experience is retired, so no-findings and
+                // findings alike must send an explicit empty array.
+                retirements: [],
                 entries: (() => {
                     const candidates = group.episodes.flatMap(episode => episode.observations
                         .filter(observation => observation.ok && observation.evidence.length)

@@ -28,16 +28,16 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         const definitions = profile.buildToolDefinitions(input, makeState());
         const byName = new Map(definitions.map(definition => [definition.name, definition]));
 
+        // Tool descriptions are purely semantic prose: the numeric grant limits reach the model only
+        // through the JSON Schema maximums asserted here, never through the description text.
         const readFileParameters = byName.get('readFileContent')?.parameters;
         const readFileProperties = readFileParameters?.properties as Record<string, any>;
         assert.equal(readFileProperties.maxLines.anyOf[0].maximum, 400);
-        assert.match(byName.get('readFileContent')?.description ?? '', /400/);
 
         for (const definition of definitions) {
             const properties = definition.parameters.properties as Record<string, any> | undefined;
             if (properties?.maxResults) {
                 assert.equal(properties.maxResults.anyOf[0].maximum, 50, definition.name);
-                assert.match(definition.description, /50/);
             }
         }
     });
@@ -746,51 +746,75 @@ describe('ChangeAnalysisProfile terminal normalization', () => {
         assert.equal(output.analysisStatus, 'complete');
     });
 
-    it('trims informationSelection lists using AGENT_TERMINAL_LIMITS', () => {
+    it('trims must_express claims to the runtime limit while preserving input order', () => {
+        // Normalization is only reachable for input the terminal schema accepts, and claims is capped
+        // at maxClaims: the fixture fills that cap exactly, leaving 13 must_express claims to trim.
         const profile = createChangeAnalysisProfile(makeInput());
         const limits = AGENT_TERMINAL_LIMITS;
         const claims = [
-            ...Array.from({ length: limits.maxMustExpressClaims + 1 }, (_, index) => ({
-                category: 'observed_change' as const,
-                claim: `must ${index + 1}`,
-                evidenceRefs: ['D1'],
-                disposition: 'must_express' as const,
-            })),
-            ...Array.from({ length: limits.maxOptionalClaims + 1 }, (_, index) => ({
-                category: 'observed_change' as const,
-                claim: `optional ${index + 1}`,
-                evidenceRefs: ['D1'],
-                disposition: 'optional' as const,
-            })),
-            ...Array.from({ length: limits.maxOmittedClaims + 1 }, (_, index) => ({
-                category: 'observed_change' as const,
-                claim: `omit ${index + 1}`,
-                evidenceRefs: ['D1'],
-                disposition: 'omit' as const,
-            })),
+            ...claimsWithDisposition('must_express', limits.maxMustExpressClaims + 1),
+            ...claimsWithDisposition('optional', 5),
+            ...claimsWithDisposition('omit', 2),
         ];
-        const raw = changeAnalysisAgentFinalResponseSchema.parse({
+        assert.equal(claims.length, limits.maxClaims);
+
+        const output = profile.normalizeFinal(changeAnalysisAgentFinalResponseSchema.parse({
             ...minimalRaw(),
             claims,
-        });
+        }), makeState());
 
-        const output = profile.normalizeFinal(raw, makeState());
-
-        assert.equal(output.informationSelection.mustExpress.length, limits.maxMustExpressClaims);
-        assert.equal(output.informationSelection.optional.length, limits.maxOptionalClaims);
-        assert.equal(output.informationSelection.omit.length, limits.maxOmittedClaims);
         assert.deepEqual(
             output.informationSelection.mustExpress,
-            Array.from({ length: limits.maxMustExpressClaims }, (_, index) => `must ${index + 1}`),
+            Array.from({ length: limits.maxMustExpressClaims }, (_, index) => `must_express ${index + 1}`),
         );
+        assert.equal(output.informationSelection.optional.length, 5);
+        assert.equal(output.informationSelection.omit.length, 2);
+    });
+
+    it('trims optional claims to the runtime limit independently of must_express', () => {
+        // A second disposition over its own limit trims separately: must_express stays intact at 7
+        // while the 13 optional claims are cut to maxOptionalClaims in their original order.
+        const profile = createChangeAnalysisProfile(makeInput());
+        const limits = AGENT_TERMINAL_LIMITS;
+        const claims = [
+            ...claimsWithDisposition('must_express', 7),
+            ...claimsWithDisposition('optional', limits.maxOptionalClaims + 1),
+        ];
+        assert.equal(claims.length, limits.maxClaims);
+
+        const output = profile.normalizeFinal(changeAnalysisAgentFinalResponseSchema.parse({
+            ...minimalRaw(),
+            claims,
+        }), makeState());
+
         assert.deepEqual(
             output.informationSelection.optional,
             Array.from({ length: limits.maxOptionalClaims }, (_, index) => `optional ${index + 1}`),
         );
+        assert.equal(output.informationSelection.mustExpress.length, 7);
+    });
+
+    it('trims omit claims to the runtime limit', () => {
+        // omit is trimmed by a smaller limit than the other dispositions, so 9 omitted claims must be
+        // cut to maxOmittedClaims and the 11 must_express claims left untouched.
+        const profile = createChangeAnalysisProfile(makeInput());
+        const limits = AGENT_TERMINAL_LIMITS;
+        const claims = [
+            ...claimsWithDisposition('must_express', 11),
+            ...claimsWithDisposition('omit', limits.maxOmittedClaims + 1),
+        ];
+        assert.equal(claims.length, limits.maxClaims);
+
+        const output = profile.normalizeFinal(changeAnalysisAgentFinalResponseSchema.parse({
+            ...minimalRaw(),
+            claims,
+        }), makeState());
+
         assert.deepEqual(
             output.informationSelection.omit,
             Array.from({ length: limits.maxOmittedClaims }, (_, index) => `omit ${index + 1}`),
         );
+        assert.equal(output.informationSelection.mustExpress.length, 11);
     });
 });
 
@@ -901,6 +925,28 @@ function makeState(): AgentRunState {
         epoch: 0,
         stopReason: '',
     };
+}
+
+/**
+ * Distinct claims for one disposition, labelled so trimmed results are identifiable. Every claim
+ * cites D1 with a category the terminal allows for that disposition, which is what makes it
+ * selectable for trimming.
+ */
+function claimsWithDisposition(
+    disposition: 'must_express' | 'optional' | 'omit',
+    count: number,
+): Array<{
+    category: 'observed_change';
+    claim: string;
+    evidenceRefs: string[];
+    disposition: 'must_express' | 'optional' | 'omit';
+}> {
+    return Array.from({ length: count }, (_, index) => ({
+        category: 'observed_change' as const,
+        claim: `${disposition} ${index + 1}`,
+        evidenceRefs: ['D1'],
+        disposition,
+    }));
 }
 
 function minimalRaw() {

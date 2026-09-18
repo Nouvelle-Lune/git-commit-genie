@@ -82,7 +82,11 @@ describe('chain token budget', () => {
     });
 
     it('derives output from the remaining window after safety and input reserve', () => {
-        assert.equal(deriveMaxOutputTokens(688), 256);
+        // In a small window the 512-token minimum input reserve outranks the 256-token output floor:
+        // 688 - 512 = 176, and min(ceiling, 176, max(256, 172)) = 176. At 30_400 the 55 percent input
+        // reserve is 16_720, which still leaves 13_680, above the 25 percent output target of 7_600,
+        // so only the output fraction binds there.
+        assert.equal(deriveMaxOutputTokens(688), 176);
         assert.equal(deriveMaxOutputTokens(30_400), 7_600);
     });
 

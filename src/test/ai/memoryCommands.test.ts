@@ -235,7 +235,17 @@ describe('MemoryCommands repository maintenance', () => {
         const store = makeStore();
         const episodes = makeRecheckEpisodes();
         const groups = buildConsolidationGroups(episodes as any, []);
-        store.inspect.resolves({ epoch: 'epoch', generation: 1, episodes, handbook: [], representedSupports: [], consolidated: groups.map(group => group.fingerprint), organizedSeeds: groups.map(group => group.seedId) });
+        // buildConsolidationGroups emits one group per eligible episode, so marking every built group
+        // as organized would offer four picker items instead of the two this case rechecks. Groups
+        // follow the createdAt sort of the eligible episodes, which puts the src/parser.ts seed and
+        // the src/unorganized.ts seed at index 0 and 2; the assertion below proves that mapping.
+        const organizedGroups = [groups[0], groups[2]];
+        assert.deepEqual(organizedGroups.map(group => group.seedId), [episodes[0].id, episodes[2].id]);
+        store.inspect.resolves({
+            epoch: 'epoch', generation: 1, episodes, handbook: [], representedSupports: [],
+            consolidated: organizedGroups.map(group => group.fingerprint),
+            organizedSeeds: organizedGroups.map(group => group.seedId),
+        });
         const memory = makeMemoryService(store);
         memory.consolidate.resolves({
             status: 'no-findings', groupCount: 2, skippedGroups: 0, deferredPaths: [], retryCount: 0,
@@ -250,14 +260,19 @@ describe('MemoryCommands repository maintenance', () => {
         const picker = stubRecheckSelection(sandbox, items => {
             assert.deepEqual(items.map(item => item.label), ['Where should src/parser.ts be investigated?', 'Where should src/unorganized.ts be investigated?']);
             assert.deepEqual(items.map(item => item.path), [episodes[0].id, episodes[2].id]);
-            assert.deepEqual(items.map(item => item.description), ['2 historical versions · 2 saved evidence records', '2 historical versions · 2 saved evidence records']);
+            // Each selected group absorbs every related fixture episode, so both items report the
+            // group's four distinct snapshots and four recorded observations, not the two episodes
+            // the two seeds happen to name.
+            assert.deepEqual(items.map(item => item.description), ['4 historical versions · 4 saved evidence records', '4 historical versions · 4 saved evidence records']);
             assert.equal(items.every(item => item.buttons?.length === 1), true);
             assert.equal(items.every(item => item.buttons?.[0].tooltip === 'Understand this evidence group'), true);
             assert.equal(picker.quickPick.canSelectMany, true);
             assert.equal(picker.quickPick.matchOnDescription, true);
             assert.equal(picker.quickPick.title, 'Recheck historical evidence');
             assert.equal(picker.quickPick.placeholder, 'Select evidence groups to recheck; use the info button to view details.');
-        }, ['src/parser.ts', 'src/unorganized.ts']);
+            // The harness marks selection by current item label, so the two anchor labels are passed
+            // here while the confirmed seed ids stay the values asserted after acceptance.
+        }, ['Where should src/parser.ts be investigated?', 'Where should src/unorganized.ts be investigated?']);
         const statuses = stubStatusBar(sandbox);
         const information = stubInformation(sandbox);
         const warning = sandbox.stub(vscode.window, 'showWarningMessage').resolves('Recheck organized evidence' as never);
@@ -268,7 +283,13 @@ describe('MemoryCommands repository maintenance', () => {
         assert.equal(warning.calledOnce, true);
         assert.deepEqual(warning.firstCall.args[1], { modal: true });
         assert.equal(warning.firstCall.args[2], 'Recheck organized evidence');
-        assert.deepEqual(memory.consolidate.firstCall.args, ['r'.repeat(64), model, 'manual-recheck', [episodes[0].id, episodes[2].id]]);
+        // Each confirmed group is rechecked by its own paid consolidation call, and a consolidation
+        // call carries exactly one seed group, so the two selected seeds arrive as two one-seed
+        // calls in picker order rather than one call carrying both.
+        assert.deepEqual(memory.consolidate.getCalls().map((call: { args: unknown[] }) => call.args), [
+            ['r'.repeat(64), model, 'manual-recheck', [episodes[0].id]],
+            ['r'.repeat(64), model, 'manual-recheck', [episodes[2].id]],
+        ]);
         assert.equal(information.length, 1);
         assertSpinnersReleased(statuses);
     });

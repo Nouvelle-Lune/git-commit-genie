@@ -1667,11 +1667,20 @@ describe('AgentRuntime contracts', () => {
             maxSteps: 4,
         };
         const events: Array<{ type: string; observation?: { tool: string; ok: boolean; output: string } }> = [];
+        // The terminal claims cite D1, so the run needs the same pre-allocated diff ledger a real run
+        // gets from EvidenceLedger.fromDiffs: an empty ledger cannot resolve D1, and normalizeClaim
+        // would downgrade the claims and report analysisStatus 'degraded' instead of 'complete'.
+        const ledger = EvidenceLedger.fromDiffs([{
+            fileName: 'src/parser.ts',
+            status: 'modified',
+            diffHunks: [],
+            rawDiff: '@@ -1 +1 @@\n-old\n+new',
+        }]);
         const result = await new AgentRuntime({ onEvent: event => {
             if (event.type === 'toolComplete') {
                 events.push({ type: event.type, observation: event.observation });
             }
-        } }).run(execution, createChangeAnalysisProfile(input), input, new EvidenceLedger());
+        } }).run(execution, createChangeAnalysisProfile(input), input, ledger);
 
         assert.equal(result.status, 'complete');
         assert.equal(result.output.analysisStatus, 'complete');

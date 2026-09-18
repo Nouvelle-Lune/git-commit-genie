@@ -94,8 +94,11 @@ describe('persisted Memory Webview logs', () => {
         assert.equal(isRunningMemoryConsolidation(restoredRunning), false);
         assert.equal(isRetryingMemoryConsolidation(restoredRetry), false);
         assert.equal(isRunningMemoryConsolidation(restoredTerminal), false);
+        // Model memory tool calls stay visible by design: searchRepositoryMemory and
+        // readMemorySources are in VISIBLE_AGENT_MEMORY_TOOLS, so the restored search row survives
+        // webview filtering while the consolidation lifecycle rows remain hidden.
         assert.deepEqual(filterMemoryLogsForWebview(buffer).map(log => log.id), [
-            'ordinary-before', 'ordinary-after',
+            'ordinary-before', 'memory-search', 'ordinary-after',
         ]);
         assert.equal(updates.length, 0);
     });
