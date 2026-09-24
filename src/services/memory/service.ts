@@ -126,7 +126,7 @@ export function createConsolidationRunner(execution: LLMExecution, settings: Mem
         for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
             const response = await session.run({
                 messages: delta, responseFormat: { name: 'repositoryMemoryConsolidation', schema },
-                transportRetries: 0, temperature: 0, maxOutputTokens: outputTokens, signal
+                transportRetries: 0, maxOutputTokens: outputTokens, signal
             });
             await execution.accountCall(response.usage);
             const completed = response.stopReason === 'completed';

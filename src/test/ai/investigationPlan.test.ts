@@ -63,7 +63,6 @@ function harnessFor(steps: PlannerStep[], maxRetries = steps.length - 1): Planne
     let callIndex = 0;
     const execution: LLMExecution = {
         signal: undefined,
-        temperature: 0,
         maxOutputTokens: 128,
         maxRetries,
         thinking: { reasoning: false, level: 'off' },

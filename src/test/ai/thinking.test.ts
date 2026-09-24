@@ -77,13 +77,13 @@ describe('unified native thinking configuration', () => {
         const configured = model('custom', 'Qwen3.5-9B');
         const metadata = getModelThinkingMetadata(configured);
         const thinking = resolveThinkingConfig(configured, settings('low'));
-        const body: Record<string, unknown> = { temperature: 0.2 };
+        const body: Record<string, unknown> = {};
 
         assert.deepEqual(getSupportedThinkingLevels(metadata), ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
         assert.equal(thinking.reasoning, true);
         assert.equal(thinking.level, 'low');
         applyOpenAICompatibleThinking(body, thinking);
-        assert.deepEqual(body, { temperature: 0.2, reasoning_effort: 'low' });
+        assert.deepEqual(body, { reasoning_effort: 'low' });
     });
 
     it('keeps an explicitly unsupported custom model closed', () => {
@@ -102,12 +102,12 @@ describe('unified native thinking configuration', () => {
         const thinking = resolveThinkingConfig(configured, settings('low', {
             'custom/local-model': 'off',
         }));
-        const body: Record<string, unknown> = { temperature: 0.2 };
+        const body: Record<string, unknown> = {};
 
         assert.equal(thinking.level, 'off');
         assert.equal(thinking.nativeValue, undefined);
         applyOpenAICompatibleThinking(body, thinking);
-        assert.deepEqual(body, { temperature: 0.2, reasoning_effort: 'none' });
+        assert.deepEqual(body, { reasoning_effort: 'none' });
     });
 
     it('does not let a stale custom reasoning flag suppress the configured off value', () => {
@@ -126,13 +126,13 @@ describe('unified native thinking configuration', () => {
         const thinking = resolveThinkingConfig(configured, settings('off', {
             'custom/Qwen3.5-9B': 'VERY_HIGH',
         }));
-        const body: Record<string, unknown> = { temperature: 0.2 };
+        const body: Record<string, unknown> = {};
 
         assert.equal(thinking.reasoning, true);
         assert.equal(thinking.level, 'medium');
         assert.equal(thinking.nativeValue, 'VERY_HIGH');
         applyOpenAICompatibleThinking(body, thinking);
-        assert.deepEqual(body, { temperature: 0.2, reasoning_effort: 'VERY_HIGH' });
+        assert.deepEqual(body, { reasoning_effort: 'VERY_HIGH' });
     });
 
     it('preserves custom native overrides without capability probing or rewrite', () => {
@@ -223,10 +223,10 @@ describe('unified native thinking configuration', () => {
         assert.deepEqual(body, { reasoning: { effort: 'none' } });
     });
 
-    it('serializes Anthropic budgets and removes incompatible sampling controls', () => {
+    it('serializes Anthropic thinking budgets within the derived output ceiling', () => {
         const configured = model('anthropic', 'claude-opus-4-5');
         const thinking = resolveThinkingConfig(configured, settings('medium'));
-        const body: Record<string, unknown> = { max_tokens: 12000, temperature: 0.2 };
+        const body: Record<string, unknown> = { max_tokens: 12000 };
 
         applyAnthropicThinking(body, thinking);
         assert.deepEqual(body, {
@@ -296,18 +296,16 @@ describe('unified native thinking configuration', () => {
 
         const customConfigured = model('custom', 'local-reasoning-model');
         const customThinking = resolveThinkingConfig(customConfigured, settings('high'));
-        const customBody: Record<string, unknown> = { temperature: 0.2 };
+        const customBody: Record<string, unknown> = {};
         applyOpenAICompatibleThinking(customBody, customThinking);
         assert.deepEqual(customBody, {
-            temperature: 0.2,
             reasoning_effort: 'high',
         });
 
         const customOffThinking = resolveThinkingConfig(customConfigured, settings('off'));
-        const customOffBody: Record<string, unknown> = { temperature: 0.2 };
+        const customOffBody: Record<string, unknown> = {};
         applyOpenAICompatibleThinking(customOffBody, customOffThinking);
         assert.deepEqual(customOffBody, {
-            temperature: 0.2,
             reasoning_effort: 'none',
         });
     });

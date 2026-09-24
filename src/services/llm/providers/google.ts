@@ -64,7 +64,6 @@ class GoogleSession implements AISession {
             })),
             tool_choice: request.toolChoice === 'required' ? 'any' : request.toolChoice,
             generation_config: {
-                temperature: request.temperature,
                 max_output_tokens: request.maxOutputTokens,
             },
         };

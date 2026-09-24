@@ -19,7 +19,6 @@ export type RequestType =
 
 export interface LLMRunOptions {
     requestType: RequestType;
-    temperature?: number;
     maxOutputTokens?: number;
     /**
      * Request-scoped schema, used instead of the request type's registered
@@ -44,7 +43,6 @@ export interface LLMRunOptions {
 export interface LLMExecution {
     readonly model?: string;
     readonly signal?: AbortSignal;
-    readonly temperature: number;
     readonly maxOutputTokens: number;
     readonly maxRetries: number;
     /**

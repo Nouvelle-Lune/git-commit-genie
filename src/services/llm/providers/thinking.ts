@@ -43,8 +43,6 @@ export function applyAnthropicThinking(
         );
     }
     body.thinking = { type: 'enabled', budget_tokens: thinking.budget };
-    // Anthropic extended thinking does not accept sampling controls such as temperature.
-    delete body.temperature;
 }
 
 /** Applies the Gemini Interactions API thinking level or legacy numeric budget. */

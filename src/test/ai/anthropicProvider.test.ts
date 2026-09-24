@@ -67,7 +67,6 @@ describe('Anthropic provider response accounting', () => {
         const result = await session.run({
             messages: [{ role: 'user', content: 'return JSON' }],
             maxOutputTokens: 8_192,
-            temperature: 0.7,
         });
 
         assert.equal(requestBody?.max_tokens, 8_192);

@@ -170,9 +170,6 @@ function stubConfiguration(mode: unknown, legacy: LegacyConfiguration = {}): Con
             if (key === 'llm.maxRetries') {
                 return 0 as T;
             }
-            if (key === 'llm.temperature') {
-                return 0 as T;
-            }
             return defaultValue;
         },
     } as vscode.WorkspaceConfiguration;

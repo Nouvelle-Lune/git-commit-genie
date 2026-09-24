@@ -157,7 +157,6 @@ export interface AIRunRequest {
     tools?: AIFunctionTool[];
     responseFormat?: AIResponseFormat;
     toolChoice?: 'auto' | 'required' | 'none';
-    temperature?: number;
     maxOutputTokens?: number;
     signal?: AbortSignal;
 }

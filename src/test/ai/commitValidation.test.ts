@@ -155,7 +155,6 @@ function executionFor(responses: unknown[], requests: AIMessage[][] = []): LLMEx
     };
     return {
         model: 'test',
-        temperature: 0,
         maxOutputTokens: 128,
         maxRetries: 1,
         thinking: { reasoning: false, level: 'off' },

@@ -31,7 +31,6 @@ describe('AgentRuntime token budgeting', () => {
         });
         const execution: LLMExecution = {
             model: 'test',
-            temperature: 0,
             maxOutputTokens: tokenBudget.maxOutputTokens,
             maxRetries: 0,
             thinking: { reasoning: false, level: 'off' },

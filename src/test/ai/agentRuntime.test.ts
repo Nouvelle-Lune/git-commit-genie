@@ -31,7 +31,6 @@ function createExecution(
     });
     return {
         model: 'test-model',
-        temperature: 0.2,
         maxOutputTokens: tokenBudget.maxOutputTokens,
         maxRetries: 1,
         thinking: { reasoning: true, level: 'low' },
@@ -640,7 +639,6 @@ describe('AgentRuntime contracts', () => {
         const thinking = { reasoning: true, level: 'high' as const };
         const execution: LLMExecution = {
             model: 'local-model',
-            temperature: 0.2,
             maxOutputTokens: tokenBudget.maxOutputTokens,
             maxRetries: 1,
             thinking,
@@ -1494,7 +1492,6 @@ describe('AgentRuntime contracts', () => {
         });
         const execution: LLMExecution = {
             model: 'test-model',
-            temperature: 0.2,
             maxOutputTokens: tokenBudget.maxOutputTokens,
             maxRetries: 1,
             thinking: { reasoning: false, level: 'off' },

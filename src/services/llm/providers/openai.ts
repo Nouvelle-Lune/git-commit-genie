@@ -76,11 +76,6 @@ class OpenAISession implements AISession {
                 },
             };
         }
-        const thinkingEnabled = thinking?.reasoning === true && thinking.level !== 'off';
-        if (request.temperature !== undefined && !this.model.startsWith('gpt-5') && !thinkingEnabled) {
-            body.temperature = request.temperature;
-        }
-
         const response: any = await (this.client.responses.create as any)(body, {
             signal: request.signal,
             ...(request.transportRetries === 0 ? { maxRetries: 0 } : {}),

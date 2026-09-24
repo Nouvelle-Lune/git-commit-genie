@@ -256,14 +256,6 @@
           "minimum": 1,
           "markdownDescription": "%config.llm.maxRetries.desc%"
         },
-        "gitCommitGenie.llm.temperature": {
-          "order": 7,
-          "type": "number",
-          "default": 1,
-          "minimum": 0,
-          "maximum": 2,
-          "markdownDescription": "%config.llm.temperature.desc%"
-        },
         "gitCommitGenie.ui.stageNotifications.enabled": {
           "order": 10,
           "type": "boolean",

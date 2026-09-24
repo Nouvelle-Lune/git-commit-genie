@@ -375,7 +375,6 @@ export class AgentRuntime {
                     toolResults,
                     tools,
                     toolChoice: 'auto',
-                    temperature: execution.temperature,
                     maxOutputTokens: execution.maxOutputTokens,
                     signal: execution.signal,
                 });
@@ -622,7 +621,6 @@ export class AgentRuntime {
                     tools: params.tools,
                     responseFormat: params.responseFormat,
                     toolChoice: 'none',
-                    temperature: execution.temperature,
                     maxOutputTokens: execution.maxOutputTokens,
                     signal: execution.signal,
                 });

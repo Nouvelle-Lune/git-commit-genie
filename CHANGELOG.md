@@ -1,5 +1,47 @@
 # Changelog
 
+## [Unreleased]
+
+### Model access and providers
+- breaking: Removed the dedicated Qwen, Local, DeepSeek, GLM, Kimi and OpenRouter provider entries. Every endpoint is now configured as a model instance on OpenAI, Anthropic, Google Gemini or a custom OpenAI-compatible entry, so region-specific Qwen keys and self-hosted base URLs are set up as custom models instead of through provider-only dialogs. Existing provider and model configuration is migrated to the new model registry on activation.
+- feat: Replaced the per-provider LLM services with a provider-neutral model and session layer. Conversation history, tool results and continuation are owned by the provider session, and investigation uses native function calling instead of prompt-driven tool loops.
+- feat: Added unified thinking configuration: `gitCommitGenie.defaultThinkingLevel` for every supported call, `gitCommitGenie.modelThinkingLevels` for per-model overrides and `gitCommitGenie.thinkingBudgets` for numeric budgets. Thinking is resolved once per run and reused by every stage and background call, and Manage Models gained "Set thinking level override" and "Advanced thinking compatibility" for custom endpoints.
+- fix: Unsupported thinking levels on official models now fail with a descriptive error that lists the supported levels instead of being silently rewritten, while custom endpoints keep passing native values verbatim.
+- feat: The pipeline token budget is derived from `gitCommitGenie.chain.contextWindowTokens` and allocates input, output and safety margins per model. Forced compaction, a single retry and provider stop-reason classification keep a run from blindly retrying when the context window or the reasoning budget is exhausted.
+- fix: Structured output handling moved into one orchestrator with field-level diagnostics. Providers that return no final content are retried with an explicit schema prompt, blank responses are treated as empty instead of as structured output, and exhausted retries report the failing field paths. Built-in prompts no longer embed the full schema; the schema is injected into the system message only when the endpoint cannot take `response_format`.
+- fix: Tool calls stay available while structured output is relaxed during tool turns, and custom-provider history keeps tool-result order.
+- fix: Manage Models now keeps models whose endpoint has no usable `/models` catalog, validates custom base URLs on input, deletes the API key together with a removed model, and reports failures instead of dropping them. The model picker marks the currently configured model, and management submenus offer a Back entry.
+
+### Change analysis and pipeline
+- breaking: Consolidated change analysis into a single ledger-aware agent runtime. Staged hunks are pre-allocated as `D*` ids and repository observations are recorded as `E*` ids, and the previous investigation, semantic-analysis and information-selection stages are replaced by one compound terminal with per-field citations.
+- feat: Agent runs are split into an investigation phase that holds repository tools and no output schema, and a finalization phase that closes tools and enforces the terminal contract in a shared repair loop.
+- feat: Investigation planning was reworked around a repository map and one lookup verb per target, with coverage keyed by `D*` id. Plans that fail deterministic grounding are replanned, unmet evidence preconditions degrade the run to diff-only instead of failing it, and `gitCommitGenie.chain.investigation.maxSteps` now requires at least 3 steps (default 12).
+- feat: Tool grant violations and over-budget tool calls are soft-rejected with an error tool result the model can recover from, instead of aborting the run.
+- fix: Hunk headers keep their full context, so function and declaration context survives into evidence and body-only changes are identified reliably.
+- fix: A shape-valid Conventional Commits header is no longer rejected for exceeding 72 characters; the limit is prompt guidance only. Generated messages are now the smallest message the change entails: the body is omitted unless a distinct fact or the template justifies it, and fixers restore only facts the message does not already contain.
+- fix: The pipeline continues after a failed fixer stage and distinguishes evidence-compaction failures from RAG preparation failures, so a compaction problem no longer reports as a RAG error.
+- feat: `gitCommitGenie.generationMode` (`auto`, `fast`, `deep`) replaces `gitCommitGenie.chain.enabled` and is chosen with "Select generation mode". `auto` inspects the staged diff locally and routes each change; the pre-rename values `onePrompt` and `chain` are still accepted and rewritten.
+- refactor: RAG style references moved into a dedicated prompt block, and the commit message panel now renders like the semantic analysis card. Pipeline badges use VS Code theme variables, "Issues" was renamed to "Diagnostics", and a degraded analysis reports its own title.
+- feat: `gitCommitGenie.ui.rawData.enabled` shows stage inputs, outputs and tool results in the Genie panel for debugging; raw data can contain repository source code and is kept for the current session only.
+
+### Repository Memory
+- breaking: The always-on repository analysis feature, its settings and its model wiring are removed and replaced by opt-in Repository Memory under `gitCommitGenie.memory.enabled`.
+- breaking: Memory storage moved to episode version 3 and manifest version 4 with no migration path. Clear repository memory once from "Manage Repository Memory" before using it again.
+- feat: Completed runs publish against the captured before/after Git snapshot, and diffs plus investigation tools read immutable trees, so a stale snapshot opens the draft as an untitled document instead of overwriting the Source Control input.
+- feat: The handbook is experience-based. Entries describe a situation, optional steps and lessons with limitations, must cite observation-level provenance from at least two independent snapshots, and can be retired when later counterevidence still applies to the current snapshot. Steps are constrained to eligible routes that already succeeded with matching evidence.
+- feat: Every memory navigation result is gated on the current snapshot and reports whether its target is available, needs revalidation, unavailable or historical only. Changed symbols no longer participate in episodes or retrieval ranking, which now ranks by paths, targets and BM25 terms.
+- feat: Consolidation groups one seed investigation with related episodes and runs one group per call, validates groups independently, publishes valid groups while reporting partial results, and never re-bills a group whose evidence fingerprint is unchanged.
+- feat: "Recheck organized evidence" lets you inspect a group's stored evidence and long-term memory in a read-only report before paying for a rerun, and a replay benchmark command measures retrieval against recorded runs.
+- feat: Repository memory is inspected in a read-only webview with metric cards and a newest-first record timeline, one reusable panel per repository.
+- feat: Memory budgets, quotas and exclusions are configurable under `gitCommitGenie.memory.*`, and memory operations report localized outcomes such as not ready, budget exhausted or cancelled.
+- fix: The memory log lane keeps consolidation spinners, retries and terminal outcomes in sync with the live run, shows model memory tool calls, and no longer reopens rows restored from a previous session.
+
+### Cost and packaging
+- breaking: Cost accounting is structured. Legacy numeric `cost` log entries are rejected by persistence validation in favour of `costDisplay` entries that report cache hit rates.
+- feat: Pricing resolves per model with an optional per-model flat override, and provider usage is normalized into one quote type before it is recorded.
+- docs: Rewrote the READMEs and added `docs/reference.md` and its zh-CN counterpart, documenting every command and every `gitCommitGenie.*` setting.
+- chore: Packaging ships only the webpack bundles, their license notices and the codicon files, cleans `dist` first, localizes command titles through NLS, and removes the redundant title prefix.
+
 ## [3.2.2]
 - fix: Prevented duplicate `Repository Analysis Summary` headings when generated or synchronized analysis content already contains the file title.
 

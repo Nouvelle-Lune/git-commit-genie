@@ -48,7 +48,6 @@ Open the Command Palette (`Ctrl/Cmd + Shift + P`) and search for `Git Commit Gen
 | `gitCommitGenie.chain.maxParallel` | number | `2` | Maximum parallel model calls across all stages. Increase carefully to avoid provider rate limits. |
 | `gitCommitGenie.chain.contextWindowTokens` | integer | `128000` | Context window used by the pipeline. Built-in models are clamped to their real limit automatically; change this only for custom endpoints. |
 | `gitCommitGenie.llm.maxRetries` | number | `2` | Retries for recoverable model response validation failures. |
-| `gitCommitGenie.llm.temperature` | number | `1` | Sampling temperature (0–2). Some providers only accept `1`; changing it may cause request errors or less stable output. |
 | `gitCommitGenie.commitLanguage` | string | `auto` | Target language for commit messages. `auto` matches your VS Code display language. Values: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`. |
 | `gitCommitGenie.autoStageAllForDiff` | boolean | `false` | When the staging area is empty, temporarily stage all changes to build the diff, then restore your staging state. Experimental; may include unrelated changes in the prompt. |
 

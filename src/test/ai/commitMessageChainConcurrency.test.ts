@@ -125,7 +125,6 @@ function createExecution(
     });
     return {
         model: 'chain-test',
-        temperature: 0,
         maxOutputTokens: tokenBudget.maxOutputTokens,
         maxRetries: 0,
         thinking: { reasoning: false, level: 'off' },

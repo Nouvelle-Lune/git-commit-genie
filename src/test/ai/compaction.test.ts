@@ -28,7 +28,6 @@ function diff(fileName: string, content: string, header = '@@ -1 +1 @@'): DiffDa
 function fakeExecution(onCreateSession?: (messages: AIMessage[]) => void): LLMExecution {
     return {
         signal: undefined,
-        temperature: 0,
         maxOutputTokens: 128,
         maxRetries: 0,
         thinking: { reasoning: false, level: 'off' },

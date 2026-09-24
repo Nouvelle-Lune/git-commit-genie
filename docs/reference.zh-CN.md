@@ -48,7 +48,6 @@ Git Commit Genie 的全部命令与设置项。所有设置位于设置编辑器
 | `gitCommitGenie.chain.maxParallel` | number | `2` | 各阶段允许的最大并行模型调用数。谨慎调高，避免触发服务商限流。 |
 | `gitCommitGenie.chain.contextWindowTokens` | integer | `128000` | 流水线使用的上下文窗口。内置模型会自动按其真实上限收紧；仅为自定义端点手动调整。 |
 | `gitCommitGenie.llm.maxRetries` | number | `2` | 模型输出校验失败时的重试次数。 |
-| `gitCommitGenie.llm.temperature` | number | `1` | 采样温度（0–2）。部分服务商只接受 `1`，修改后可能报错或导致输出不稳定。 |
 | `gitCommitGenie.commitLanguage` | string | `auto` | 提交信息目标语言。`auto` 跟随 VS Code 显示语言。可选值：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。 |
 | `gitCommitGenie.autoStageAllForDiff` | boolean | `false` | 暂存区为空时，临时暂存全部改动以构建 diff，随后还原原暂存状态。实验性功能；可能把无关改动带入提示。 |
 

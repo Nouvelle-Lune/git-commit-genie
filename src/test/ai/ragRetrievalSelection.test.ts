@@ -179,7 +179,6 @@ function createExecution(
     });
     return {
         model: 'rag-test',
-        temperature: 0,
         maxOutputTokens: tokenBudget.maxOutputTokens,
         maxRetries: 0,
         thinking: { reasoning: false, level: 'off' },

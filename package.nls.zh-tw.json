@@ -31,7 +31,6 @@
   "config.modelThinkingLevels.desc": "可選的單模型覆蓋設定。每個鍵是 `provider/model`，每個值是思考等級。鍵和值範例：`openai/gpt-5.4` → `high`；完整 JSON 範例：`{ \"openai/gpt-5.4\": \"high\", \"custom/Qwen3.5-9B\": \"low\" }`。沒有對應鍵時繼承 `defaultThinkingLevel`。一旦建立 execution，該模型解析出的等級會用於所有階段。標準值為 `off`、`minimal`、`low`、`medium`、`high`、`xhigh`、`max`；Custom 模型還可填寫 `VERY_HIGH` 之類的非空 provider 原生值。",
   "config.thinkingBudgets.desc": "僅用於採用數字思考預算的 Anthropic/Google 模型，以及明確設定了進階本機引擎預算欄位的 Custom 端點。範例：`{ \"low\": 4096, \"medium\": 10240 }`。一般 OpenAI-compatible 模型提供商無需設定此項。",
   "config.llm.maxRetries.desc": "模型回應出現可修復驗證錯誤時的最大重試次數，包括記憶整理。",
-  "config.llm.temperature.desc": "Temperature（0-2），預設為 1。部分服務商/模型組合僅接受 1；修改此值可能導致 400 錯誤（invalid temperature）或輸出穩定性下降。",
   "config.commitLanguage.desc": "產生的提交資訊目標語言。",
   "config.commitLanguage.auto": "自動（跟隨 VS Code 顯示語言）",
   "config.commitLanguage.en": "英文",

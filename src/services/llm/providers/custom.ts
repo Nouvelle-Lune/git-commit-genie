@@ -191,7 +191,6 @@ class CustomSession implements AISession {
         const body: Record<string, unknown> = {
             model: this.model,
             messages: requestMessages,
-            temperature: request.temperature,
             max_tokens: request.maxOutputTokens,
             response_format: responseFormat,
             tools: callableTools?.map(tool => ({

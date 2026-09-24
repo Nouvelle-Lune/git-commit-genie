@@ -110,7 +110,6 @@ export class UnifiedLLMService extends BaseLLMService {
         const provider = this.provider;
         const signal = this.toAbortSignal(options?.token);
         const configuration = vscode.workspace.getConfiguration('gitCommitGenie');
-        const temperature = configuration.get<number>('llm.temperature', 1);
         const maxRetries = configuration.get<number>('llm.maxRetries', 2);
         const thinkingSettings = {
             defaultThinkingLevel: configuration.get<unknown>('defaultThinkingLevel', 'off'),
@@ -151,7 +150,6 @@ export class UnifiedLLMService extends BaseLLMService {
         return {
             model: modelName,
             signal,
-            temperature,
             maxOutputTokens: tokenBudget.maxOutputTokens,
             maxRetries,
             thinking,
@@ -208,8 +206,6 @@ export class UnifiedLLMService extends BaseLLMService {
         const maxRetries = callerRetry
             ? 0
             : vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.maxRetries', 2);
-        const temperature = runOptions.temperature
-            ?? vscode.workspace.getConfiguration('gitCommitGenie').get<number>('llm.temperature', 1);
         const maxOutputTokens = runOptions.maxOutputTokens ?? tokenBudget.maxOutputTokens;
         assertChatMessagesWithinTokenBudget(messages, tokenBudget, requestType);
 
@@ -245,7 +241,6 @@ export class UnifiedLLMService extends BaseLLMService {
                         name: requestType,
                         schema: jsonSchema,
                     } : undefined,
-                    temperature,
                     maxOutputTokens,
                     signal,
                 });
