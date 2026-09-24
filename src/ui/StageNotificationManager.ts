@@ -3,6 +3,7 @@ import { L10N_KEYS as I18N } from '../i18n/keys';
 import { safeRun } from '../utils/safeRun';
 
 export type StageEventType =
+  | 'autoRouted'
   | 'evidenceReady'
   | 'evidenceRouted'
   | 'summarizeStart'
@@ -36,6 +37,10 @@ export type StageEventType =
   | 'cancelled';
 
 export interface StageEventData {
+  /** Auto-router decision for this generation: one generation (Fast) or the multi-stage chain (Deep). */
+  route?: 'fast' | 'deep';
+  /** Present when the router declined to score the change and fell back to Deep. */
+  failure?: string;
   current?: number;
   total?: number;
   file?: string;

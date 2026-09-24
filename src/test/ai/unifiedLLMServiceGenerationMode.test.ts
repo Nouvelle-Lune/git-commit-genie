@@ -11,6 +11,7 @@ import type { AIMessage, AIModelConfig, AIRunRequest, AIRunResponse, AISession }
 import * as providerFactory from '../../services/llm/providers/factory';
 import * as chainModule from '../../services/chain/commitMessageChain';
 import { routeAutoGeneration } from '../../services/router/autoRouter';
+import { logger } from '../../services/logger';
 
 const UNREACHABLE_BASE_URL = 'http://127.0.0.1:9/v1';
 const MODEL_ID = 'local-model';
@@ -29,6 +30,7 @@ describe('UnifiedLLMService generation-mode routing', () => {
         stubProvider(providerRequests);
         const chainCalls: Array<{ diffs: readonly DiffData[] }> = [];
         stubChain(chainCalls);
+        const stageLogs = captureCommitStageLogs();
         const service = await createService();
 
         const chainResult = await service.generateCommitMessage([deepDiff]);
@@ -36,6 +38,7 @@ describe('UnifiedLLMService generation-mode routing', () => {
         assert.equal(chainCalls.length, 1);
         assert.deepEqual(chainCalls[0].diffs, [deepDiff]);
         assert.equal(providerRequests.length, 0);
+        assert.deepEqual(autoRouteLogs(stageLogs), [{ route: 'deep' }]);
 
         const fastResult = await service.generateCommitMessage([fastDiff]);
         assert.equal(contentOf(fastResult), 'one prompt branch result');
@@ -43,6 +46,7 @@ describe('UnifiedLLMService generation-mode routing', () => {
         assert.equal(providerRequests.length, 1);
         assert.equal(providerRequests[0].responseFormat?.name, 'commitMessage');
         assert.ok(providerRequests[0].messages?.some(message => message.role === 'user'));
+        assert.deepEqual(autoRouteLogs(stageLogs), [{ route: 'deep' }, { route: 'fast' }]);
     });
 
     it('honors a forced Fast mode even when the model would select Deep', async () => {
@@ -53,6 +57,7 @@ describe('UnifiedLLMService generation-mode routing', () => {
         stubProvider(providerRequests);
         const chainCalls: Array<{ diffs: readonly DiffData[] }> = [];
         stubChain(chainCalls);
+        const stageLogs = captureCommitStageLogs();
         const service = await createService();
 
         const result = await service.generateCommitMessage([diff]);
@@ -60,6 +65,7 @@ describe('UnifiedLLMService generation-mode routing', () => {
         assert.equal(contentOf(result), 'one prompt branch result');
         assert.equal(providerRequests.length, 1);
         assert.equal(chainCalls.length, 0);
+        assert.deepEqual(autoRouteLogs(stageLogs), []);
     });
 
     it('honors a forced Deep mode even when the model would select Fast', async () => {
@@ -70,6 +76,7 @@ describe('UnifiedLLMService generation-mode routing', () => {
         stubProvider(providerRequests);
         const chainCalls: Array<{ diffs: readonly DiffData[] }> = [];
         stubChain(chainCalls);
+        const stageLogs = captureCommitStageLogs();
         const service = await createService();
 
         const result = await service.generateCommitMessage([diff]);
@@ -78,6 +85,8 @@ describe('UnifiedLLMService generation-mode routing', () => {
         assert.equal(chainCalls.length, 1);
         assert.deepEqual(chainCalls[0].diffs, [diff]);
         assert.equal(providerRequests.length, 0);
+        // A forced route is not a decision, so no Auto card is written for it.
+        assert.deepEqual(autoRouteLogs(stageLogs), []);
     });
 
     it('keeps honoring a pre-rename onePrompt value by routing it as Fast', async () => {
@@ -189,6 +198,28 @@ function stubConfiguration(mode: unknown, legacy: LegacyConfiguration = {}): Con
         section === 'gitCommitGenie' ? generationConfig : rootConfig
     ));
     return trace;
+}
+
+interface CapturedStageLog {
+    stage: string;
+    data: Record<string, unknown>;
+}
+
+/** Captures `commitStage` tool calls exactly as the Webview receives them. */
+function captureCommitStageLogs(): CapturedStageLog[] {
+    const captured: CapturedStageLog[] = [];
+    sinon.stub(logger, 'logToolCall').callsFake((toolName: string, args: string) => {
+        if (toolName === 'commitStage') {
+            captured.push(JSON.parse(args) as CapturedStageLog);
+        }
+    });
+    return captured;
+}
+
+function autoRouteLogs(stageLogs: CapturedStageLog[]): Array<{ route: unknown }> {
+    return stageLogs
+        .filter(entry => entry.stage === 'autoRouted')
+        .map(entry => ({ route: entry.data.route }));
 }
 
 async function createService(): Promise<UnifiedLLMService> {

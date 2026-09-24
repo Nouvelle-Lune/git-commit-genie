@@ -60,6 +60,7 @@ export interface PipelineTextCatalog {
     payloadSummary: string;
     payloadRagQuery: string;
     payloadRefs: string;
+    phaseRoute: string;
     phaseInput: string;
     phaseTransform: string;
     phaseHandoff: string;
@@ -77,6 +78,7 @@ export interface PipelineTextCatalog {
     metricOutput: string;
     metricTrigger: string;
     metricProgress: string;
+    metricRoute: string;
     metricSignal: string;
     metricBreaking: string;
     metricSummary: string;
@@ -106,6 +108,13 @@ export interface PipelineTextCatalog {
     evidencePreconditionFailedTitle: string;
     outputExhaustedTitle: string;
     providerErrorTitle: string;
+    autoRoutedTitle: string;
+    autoRouteFast: string;
+    autoRouteDeep: string;
+    autoRoutedFastDescription: string;
+    autoRoutedDeepDescription: string;
+    autoRoutedFailedTitle: string;
+    autoRoutedFailedDefault: string;
     evidenceReadyTitle: string;
     evidenceReadyDescription: string;
     summarizeStartTitle: string;
@@ -264,6 +273,7 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     payloadSummary: 'summary',
     payloadRagQuery: 'RAG query',
     payloadRefs: 'refs',
+    phaseRoute: 'Route',
     phaseInput: 'Input',
     phaseTransform: 'Transform',
     phaseHandoff: 'Handoff',
@@ -281,6 +291,7 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     metricOutput: 'Output',
     metricTrigger: 'Trigger',
     metricProgress: 'Progress',
+    metricRoute: 'Route',
     metricSignal: 'Signal',
     metricBreaking: 'Breaking',
     metricSummary: 'Summary',
@@ -310,6 +321,13 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     evidencePreconditionFailedTitle: 'Repository evidence precondition unmet: {0}',
     outputExhaustedTitle: 'Output or context budget exhausted: {0}',
     providerErrorTitle: 'Provider request failed: {0}',
+    autoRoutedTitle: 'Auto routing: {0}',
+    autoRouteFast: 'Fast',
+    autoRouteDeep: 'Deep',
+    autoRoutedFastDescription: 'The Fast route was selected for this change.',
+    autoRoutedDeepDescription: 'The Deep route was selected for this change.',
+    autoRoutedFailedTitle: 'Automatic routing unavailable',
+    autoRoutedFailedDefault: 'The routing model could not be verified; the change goes through the multi-stage workflow.',
     evidenceReadyTitle: 'Change evidence collected',
     evidenceReadyDescription: '{0} staged files entered the pipeline as complete raw diffs.',
     summarizeStartTitle: 'Evidence compaction started',
@@ -535,7 +553,14 @@ export interface StructuredValidationPayload {
     error?: string;
 }
 
+/**
+ * The two routes the Auto router chooses between: `fast` generates the message
+ * in one request, `deep` runs the multi-stage chain workflow.
+ */
+export type AutoRouteName = 'fast' | 'deep';
+
 export type PipelineEventDetails =
+    | { kind: 'autoRouted'; route: AutoRouteName; failure?: string }
     | { kind: 'evidenceReady'; files: EvidenceFileEntry[]; fileCount: number; rawFiles: number; summarizedFiles: number; initialEstimatedInputTokens: number; maxInputTokens: number; contextWindowTokens: number; hardInputTokens: number; compressionTriggerTokens: number; maxOutputTokens: number; safetyTokens?: number }
     | { kind: 'summarizeProgress'; file: string; summary: string; breaking: boolean; current: number; total: number }
     | { kind: 'summarizeFailed'; target: string; error: string }
@@ -626,6 +651,7 @@ type CommitStagePayload = {
  * without also being given a badge.
  */
 export type PipelineStageName =
+    | 'autoRouted'
     | 'evidenceReady'
     | 'summarizeStart'
     | 'summarizeProgress'
@@ -671,6 +697,7 @@ export interface PipelineStageBadge {
  * stages unmatched.
  */
 export const PIPELINE_STAGE_BADGES: Record<PipelineStageName, PipelineStageBadge> = {
+    autoRouted: { label: 'AUTO', className: 'stage-badge-route' },
     evidenceReady: { label: 'EVD', className: 'stage-badge-data' },
     evidenceRouted: { label: 'EVD', className: 'stage-badge-data' },
     summarizeStart: { label: 'SUM', className: 'stage-badge-summarize' },
@@ -854,6 +881,23 @@ function requireStringField(data: Record<string, unknown>, stage: string, field:
     return value;
 }
 
+/** The route a payload names, or `undefined` when it names something this build cannot render. */
+function autoRouteOf(data: Record<string, unknown>): AutoRouteName | undefined {
+    return data.route === 'fast' || data.route === 'deep' ? data.route : undefined;
+}
+
+function requireAutoRouteField(data: Record<string, unknown>, stage: string): AutoRouteName {
+    const route = autoRouteOf(data);
+    if (!route) {
+        throw new Error(`Commit pipeline stage '${stage}' is missing required field 'route'.`);
+    }
+    return route;
+}
+
+function autoRouteLabel(route: AutoRouteName, text: PipelineTextCatalog): string {
+    return route === 'fast' ? text.autoRouteFast : text.autoRouteDeep;
+}
+
 function requireBooleanField(data: Record<string, unknown>, stage: string, field: string): boolean {
     if (typeof data[field] !== 'boolean') {
         throw new Error(`Commit pipeline stage '${stage}' is missing required field '${field}'.`);
@@ -921,6 +965,12 @@ function formatRetrievalFeatures(features: Record<string, unknown>): string[] {
 
 function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unknown>): PipelineEventDetails | undefined {
     switch (stage) {
+        case 'autoRouted':
+            return {
+                kind: 'autoRouted',
+                route: requireAutoRouteField(data, stage),
+                ...(asString(data.failure) ? { failure: asString(data.failure) } : {}),
+            };
         case 'evidenceReady':
             return {
                 kind: 'evidenceReady',
@@ -1335,6 +1385,25 @@ function presentPipelineEventCore(
     const target = handoffTargetLabel(data.target, text);
 
     switch (stage) {
+        case 'autoRouted': {
+            // Falls back to Deep for the label alone: that is the route a router failure always takes,
+            // and the details builder rejects a payload that named neither route.
+            const route = autoRouteOf(data) ?? 'deep';
+            const failure = asString(data.failure);
+            return {
+                stage,
+                phase: text.phaseRoute,
+                title: failure
+                    ? text.autoRoutedFailedTitle
+                    : formatPipelineText(text.autoRoutedTitle, autoRouteLabel(route, text)),
+                description: failure
+                    ? text.autoRoutedFailedDefault
+                    : (route === 'fast' ? text.autoRoutedFastDescription : text.autoRoutedDeepDescription),
+                metrics: [{ label: text.metricRoute, value: autoRouteLabel(route, text) }],
+                tone: failure ? 'warning' : 'success',
+                data,
+            };
+        }
         case 'evidenceReady':
             return {
                 stage,

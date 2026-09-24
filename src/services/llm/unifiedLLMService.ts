@@ -362,6 +362,15 @@ export class UnifiedLLMService extends BaseLLMService {
                 } else {
                     logger.info(`[AutoRouter] route=${autoDecision.route} probabilityDirect=${autoDecision.probabilityDirect.toFixed(6)} directThreshold=${autoDecision.directThreshold.toFixed(4)} coverageTarget=${autoDecision.coverageTarget} artifact=${autoDecision.artifactSha256?.slice(0, 12)}`);
                 }
+                // The decision opens the generation flow in the Webview, so the user sees which route
+                // Auto took without reading the extension log. Score and threshold stay out of the card.
+                safeRun('UnifiedLLM.logAutoRoute', () => logCommitStageToWebview(repoPath, {
+                    type: 'autoRouted',
+                    data: {
+                        route: autoDecision.route,
+                        ...(autoDecision.failure ? { failure: autoDecision.failure } : {}),
+                    },
+                }));
             }
             const execution = this.createExecution(repoPath, options);
             try {

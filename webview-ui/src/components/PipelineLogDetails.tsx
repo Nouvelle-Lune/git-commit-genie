@@ -113,6 +113,18 @@ function sourceLabel(source: CommitMessageSource, text: PipelineTextCatalog): st
 
 function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog): React.ReactNode {
     switch (details.kind) {
+        case 'autoRouted':
+            return (
+                <DetailFields rows={[
+                    {
+                        label: text.metricRoute,
+                        value: <SemanticTag value={details.route === 'fast' ? text.autoRouteFast : text.autoRouteDeep} />,
+                    },
+                    ...(details.failure
+                        ? [{ label: text.detailReason, value: <span className="pipeline-details-warning">{details.failure}</span> }]
+                        : []),
+                ]} />
+            );
         case 'evidenceReady':
             return (
                 <>

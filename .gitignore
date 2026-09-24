@@ -120,3 +120,6 @@ src/test/*
 **/*.joblib
 **/*.npy
 **/*.ipynb
+
+# pi
+.pi/

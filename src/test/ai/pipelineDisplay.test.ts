@@ -361,6 +361,53 @@ describe('pipeline display for parallel analysis events', () => {
     });
 });
 
+describe('auto routing card', () => {
+    it('reports the Auto decision as a successful route card', () => {
+        const presentation = presentPipelineEvent({
+            stage: 'autoRouted',
+            data: { route: 'fast' },
+        });
+
+        assert.equal(presentation.tone, 'success');
+        assert.equal(presentation.phase, 'Route');
+        assert.equal(presentation.title, 'Auto routing: Fast');
+        assert.equal(presentation.description, 'The Fast route was selected for this change.');
+        assert.deepEqual(presentation.metrics, [{ label: 'Route', value: 'Fast' }]);
+        assert.deepEqual(presentation.details, { kind: 'autoRouted', route: 'fast' });
+        assert.deepEqual(pipelineStageBadge('autoRouted'), {
+            label: 'AUTO',
+            className: 'stage-badge-route',
+        });
+    });
+
+    it('reports a router fallback as a warning that still names the Deep route', () => {
+        const presentation = presentPipelineEvent({
+            stage: 'autoRouted',
+            data: { route: 'deep', failure: 'router artifact hash mismatch: expected a, got b' },
+        });
+
+        assert.equal(presentation.tone, 'warning');
+        assert.equal(presentation.title, 'Automatic routing unavailable');
+        assert.equal(
+            presentation.description,
+            'The routing model could not be verified; the change goes through the multi-stage workflow.',
+        );
+        assert.deepEqual(presentation.metrics, [{ label: 'Route', value: 'Deep' }]);
+        assert.deepEqual(presentation.details, {
+            kind: 'autoRouted',
+            route: 'deep',
+            failure: 'router artifact hash mismatch: expected a, got b',
+        });
+    });
+
+    it('rejects a persisted route card that names no route this build can render', () => {
+        assert.throws(
+            () => presentPipelineEvent({ stage: 'autoRouted', data: { route: 'medium' } }),
+            /missing required field 'route'/,
+        );
+    });
+});
+
 describe('pipeline event details', () => {
     it('returns details for semanticAnalysisComplete with full mapping', () => {
         const presentation = presentPipelineEvent({

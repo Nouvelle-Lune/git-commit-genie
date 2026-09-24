@@ -21,6 +21,7 @@
 - fix: A shape-valid Conventional Commits header is no longer rejected for exceeding 72 characters; the limit is prompt guidance only. Generated messages are now the smallest message the change entails: the body is omitted unless a distinct fact or the template justifies it, and fixers restore only facts the message does not already contain.
 - fix: The pipeline continues after a failed fixer stage and distinguishes evidence-compaction failures from RAG preparation failures, so a compaction problem no longer reports as a RAG error.
 - feat: `gitCommitGenie.generationMode` (`auto`, `fast`, `deep`) replaces `gitCommitGenie.chain.enabled` and is chosen with "Select generation mode". `auto` inspects the staged diff locally and routes each change; the pre-rename values `onePrompt` and `chain` are still accepted and rewritten.
+- feat: In `auto` mode the generation flow opens with a routing card that names the selected route (`Fast` or `Deep`), and reports the failure reason when the router declines to score the change and falls back to `Deep`.
 - refactor: RAG style references moved into a dedicated prompt block, and the commit message panel now renders like the semantic analysis card. Pipeline badges use VS Code theme variables, "Issues" was renamed to "Diagnostics", and a degraded analysis reports its own title.
 - feat: `gitCommitGenie.ui.rawData.enabled` shows stage inputs, outputs and tool results in the Genie panel for debugging; raw data can contain repository source code and is kept for the current session only.
 

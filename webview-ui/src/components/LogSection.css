@@ -353,7 +353,8 @@
 }
 
 .stage-badge-api,
-.stage-badge-plan {
+.stage-badge-plan,
+.stage-badge-route {
   --stage-accent: var(--vscode-charts-orange);
 }
 
