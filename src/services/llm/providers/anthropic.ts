@@ -152,7 +152,10 @@ export class AnthropicProvider implements AIProvider {
     private readonly client: Anthropic;
 
     constructor(config: AnthropicProviderConfig, client?: Anthropic) {
-        this.client = client ?? new Anthropic({ apiKey: config.apiKey });
+        this.client = client ?? new Anthropic({
+            apiKey: config.apiKey,
+            ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
+        });
     }
 
     createSession(options: AISessionOptions): AISession {

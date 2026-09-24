@@ -15,7 +15,7 @@ Open the Command Palette (`Ctrl/Cmd + Shift + P`) and search for `Git Commit Gen
 | `Git Commit Genie: Generate commit message` | Analyze the staged changes and write a message into the commit box. Also available as the Genie icon in the Source Control title bar. |
 | `Git Commit Genie: Stop generate` | Cancel a running generation. Replaces the generate icon while a generation is in progress. |
 | `Git Commit Genie: Select generation mode` | Switches how Genie writes the message and remembers the choice: **Auto** decides per change, **Fast** pins one pass (quickest), **Deep** pins the multi-stage pipeline (closest to your template). |
-| `Git Commit Genie: Manage Models` | Add or remove providers and models, store API keys, configure custom OpenAI-compatible endpoints, thinking compatibility, and per-model pricing. |
+| `Git Commit Genie: Manage Models` | Add preset or custom models from a vendor, store one API key per vendor, configure custom OpenAI-compatible endpoints, thinking compatibility, and per-model pricing. |
 | `Git Commit Genie: Select/Create Template` | Select, create, rename, open, or deactivate commit templates. |
 | `Git Commit Genie: Menu` | Quick picker for generation mode, model management, and repository memory. |
 | `Git Commit Genie: Show Repository Cost` | Show the accumulated estimated usage cost for the current repository. |
@@ -118,13 +118,22 @@ RAG is off by default and stores its index inside the repository's `.git/git-com
 | `gitCommitGenie.typingAnimationSpeed` | number | `15` | Typing animation speed in milliseconds per character. Set to `-1` to disable the animation. |
 | `gitCommitGenie.showUsageCost` | boolean | `true` | Show a brief notification with the estimated cost of each generation. |
 
+## Preset vendors and custom endpoints
+
+`Git Commit Genie: Manage Models` groups endpoints by vendor. Preset vendors (OpenAI, Anthropic, Gemini, DeepSeek, GLM, Kimi, Qwen, OpenCode Zen and OpenCode Go) list their supported models with the context window and pricing that ship with the extension:
+
+- Pick a vendor, then a model from its presets. The API key is asked once per vendor and reused by every model you add from it.
+- Preset models keep the transport their vendor documents, including gateways that serve the Anthropic Messages or OpenAI Responses protocol under their own host. Their context window caps `gitCommitGenie.chain.contextWindowTokens` automatically.
+- Official vendors additionally offer "Browse available models", which reads the live `/models` endpoint with your key and adds any listed model.
+- "Enter a model id manually" adds another id from the same vendor and key, and "Add a custom model" is still the way to reach any other OpenAI-compatible endpoint (OpenRouter, a self-hosted vLLM, SGLang or llama.cpp server, or a private gateway).
+
 ## Custom and local endpoints
 
 `Git Commit Genie: Manage Models` supports any endpoint that implements OpenAI Chat Completions:
 
 - Set the base URL (HTTP or HTTPS), model id, and API key.
 - Standard endpoints need no extra configuration — the model inherits the global thinking level.
-- Only endpoints with non-standard thinking fields need a compatibility profile (for example `qwen`, `deepseek`, or `chat-template`), configured under advanced thinking compatibility while editing the model.
+- Only endpoints with non-standard thinking fields need a compatibility profile (for example `qwen`, `deepseek`, or `chat-template`), configured under advanced thinking compatibility while editing the model. A profile set on a preset model replaces the preset's own transport.
 - Pricing can be entered manually so custom models participate in cost tracking; without pricing, usage is reported as free.
 
 ## Related guides

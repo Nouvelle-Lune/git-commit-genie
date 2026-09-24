@@ -1,4 +1,5 @@
 import { MODEL_MAX_CONTEXT_TOKENS, estimateTokens } from '../analysis/tools/modelContext';
+import { presetContextTokens } from './providers/presets';
 import type { RequestType } from './llmTypes';
 import type { AIMessage, AIThinkingConfig, ProviderKind } from './providers';
 import { StructuredOutputTerminatedError } from './structuredCompletion';
@@ -27,6 +28,8 @@ export interface ChainTokenBudget {
 export interface ChainTokenBudgetOptions {
     provider: ProviderKind;
     model: string;
+    /** Preset vendor of the configured model, when it came from the preset catalog. */
+    vendor?: string;
     contextWindowTokens: number;
     thinking?: AIThinkingConfig;
 }
@@ -48,12 +51,15 @@ export function deriveMaxOutputTokens(spendableTokens: number): number {
 
 /** Resolves one budget shared by raw planning, every chain stage, and retries. */
 export function resolveChainTokenBudget(options: ChainTokenBudgetOptions): ChainTokenBudget {
-    const { provider, model, contextWindowTokens, thinking } = options;
+    const { provider, model, vendor, contextWindowTokens, thinking } = options;
     assertPositiveInteger('gitCommitGenie.chain.contextWindowTokens', contextWindowTokens);
 
-    // Custom model ids are user-owned. Their configured window remains authoritative
-    // even when the id happens to collide with a built-in registry entry.
-    const registeredContext = provider === 'custom' ? undefined : MODEL_MAX_CONTEXT_TOKENS[model];
+    // Preset models carry the window their vendor documents. Manually configured custom
+    // model ids stay user-owned: their configured window remains authoritative even when
+    // the id happens to collide with a built-in registry entry.
+    const presetContext = presetContextTokens({ vendor, model });
+    const registeredContext = presetContext
+        ?? (provider === 'custom' ? undefined : MODEL_MAX_CONTEXT_TOKENS[model]);
     const effectiveContextTokens = registeredContext
         ? Math.min(contextWindowTokens, registeredContext)
         : contextWindowTokens;

@@ -6,7 +6,9 @@ import { ModelCommands } from '../../../commands/ModelCommands';
 import {
     AI_MODELS_KEY,
     AIModelConfig,
+    NATIVE_SECRET_KEYS,
     customSecretKey,
+    vendorSecretKey,
 } from '../../../services/llm/providers';
 import { logger } from '../../../services/logger';
 
@@ -341,5 +343,128 @@ describe('ModelCommands manage models persistence', () => {
         const persisted = store.get(AI_MODELS_KEY) as AIModelConfig[];
         assert.deepEqual(persisted, []);
         assert.equal(secretStore.has(customSecretKey(existing.id)), false);
+    });
+
+    it('adds a gateway preset model under one shared vendor key', async () => {
+        const { context, store } = createMockContext();
+        const models: AIModelConfig[] = [];
+        const registry = createServiceRegistryStub(
+            models,
+            () => store.get(AI_MODELS_KEY) as AIModelConfig[] ?? [],
+        );
+        const statusBar = createStatusBarStub();
+
+        stubModelUi(sandbox, {
+            // Root → DeepSeek → Add preset → model → dismiss model menu → dismiss vendor → dismiss root
+            quickPickValues: ['deepseek', '__preset__', 'deepseek-flash', undefined, undefined, undefined],
+            inputValues: ['sk-deepseek'],
+        });
+
+        const commands = new ModelCommands(context, registry as never, statusBar as never);
+        await invokeManageModels(commands);
+
+        const persisted = store.get(AI_MODELS_KEY) as AIModelConfig[];
+        assert.equal(persisted.length, 1);
+        assert.equal(persisted[0].vendor, 'deepseek');
+        assert.equal(persisted[0].provider, 'custom');
+        assert.equal(persisted[0].model, 'deepseek-flash');
+        assert.equal(persisted[0].baseUrl, 'https://api.deepseek.com');
+
+        const service = registry.getLLMService(persisted[0].id);
+        assert.equal(service.setApiKey.callCount, 1);
+        assert.equal(service.setApiKey.firstCall.args[0], 'sk-deepseek');
+        assert.equal(registry.reloadProviderServices.callCount, 1);
+        assert.ok(statusBar.refreshModelStates.called);
+    });
+
+    it('reuses the stored vendor key instead of prompting for each model', async () => {
+        const { context, store, secretStore } = createMockContext();
+        secretStore.set(vendorSecretKey('kimi'), 'sk-kimi');
+        const models: AIModelConfig[] = [];
+        const registry = createServiceRegistryStub(
+            models,
+            () => store.get(AI_MODELS_KEY) as AIModelConfig[] ?? [],
+        );
+        const statusBar = createStatusBarStub();
+
+        stubModelUi(sandbox, {
+            // No InputBox values are scripted: the vendor key must come from secrets.
+            quickPickValues: ['kimi', '__preset__', 'kimi-k3', undefined, undefined, undefined],
+            inputValues: [],
+        });
+
+        const commands = new ModelCommands(context, registry as never, statusBar as never);
+        await invokeManageModels(commands);
+
+        const persisted = store.get(AI_MODELS_KEY) as AIModelConfig[];
+        assert.equal(persisted.length, 1);
+        assert.equal(persisted[0].vendor, 'kimi');
+        assert.equal(persisted[0].model, 'kimi-k3');
+        assert.equal(persisted[0].baseUrl, 'https://api.moonshot.ai/v1');
+        assert.equal(registry.getLLMService(persisted[0].id).setApiKey.firstCall.args[0], 'sk-kimi');
+    });
+
+    it('adds a native preset with the provider secret slot and no endpoint override', async () => {
+        const { context, store, secretStore } = createMockContext();
+        secretStore.set(NATIVE_SECRET_KEYS.anthropic, 'sk-ant');
+        const models: AIModelConfig[] = [];
+        const registry = createServiceRegistryStub(
+            models,
+            () => store.get(AI_MODELS_KEY) as AIModelConfig[] ?? [],
+        );
+        const statusBar = createStatusBarStub();
+
+        stubModelUi(sandbox, {
+            quickPickValues: ['anthropic', '__preset__', 'claude-opus-5-5', undefined, undefined, undefined],
+            inputValues: [],
+        });
+
+        const commands = new ModelCommands(context, registry as never, statusBar as never);
+        await invokeManageModels(commands);
+
+        const persisted = store.get(AI_MODELS_KEY) as AIModelConfig[];
+        assert.equal(persisted.length, 1);
+        assert.equal(persisted[0].vendor, 'anthropic');
+        assert.equal(persisted[0].provider, 'anthropic');
+        assert.equal(persisted[0].model, 'claude-opus-5-5');
+        assert.equal(persisted[0].baseUrl, undefined);
+        assert.equal(registry.getLLMService(persisted[0].id).setApiKey.firstCall.args[0], 'sk-ant');
+    });
+
+    it('keeps the shared vendor key when one preset model is deleted', async () => {
+        const existing: AIModelConfig = {
+            id: 'gateway-model-1',
+            label: 'GLM-5.3',
+            provider: 'custom',
+            model: 'glm-5.3',
+            baseUrl: 'https://open.bigmodel.cn/api/paas/v4',
+            vendor: 'glm',
+        };
+        const { context, store, secretStore, eventLog } = createMockContext();
+        store.set(AI_MODELS_KEY, [existing]);
+        secretStore.set(vendorSecretKey('glm'), 'sk-glm');
+        const models: AIModelConfig[] = [{ ...existing }];
+        const registry = createServiceRegistryStub(
+            models,
+            () => store.get(AI_MODELS_KEY) as AIModelConfig[] ?? [],
+        );
+        const statusBar = createStatusBarStub();
+
+        stubModelUi(sandbox, {
+            quickPickValues: ['glm', existing.id, 'delete', undefined, undefined],
+            inputValues: [],
+            warningValue: 'Delete',
+        });
+
+        const commands = new ModelCommands(context, registry as never, statusBar as never);
+        await invokeManageModels(commands);
+
+        assert.deepEqual(store.get(AI_MODELS_KEY), []);
+        assert.equal(secretStore.get(vendorSecretKey('glm')), 'sk-glm');
+        assert.equal(
+            eventLog.some(entry => entry.startsWith('secrets.delete:')),
+            false,
+            `vendor keys must outlive one model instance; log=${JSON.stringify(eventLog)}`,
+        );
     });
 });

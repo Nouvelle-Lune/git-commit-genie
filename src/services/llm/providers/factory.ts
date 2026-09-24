@@ -13,11 +13,11 @@ export interface ProviderFactoryConfig {
 export function createAIProvider(config: ProviderFactoryConfig): AIProvider {
     switch (config.kind) {
         case 'openai':
-            return new OpenAIProvider({ apiKey: config.apiKey });
+            return new OpenAIProvider({ apiKey: config.apiKey, baseUrl: config.baseUrl });
         case 'anthropic':
-            return new AnthropicProvider({ apiKey: config.apiKey });
+            return new AnthropicProvider({ apiKey: config.apiKey, baseUrl: config.baseUrl });
         case 'google':
-            return new GoogleProvider({ apiKey: config.apiKey });
+            return new GoogleProvider({ apiKey: config.apiKey, baseUrl: config.baseUrl });
         case 'custom':
             if (!config.baseUrl) {
                 throw new Error('Custom provider requires a base URL.');

@@ -7,16 +7,23 @@ import {
     AIChatTemplateValue,
     AIThinkingFormat,
     AIThinkingTokenBudgetField,
-    NATIVE_SECRET_KEYS,
+    PRESET_TRANSPORT_LABELS,
+    PRESET_TRANSPORT_PROVIDERS,
     PROVIDER_LABELS,
+    PresetModel,
     ProviderKind,
     ThinkingLevel,
     THINKING_LEVELS,
+    VENDOR_PRESETS,
+    VendorPreset,
     createAIProvider,
     customSecretKey,
     getModelThinkingMetadata,
     getSupportedThinkingLevels,
+    getVendorPreset,
     modelSecretKey,
+    pricingKeyForModel,
+    vendorSecretKey,
 } from '../services/llm/providers';
 import { ServiceRegistry } from '../core/ServiceRegistry';
 import { StatusBarManager } from '../ui/StatusBarManager';
@@ -33,6 +40,11 @@ type ModelPurpose = 'generation';
 type MenuExit = 'back' | 'done';
 
 const BACK_VALUE = '__back__';
+const CUSTOM_VENDOR_VALUE = 'custom';
+const ADD_PRESET_VALUE = '__preset__';
+const BROWSE_MODELS_VALUE = '__browse__';
+const MANUAL_MODEL_VALUE = '__manual__';
+const ADD_CUSTOM_VALUE = '__add__';
 
 const THINKING_FORMAT_OPTIONS: ReadonlyArray<{
     label: string;
@@ -90,44 +102,112 @@ export class ModelCommands {
     private async manageModels(): Promise<void> {
         for (;;) {
             const generation = this.modelDescription(this.context.globalState.get<string>(GENERATION_MODEL_ID_KEY, ''));
-            const items: Array<vscode.QuickPickItem & { value: ModelPurpose | ProviderKind }> = [
+            const customCount = this.serviceRegistry.getModels()
+                .filter(model => model.vendor === undefined && model.provider === 'custom').length;
+            const items: Array<vscode.QuickPickItem & { value: string }> = [
                 { label: '$(sparkle) Commit message model', description: generation, value: 'generation' },
                 { label: '', kind: vscode.QuickPickItemKind.Separator, value: 'generation' },
-                ...(['openai', 'anthropic', 'google', 'custom'] as const).map(value => ({
-                    label: PROVIDER_LABELS[value],
-                    description: `${this.serviceRegistry.getModels().filter(model => model.provider === value).length} configured`,
-                    value,
-                })),
+                ...VENDOR_PRESETS.map(vendor => {
+                    const configured = this.serviceRegistry.getModels().filter(model => model.vendor === vendor.id).length;
+                    return {
+                        label: vendor.label,
+                        description: `${configured} configured · ${vendor.description}`,
+                        value: vendor.id,
+                    };
+                }),
+                {
+                    label: 'Custom OpenAI-compatible',
+                    description: `${customCount} configured · your own endpoint and model id`,
+                    value: CUSTOM_VENDOR_VALUE,
+                },
             ];
             const picked = await vscode.window.showQuickPick(items, { placeHolder: 'Manage models or select a workflow model' });
             if (!picked) { return; }
             if (picked.value === 'generation') {
-                const exit = await this.selectWorkflowModel(picked.value);
+                const exit = await this.selectWorkflowModel(picked.value as ModelPurpose);
                 if (exit === 'back') { continue; }
                 return;
             }
-            const exit = await this.manageProvider(picked.value);
+            const vendor = getVendorPreset(picked.value);
+            const exit = vendor ? await this.manageVendor(vendor) : await this.manageCustomModels();
             if (exit === 'back') { continue; }
             return;
         }
     }
 
-    private async manageProvider(provider: ProviderKind): Promise<MenuExit> {
+    /**
+     * Preset vendors list their curated models first and keep a manual escape hatch:
+     * native providers can browse the live model list, gateways accept any model id the
+     * vendor serves under the same key.
+     */
+    private async manageVendor(vendor: VendorPreset): Promise<MenuExit> {
         for (;;) {
-            const models = this.serviceRegistry.getModels().filter(model => model.provider === provider);
+            const models = this.serviceRegistry.getModels().filter(model => model.vendor === vendor.id);
             const picked = await vscode.window.showQuickPick([
                 this.backItem(),
-                { label: '$(add) Add model', value: '__add__' },
+                {
+                    label: '$(add) Add preset model',
+                    description: `${vendor.models.length} presets · one ${vendor.label} API key`,
+                    value: ADD_PRESET_VALUE,
+                },
+                ...(vendor.endpoints === undefined
+                    ? [{
+                        label: '$(list-unordered) Browse available models',
+                        description: `Query the ${vendor.label} model list with your API key`,
+                        value: BROWSE_MODELS_VALUE,
+                    }]
+                    : [{
+                        label: '$(edit) Enter a model id manually',
+                        description: `Use another ${vendor.label} model id with the same API key`,
+                        value: MANUAL_MODEL_VALUE,
+                    }]),
                 ...models.map(model => ({
                     label: model.label,
                     description: this.usageDescription(model.id),
-                    detail: provider === 'custom' ? `${model.model} · ${model.baseUrl}` : model.model,
+                    detail: this.modelDetail(model),
                     value: model.id,
                 })),
-            ], { placeHolder: `${PROVIDER_LABELS[provider]} models` });
+            ], { placeHolder: `${vendor.label} models` });
             if (!picked || picked.value === BACK_VALUE) { return 'back'; }
-            if (picked.value === '__add__') {
-                const exit = await this.addModel(provider);
+            if (picked.value === ADD_PRESET_VALUE) {
+                const exit = await this.addPresetModel(vendor);
+                if (exit === 'back') { continue; }
+                return 'done';
+            }
+            if (picked.value === BROWSE_MODELS_VALUE) {
+                const exit = await this.addBrowsedModel(vendor);
+                if (exit === 'back') { continue; }
+                return 'done';
+            }
+            if (picked.value === MANUAL_MODEL_VALUE) {
+                const exit = await this.addManualVendorModel(vendor);
+                if (exit === 'back') { continue; }
+                return 'done';
+            }
+            const exit = await this.manageConfiguredModel(this.requireModel(picked.value));
+            if (exit === 'back') { continue; }
+            return 'done';
+        }
+    }
+
+    /** Custom endpoints keep the original per-instance flow, including its own secret slot. */
+    private async manageCustomModels(): Promise<MenuExit> {
+        for (;;) {
+            const models = this.serviceRegistry.getModels()
+                .filter(model => model.vendor === undefined && model.provider === 'custom');
+            const picked = await vscode.window.showQuickPick([
+                this.backItem(),
+                { label: '$(add) Add model', value: ADD_CUSTOM_VALUE },
+                ...models.map(model => ({
+                    label: model.label,
+                    description: this.usageDescription(model.id),
+                    detail: this.modelDetail(model),
+                    value: model.id,
+                })),
+            ], { placeHolder: 'Custom OpenAI-compatible models' });
+            if (!picked || picked.value === BACK_VALUE) { return 'back'; }
+            if (picked.value === ADD_CUSTOM_VALUE) {
+                const exit = await this.addCustomModel();
                 if (exit === 'back') { continue; }
                 return 'done';
             }
@@ -191,20 +271,106 @@ export class ModelCommands {
         }
     }
 
-    private async addModel(provider: ProviderKind): Promise<MenuExit> {
-        const nativeApiKey = provider === 'custom'
-            ? undefined
-            : await this.resolveNativeApiKey(provider);
-        if (provider !== 'custom' && !nativeApiKey) { return 'back'; }
-        const model = provider === 'custom'
-            ? await this.promptCustomModel({ id: randomUUID(), label: '', provider, model: '', baseUrl: '' })
-            : await this.promptNativeModel(provider, nativeApiKey!);
+    /** Adds one curated preset model after resolving the vendor's shared API key. */
+    private async addPresetModel(vendor: VendorPreset): Promise<MenuExit> {
+        const apiKey = await this.resolveVendorApiKey(vendor);
+        if (!apiKey) { return 'back'; }
+        const picked = await vscode.window.showQuickPick(vendor.models.map(entry => ({
+            label: entry.label,
+            description: `${entry.model} · ${this.formatContext(entry.contextTokens)}`,
+            detail: this.presetDetail(vendor, entry),
+            value: entry.model,
+        })), { placeHolder: `Select a ${vendor.label} model` });
+        if (!picked) { return 'back'; }
+        const preset = vendor.models.find(entry => entry.model === picked.value);
+        if (!preset) { return 'back'; }
+        const model = this.presetModelConfig(vendor, preset);
+        await this.persistNewModel(model, apiKey);
+        return this.manageConfiguredModel(model);
+    }
+
+    /** Native providers keep the live `/models` flow as a fallback to the preset list. */
+    private async addBrowsedModel(vendor: VendorPreset): Promise<MenuExit> {
+        const apiKey = await this.resolveVendorApiKey(vendor);
+        if (!apiKey) { return 'back'; }
+        const provider = this.nativeProviderKind(vendor);
+        const available = await createAIProvider({ kind: provider, apiKey }).listModels();
+        if (!available.length) {
+            throw new Error(`${vendor.label} returned no available models.`);
+        }
+        const modelId = await vscode.window.showQuickPick(available, { placeHolder: `Select a ${vendor.label} model` });
+        if (!modelId) { return 'back'; }
+        const preset = vendor.models.find(entry => entry.model === modelId);
+        if (preset) {
+            const model = this.presetModelConfig(vendor, preset);
+            await this.persistNewModel(model, apiKey);
+            return this.manageConfiguredModel(model);
+        }
+        const label = await vscode.window.showInputBox({ title: 'Model display name', value: modelId, ignoreFocusOut: true });
+        if (!label?.trim()) { return 'back'; }
+        const model: AIModelConfig = {
+            id: randomUUID(),
+            label: label.trim(),
+            provider,
+            model: modelId,
+            vendor: vendor.id,
+        };
+        await this.persistNewModel(model, apiKey);
+        return this.manageConfiguredModel(model);
+    }
+
+    /** Manual OpenAI-compatible endpoint; the API key stays per model instance. */
+    private async addCustomModel(): Promise<MenuExit> {
+        const model = await this.promptCustomModel({ id: randomUUID(), label: '', provider: 'custom', model: '', baseUrl: '' });
         if (!model) { return 'back'; }
-        const apiKey = nativeApiKey ?? await this.resolveApiKeyForNewModel(model);
+        const apiKey = await this.resolveApiKeyForNewModel(model);
         if (!apiKey) { return 'back'; }
         // Persist immediately: OpenAI-compatible /models membership checks reject many valid
         // custom endpoints (missing catalog, alias ids, pagination). Endpoint/model validity
         // surfaces when the model is actually used for generation.
+        await this.persistNewModel(model, apiKey);
+        return this.manageConfiguredModel(model);
+    }
+
+    /** Chat model of a gateway that is not in the curated list, under the same vendor key. */
+    private async addManualVendorModel(vendor: VendorPreset): Promise<MenuExit> {
+        const endpoints = vendor.endpoints ?? {};
+        const transports = (Object.keys(endpoints) as PresetModel['transport'][]);
+        if (!transports.length) {
+            throw new Error(`${vendor.label} has no configurable endpoint.`);
+        }
+        const apiKey = await this.resolveVendorApiKey(vendor);
+        if (!apiKey) { return 'back'; }
+        let transport = transports[0];
+        if (transports.length > 1) {
+            const picked = await vscode.window.showQuickPick(transports.map(value => ({
+                label: PRESET_TRANSPORT_LABELS[value],
+                description: endpoints[value],
+                value,
+            })), { placeHolder: `Select how ${vendor.label} serves this model` });
+            if (!picked) { return 'back'; }
+            transport = picked.value;
+        }
+        const modelId = await vscode.window.showInputBox({
+            title: 'Model id',
+            placeHolder: 'exact id the endpoint expects',
+            ignoreFocusOut: true,
+            validateInput: value => value.trim() ? undefined : 'A model id is required.',
+        });
+        if (!modelId?.trim()) { return 'back'; }
+        const model: AIModelConfig = {
+            id: randomUUID(),
+            label: modelId.trim(),
+            provider: PRESET_TRANSPORT_PROVIDERS[transport],
+            model: modelId.trim(),
+            vendor: vendor.id,
+            baseUrl: endpoints[transport],
+        };
+        await this.persistNewModel(model, apiKey);
+        return this.manageConfiguredModel(model);
+    }
+
+    private async persistNewModel(model: AIModelConfig, apiKey: string): Promise<void> {
         await this.context.globalState.update(AI_MODELS_KEY, [...this.serviceRegistry.getModels(), model]);
         await this.serviceRegistry.reloadProviderServices();
         const service = this.serviceRegistry.getLLMService(model.id);
@@ -213,7 +379,99 @@ export class ModelCommands {
         }
         await service.setApiKey(apiKey);
         await this.statusBarManager.refreshModelStates();
-        return this.manageConfiguredModel(model);
+    }
+
+    private presetModelConfig(vendor: VendorPreset, preset: PresetModel): AIModelConfig {
+        const baseUrl = vendor.endpoints?.[preset.transport];
+        return {
+            id: randomUUID(),
+            label: preset.label,
+            provider: PRESET_TRANSPORT_PROVIDERS[preset.transport],
+            model: preset.model,
+            vendor: vendor.id,
+            ...(baseUrl !== undefined ? { baseUrl } : {}),
+        };
+    }
+
+    private nativeProviderKind(vendor: VendorPreset): Exclude<ProviderKind, 'custom'> {
+        const transport = vendor.models[0]?.transport;
+        const provider = transport ? PRESET_TRANSPORT_PROVIDERS[transport] : 'custom';
+        if (provider === 'custom') {
+            throw new Error(`${vendor.label} has no browsable provider model list.`);
+        }
+        return provider;
+    }
+
+    private presetDetail(vendor: VendorPreset, preset: PresetModel): string {
+        const endpoint = vendor.endpoints?.[preset.transport]
+            ?? PROVIDER_LABELS[PRESET_TRANSPORT_PROVIDERS[preset.transport]];
+        const described = describePricingSource(pricingKeyForModel({ vendor: vendor.id, model: preset.model }));
+        const pricing = described.source === 'Unpriced' ? 'Unpriced' : this.formatRatesForMenu(described.rates!);
+        return `${PRESET_TRANSPORT_LABELS[preset.transport]} · ${endpoint} · ${pricing}`;
+    }
+
+    private modelDetail(model: AIModelConfig): string {
+        const parts = [model.model];
+        const vendor = getVendorPreset(model.vendor);
+        if (vendor) {
+            parts.push(vendor.label);
+        }
+        if (model.baseUrl) {
+            parts.push(model.baseUrl);
+        }
+        return parts.join(' · ');
+    }
+
+    private formatContext(contextTokens: number): string {
+        return `${Math.round(contextTokens / 1000)}K context`;
+    }
+
+    private async editModel(current: AIModelConfig): Promise<void> {
+        const vendor = getVendorPreset(current.vendor);
+        let updated: AIModelConfig | undefined;
+        if (vendor) {
+            updated = await this.pickVendorModel(vendor, current);
+        } else if (current.provider === 'custom') {
+            updated = await this.promptCustomModel(current);
+        } else {
+            updated = await this.promptNativeModel(current.provider, await this.requireStoredApiKey(current));
+        }
+        if (!updated) { return; }
+        // Preserve pricing override and thinking metadata across label/model/endpoint edits.
+        const model: AIModelConfig = {
+            ...current,
+            label: updated.label,
+            model: updated.model,
+            baseUrl: updated.baseUrl,
+            id: current.id,
+            provider: current.provider,
+            vendor: updated.vendor ?? current.vendor,
+        };
+        if (model.baseUrl === undefined) {
+            delete model.baseUrl;
+        }
+        await this.updateConfiguredModel(model);
+    }
+
+    private async pickVendorModel(vendor: VendorPreset, current: AIModelConfig): Promise<AIModelConfig | undefined> {
+        const picked = await vscode.window.showQuickPick(vendor.models.map(entry => ({
+            label: entry.label,
+            description: entry.model === current.model ? 'Current' : entry.model,
+            detail: this.presetDetail(vendor, entry),
+            value: entry.model,
+        })), { placeHolder: `Select a ${vendor.label} model` });
+        if (!picked) { return undefined; }
+        const preset = vendor.models.find(entry => entry.model === picked.value);
+        if (!preset) { return undefined; }
+        return this.presetModelConfig(vendor, preset);
+    }
+
+    private async requireStoredApiKey(model: AIModelConfig): Promise<string> {
+        const apiKey = await this.context.secrets.get(modelSecretKey(model));
+        if (!apiKey) {
+            throw new Error(`${model.label} has no API key.`);
+        }
+        return apiKey;
     }
 
     private async promptNativeModel(
@@ -231,37 +489,6 @@ export class ModelCommands {
         return { id: randomUUID(), label: label.trim(), provider, model };
     }
 
-    private async editModel(current: AIModelConfig): Promise<void> {
-        let updated: AIModelConfig | undefined;
-        if (current.provider === 'custom') {
-            updated = await this.promptCustomModel(current);
-        } else {
-            // Native edit still needs the shared provider key to re-list catalog models.
-            const apiKey = await this.context.secrets.get(modelSecretKey(current));
-            if (!apiKey) {
-                throw new Error(`${current.label} has no API key.`);
-            }
-            updated = await this.promptNativeModel(current.provider, apiKey);
-        }
-        if (!updated) { return; }
-        // Preserve pricing override and thinking metadata across label/model/endpoint edits.
-        const model: AIModelConfig = {
-            ...current,
-            label: updated.label,
-            model: updated.model,
-            baseUrl: updated.baseUrl,
-            id: current.id,
-            provider: current.provider,
-        };
-        await this.context.globalState.update(
-            AI_MODELS_KEY,
-            this.serviceRegistry.getModels().map(candidate => candidate.id === current.id ? model : candidate),
-        );
-        await this.serviceRegistry.reloadProviderServices();
-        this.serviceRegistry.updateCurrentLLMService();
-        await this.statusBarManager.refreshModelStates();
-    }
-
     private async replaceApiKey(model: AIModelConfig): Promise<void> {
         const apiKey = await this.promptApiKey(PROVIDER_LABELS[model.provider]);
         if (!apiKey) { return; }
@@ -277,15 +504,20 @@ export class ModelCommands {
         if (this.context.globalState.get<string>(GENERATION_MODEL_ID_KEY, '') === model.id) {
             throw new Error('Select another commit message model before deleting this model.');
         }
+        const sharedKey = model.vendor !== undefined && getVendorPreset(model.vendor) !== undefined;
         const confirmation = await vscode.window.showWarningMessage(
-            `Delete model '${model.label}'?`,
+            sharedKey
+                ? `Delete model '${model.label}'? The shared ${getVendorPreset(model.vendor)!.label} API key is kept for the other models of this vendor.`
+                : `Delete model '${model.label}'?`,
             { modal: true },
             'Delete',
         );
         if (confirmation !== 'Delete') { return; }
-        // Delete the secret while the model still owns it. ServiceRegistry.secrets.onDidChange
-        // requires an owner in getModels(); reversing this order throws a silent rejection.
-        if (model.provider === 'custom') {
+        // Delete an instance secret while the model still owns it; vendor keys are shared
+        // by every model of that vendor and outlive any single instance.
+        // ServiceRegistry.secrets.onDidChange requires an owner in getModels(); reversing
+        // the order throws a silent rejection.
+        if (model.provider === 'custom' && !sharedKey) {
             await this.context.secrets.delete(customSecretKey(model.id));
         }
         const remaining = this.serviceRegistry.getModels().filter(candidate => candidate.id !== model.id);
@@ -305,7 +537,7 @@ export class ModelCommands {
                     description: this.context.globalState.get<string>(purposeKey, '') === model.id
                         ? `Current · ${PROVIDER_LABELS[model.provider]}`
                         : PROVIDER_LABELS[model.provider],
-                    detail: model.provider === 'custom' ? `${model.model} · ${model.baseUrl}` : model.model,
+                    detail: this.modelDetail(model),
                     value: model.id,
                 })),
             ], { placeHolder: 'Select commit message model' });
@@ -398,7 +630,7 @@ export class ModelCommands {
             throw new Error('Thinking compatibility profiles are only available for custom OpenAI-compatible models.');
         }
 
-        const currentFormat = model.thinkingFormat ?? 'openai';
+        const currentFormat = getModelThinkingMetadata(model).thinkingFormat ?? 'openai';
         const formatChoice = await vscode.window.showQuickPick(
             [
                 this.backItem(),
@@ -472,9 +704,14 @@ export class ModelCommands {
         return existing ?? this.promptApiKey(PROVIDER_LABELS[model.provider]);
     }
 
-    private async resolveNativeApiKey(provider: Exclude<ProviderKind, 'custom'>): Promise<string | undefined> {
-        return await this.context.secrets.get(NATIVE_SECRET_KEYS[provider])
-            ?? this.promptApiKey(PROVIDER_LABELS[provider]);
+    /**
+     * One key per vendor, reused by every model the user adds from that vendor.
+     * Native vendors keep their historical provider-wide secret slot.
+     */
+    private async resolveVendorApiKey(vendor: VendorPreset): Promise<string | undefined> {
+        const secretKey = vendorSecretKey(vendor.id);
+        return await this.context.secrets.get(secretKey)
+            ?? this.promptApiKey(vendor.label);
     }
 
     private async promptCustomModel(initial: AIModelConfig): Promise<AIModelConfig | undefined> {
@@ -512,7 +749,7 @@ export class ModelCommands {
     }
 
     private pricingDescription(model: AIModelConfig): string {
-        const described = describePricingSource(model.model, model.pricingOverride);
+        const described = describePricingSource(pricingKeyForModel(model), model.pricingOverride);
         if (described.source === 'Unpriced') {
             return 'Unpriced';
         }
@@ -532,7 +769,7 @@ export class ModelCommands {
     private async manageModelPricing(initial: AIModelConfig): Promise<MenuExit> {
         let model = initial;
         for (;;) {
-            const described = describePricingSource(model.model, model.pricingOverride);
+            const described = describePricingSource(pricingKeyForModel(model), model.pricingOverride);
             const detail = described.source === 'Unpriced'
                 ? 'No built-in or custom price configured'
                 : this.formatRatesForMenu(described.rates!);
@@ -569,7 +806,7 @@ export class ModelCommands {
                 const { pricingOverride: _removed, ...rest } = model;
                 await this.updateConfiguredModel(rest);
                 model = this.requireModel(model.id);
-                const after = describePricingSource(model.model, model.pricingOverride);
+                const after = describePricingSource(pricingKeyForModel(model), model.pricingOverride);
                 vscode.window.showInformationMessage(
                     after.source === 'Unpriced'
                         ? `${model.label} has no built-in price (Unpriced).`

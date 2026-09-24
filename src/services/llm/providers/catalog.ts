@@ -1,4 +1,5 @@
 import type { AIModelConfig } from './config';
+import { getPresetModel } from './presets';
 import {
     AIModelThinkingMetadata,
     AIThinkingConfig,
@@ -98,6 +99,8 @@ function catalogEntries(
 }
 
 const OPENAI_REASONING_MODELS = [
+    'gpt-6-sol',
+    'gpt-6-luna',
     'gpt-5.6-sol',
     'gpt-5.6-terra',
     'gpt-5.6-luna',
@@ -110,6 +113,8 @@ const OPENAI_REASONING_MODELS = [
 ] as const;
 
 const OPENAI_REASONING_NO_OFF_MODELS = [
+    // GPT-6 Astra rejects reasoning_effort="none".
+    'gpt-6-astra',
     'gpt-5',
     'gpt-5-mini',
     'gpt-5-nano',
@@ -124,6 +129,8 @@ const ANTHROPIC_EXTENDED_THINKING_MODELS = [
     'claude-sonnet-4-20250514',
     'claude-opus-4-20250514',
     'claude-opus-4-1-20250805',
+    'claude-fable-5-1',
+    'claude-opus-5-5',
     'claude-fable-5',
     'claude-opus-5',
     'claude-sonnet-5',
@@ -160,6 +167,7 @@ const GOOGLE_BUDGET_NO_OFF_MAP: Partial<Record<ThinkingLevel, string | null>> = 
 });
 
 const GEMINI_LEVEL_MODELS = [
+    'gemini-3.8-flash',
     'gemini-3.7-flash',
     'gemini-3.6-flash',
     'gemini-3.5-flash',
@@ -217,18 +225,36 @@ function defaultSupportsReasoningEffort(format: AIThinkingFormat): boolean | und
  * when its Chat Completions implementation uses non-standard thinking fields.
  */
 export function getModelThinkingMetadata(
-    model: Pick<AIModelConfig, 'provider' | 'model' | 'reasoning' | 'thinkingLevelMap' | 'thinkingFormat' | 'chatTemplateKwargs' | 'chatTemplateArgs' | 'thinkingTokenBudgetField' | 'supportsReasoningEffort' | 'requiresReasoningContentOnAssistantMessages'>,
+    model: Pick<AIModelConfig, 'provider' | 'model' | 'vendor' | 'reasoning' | 'thinkingLevelMap' | 'thinkingFormat' | 'chatTemplateKwargs' | 'chatTemplateArgs' | 'thinkingTokenBudgetField' | 'supportsReasoningEffort' | 'requiresReasoningContentOnAssistantMessages'>,
 ): AIModelThinkingMetadata {
+    const preset = getPresetModel(model.vendor, model.model)?.thinking;
+    const hasExplicitMetadata = model.reasoning !== undefined || model.thinkingLevelMap !== undefined;
+    const withExplicitCapability = (base: AIModelThinkingMetadata): AIModelThinkingMetadata => (
+        hasExplicitMetadata
+            ? {
+                ...base,
+                reasoning: model.reasoning === true,
+                ...(model.thinkingLevelMap !== undefined ? { thinkingLevelMap: model.thinkingLevelMap } : {}),
+            }
+            : base
+    );
+
+    // An explicit format is the user overriding the transport profile, including one
+    // a preset would otherwise supply, so it wins over both preset and catalog metadata.
+    if (model.thinkingFormat !== undefined) {
+        return withExplicitCapability(customThinkingMetadata(model));
+    }
+
+    if (preset) {
+        return withExplicitCapability(preset);
+    }
+
     if (model.provider === 'custom') {
         return customThinkingMetadata(model);
     }
 
-    const hasExplicitMetadata = model.reasoning !== undefined || model.thinkingLevelMap !== undefined;
     if (hasExplicitMetadata) {
-        return {
-            reasoning: model.reasoning === true,
-            ...(model.thinkingLevelMap !== undefined ? { thinkingLevelMap: model.thinkingLevelMap } : {}),
-        };
+        return withExplicitCapability({ reasoning: false });
     }
 
     return MODEL_THINKING_CATALOG[`${model.provider}/${model.model}`] ?? { reasoning: false };

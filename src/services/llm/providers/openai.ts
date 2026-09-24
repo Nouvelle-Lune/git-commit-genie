@@ -144,7 +144,10 @@ export class OpenAIProvider implements AIProvider {
     private readonly client: OpenAI;
 
     constructor(config: OpenAIProviderConfig, client?: OpenAI) {
-        this.client = client ?? new OpenAI({ apiKey: config.apiKey });
+        this.client = client ?? new OpenAI({
+            apiKey: config.apiKey,
+            ...(config.baseUrl ? { baseURL: config.baseUrl } : {}),
+        });
     }
 
     createSession(options: AISessionOptions): AISession {

@@ -45,7 +45,7 @@ code --install-extension Lune-99.git-commit-genie
 
 ## 使用
 
-1. 运行 `Git Commit Genie: 管理模型`，添加服务商并填入 API Key。密钥保存在 VS Code SecretStorage 中，不写入 `settings.json`。
+1. 运行 `Git Commit Genie: 管理模型`，选择服务商（如 OpenAI、Anthropic、DeepSeek、OpenCode Zen），从预设模型里挑一个并填入 API Key。同一服务商的模型共用这一个密钥，密钥保存在 VS Code SecretStorage 中，不写入 `settings.json`。
 2. 暂存改动。
 3. 点击源代码管理标题栏的 Genie 图标，或运行 `Git Commit Genie: 生成提交信息`。
 4. 检查提交框中的信息，按需修改后提交。
@@ -55,7 +55,7 @@ code --install-extension Lune-99.git-commit-genie
 ## 特性
 
 - 生成符合 Conventional Commits 的提交信息，并在写入提交框前完成校验。
-- 服务商：OpenAI、Anthropic Claude、Google Gemini，以及 DeepSeek、Qwen、GLM、Kimi、OpenRouter、本地 vLLM / SGLang / llama.cpp 等兼容端点。
+- 服务商：OpenAI、Anthropic Claude、Google Gemini，以及 DeepSeek、GLM、Kimi、Qwen（国际站与中国站）、OpenCode Zen、OpenCode Go 网关 —— 这些均以预设形式内置（含精选模型清单与官方价格），另支持 OpenRouter、本地 vLLM / SGLang / llama.cpp 等自定义兼容端点。
 - 思考等级从 `off` 到 `max`，可全局设置或按模型设置。
 - 提交信息语言：`auto`、`en`、`zh-CN`、`zh-TW`、`ja`、`ko`、`de`、`fr`、`es`、`pt`、`ru`、`it`。
 - 插件界面支持英文、简体中文与繁体中文。

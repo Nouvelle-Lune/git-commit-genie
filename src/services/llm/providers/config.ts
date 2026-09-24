@@ -23,6 +23,11 @@ export interface AIModelConfig extends Partial<AIModelThinkingMetadata> {
     /** Required only for OpenAI-compatible custom providers. */
     baseUrl?: string;
     /**
+     * Preset vendor this instance came from (see providers/presets.ts). Absent for
+     * manually configured models; native vendors reuse the provider secret slot.
+     */
+    vendor?: string;
+    /**
      * Optional flat USD/1M-token override for this model instance.
      * Absent means use built-in PRICING_TABLE exact match, otherwise unpriced.
      * Editing label/endpoint/key must preserve this field; deleting the model removes it.
@@ -34,7 +39,22 @@ export function customSecretKey(id: string): string {
     return `gitCommitGenie.secret.ai.custom.${id}`;
 }
 
+/**
+ * Secret slot shared by every model instance of one preset vendor. Native vendors
+ * keep their historical provider-wide slot so existing keys stay valid; every other
+ * vendor gets one slot of its own, which is what makes "paste one key per vendor" work.
+ */
+export function vendorSecretKey(vendorId: string): string {
+    if (vendorId === 'openai' || vendorId === 'anthropic' || vendorId === 'google') {
+        return NATIVE_SECRET_KEYS[vendorId];
+    }
+    return `gitCommitGenie.secret.ai.vendor.${vendorId}`;
+}
+
 export function modelSecretKey(model: AIModelConfig): string {
+    if (model.vendor !== undefined) {
+        return vendorSecretKey(model.vendor);
+    }
     return model.provider === 'custom'
         ? customSecretKey(model.id)
         : NATIVE_SECRET_KEYS[model.provider];

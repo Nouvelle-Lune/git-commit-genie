@@ -46,6 +46,7 @@ import type { StageEvent } from '../../ui/StageNotificationManager';
 import type { CostTrackingService } from '../cost/costTrackingService';
 import type { CostQuote } from '../cost/costTypes';
 import { resolveModelPricing } from '../cost/costAccounting';
+import { pricingKeyForModel } from './providers/presets';
 import { summarizeTaskCostQuotes } from '../cost/costDisplay';
 import type { AIUsage } from './providers';
 import { routeAutoGeneration } from '../router/autoRouter';
@@ -126,11 +127,15 @@ export class UnifiedLLMService extends BaseLLMService {
         const tokenBudget = resolveChainTokenBudget({
             provider: this.options.model.provider,
             model: this.getCurrentModel(),
+            vendor: this.options.model.vendor,
             contextWindowTokens,
             thinking,
         });
         // Snapshot pricing at execution creation so mid-task override edits do not affect in-flight calls.
-        const pricing = resolveModelPricing(this.options.model.model, this.options.model.pricingOverride);
+        const pricing = resolveModelPricing(
+            pricingKeyForModel(this.options.model),
+            this.options.model.pricingOverride,
+        );
         const recordedQuotes: CostQuote[] = [];
         const costTracker = this.options.costTracker;
         const modelConfig = this.options.model;

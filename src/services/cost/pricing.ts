@@ -48,6 +48,26 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     'local': { input: 0, output: 0, cached: 0 },
 
     // OpenAI (USD)
+    // GPT-6 is the current flagship family. Prompts above 272K input tokens are
+    // repriced at 2x input and 1.5x output for the entire request.
+    'gpt-6-astra': {
+        tiers: [
+            { maxInputTokens: 272000, input: 10.0, output: 50.0, cached: 1.0 },
+            { maxInputTokens: Infinity, input: 20.0, output: 75.0, cached: 2.0 }
+        ]
+    },
+    'gpt-6-sol': {
+        tiers: [
+            { maxInputTokens: 272000, input: 2.0, output: 10.0, cached: 0.2 },
+            { maxInputTokens: Infinity, input: 4.0, output: 15.0, cached: 0.4 }
+        ]
+    },
+    'gpt-6-luna': {
+        tiers: [
+            { maxInputTokens: 272000, input: 0.10, output: 0.50, cached: 0.01 },
+            { maxInputTokens: Infinity, input: 0.20, output: 0.75, cached: 0.02 }
+        ]
+    },
     'gpt-5.6-sol': {
         tiers: [
             { maxInputTokens: 272000, input: 5.0, output: 30.0, cached: 0.5 },
@@ -88,9 +108,13 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     'gpt-5-nano': { input: 0.05, output: 0.4, cached: 0.005 },
 
     // Anthropic Claude (USD)
+    // Fable 5.1 and Opus 5.5 are the current line; both bill cache reads below the
+    // usual 0.1x multiplier (Fable 5.1 at 0.025x, Opus 5.5 at 0.05x).
+    'claude-fable-5-1': { input: 10.0, output: 50.0, cached: 0.25 },
+    'claude-opus-5-5': { input: 4.0, output: 20.0, cached: 0.20 },
     'claude-fable-5': { input: 10.0, output: 50.0, cached: 1.0 },
     'claude-opus-5': { input: 5.0, output: 25.0, cached: 0.5 },
-    'claude-sonnet-5': { input: 3.0, output: 15.0, cached: 0.3 },
+    'claude-sonnet-5': { input: 2.0, output: 10.0, cached: 0.2 },
     'claude-opus-4-8': { input: 5.0, output: 25.0, cached: 0.5 },
     'claude-opus-4-7': { input: 5.0, output: 25.0, cached: 0.5 },
     'claude-sonnet-4-6': { input: 3.0, output: 15.0, cached: 0.3 },
@@ -100,7 +124,11 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     'claude-haiku-4-5': { input: 1.0, output: 5.0, cached: 0.10 },
 
     // Google Gemini (USD)
-    'gemini-3.6-flash': { input: 1.50, output: 7.50, cached: 0.15 },
+    // The 3.6-3.8 Flash generation shares a $0.75/$3.75 card that doubles on 2027-01-01;
+    // the discounted rate is recorded while it is in force.
+    'gemini-3.8-flash': { input: 0.75, output: 3.75, cached: 0.075 },
+    'gemini-3.7-flash': { input: 0.75, output: 3.75, cached: 0.075 },
+    'gemini-3.6-flash': { input: 0.75, output: 3.75, cached: 0.075 },
     'gemini-3.5-flash': { input: 1.50, output: 9.00, cached: 0.15 },
     'gemini-3.1-pro-preview': {
         tiers: [
@@ -120,11 +148,17 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
 
     // lite variants removed
 
-    // DeepSeek (USD)
-    'deepseek-v4-flash': { input: 0.14, output: 0.28, cached: 0.0028 },
-    'deepseek-v4-pro': { input: 0.435, output: 0.87, cached: 0.003625 },
+    // DeepSeek (USD). Peak/off-peak billing started on 2026-08-16; the off-peak floor
+    // is recorded because it is a permanent published schedule and never overstates a
+    // request. V4.1 Flash renamed the Flash line to `deepseek-flash` and retired the
+    // legacy `deepseek-v4-flash` name.
+    'deepseek-flash': { input: 0.15, output: 0.60, cached: 0.003 },
+    'deepseek-v4-pro': { input: 0.66, output: 1.98, cached: 0.022 },
 
     // GLM (USD)
+    'glm-5.3': { input: cny(8), output: cny(28), cached: cny(2) },
+    'glm-5.3-flash': { input: cny(0.8), output: cny(2.8), cached: cny(0.23) },
+    'glm-5.3-flashx': { input: cny(2), output: cny(7), cached: cny(0.57) },
     'glm-5.2': { input: cny(8), output: cny(28), cached: cny(2) },
     'glm-5.1': {
         tiers: [
@@ -167,10 +201,16 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     // Kimi (USD)
     'kimi-k3': { input: 3.0, output: 15.0, cached: 0.30 },
     'kimi-k2.7-code': { input: 0.95, output: 4.0, cached: 0.19 },
+    // The highspeed tier bills at 2x the standard coding rate.
+    'kimi-k2.7-code-highspeed': { input: 1.90, output: 8.0, cached: 0.38 },
     'kimi-k2.6': { input: 0.95, output: 4.0, cached: 0.16 },
 
     // Qwen International (Singapore), converted from the dashboard's
     // CNY-localized display with the fixed project exchange rate.
+    // The 3.8 generation is published in USD on the international site, so it is recorded
+    // as USD instead of going through the CNY helper.
+    'qwen3.8-max:intl': { input: 2.0, output: 6.0, cached: 0.25 },
+    'qwen3.8-flash:intl': { input: 0.15, output: 0.47, cached: 0.016 },
     'qwen3.7-max:intl': { input: cny(18.736), output: cny(56.207), cached: cny(3.7472) },
     'qwen3.7-plus:intl': {
         tiers: [
@@ -238,6 +278,8 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
     },
 
     // Qwen China (Beijing), converted from CNY with the fixed project rate.
+    'qwen3.8-max:china': { input: cny(12), output: cny(36), cached: cny(1.5) },
+    'qwen3.8-flash:china': { input: cny(0.8), output: cny(2.7), cached: cny(0.1) },
     'qwen3.7-max:china': { input: cny(12), output: cny(36), cached: cny(2.4) },
     'qwen3.7-plus:china': {
         tiers: [
@@ -315,4 +357,184 @@ export const PRICING_TABLE: Record<string, ModelPricing> = {
             { maxInputTokens: Infinity, input: 0.717, output: 3.584, cached: 0.1434 } // >256K
         ]
     },
+
+    // OpenCode Zen gateway rate card (USD), filed per vendor because a gateway price
+    // is independent from the same model sold by its own vendor.
+    'opencode-zen:claude-fable-5': { input: 10, output: 50, cached: 1 },
+    'opencode-zen:claude-fable-5-1': { input: 10, output: 50, cached: 0.25 },
+    'opencode-zen:claude-haiku-4-5': { input: 1, output: 5, cached: 0.1 },
+    'opencode-zen:claude-opus-4-5': { input: 5, output: 25, cached: 0.5 },
+    'opencode-zen:claude-opus-4-6': { input: 5, output: 25, cached: 0.5 },
+    'opencode-zen:claude-opus-4-7': { input: 5, output: 25, cached: 0.5 },
+    'opencode-zen:claude-opus-4-8': { input: 5, output: 25, cached: 0.5 },
+    'opencode-zen:claude-opus-5': { input: 5, output: 25, cached: 0.5 },
+    'opencode-zen:claude-opus-5-5': { input: 4, output: 20, cached: 0.2 },
+    'opencode-zen:claude-sonnet-4-5': {
+        tiers: [
+            { maxInputTokens: 200000, input: 3, output: 15, cached: 0.3 },
+            { maxInputTokens: Infinity, input: 6, output: 22.5, cached: 0.6 }
+        ]
+    },
+    'opencode-zen:claude-sonnet-4-6': { input: 3, output: 15, cached: 0.3 },
+    'opencode-zen:claude-sonnet-5': { input: 2, output: 10, cached: 0.2 },
+    'opencode-zen:deepseek-v4-flash': { input: 0.14, output: 0.28, cached: 0.028 },
+    'opencode-zen:deepseek-v4-flash-vision-exp': { input: 0.14, output: 0.28, cached: 0.028 },
+    'opencode-zen:deepseek-v4-pro': { input: 1.74, output: 3.48, cached: 0.145 },
+    'opencode-zen:deepseek-v4.1-flash': { input: 0.3, output: 1.2, cached: 0.006 },
+    'opencode-zen:glm-5.1': { input: 1.4, output: 4.4, cached: 0.26 },
+    'opencode-zen:glm-5.2': { input: 1.4, output: 4.4, cached: 0.26 },
+    'opencode-zen:glm-5.3': { input: 1.4, output: 4.4, cached: 0.26 },
+    'opencode-zen:glm-5.3-flash': { input: 0.15, output: 0.5, cached: 0.03 },
+    'opencode-zen:gpt-5': { input: 1.07, output: 8.5, cached: 0.107 },
+    'opencode-zen:gpt-5-nano': { input: 0.05, output: 0.4, cached: 0.005 },
+    'opencode-zen:gpt-5.1': { input: 1.07, output: 8.5, cached: 0.107 },
+    'opencode-zen:gpt-5.2': { input: 1.75, output: 14, cached: 0.175 },
+    'opencode-zen:gpt-5.3-codex': { input: 1.75, output: 14, cached: 0.175 },
+    'opencode-zen:gpt-5.3-codex-spark': { input: 1.75, output: 14, cached: 0.175 },
+    'opencode-zen:gpt-5.4': {
+        tiers: [
+            { maxInputTokens: 272000, input: 2.5, output: 15, cached: 0.25 },
+            { maxInputTokens: Infinity, input: 5, output: 22.5, cached: 0.5 }
+        ]
+    },
+    'opencode-zen:gpt-5.4-mini': { input: 0.75, output: 4.5, cached: 0.075 },
+    'opencode-zen:gpt-5.4-nano': { input: 0.2, output: 1.25, cached: 0.02 },
+    'opencode-zen:gpt-5.4-pro': { input: 30, output: 180, cached: 30 },
+    'opencode-zen:gpt-5.5': {
+        tiers: [
+            { maxInputTokens: 272000, input: 5, output: 30, cached: 0.5 },
+            { maxInputTokens: Infinity, input: 10, output: 45, cached: 1 }
+        ]
+    },
+    'opencode-zen:gpt-5.5-pro': { input: 30, output: 180, cached: 30 },
+    'opencode-zen:gpt-5.6-luna': {
+        tiers: [
+            { maxInputTokens: 272000, input: 0.2, output: 1.2, cached: 0.02 },
+            { maxInputTokens: Infinity, input: 0.4, output: 1.8, cached: 0.04 }
+        ]
+    },
+    'opencode-zen:gpt-5.6-sol': {
+        tiers: [
+            { maxInputTokens: 272000, input: 4, output: 20, cached: 0.4 },
+            { maxInputTokens: Infinity, input: 8, output: 30, cached: 0.8 }
+        ]
+    },
+    'opencode-zen:gpt-5.6-terra': {
+        tiers: [
+            { maxInputTokens: 272000, input: 2, output: 12, cached: 0.2 },
+            { maxInputTokens: Infinity, input: 4, output: 18, cached: 0.4 }
+        ]
+    },
+    'opencode-zen:gpt-6-astra': {
+        tiers: [
+            { maxInputTokens: 272000, input: 10, output: 50, cached: 1 },
+            { maxInputTokens: Infinity, input: 20, output: 75, cached: 2 }
+        ]
+    },
+    'opencode-zen:gpt-6-luna': {
+        tiers: [
+            { maxInputTokens: 272000, input: 0.1, output: 0.5, cached: 0.01 },
+            { maxInputTokens: Infinity, input: 0.2, output: 0.75, cached: 0.02 }
+        ]
+    },
+    'opencode-zen:gpt-6-sol': {
+        tiers: [
+            { maxInputTokens: 272000, input: 2, output: 10, cached: 0.2 },
+            { maxInputTokens: Infinity, input: 4, output: 15, cached: 0.4 }
+        ]
+    },
+    'opencode-zen:grok-4.5': {
+        tiers: [
+            { maxInputTokens: 200000, input: 2, output: 6, cached: 0.3 },
+            { maxInputTokens: Infinity, input: 4, output: 12, cached: 0.6 }
+        ]
+    },
+    'opencode-zen:grok-4.6': {
+        tiers: [
+            { maxInputTokens: 200000, input: 2, output: 6, cached: 0.5 },
+            { maxInputTokens: Infinity, input: 4, output: 12, cached: 1 }
+        ]
+    },
+    'opencode-zen:grok-4.7': {
+        tiers: [
+            { maxInputTokens: 200000, input: 2, output: 6, cached: 0.5 },
+            { maxInputTokens: Infinity, input: 4, output: 12, cached: 1 }
+        ]
+    },
+    'opencode-zen:grok-build-0.1': { input: 1, output: 2, cached: 0.2 },
+    'opencode-zen:kimi-k2.6': { input: 0.95, output: 4, cached: 0.16 },
+    'opencode-zen:kimi-k2.7-code': { input: 0.95, output: 4, cached: 0.19 },
+    'opencode-zen:kimi-k3': { input: 3, output: 15, cached: 0.3 },
+    'opencode-zen:minimax-m2.7': { input: 0.3, output: 1.2, cached: 0.06 },
+    'opencode-zen:minimax-m3': { input: 0.3, output: 1.2, cached: 0.06 },
+    'opencode-zen:muse-spark-1.2': { input: 1.25, output: 4.25, cached: 0.15 },
+    'opencode-zen:muse-spark-1.3': { input: 1.25, output: 4.25, cached: 0.15 },
+    'opencode-zen:qwen3.5-plus': { input: 0.2, output: 1.2, cached: 0.02 },
+    'opencode-zen:qwen3.6-plus': { input: 0.5, output: 3, cached: 0.05 },
+    'opencode-zen:qwen3.8-flash': { input: 0.15, output: 0.47, cached: 0.016 },
+
+    // OpenCode Go gateway rate card (USD), filed per vendor because a gateway price
+    // is independent from the same model sold by its own vendor.
+    'opencode-go:deepseek-v4-flash': { input: 0.15, output: 0.6, cached: 0.003 },
+    'opencode-go:deepseek-v4-flash-vision-exp': { input: 0.15, output: 0.6, cached: 0.003 },
+    'opencode-go:deepseek-v4-pro': { input: 0.66, output: 1.98, cached: 0.022 },
+    'opencode-go:deepseek-v4.1-flash': { input: 0.15, output: 0.6, cached: 0.003 },
+    'opencode-go:glm-5.1': { input: 1.4, output: 4.4, cached: 0.26 },
+    'opencode-go:glm-5.2': { input: 1.4, output: 4.4, cached: 0.26 },
+    'opencode-go:glm-5.3': { input: 1.4, output: 4.4, cached: 0.26 },
+    'opencode-go:glm-5.3-flash': { input: 0.15, output: 0.5, cached: 0.03 },
+    'opencode-go:gpt-5.6-luna': {
+        tiers: [
+            { maxInputTokens: 272000, input: 0.2, output: 1.2, cached: 0.02 },
+            { maxInputTokens: Infinity, input: 0.4, output: 1.8, cached: 0.04 }
+        ]
+    },
+    'opencode-go:gpt-6-luna': {
+        tiers: [
+            { maxInputTokens: 272000, input: 0.1, output: 0.5, cached: 0.01 },
+            { maxInputTokens: Infinity, input: 0.2, output: 0.75, cached: 0.02 }
+        ]
+    },
+    'opencode-go:grok-4.6': {
+        tiers: [
+            { maxInputTokens: 200000, input: 2, output: 6, cached: 0.5 },
+            { maxInputTokens: Infinity, input: 4, output: 12, cached: 1 }
+        ]
+    },
+    'opencode-go:grok-4.7': {
+        tiers: [
+            { maxInputTokens: 200000, input: 2, output: 6, cached: 0.5 },
+            { maxInputTokens: Infinity, input: 4, output: 12, cached: 1 }
+        ]
+    },
+    'opencode-go:hy3': { input: 0.14, output: 0.58, cached: 0.035 },
+    'opencode-go:hy4-preview': { input: 0.834, output: 2.501, cached: 0.042 },
+    'opencode-go:kimi-k2.6': { input: 0.95, output: 4, cached: 0.16 },
+    'opencode-go:kimi-k2.7-code': { input: 0.95, output: 4, cached: 0.19 },
+    'opencode-go:kimi-k3': { input: 3, output: 15, cached: 0.3 },
+    'opencode-go:longcat-2.0': { input: 0.3, output: 1.2, cached: 0.006 },
+    'opencode-go:mimo-v2.5': { input: 0.14, output: 0.28, cached: 0.0028 },
+    'opencode-go:mimo-v2.5-pro': { input: 0.435, output: 0.87, cached: 0.003625 },
+    'opencode-go:mimo-v2.6-flash': { input: 0.14, output: 0.28, cached: 0.0028 },
+    'opencode-go:mimo-v2.6-pro': { input: 0.435, output: 0.87, cached: 0.003625 },
+    'opencode-go:minimax-m2.5': { input: 0.3, output: 1.2, cached: 0.06 },
+    'opencode-go:minimax-m2.7': { input: 0.3, output: 1.2, cached: 0.06 },
+    'opencode-go:minimax-m3': { input: 0.3, output: 1.2, cached: 0.06 },
+    'opencode-go:muse-spark-1.2-contributor': { input: 0.1, output: 0.2, cached: 0.002 },
+    'opencode-go:muse-spark-1.3-contributor': { input: 0.1, output: 0.2, cached: 0.002 },
+    'opencode-go:qwen3.6-plus': {
+        tiers: [
+            { maxInputTokens: 256000, input: 0.5, output: 3, cached: 0.05 },
+            { maxInputTokens: Infinity, input: 2, output: 6, cached: 0.2 }
+        ]
+    },
+    'opencode-go:qwen3.7-max': { input: 2.5, output: 7.5, cached: 0.5 },
+    'opencode-go:qwen3.7-plus': {
+        tiers: [
+            { maxInputTokens: 256000, input: 0.4, output: 1.6, cached: 0.04 },
+            { maxInputTokens: Infinity, input: 1.2, output: 4.8, cached: 0.12 }
+        ]
+    },
+    'opencode-go:qwen3.8-flash': { input: 0.15, output: 0.47, cached: 0.016 },
+    'opencode-go:qwen3.8-max': { input: 2, output: 6, cached: 0.25 },
 };

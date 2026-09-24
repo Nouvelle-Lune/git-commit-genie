@@ -11,6 +11,9 @@
  */
 export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   // OpenAI
+  'gpt-6-astra': 1_050_000,
+  'gpt-6-sol': 1_050_000,
+  'gpt-6-luna': 1_050_000,
   'gpt-5.6-sol': 1_050_000,
   'gpt-5.6-terra': 1_050_000,
   'gpt-5.6-luna': 1_050_000,
@@ -25,10 +28,12 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'gpt-5-nano': 400_000,
 
   // DeepSeek
-  'deepseek-v4-flash': 1_000_000,
+  'deepseek-flash': 1_000_000,
   'deepseek-v4-pro': 1_000_000,
 
   // Anthropic
+  'claude-fable-5-1': 1_000_000,
+  'claude-opus-5-5': 1_000_000,
   'claude-fable-5': 1_000_000,
   'claude-opus-5': 1_000_000,
   'claude-sonnet-5': 1_000_000,
@@ -41,6 +46,8 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'claude-haiku-4-5': 200_000,
 
   // Google Gemini
+  'gemini-3.8-flash': 1_048_576,
+  'gemini-3.7-flash': 1_048_576,
   'gemini-3.6-flash': 1_048_576,
   'gemini-3.5-flash': 1_048_576,
   'gemini-3.1-pro-preview': 1_048_576,
@@ -49,6 +56,8 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'gemini-2.5-pro': 1_048_576,
 
   // Qwen
+  'qwen3.8-max': 1_000_000,
+  'qwen3.8-flash': 1_000_000,
   'qwen3.7-max': 1_000_000,
   'qwen3.7-plus': 1_000_000,
   'qwen3.7-flash': 1_000_000,
@@ -61,6 +70,9 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'qwen3-coder-flash': 1_000_000,
 
   // GLM
+  'glm-5.3': 1_000_000,
+  'glm-5.3-flash': 1_000_000,
+  'glm-5.3-flashx': 1_000_000,
   'glm-5.2': 1_000_000,
   'glm-5.1': 200_000,
   'glm-5': 200_000,
@@ -73,9 +85,13 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   // Kimi
   'kimi-k3': 1_000_000,
   'kimi-k2.7-code': 256_000,
+  'kimi-k2.7-code-highspeed': 256_000,
   'kimi-k2.6': 256_000,
 
   // OpenRouter mapped model ids
+  'openai/gpt-6-astra': 1_050_000,
+  'openai/gpt-6-sol': 1_050_000,
+  'openai/gpt-6-luna': 1_050_000,
   'openai/gpt-5.6-sol': 1_050_000,
   'openai/gpt-5.6-terra': 1_050_000,
   'openai/gpt-5.6-luna': 1_050_000,
@@ -87,8 +103,10 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'openai/gpt-5.2': 400_000,
   'openai/gpt-5-mini': 400_000,
   'openai/gpt-5-nano': 400_000,
-  'deepseek/deepseek-v4-flash': 1_000_000,
+  'deepseek/deepseek-v4.1-flash': 1_000_000,
   'deepseek/deepseek-v4-pro': 1_000_000,
+  'anthropic/claude-fable-5.1': 1_000_000,
+  'anthropic/claude-opus-5.5': 1_000_000,
   'anthropic/claude-fable-5': 1_000_000,
   'anthropic/claude-opus-5': 1_000_000,
   'anthropic/claude-sonnet-5': 1_000_000,
@@ -99,12 +117,16 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'anthropic/claude-haiku-4.5': 200_000,
   'anthropic/claude-sonnet-4.5': 200_000,
   'anthropic/claude-opus-4.5': 200_000,
+  'google/gemini-3.8-flash': 1_048_576,
+  'google/gemini-3.7-flash': 1_048_576,
   'google/gemini-3.6-flash': 1_048_576,
   'google/gemini-3.5-flash': 1_048_576,
   'google/gemini-3.1-pro-preview': 1_048_576,
   'google/gemini-2.5-flash': 1_048_576,
   'google/gemini-2.5-pro': 1_048_576,
   'google/gemini-3-flash-preview': 1_048_576,
+  'qwen/qwen3.8-max': 1_000_000,
+  'qwen/qwen3.8-flash': 1_000_000,
   'qwen/qwen3.7-max': 1_000_000,
   'qwen/qwen3.7-plus': 1_000_000,
   'qwen/qwen3.7-flash': 1_000_000,
@@ -112,6 +134,8 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'qwen/qwen3.5-plus-20260420': 1_000_000,
   'qwen/qwen3.5-flash-02-23': 1_000_000,
   'qwen/qwen-plus': 1_000_000,
+  'z-ai/glm-5.3': 1_000_000,
+  'z-ai/glm-5.3-flash': 1_000_000,
   'z-ai/glm-5.2': 1_000_000,
   'z-ai/glm-5.1': 200_000,
   'z-ai/glm-5': 200_000,
@@ -121,6 +145,7 @@ export const MODEL_MAX_CONTEXT_TOKENS: Record<string, number> = {
   'z-ai/glm-4.5-air': 128_000,
   'moonshotai/kimi-k3': 1_000_000,
   'moonshotai/kimi-k2.7-code': 256_000,
+  'moonshotai/kimi-k2.7-code-highspeed': 256_000,
   'moonshotai/kimi-k2.6': 256_000,
 };
 

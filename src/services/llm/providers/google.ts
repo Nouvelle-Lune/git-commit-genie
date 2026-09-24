@@ -13,6 +13,8 @@ import { parseStructuredText } from './json';
 import { applyGoogleThinking } from './thinking';
 
 const INTERACTIONS_URL = 'https://generativelanguage.googleapis.com/v1beta/interactions';
+/** Default Gemini API root; includes the version segment the requests append to. */
+const DEFAULT_GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 /** Fetch implementation injected for deterministic provider testing. */
 type Fetch = typeof fetch;
 
@@ -35,6 +37,7 @@ class GoogleSession implements AISession {
         options: AISessionOptions,
         private readonly systemInstruction?: string,
         private readonly fetchFn: Fetch = fetch,
+        private readonly baseUrl: string = DEFAULT_GEMINI_BASE_URL,
     ) {
         this.model = options.model;
         this.thinking = options.thinking;
@@ -76,7 +79,7 @@ class GoogleSession implements AISession {
             };
         }
 
-        const response = await this.fetchFn(INTERACTIONS_URL, {
+        const response = await this.fetchFn(`${this.baseUrl}/interactions`, {
             method: 'POST',
             headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey },
             body: JSON.stringify(body),
@@ -158,11 +161,18 @@ export class GoogleProvider implements AIProvider {
     constructor(private readonly config: GoogleProviderConfig, private readonly fetchFn: Fetch = fetch) {}
 
     createSession(options: AISessionOptions): AISession {
-        return new GoogleSession(this.config.apiKey, options, options.systemInstruction, this.fetchFn);
+        return new GoogleSession(
+            this.config.apiKey,
+            options,
+            options.systemInstruction,
+            this.fetchFn,
+            this.config.baseUrl ?? DEFAULT_GEMINI_BASE_URL,
+        );
     }
 
     async listModels(signal?: AbortSignal): Promise<string[]> {
-        const response = await this.fetchFn('https://generativelanguage.googleapis.com/v1beta/models', {
+        const baseUrl = this.config.baseUrl ?? DEFAULT_GEMINI_BASE_URL;
+        const response = await this.fetchFn(`${baseUrl}/models`, {
             headers: { 'x-goog-api-key': this.config.apiKey },
             signal,
         });

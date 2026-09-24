@@ -205,14 +205,20 @@ export interface AIProvider {
 
 export interface OpenAIProviderConfig {
     apiKey: string;
+    /** OpenAI-compatible endpoint override (for example a gateway). Defaults to api.openai.com. */
+    baseUrl?: string;
 }
 
 export interface AnthropicProviderConfig {
     apiKey: string;
+    /** Anthropic-compatible endpoint override. The SDK appends `/v1/messages`. */
+    baseUrl?: string;
 }
 
 export interface GoogleProviderConfig {
     apiKey: string;
+    /** Gemini API root that already carries the version segment, e.g. `.../v1beta`. */
+    baseUrl?: string;
 }
 
 export interface CustomProviderConfig {

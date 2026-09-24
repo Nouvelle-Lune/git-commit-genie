@@ -118,13 +118,22 @@ RAG 默认关闭，索引保存在仓库的 `.git/git-commit-genie/rag` 目录�
 | `gitCommitGenie.typingAnimationSpeed` | number | `15` | 提交框打字动画速度，单位为每字符毫秒。设为 `-1` 关闭动画。 |
 | `gitCommitGenie.showUsageCost` | boolean | `true` | 每次生成后以简短通知显示预估费用。 |
 
+## 预设服务商与自定义端点
+
+`Git Commit Genie: 管理模型` 按服务商分组管理端点。预设服务商（OpenAI、Anthropic、Gemini、DeepSeek、GLM、Kimi、Qwen、OpenCode Zen、OpenCode Go）会列出内置的受支持模型及其上下文窗口与价格：
+
+- 选择服务商后再选预设模型即可，API Key 每个服务商只问一次，该服务商下的所有模型共用。
+- 预设模型使用厂商文档规定的传输协议，包括以自己的域名提供 Anthropic Messages 或 OpenAI Responses 协议的网关；其上下文窗口会自动收紧 `gitCommitGenie.chain.contextWindowTokens`。
+- 官方服务商额外提供「浏览可用模型」，用你的密钥实时读取 `/models` 列表并添加其中的任意模型。
+- 「手动输入模型 ID」可用同一个密钥添加该厂商的其他模型 ID；「添加自定义模型」仍是接入任意其他 OpenAI 兼容端点（OpenRouter、自建 vLLM / SGLang / llama.cpp，或私有网关）的方式。
+
 ## 自定义与本地端点
 
 `Git Commit Genie: 管理模型` 支持任何实现 OpenAI Chat Completions 的端点：
 
 - 填写 Base URL（HTTP 或 HTTPS）、模型 ID 与 API Key。
 - 标准端点无需额外配置，模型会自动继承全局思考等级。
-- 仅当端点使用非标准 thinking 字段时才需要选择兼容格式（例如 `qwen`、`deepseek`、`chat-template`），在编辑模型时的高级 thinking 兼容中配置。
+- 仅当端点使用非标准 thinking 字段时才需要选择兼容格式（例如 `qwen`、`deepseek`、`chat-template`），在编辑模型时的高级 thinking 兼容中配置；在预设模型上设置兼容格式会覆盖预设自带的传输协议。
 - 可手动填写价格，让自定义模型参与费用统计；未填写价格时按免费统计。
 
 ## 相关指南

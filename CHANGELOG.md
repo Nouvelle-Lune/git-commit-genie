@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Model access and providers
+- feat: Models of a vendor are now configured from a preset catalog (`src/services/llm/providers/presets.ts`). Picking a vendor lists its curated models with context window, transport and rate card, and one API key per vendor is shared by every model added from it; OpenAI, Anthropic, Gemini, DeepSeek, GLM, Kimi, Qwen (international and China), OpenCode Zen and OpenCode Go ship presets. Manually configured custom OpenAI-compatible endpoints keep their own per-instance key and dialog.
+- feat: Native providers accept an endpoint override, so a gateway that serves the OpenAI, Anthropic or Gemini protocol under its own host (OpenCode Zen/Go and similar) can be used with the matching adapter and thinking profile instead of a chat-completions shim.
+- feat: Refreshed the built-in model tables for the current vendor lineups: GPT-6 Astra/Sol/Luna, Claude Fable 5.1 and Opus 5.5, Gemini 3.8/3.7 Flash, DeepSeek V4.1 Flash (`deepseek-flash`), GLM-5.3/5.3-Flash/5.3-FlashX and Qwen 3.8 Max/Flash, together with the OpenCode Zen and OpenCode Go gateway rate cards. Claude Sonnet 5, GPT-5.6, Gemini 3.6 Flash and the DeepSeek peak/off-peak cards were re-priced, and the retired `deepseek-v4-flash` entry was removed.
 - breaking: Removed the dedicated Qwen, Local, DeepSeek, GLM, Kimi and OpenRouter provider entries. Every endpoint is now configured as a model instance on OpenAI, Anthropic, Google Gemini or a custom OpenAI-compatible entry, so region-specific Qwen keys and self-hosted base URLs are set up as custom models instead of through provider-only dialogs. Existing provider and model configuration is migrated to the new model registry on activation.
 - feat: Replaced the per-provider LLM services with a provider-neutral model and session layer. Conversation history, tool results and continuation are owned by the provider session, and investigation uses native function calling instead of prompt-driven tool loops.
 - feat: Added unified thinking configuration: `gitCommitGenie.defaultThinkingLevel` for every supported call, `gitCommitGenie.modelThinkingLevels` for per-model overrides and `gitCommitGenie.thinkingBudgets` for numeric budgets. Thinking is resolved once per run and reused by every stage and background call, and Manage Models gained "Set thinking level override" and "Advanced thinking compatibility" for custom endpoints.
@@ -39,7 +42,7 @@
 
 ### Cost and packaging
 - breaking: Cost accounting is structured. Legacy numeric `cost` log entries are rejected by persistence validation in favour of `costDisplay` entries that report cache hit rates.
-- feat: Pricing resolves per model with an optional per-model flat override, and provider usage is normalized into one quote type before it is recorded.
+- feat: Pricing resolves per model with an optional per-model flat override, and provider usage is normalized into one quote type before it is recorded. Preset models resolve through their vendor rate card (regional Qwen suffixes, gateway-prefixed keys such as `opencode-zen:kimi-k3`), and a preset model's documented context window caps the configured chain window.
 - docs: Rewrote the READMEs and added `docs/reference.md` and its zh-CN counterpart, documenting every command and every `gitCommitGenie.*` setting.
 - chore: Packaging ships only the webpack bundles, their license notices and the codicon files, cleans `dist` first, localizes command titles through NLS, and removes the redundant title prefix.
 

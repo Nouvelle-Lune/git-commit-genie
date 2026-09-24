@@ -45,7 +45,7 @@ Requirements: VS Code 1.103 or newer, the built-in Git extension, and an API key
 
 ## Usage
 
-1. Run `Git Commit Genie: Manage Models`, add a provider and paste its API key. Keys are stored in VS Code SecretStorage, not in `settings.json`.
+1. Run `Git Commit Genie: Manage Models`, pick a vendor such as OpenAI, Anthropic, DeepSeek or OpenCode Zen, choose one of its preset models and paste the API key once. The key is shared by every model you add from that vendor and is stored in VS Code SecretStorage, not in `settings.json`.
 2. Stage your changes.
 3. Click the Genie icon in the Source Control title bar, or run `Git Commit Genie: Generate commit message`.
 4. Review the message in the commit box, edit it if needed, and commit.
@@ -55,7 +55,7 @@ Requirements: VS Code 1.103 or newer, the built-in Git extension, and an API key
 ## Features
 
 - Conventional Commits output, validated before it is written to the commit box.
-- Providers: OpenAI, Anthropic Claude and Google Gemini, plus custom OpenAI-compatible endpoints such as DeepSeek, Qwen, GLM, Kimi, OpenRouter and local vLLM, SGLang or llama.cpp servers.
+- Providers: OpenAI, Anthropic Claude and Google Gemini, DeepSeek, GLM, Kimi, Qwen (international and China), and the OpenCode Zen and OpenCode Go gateways ship as presets with curated model lists and built-in pricing, plus custom OpenAI-compatible endpoints such as OpenRouter or local vLLM, SGLang and llama.cpp servers.
 - Thinking levels from `off` to `max`, set globally or per model.
 - Commit message languages: `auto`, `en`, `zh-CN`, `zh-TW`, `ja`, `ko`, `de`, `fr`, `es`, `pt`, `ru`, `it`.
 - Extension UI in English, Simplified Chinese and Traditional Chinese.
