@@ -600,7 +600,7 @@
   },
   "scripts": {
     "test:compile": "tsc --outDir out",
-    "test:memory": "tsc -p tsconfig.memory-tests.json && mocha 'out/test/ai/repositorySnapshot.test.js' 'out/test/ai/repositoryMemory*.test.js'",
+    "test:memory": "tsc -p tsconfig.memory-tests.json && mocha 'out/test/ai/memory/repositorySnapshot.test.js' 'out/test/ai/memory/repositoryMemory*.test.js'",
     "test:extension": "npm run test:compile && vscode-test --config vscode-test.config.mjs --skip-extension-dependencies",
     "clean": "rm -rf dist",
     "vscode:prepublish": "npm run package",
