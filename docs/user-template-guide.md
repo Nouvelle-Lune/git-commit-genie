@@ -1,10 +1,10 @@
 # Git Commit Genie User Template Authoring Guide
 
-This guide explains how to write a User Template that strongly shapes the final commit message structure and wording (especially in Chain Prompting mode). The template is read and distilled into a Template Policy only when the file exists, is non‑empty, and yields an extractable policy. Otherwise the generator falls back to default rules.
+This guide explains how to write a User Template that strongly shapes the final commit message structure and wording (especially in Deep mode). The template is read and distilled into a Template Policy only when the file exists, is non‑empty, and yields an extractable policy. Otherwise the generator falls back to default rules.
 
 ## Prerequisites & Notes
 
-- Chain mode strongly enforces the extracted policy (command: `Git Commit Genie: Toggle thinking mode`; status bar shows `· Thinking` when enabled).
+- Deep mode strongly enforces the extracted policy; select it with `Git Commit Genie: Select generation mode`. Auto decides locally from the staged diff and does not inspect the user template.
 - Use the command `git-commit-genie.selectTemplate` to select or create a template file.
 - File must exist, be non‑empty, and contain clear structured preferences.
 - Write the template content in English for best extraction (the internal prompts are English).
@@ -79,7 +79,7 @@ Refs: N/A
 - Template not applied?
   - Is the template activated?
   - Is it sufficiently clear & structured?
-  - Is chain mode enabled?
+  - Is Deep mode selected? (Auto decides locally from the staged diff and never promotes a change to Deep because of the template.)
 - Why didn't the header format change per template desire?
   - Header must always comply with Conventional Commits. Template only influences selection (type / scope / `!`) and wording, not the core format.
 - Output too long?

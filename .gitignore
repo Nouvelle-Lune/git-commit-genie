@@ -113,3 +113,10 @@ test/
 src/test/*
 !src/test/ai/
 !src/test/ai/*.test.ts
+
+# Auto router model development content: training exports, Python tooling, notebooks, checkpoints.
+# The shipped payload is resources/models/router/rf-79-router.enc (+ the generated base64 module in
+# src/services/router), and that is what belongs in the repository.
+**/*.joblib
+**/*.npy
+**/*.ipynb

@@ -48,6 +48,8 @@ import type { CostQuote } from '../cost/costTypes';
 import { resolveModelPricing } from '../cost/costAccounting';
 import { summarizeTaskCostQuotes } from '../cost/costDisplay';
 import type { AIUsage } from './providers';
+import { routeAutoGeneration } from '../router/autoRouter';
+import { parseGenerationMode } from '../router/generationMode';
 
 export interface UnifiedLLMServiceOptions {
     model: AIModelConfig;
@@ -350,13 +352,25 @@ export class UnifiedLLMService extends BaseLLMService {
 
         try {
             const cfg = vscode.workspace.getConfiguration('gitCommitGenie');
-            const useChain = cfg.get<boolean>('chain.enabled', true);
-            const repoPath = this.getRepoPathForLogging(options?.targetRepo);
-            safeRun('UnifiedLLM.logGenerationStart', () => logger.logGenerationStart(repoPath, useChain ? 'thinking' : 'default'));
             const jsonMessage = await this.buildJsonMessage(diffs, options?.targetRepo);
+            const parsedInput = JSON.parse(jsonMessage);
+            const configuredMode = parseGenerationMode(cfg.get<unknown>('generationMode', 'auto'));
+            const autoDecision = configuredMode === 'auto'
+                ? routeAutoGeneration(diffs)
+                : undefined;
+            const resolvedRoute = configuredMode === 'deep' || autoDecision?.route === 'deep' ? 'deep' : 'fast';
+            const repoPath = this.getRepoPathForLogging(options?.targetRepo);
+            safeRun('UnifiedLLM.logGenerationStart', () => logger.logGenerationStart(repoPath, resolvedRoute === 'deep' ? 'thinking' : 'default'));
+            if (autoDecision) {
+                if (autoDecision.probabilityDirect === null || autoDecision.directThreshold === null) {
+                    logger.warn(`[AutoRouter] ${autoDecision.failure}; falling back to the chain workflow`);
+                } else {
+                    logger.info(`[AutoRouter] route=${autoDecision.route} probabilityDirect=${autoDecision.probabilityDirect.toFixed(6)} directThreshold=${autoDecision.directThreshold.toFixed(4)} coverageTarget=${autoDecision.coverageTarget} artifact=${autoDecision.artifactSha256?.slice(0, 12)}`);
+                }
+            }
             const execution = this.createExecution(repoPath, options);
             try {
-                if (!useChain) {
+                if (resolvedRoute === 'fast') {
                     const rules = this.readRules();
                     const messages: AIMessage[] = [
                         { role: 'system', content: rules.baseRule },
@@ -376,7 +390,6 @@ export class UnifiedLLMService extends BaseLLMService {
                     return { content: result.commitMessage };
                 }
 
-                const parsedInput = JSON.parse(jsonMessage);
                 stageNotifications.begin();
                 try {
                     const out = await generateCommitMessageChain({

@@ -14,10 +14,10 @@ Open the Command Palette (`Ctrl/Cmd + Shift + P`) and search for `Git Commit Gen
 | --- | --- |
 | `Git Commit Genie: Generate commit message` | Analyze the staged changes and write a message into the commit box. Also available as the Genie icon in the Source Control title bar. |
 | `Git Commit Genie: Stop generate` | Cancel a running generation. Replaces the generate icon while a generation is in progress. |
-| `Git Commit Genie: Enable/Disable thinking mode` | Toggle the multi-stage pipeline (`gitCommitGenie.chain.enabled`). |
+| `Git Commit Genie: Select generation mode` | Switches how Genie writes the message and remembers the choice: **Auto** decides per change, **Fast** pins one pass (quickest), **Deep** pins the multi-stage pipeline (closest to your template). |
 | `Git Commit Genie: Manage Models` | Add or remove providers and models, store API keys, configure custom OpenAI-compatible endpoints, thinking compatibility, and per-model pricing. |
 | `Git Commit Genie: Select/Create Template` | Select, create, rename, open, or deactivate commit templates. |
-| `Git Commit Genie: Menu` | Quick picker for the thinking-mode toggle, model management, and repository memory. |
+| `Git Commit Genie: Menu` | Quick picker for generation mode, model management, and repository memory. |
 | `Git Commit Genie: Show Repository Cost` | Show the accumulated estimated usage cost for the current repository. |
 | `Git Commit Genie: Reset Repository Cost` | Reset the accumulated cost for the current repository. |
 | `Git Commit Genie: Manage Repository Memory` | Enable or disable memory, inspect what was learned, rebuild the search index, run or pause consolidation, and clear memory. |
@@ -44,7 +44,7 @@ Open the Command Palette (`Ctrl/Cmd + Shift + P`) and search for `Git Commit Gen
 
 | Setting | Type | Default | Description |
 | --- | --- | --- | --- |
-| `gitCommitGenie.chain.enabled` | boolean | `true` | Run the multi-stage pipeline (evidence → investigation → draft → verify) instead of a single prompt. Slower and more token-hungry, but more accurate and template-faithful. |
+| `gitCommitGenie.generationMode` | string | `auto` | How much work each commit gets. `auto` (recommended) inspects the staged diff locally: changes it is confident about take one pass, the rest run the full multi-stage pipeline. `fast` and `deep` pin one of the two. The pre-rename values `onePrompt` and `chain` are still accepted and rewritten to the new ones. |
 | `gitCommitGenie.chain.maxParallel` | number | `2` | Maximum parallel model calls across all stages. Increase carefully to avoid provider rate limits. |
 | `gitCommitGenie.chain.contextWindowTokens` | integer | `128000` | Context window used by the pipeline. Built-in models are clamped to their real limit automatically; change this only for custom endpoints. |
 | `gitCommitGenie.llm.maxRetries` | number | `2` | Retries for recoverable model response validation failures. |

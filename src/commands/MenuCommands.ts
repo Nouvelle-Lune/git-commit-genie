@@ -22,8 +22,8 @@ export class MenuCommands {
         const items: Array<vscode.QuickPickItem & { action: string }> = [];
 
         items.push({
-            label: vscode.l10n.t(I18N.genieMenu.toggleThinking),
-            action: 'toggle'
+            label: vscode.l10n.t(I18N.genieMenu.selectGenerationMode),
+            action: 'generationMode'
         });
 
         items.push({
@@ -51,8 +51,8 @@ export class MenuCommands {
         }
 
         switch (pick.action) {
-            case 'toggle':
-                await vscode.commands.executeCommand('git-commit-genie.toggleChainMode');
+            case 'generationMode':
+                await vscode.commands.executeCommand('git-commit-genie.selectGenerationMode');
                 break;
             case 'memory':
                 await vscode.commands.executeCommand('git-commit-genie.manageMemory');

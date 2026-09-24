@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { logger, LogLevel } from '../services/logger';
+import { GenerationMode, parseGenerationMode } from '../services/router/generationMode';
 
 export class ConfigurationManager {
     constructor(private context: vscode.ExtensionContext) { }
@@ -27,17 +28,9 @@ export class ConfigurationManager {
         // Cleanup if needed
     }
 
-    readChainEnabled(): boolean {
-        const cfg = vscode.workspace.getConfiguration();
-        // New key
-        const newVal = cfg.get<boolean>('gitCommitGenie.chain.enabled');
-        if (typeof newVal === 'boolean') {
-            this.context.globalState.update('gitCommitGenie.useChainPrompts', newVal);
-            return newVal;
-        } else {
-            // newVal is undefined
-            return false;
-        }
+    readGenerationMode(): GenerationMode {
+        const value = vscode.workspace.getConfiguration('gitCommitGenie').get<unknown>('generationMode', 'auto');
+        return parseGenerationMode(value);
     }
 
     isRagEnabled(): boolean {
@@ -62,8 +55,7 @@ export class ConfigurationManager {
     }
 
     private async onConfigurationChanged(e: vscode.ConfigurationChangeEvent): Promise<void> {
-        const chainChanged = e.affectsConfiguration('gitCommitGenie.useChainPrompts') ||
-            e.affectsConfiguration('gitCommitGenie.chain.enabled');
+        const generationModeChanged = e.affectsConfiguration('gitCommitGenie.generationMode');
         const memoryChanged = e.affectsConfiguration('gitCommitGenie.memory');
         const ragChanged = e.affectsConfiguration('gitCommitGenie.rag.enabled');
         const logLevelChanged = e.affectsConfiguration('gitCommitGenie.logLevel');
@@ -83,7 +75,7 @@ export class ConfigurationManager {
         }
 
         // Notify other components about config changes
-        if (chainChanged || memoryChanged || ragChanged) {
+        if (generationModeChanged || memoryChanged || ragChanged) {
             vscode.commands.executeCommand('git-commit-genie.updateStatusBar');
         }
     }

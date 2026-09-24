@@ -10,6 +10,7 @@ import { TemplateService } from '../template/templateService';
 import { LLMService } from '../services/llm/llmTypes';
 import { UnifiedLLMService } from '../services/llm/unifiedLLMService';
 import { migrateAIConfiguration } from '../services/llm/configMigration';
+import { migrateGenerationModeSetting } from '../services/router/generationModeMigration';
 import { RepoService } from '../services/repo/repo';
 import { CostTrackingService } from '../services/cost/costTrackingService';
 import { logger } from '../services/logger';
@@ -35,6 +36,7 @@ export class ServiceRegistry {
     async initialize(): Promise<void> {
         logger.info('Initializing services...');
         await migrateAIConfiguration(this.context);
+        await migrateGenerationModeSetting();
 
         this.repoService = new RepoService();
         this.memoryService = new RepositoryMemoryService(this.context);

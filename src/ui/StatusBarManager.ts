@@ -127,7 +127,7 @@ export class StatusBarManager {
 
     private registerConfigListeners(): void {
         const disposable = vscode.workspace.onDidChangeConfiguration((e) => {
-            if (e.affectsConfiguration('gitCommitGenie.memory')) {
+            if (e.affectsConfiguration('gitCommitGenie.memory') || e.affectsConfiguration('gitCommitGenie.generationMode')) {
                 void this.updateStatusBar();
             }
         });
@@ -226,13 +226,12 @@ export class StatusBarManager {
 
     private buildStatusBarText(): string {
         const { model } = this.providerState;
-        const chainEnabled = this.configManager.readChainEnabled();
-
-        const chainBadge = chainEnabled ? vscode.l10n.t(I18N.statusBar.chainBadge) : '';
+        const generationMode = this.configManager.readGenerationMode();
+        const generationModeBadge = vscode.l10n.t(I18N.statusBar.generationModeBadge[generationMode]);
         const modelLabel = this.getModelLabel();
         const memoryIcon = vscode.workspace.getConfiguration('gitCommitGenie.memory').get<boolean>('enabled', false) ? '$(database)' : '';
 
-        return `$(genie-base) Genie: ${modelLabel}${chainBadge} ${memoryIcon}`;
+        return `$(genie-base) Genie: ${modelLabel}${generationModeBadge} ${memoryIcon}`;
     }
 
     private getModelLabel(): string {

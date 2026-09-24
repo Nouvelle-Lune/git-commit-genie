@@ -9,7 +9,11 @@ export const L10N_KEYS = {
     tooltipConfigured: 'Git Commit Genie: {0}',
     tooltipNeedConfig: 'Git Commit Genie: {0} — click to configure models',
     selectModel: 'Select Model',
-    chainBadge: ' · Thinking',
+    generationModeBadge: {
+      auto: ' · Auto',
+      fast: ' · Fast',
+      deep: ' · Deep',
+    },
     analysisModel: 'Repository Analysis Model: {0}'
   },
   manageModels: {
@@ -31,10 +35,15 @@ export const L10N_KEYS = {
     useDefaultModel: 'Use default model',
     useDefaultModelDesc: 'Follow the general commit message model',
   },
-  chain: {
-    toggled: 'Chain prompting {0}.',
-    enabled: 'enabled',
-    disabled: 'disabled'
+  generationMode: {
+    select: 'How should Genie write this commit?',
+    selected: 'Commit generation mode changed to {0}.',
+    auto: 'Auto',
+    autoHint: 'Let Genie decide for each change',
+    fast: 'Fast',
+    fastHint: 'One pass — quickest and cheapest',
+    deep: 'Deep',
+    deepHint: 'Multi-stage analysis — closest to your template',
   },
   generation: {
     progressTitle: 'Genie Generating Commit Message…',
@@ -111,7 +120,7 @@ export const L10N_KEYS = {
     onlyOneRepository: 'Only one repository available'
   },
   rateLimit: {
-    hit: 'Rate limit hit for {0} ({1}). Consider lowering chain concurrency ({2}) or upgrading your plan.'
+    hit: 'Rate limit hit for {0} ({1}). Consider lowering Deep mode concurrency ({2}) or upgrading your plan.'
   },
   settings: {
     chainMaxParallelLabel: 'Max Parallel Chains'
@@ -119,7 +128,7 @@ export const L10N_KEYS = {
   genieMenu: {
     placeholder: 'Git Commit Genie',
     manageModels: '$(gear) Manage Models',
-    toggleThinking: '$(thinking) Enable / Disable thinking mode',
+    selectGenerationMode: '$(circuit-board) Select generation mode',
   },
   templates: {
     pickWorkspaceFolder: 'Pick a workspace folder',

@@ -125,11 +125,21 @@
             "experimental"
           ]
         },
-        "gitCommitGenie.chain.enabled": {
+        "gitCommitGenie.generationMode": {
           "order": 3,
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "%config.chain.enabled.desc%",
+          "type": "string",
+          "enum": [
+            "auto",
+            "fast",
+            "deep"
+          ],
+          "enumItemLabels": [
+            "%config.generationMode.enum.auto%",
+            "%config.generationMode.enum.fast%",
+            "%config.generationMode.enum.deep%"
+          ],
+          "default": "auto",
+          "markdownDescription": "%config.generationMode.desc%",
           "tags": [
             "experimental"
           ]
@@ -535,8 +545,8 @@
         "enablement": "gitCommitGenie.hasGitRepo == true && gitCommitGenie.ragEnabled == true && gitCommitGenie.ragIndexing == true"
       },
       {
-        "command": "git-commit-genie.toggleChainMode",
-        "title": "%command.toggleChain%",
+        "command": "git-commit-genie.selectGenerationMode",
+        "title": "%command.selectGenerationMode%",
         "category": "%category.title%",
         "icon": "$(circuit-board)"
       },

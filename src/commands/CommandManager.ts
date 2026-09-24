@@ -8,6 +8,7 @@ import { MemoryCommands } from './MemoryCommands';
 import { MenuCommands } from './MenuCommands';
 import { CostCommands } from './CostCommands';
 import { Repository } from '../services/git/git';
+import { parseGenerationMode } from '../services/router/generationMode';
 
 export class CommandManager {
     private modelCommands!: ModelCommands;
@@ -57,24 +58,33 @@ export class CommandManager {
             })
         );
 
-        // Toggle chain prompting mode
+        // Select commit generation mode.
         this.context.subscriptions.push(
-            vscode.commands.registerCommand('git-commit-genie.toggleChainMode', async () => {
-                const currentCfg = vscode.workspace.getConfiguration();
-                // Prefer new key if present or previously set
-                let current = currentCfg.get<boolean>('gitCommitGenie.chain.enabled');
-                if (typeof current !== 'boolean') {
-                    current = currentCfg.get<boolean>('gitCommitGenie.useChainPrompts', false);
-                }
-                await currentCfg.update('gitCommitGenie.chain.enabled', !current, vscode.ConfigurationTarget.Global);
-
-                this.statusBarManager.updateStatusBar();
-                vscode.window.showInformationMessage(
-                    vscode.l10n.t(
-                        I18N.chain.toggled,
-                        !current ? vscode.l10n.t(I18N.chain.enabled) : vscode.l10n.t(I18N.chain.disabled)
-                    )
+            vscode.commands.registerCommand('git-commit-genie.selectGenerationMode', async () => {
+                // Each entry carries the one line a user needs to choose: the labels alone
+                // ("Fast" / "Deep") say nothing about what changes between them.
+                const currentMode = parseGenerationMode(
+                    vscode.workspace.getConfiguration('gitCommitGenie').get<unknown>('generationMode', 'auto'),
                 );
+                const items = [
+                    { label: vscode.l10n.t(I18N.generationMode.auto), description: vscode.l10n.t(I18N.generationMode.autoHint), value: 'auto' },
+                    { label: vscode.l10n.t(I18N.generationMode.fast), description: vscode.l10n.t(I18N.generationMode.fastHint), value: 'fast' },
+                    { label: vscode.l10n.t(I18N.generationMode.deep), description: vscode.l10n.t(I18N.generationMode.deepHint), value: 'deep' },
+                ] as const;
+                const selected = await vscode.window.showQuickPick(
+                    items.map(item => ({ ...item, picked: item.value === currentMode })),
+                    { placeHolder: vscode.l10n.t(I18N.generationMode.select) },
+                );
+                if (!selected) {
+                    return;
+                }
+                await vscode.workspace.getConfiguration('gitCommitGenie').update(
+                    'generationMode',
+                    selected.value,
+                    vscode.ConfigurationTarget.Global,
+                );
+                this.statusBarManager.updateStatusBar();
+                vscode.window.showInformationMessage(vscode.l10n.t(I18N.generationMode.selected, selected.label));
             })
         );
 

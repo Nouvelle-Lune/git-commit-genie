@@ -73,3 +73,15 @@ tests/**
 src/test/**
 **/*.test.*
 **/*.spec.*
+
+# Auto router payload. The shipped model is one encrypted, authenticated artifact plus its model
+# card (resources/models/router/rf-79-router.enc, MODEL-CARD.md), and both are meant to ship. What
+# must never ship is the machinery around it: training exports, Python tooling, notebooks,
+# checkpoints. Do NOT express that with a global "*.json" rule or a "keep resources/models/router/**"
+# allowlist — the model is JSON *inside* the encrypted blob, and vsce gives negations absolute
+# priority, so a broad ignore plus per-file negations silently re-includes whatever it did not name.
+**/*.joblib
+**/*.npy
+**/*.py
+**/*.ipynb
+__pycache__/**

@@ -27,7 +27,7 @@ Git Commit Genie 根据已暂存的改动生成提交信息，支持 OpenAI、An
 | 起草 | 结合证据、模板、仓库记忆与 RAG 风格参考，起草一条提交信息。 |
 | 校验 | 按 Conventional Commits 与模板检查草稿，做最小修复，并强制使用目标语言。 |
 
-流水线由 `gitCommitGenie.chain.enabled` 控制，默认开启。关闭后改用单轮提示生成，对少量改动更快、更省 Token。
+`gitCommitGenie.generationMode` 决定每次提交写多少步，默认 `auto`：Genie 在本地看一遍暂存区改动，有把握的走一次生成（快速），其余走完整多阶段流水线（深度）。`fast` 与 `deep` 可固定其中一种 —— 要求每条信息都严格遵循模板时选 `deep`。
 
 流水线与模型自身的思考等级是两件事：流水线决定跑几个阶段，`gitCommitGenie.defaultThinkingLevel` 决定每次调用中模型推理的深度。
 
@@ -110,7 +110,7 @@ Refs: #142
 
 | 设置项 | 默认值 | 说明 |
 | --- | --- | --- |
-| `gitCommitGenie.chain.enabled` | `true` | 多阶段流水线；关闭后使用单轮提示生成 |
+| `gitCommitGenie.generationMode` | `auto` | 自动决定每次提交的生成深度，或固定「快速」/「深度」 |
 | `gitCommitGenie.commitLanguage` | `auto` | 提交信息目标语言 |
 | `gitCommitGenie.defaultThinkingLevel` | `off` | 受支持模型的思考等级 |
 | `gitCommitGenie.memory.enabled` | `false` | 仓库记忆 |

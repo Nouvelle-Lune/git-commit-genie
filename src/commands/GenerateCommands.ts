@@ -112,8 +112,11 @@ export class GenerateCommands {
                 }
 
                 const llmService = this.serviceRegistry.getCurrentLLMService();
-                const memoryRun = vscode.workspace.getConfiguration('gitCommitGenie.chain').get<boolean>('enabled', true)
-                    ? await memoryService.prepare(snapshot, selectedModel.model, resolveInvestigationSettings().excludePatterns) : undefined;
+                const memoryRun = await memoryService.prepare(
+                    snapshot,
+                    selectedModel.model,
+                    resolveInvestigationSettings().excludePatterns,
+                );
                 const result = await llmService.generateCommitMessage(diffs, {
                     snapshot,
                     memoryRun,

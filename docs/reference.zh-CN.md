@@ -14,10 +14,10 @@ Git Commit Genie 的全部命令与设置项。所有设置位于设置编辑器
 | --- | --- |
 | `Git Commit Genie: 生成提交信息` | 分析已暂存的改动并写入提交框。源代码管理标题栏上的 Genie 图标同样可用。 |
 | `Git Commit Genie: 停止生成` | 取消正在进行的生成。生成过程中会替换标题栏上的生成图标。 |
-| `Git Commit Genie: 启用/关闭链式思考模式` | 开关多阶段流水线（`gitCommitGenie.chain.enabled`）。 |
+| `Git Commit Genie: 选择生成模式` | 切换生成方式，选择会被记住：**自动** 让 Genie 对每次改动自己判断，**快速** 固定一次生成（最快最省），**深度** 固定多阶段分析（最贴合模板）。 |
 | `Git Commit Genie: 管理模型` | 添加或移除服务商与模型、保存 API Key、配置自定义 OpenAI 兼容端点、Thinking 兼容性以及单模型价格。 |
 | `Git Commit Genie: 选择/新建模板` | 选择、新建、重命名、打开或停用提交模板。 |
-| `Git Commit Genie: Menu`（菜单） | 快捷入口：思考模式开关、模型管理、仓库记忆。 |
+| `Git Commit Genie: Menu`（菜单） | 快捷入口：生成模式、模型管理、仓库记忆。 |
 | `Git Commit Genie: 查看仓库费用` | 查看当前仓库累计的预估使用费用。 |
 | `Git Commit Genie: 重置仓库费用` | 将当前仓库的累计费用清零。 |
 | `Git Commit Genie: 管理仓库记忆` | 启用或停用记忆、查看已学到的内容、重建检索索引、执行或暂停整理，以及清空记忆。 |
@@ -44,7 +44,7 @@ Git Commit Genie 的全部命令与设置项。所有设置位于设置编辑器
 
 | 设置项 | 类型 | 默认值 | 说明 |
 | --- | --- | --- | --- |
-| `gitCommitGenie.chain.enabled` | boolean | `true` | 使用多阶段流水线（证据 → 调查 → 起草 → 校验）替代单轮提示。更慢、更耗 Token，但结果更准确、更贴合模板。 |
+| `gitCommitGenie.generationMode` | string | `auto` | 每次提交写多少步。`auto`（推荐）在本地判断暂存区改动：有把握的走「快速」一次生成，其余走「深度」多阶段流水线（多数改动落在深度）；`fast`、`deep` 可固定其中一种。改名前的 `onePrompt`、`chain` 仍会被接受，并自动改写为新值。 |
 | `gitCommitGenie.chain.maxParallel` | number | `2` | 各阶段允许的最大并行模型调用数。谨慎调高，避免触发服务商限流。 |
 | `gitCommitGenie.chain.contextWindowTokens` | integer | `128000` | 流水线使用的上下文窗口。内置模型会自动按其真实上限收紧；仅为自定义端点手动调整。 |
 | `gitCommitGenie.llm.maxRetries` | number | `2` | 模型输出校验失败时的重试次数。 |

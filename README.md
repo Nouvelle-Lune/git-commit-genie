@@ -27,7 +27,7 @@ Generation runs as a pipeline:
 | Draft | Writes one message from the evidence, your template, repository memory and RAG style references. |
 | Verify | Checks the draft against Conventional Commits and your template, applies minimal fixes and enforces the target language. |
 
-The pipeline is controlled by `gitCommitGenie.chain.enabled` and is enabled by default. Disabling it generates the message from a single prompt, which is faster and cheaper for small commits.
+`gitCommitGenie.generationMode` decides how much work each commit gets and defaults to `auto`: Genie inspects the staged diff locally and writes changes it is confident about in a single pass, while everything else runs the full multi-stage pipeline. `fast` and `deep` pin one of the two — pick `deep` when every message must follow your template.
 
 The pipeline is independent from the model's own reasoning level: the pipeline decides how many stages run, while `gitCommitGenie.defaultThinkingLevel` decides how much the model reasons inside each call.
 
@@ -110,7 +110,7 @@ Commonly changed settings:
 
 | Setting | Default | Description |
 | --- | --- | --- |
-| `gitCommitGenie.chain.enabled` | `true` | Multi-stage pipeline; disable for single-prompt generation |
+| `gitCommitGenie.generationMode` | `auto` | How much work per commit: Auto, or pinned Fast / Deep |
 | `gitCommitGenie.commitLanguage` | `auto` | Target language for commit messages |
 | `gitCommitGenie.defaultThinkingLevel` | `off` | Thinking level for supported models |
 | `gitCommitGenie.memory.enabled` | `false` | Repository memory |
