@@ -171,15 +171,15 @@ class CustomSession implements AISession {
         responseFormat: NonNullable<AIRunRequest['responseFormat']>,
         buildInstruction = structuredOutputPromptInjection,
     ): CustomMessage[] {
-        const messages = requestMessages.map(message => ({ ...message }));
-        const formatInstruction = buildInstruction(responseFormat.schema);
-        const systemMessage = messages.find(message => message.role === 'system');
-        if (systemMessage) {
-            systemMessage.content = `${systemMessage.content ?? ''}\n\n${formatInstruction}`;
-        } else {
-            messages.unshift({ role: 'system', content: formatInstruction });
-        }
-        return messages;
+        // Appended as its own trailing turn, never merged into the system
+        // message: the system block is the first thing a chat template renders,
+        // so rewriting it invalidates every token cached before the request.
+        // The contract is per-request either way, so the model still receives
+        // it immediately before the generation that has to satisfy it.
+        return [
+            ...requestMessages,
+            { role: 'user', content: buildInstruction(responseFormat.schema) },
+        ];
     }
 
     private requestCompletion(
@@ -187,18 +187,22 @@ class CustomSession implements AISession {
         requestMessages: CustomMessage[],
         responseFormat: Record<string, unknown> | undefined,
     ): Promise<unknown> {
-        const callableTools = request.toolChoice === 'none' ? undefined : request.tools;
         const body: Record<string, unknown> = {
             model: this.model,
             messages: requestMessages,
             max_tokens: request.maxOutputTokens,
             response_format: responseFormat,
-            tools: callableTools?.map(tool => ({
+            // `tool_choice: 'none'` is what closes the tool set; the definitions
+            // stay in the body regardless. A Chat Completions template renders
+            // `tools` into the prompt prefix, so dropping them for the terminal
+            // turn re-templates the whole conversation and discards the cached
+            // prefix the investigation just built.
+            tools: request.tools?.map(tool => ({
                 type: 'function',
                 function: { name: tool.name, description: tool.description, parameters: tool.parameters },
             })),
             tool_choice: request.toolChoice,
-            parallel_tool_calls: callableTools?.length ? false : undefined,
+            parallel_tool_calls: request.tools?.length ? false : undefined,
         };
         applyOpenAICompatibleThinking(body, this.thinking);
         return (this.client.chat.completions.create as any)(body, {

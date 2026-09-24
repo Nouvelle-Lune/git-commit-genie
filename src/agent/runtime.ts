@@ -37,6 +37,17 @@ export type AgentFailureCategory = StructuredFailureKind;
 /** Runtime-owned control action that ends the investigation phase. */
 export const FINISH_INVESTIGATION_TOOL = 'finishInvestigation';
 
+/**
+ * Lookup steps tolerated after the repository budget is spent.
+ *
+ * The budget is enforced by appended reminder text first, and by changing the
+ * tool contract only once the reminders have failed. Every reminder is a new
+ * tail message, so the system block and the tool list stay byte-identical for
+ * the whole investigation phase — that is what lets a provider prompt cache
+ * survive every warning turn instead of being invalidated by the first one.
+ */
+const BUDGET_REMINDER_GRACE_STEPS = 3;
+
 const FINISH_INVESTIGATION_DEFINITION: AIFunctionTool = {
     name: FINISH_INVESTIGATION_TOOL,
     description: [
@@ -66,6 +77,12 @@ export interface AgentPromptLayers {
 }
 
 export interface AgentContextPolicy {
+    /**
+     * Repository lookups budgeted before the runtime starts reminding the model
+     * to close the investigation. A few grace steps beyond it are tolerated on
+     * the appended reminders, and only their exhaustion changes the tool
+     * contract, so the request prefix stays cacheable while warning.
+     */
     maxSteps: number;
     maxEpochs: 0 | 1;
     maxObservationChars: number;
@@ -333,8 +350,9 @@ export class AgentRuntime {
         let epochObservationStart = 0;
         const seenCalls = new Set<string>();
         const maxSteps = profile.contextPolicy.maxSteps;
+        const stepLimit = maxSteps + BUDGET_REMINDER_GRACE_STEPS;
         const totalAttempts = execution.maxRetries + 1;
-        const budgetExhaustedOutput = buildBudgetExhaustedToolOutput(profile.id, maxSteps);
+        const budgetExhaustedOutput = buildBudgetExhaustedToolOutput(profile.id, stepLimit);
         // Counted separately rather than as one shared budget: answering without
         // a tool call and ending before the evidence exists are different
         // mistakes, and a model that made one of each should still get a chance
@@ -370,8 +388,11 @@ export class AgentRuntime {
                 epochObservationStart = prepared.epochObservationStart;
 
                 state.apiCalls += 1;
+                // The warning is appended to the delta rather than written into
+                // the system block: an earlier turn's tokens are never rewritten.
+                const budgetReminder = buildBudgetReminder(state.steps, maxSteps);
                 const response = await session.run({
-                    messages: toSessionDelta(messages),
+                    messages: toSessionDelta(budgetReminder ? [...messages, budgetReminder] : messages),
                     toolResults,
                     tools,
                     toolChoice: 'auto',
@@ -461,7 +482,7 @@ export class AgentRuntime {
                         });
                         continue;
                     }
-                    if (state.steps >= maxSteps) {
+                    if (state.steps >= stepLimit) {
                         // Providers require one tool_result per pending tool_use,
                         // so overflow calls are refused in-band instead of run.
                         toolResults.push({
@@ -493,8 +514,8 @@ export class AgentRuntime {
                     transition = finished;
                     break;
                 }
-                if (state.steps >= maxSteps) {
-                    // The last permitted lookup has run. Finalize now rather than
+                if (state.steps >= stepLimit) {
+                    // The grace lookups are spent. Finalize now rather than
                     // spending another paid turn waiting for an over-budget call.
                     transition = { trigger: 'budgetExhausted', reason: null };
                 }
@@ -959,15 +980,51 @@ function buildPreconditionDegradationOutput(reason: string): string {
     ].join('\n');
 }
 
-/** Stable tool_result body used when a call is refused after the step budget is spent. */
-function buildBudgetExhaustedToolOutput(profileId: string, maxSteps: number): string {
+/** Stable tool_result body used when a call is refused after the lookup budget and its reminders are spent. */
+function buildBudgetExhaustedToolOutput(profileId: string, stepLimit: number): string {
     return [
         '<investigation_closed>',
-        `Agent profile '${profileId}' reached its ${maxSteps} permitted repository lookups.`,
+        `Agent profile '${profileId}' reached its ${stepLimit} permitted repository lookups, including the reminder grace calls.`,
         'This call was not executed and no further tool call is possible.',
         'Repository investigation is closed; answer the terminal contract with the evidence already collected.',
         '</investigation_closed>',
     ].join('\n');
+}
+
+/**
+ * Tail warning that asks the model to close the investigation itself.
+ *
+ * The step budget is soft for {@link BUDGET_REMINDER_GRACE_STEPS} lookups so a
+ * run that is one lookup short of its answer can still finish it, while the
+ * tool contract stays untouched. The budget is only enforced through the tool
+ * contract after these warnings failed to produce a close.
+ */
+function buildBudgetReminder(steps: number, maxSteps: number): AIMessage | null {
+    if (steps >= maxSteps) {
+        return {
+            role: 'user',
+            content: [
+                '<system_reminder>',
+                `Repository lookup budget exhausted: ${steps} of ${maxSteps} call(s) used.`,
+                'Additional lookups are unbudgeted and cannot change what the terminal may cite.',
+                `Call ${FINISH_INVESTIGATION_TOOL} now and answer the terminal contract with the evidence already collected.`,
+                '</system_reminder>',
+            ].join('\n'),
+        };
+    }
+    if (steps === maxSteps - 1) {
+        return {
+            role: 'user',
+            content: [
+                '<system_reminder>',
+                `Repository lookup budget: 1 of ${maxSteps} call(s) remains.`,
+                'Run only the lookup that is still material and then stop opening new lines of inquiry.',
+                `End the investigation by calling ${FINISH_INVESTIGATION_TOOL} as soon as it is answered or is clearly unanswerable.`,
+                '</system_reminder>',
+            ].join('\n'),
+        };
+    }
+    return null;
 }
 
 function recordEvidencePrecondition(state: AgentRunState, message: string): void {

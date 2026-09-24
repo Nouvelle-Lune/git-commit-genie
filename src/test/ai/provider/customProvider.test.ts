@@ -115,9 +115,14 @@ describe('Custom provider response accounting', () => {
         const format = requestBody?.response_format as { type?: string; json_schema?: { strict?: boolean } };
         assert.equal(format.type, 'json_schema');
         assert.equal(format.json_schema?.strict, true);
+        // The schema instruction trails the request: the system block a chat
+        // template renders first must stay identical across every phase.
         const messages = requestBody?.messages as Array<{ role: string; content: string }>;
-        assert.match(messages[0].content, /"type":\s*"object"/);
-        assert.match(messages[0].content, /Use the exact camelCase keys/);
+        assert.equal(messages.length, 2);
+        assert.equal(messages[0].content, 'return draft components');
+        assert.equal(messages[1].role, 'user');
+        assert.match(messages[1].content, /"type":\s*"object"/);
+        assert.match(messages[1].content, /Use the exact camelCase keys/);
     });
 
     it('injects the JSON schema into the prompt when structured output is unsupported', async () => {
@@ -157,11 +162,12 @@ describe('Custom provider response accounting', () => {
         assert.equal(attempts, 2);
         assert.equal((requestBody?.response_format as { type?: string })?.type, 'json_object');
         const messages = requestBody?.messages as Array<{ role: string; content: string }>;
-        assert.match(messages[0].content, /"type":\s*"object"/);
-        assert.match(messages[0].content, /Use the exact camelCase keys/);
+        assert.equal(messages[1].role, 'user');
+        assert.match(messages[1].content, /"type":\s*"object"/);
+        assert.match(messages[1].content, /Use the exact camelCase keys/);
     });
 
-    it('appends the JSON schema to an existing system instruction on fallback', async () => {
+    it('keeps an existing system instruction untouched and appends the schema to the tail on fallback', async () => {
         const schema = z.toJSONSchema(classifyAndDraftResponseSchema) as Record<string, unknown>;
         let requestBody: Record<string, unknown> | undefined;
         let attempts = 0;
@@ -201,10 +207,14 @@ describe('Custom provider response accounting', () => {
 
         assert.equal(attempts, 2);
         const messages = requestBody?.messages as Array<{ role: string; content: string }>;
-        assert.equal(messages.length, 2);
-        assert.match(messages[0].content, /You are a commit message generator\./);
-        assert.match(messages[0].content, /"type":\s*"object"/);
+        assert.equal(messages.length, 3);
+        assert.equal(messages[0].role, 'system');
+        assert.equal(messages[0].content, 'You are a commit message generator.');
         assert.equal(messages[1].role, 'user');
+        assert.equal(messages[1].content, 'return draft components');
+        assert.equal(messages[2].role, 'user');
+        assert.match(messages[2].content, /"type":\s*"object"/);
+        assert.match(messages[2].content, /Use the exact camelCase keys/);
     });
 
     it('keeps tool turns unconstrained while retaining tools and parses terminal JSON locally', async () => {
@@ -242,7 +252,10 @@ describe('Custom provider response accounting', () => {
         }]);
         assert.equal(requestBody?.parallel_tool_calls, false);
         assert.deepEqual(result.structured, JSON.parse(terminalJson));
-        assert.match(String((requestBody?.messages as Array<{ role: string; content: string }>)[0].content), /When no further tool call is needed/);
+        const messages = requestBody?.messages as Array<{ role: string; content: string }>;
+        assert.equal(messages[0].content, 'inspect the changed file');
+        assert.equal(messages[1].role, 'user');
+        assert.match(messages[1].content, /When no further tool call is needed/);
     });
 
     it('replays an assistant tool call before its matching tool result across two session runs', async () => {
@@ -308,8 +321,13 @@ describe('Custom provider response accounting', () => {
             assert.equal(request.response_format, undefined);
             assert.deepEqual(request.tools, [{ type: 'function', function: repositoryTool }]);
             assert.equal(request.parallel_tool_calls, false);
-            const systemContent = String((request.messages as Array<{ role: string; content: string }>)[0].content);
-            assert.equal((systemContent.match(/When no further tool call is needed/g) ?? []).length, 1);
+            const messages = request.messages as Array<{ role: string; content: string }>;
+            assert.equal(messages[0].content, 'Investigate the repository.');
+            assert.equal(
+                (messages.map(message => message.content).join('\n').match(/When no further tool call is needed/g) ?? []).length,
+                1,
+            );
+            assert.equal(messages[messages.length - 1].role, 'user');
         }
 
         const messages = requests[1].messages as Array<{
@@ -505,7 +523,74 @@ describe('Custom provider response accounting', () => {
         ]);
     });
 
-    it('appends the mixed-mode terminal and single-tool instructions to an existing system prompt', async () => {
+    it('extends the investigation prompt instead of replacing it on the terminal turn', async () => {
+        // Reported defect: the terminal request rewrote the system message with the
+        // JSON schema and dropped the tool definitions, so a provider prefix cache
+        // stopped matching exactly at the investigation/finalization boundary.
+        const requests: Array<Record<string, unknown>> = [];
+        const toolCall = {
+            id: 'call_read_1',
+            type: 'function',
+            function: { name: repositoryTool.name, arguments: '{"filePath":"src/index.ts"}' },
+        };
+        const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
+            chat: {
+                completions: {
+                    create: async (body: Record<string, unknown>) => {
+                        requests.push(body);
+                        return requests.length === 1
+                            ? {
+                                choices: [{
+                                    finish_reason: 'tool_calls',
+                                    message: { role: 'assistant', content: null, tool_calls: [toolCall] },
+                                }],
+                            }
+                            : {
+                                choices: [{
+                                    finish_reason: 'stop',
+                                    message: { role: 'assistant', content: terminalJson },
+                                }],
+                            };
+                    },
+                },
+            },
+        } as any);
+        const session = provider.createSession({
+            model: 'local-model',
+            systemInstruction: 'Investigate the repository.',
+        });
+
+        await session.run({
+            messages: [{ role: 'user', content: 'inspect the changed file' }],
+            tools: [repositoryTool],
+            toolChoice: 'auto',
+        });
+        await session.run({
+            messages: [{ role: 'user', content: 'Finalize the repository investigation.' }],
+            responseFormat,
+            tools: [repositoryTool],
+            toolChoice: 'none',
+            toolResults: [{
+                callId: 'call_read_1',
+                name: repositoryTool.name,
+                output: 'file contents',
+            }],
+        });
+
+        const [investigation, terminal] = requests;
+        assert.deepEqual(terminal.tools, investigation.tools);
+        assert.equal(investigation.tool_choice, 'auto');
+        assert.equal(terminal.tool_choice, 'none');
+        assert.equal(terminal.parallel_tool_calls, false);
+        const investigationMessages = investigation.messages as SerializedMessage[];
+        const terminalMessages = terminal.messages as SerializedMessage[];
+        // Everything the investigation sent stays byte-identical and in place, so
+        // the provider finds the whole prior prompt in its cache and only pays for
+        // the appended terminal turn.
+        assert.deepEqual(terminalMessages.slice(0, investigationMessages.length), investigationMessages);
+    });
+
+    it('appends the mixed-mode terminal and single-tool instructions to the end of the conversation', async () => {
         let requestBody: Record<string, unknown> | undefined;
         const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
             chat: {
@@ -543,10 +628,12 @@ describe('Custom provider response accounting', () => {
 
         const messages = requestBody?.messages as Array<{ role: string; content: string }>;
         assert.equal(messages[0].role, 'system');
-        assert.match(messages[0].content, /You are a repository investigator\./);
-        assert.match(messages[0].content, /When no further tool call is needed, return exactly one JSON object/);
-        assert.match(messages[0].content, /When calling a tool, return only one tool call and no accompanying text\./);
-        assert.match(messages[0].content, /"properties"/);
+        assert.equal(messages[0].content, 'You are a repository investigator.');
+        assert.equal(messages[1].content, 'inspect the changed file');
+        assert.equal(messages[2].role, 'user');
+        assert.match(messages[2].content, /When no further tool call is needed, return exactly one JSON object/);
+        assert.match(messages[2].content, /When calling a tool, return only one tool call and no accompanying text\./);
+        assert.match(messages[2].content, /"properties"/);
         assert.equal(result.stopReason, 'tool_call');
         assert.deepEqual(result.toolCalls, [{
             id: 'call_1',
@@ -555,7 +642,7 @@ describe('Custom provider response accounting', () => {
         }]);
     });
 
-    it('uses strict structured output and omits tools when toolChoice is none', async () => {
+    it('closes the tool set with toolChoice none while keeping the tool definitions', async () => {
         let requestBody: Record<string, unknown> | undefined;
         const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
             chat: {
@@ -583,11 +670,19 @@ describe('Custom provider response accounting', () => {
         const format = requestBody?.response_format as { type: string; json_schema: { strict: boolean } };
         assert.equal(format.type, 'json_schema');
         assert.equal(format.json_schema.strict, true);
-        assert.equal(requestBody?.tools, undefined);
-        assert.equal(requestBody?.parallel_tool_calls, undefined);
+        // The definitions stay byte-identical to the investigation turns, so a
+        // Chat Completions template renders the same prompt prefix; only the
+        // choice narrows. Removing them re-templated the whole conversation and
+        // threw away the provider's cached prefix at the phase change.
+        assert.deepEqual(requestBody?.tools, [{ type: 'function', function: repositoryTool }]);
+        assert.equal(requestBody?.parallel_tool_calls, false);
         assert.equal(requestBody?.tool_choice, 'none');
         assert.deepEqual(result.structured, JSON.parse(terminalJson));
-        assert.doesNotMatch(String((requestBody?.messages as Array<{ role: string; content: string }>)[0].content), /When no further tool call is needed/);
+        const messages = requestBody?.messages as Array<{ role: string; content: string }>;
+        assert.equal(messages[0].content, 'return draft components');
+        assert.doesNotMatch(messages[0].content, /When no further tool call is needed/);
+        assert.equal(messages[1].role, 'user');
+        assert.match(messages[1].content, /Use the exact camelCase keys/);
     });
 
     it('normalizes reasoning token details and known length termination', async () => {

@@ -107,12 +107,12 @@ function finishInvestigationResponse(reason = 'enough evidence'): AIRunResponse 
     });
 }
 
-function inspectToolResponse(callId: string, reason: string): AIRunResponse {
+function inspectToolResponse(callId: string, reason: string, filePath = 'src/target.ts'): AIRunResponse {
     return response({
         toolCalls: [{
             id: callId,
             name: 'inspect',
-            arguments: { reason, filePath: 'src/target.ts' },
+            arguments: { reason, filePath },
         }],
         stopReason: 'tool_call',
     });
@@ -338,6 +338,7 @@ describe('AgentRuntime contracts', () => {
                 }],
                 stopReason: 'tool_call',
             }),
+            finishInvestigationResponse('the bounded range is enough'),
             response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
         ], requests, []);
         const profile: AgentProfile<null, { value: string }, string> = {
@@ -384,11 +385,11 @@ describe('AgentRuntime contracts', () => {
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'done');
         assert.deepEqual(executedArguments.map(args => args.maxLines), [400]);
-        assert.equal(requests.length, 3);
+        assert.equal(requests.length, 4);
         assert.equal(requests[1].toolResults?.[0].isError, true);
         assert.match(requests[1].toolResults?.[0].output ?? '', /maxLines.*400/);
-        assert.equal(requests[2].toolChoice, 'none');
         assert.equal(requests[2].toolResults?.[0].output, 'read 400 lines');
+        assert.equal(requests[3].toolChoice, 'none');
         assert.equal(result.state.steps, 2);
         assert.equal(result.state.observations.length, 2);
         assert.equal(result.state.observations[0].ok, false);
@@ -420,6 +421,7 @@ describe('AgentRuntime contracts', () => {
                 }],
                 stopReason: 'tool_call',
             }),
+            finishInvestigationResponse('the granted path is enough'),
             response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
         ], requests, []);
         const profile: AgentProfile<null, { value: string }, string> = {
@@ -463,8 +465,8 @@ describe('AgentRuntime contracts', () => {
         assert.deepEqual(executedPaths, ['src/inside.ts']);
         assert.equal(requests[1].toolResults?.[0].isError, true);
         assert.match(requests[1].toolResults?.[0].output ?? '', /outside/);
-        assert.equal(requests[2].toolChoice, 'none');
         assert.equal(requests[2].toolResults?.[0].output, 'inside root');
+        assert.equal(requests[3].toolChoice, 'none');
         assert.equal(result.metrics.issues.filter(issue => issue.type === 'tool_rejected').length, 1);
     });
 
@@ -478,9 +480,12 @@ describe('AgentRuntime contracts', () => {
                 toolCalls: [{ id: 'large', name: 'inspect', arguments: { reason: 'collect' } }],
                 stopReason: 'tool_call',
             }),
+            finishInvestigationResponse('the collected evidence is enough'),
             response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
         ], requests, sessionIds);
-        execution.tokenBudget.compressionTriggerTokens = 20;
+        // Above the post-compaction checkpoint estimate and below the truncated
+        // observation estimate, so exactly one epoch is created.
+        execution.tokenBudget.compressionTriggerTokens = 200;
         const ledger = EvidenceLedger.fromDiffs([makeDiff('a.ts', ['@@ -1 +1 @@'])]);
         const profile: AgentProfile<string, { value: string }, string> = {
             id: 'epoch-test',
@@ -532,8 +537,9 @@ describe('AgentRuntime contracts', () => {
         assert.deepEqual(events, ['epoch:1']);
         assert.deepEqual(sessionIds, ['agent:epoch-test:2:4:test-model', 'agent:epoch-test:2:4:test-model']);
         assert.deepEqual(ledger.snapshot().map(entry => entry.id), ['D1']);
-        assert.equal(requests[1].toolChoice, 'none');
+        assert.equal(requests[1].toolChoice, 'auto');
         assert.equal(requests[1].messages?.[0].content.includes('checkpoint:D1'), true);
+        assert.equal(requests[2].toolChoice, 'none');
         for (const request of requests) {
             assert.equal('thinking' in request, false);
         }
@@ -587,8 +593,8 @@ describe('AgentRuntime contracts', () => {
         assert.equal('thinking' in requests[1], false);
     });
 
-    it('repairs an invalid mixed terminal through a no-tools strict Custom request', async () => {
-        // Verify repairs an invalid mixed terminal through a no-tools strict Custom request.
+    it('repairs an invalid mixed terminal through a closed-tools strict Custom request', async () => {
+        // Verify an invalid terminal is repaired while the tool definitions stay in every request.
         const requests: Array<Record<string, unknown>> = [];
         let callCount = 0;
         const provider = new CustomProvider({ apiKey: 'test', baseUrl: 'http://localhost:8080/v1' }, {
@@ -614,6 +620,22 @@ describe('AgentRuntime contracts', () => {
                             };
                         }
                         if (callCount === 2) {
+                            return {
+                                choices: [{
+                                    finish_reason: 'tool_calls',
+                                    message: {
+                                        role: 'assistant',
+                                        content: null,
+                                        tool_calls: [{
+                                            id: 'call_finish',
+                                            type: 'function',
+                                            function: { name: FINISH_INVESTIGATION_TOOL, arguments: '{"reason":"evidence collected"}' },
+                                        }],
+                                    },
+                                }],
+                            };
+                        }
+                        if (callCount === 3) {
                             return {
                                 choices: [{
                                     finish_reason: 'stop',
@@ -696,25 +718,33 @@ describe('AgentRuntime contracts', () => {
 
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'repaired');
-        assert.equal(requests.length, 3);
+        assert.equal(requests.length, 4);
         assert.equal(requests[0].response_format, undefined);
         assert.equal(requests[0].tool_choice, 'auto');
         assert.equal(requests[0].parallel_tool_calls, false);
         assert.ok(Array.isArray(requests[0].tools));
-        assert.equal(requests[1].tool_choice, 'none');
-        assert.equal(requests[1].tools, undefined);
-        assert.equal(requests[1].parallel_tool_calls, undefined);
-        assert.ok(requests[1].response_format);
+        assert.equal(requests[1].tool_choice, 'auto');
         assert.equal(requests[2].tool_choice, 'none');
-        const format = requests[1].response_format as {
+        assert.ok(requests[2].response_format);
+        // `tool_choice: 'none'` closes the tool set; the definitions themselves
+        // must reach the model byte-identically to keep a Chat Completions
+        // prefix cache alive across the phase change.
+        assert.deepEqual(requests[2].tools, requests[0].tools);
+        assert.equal(requests[2].parallel_tool_calls, false);
+        assert.equal(requests[3].tool_choice, 'none');
+        const format = requests[2].response_format as {
             type: string;
             json_schema: { name: string; strict: boolean };
         };
         assert.equal(format.type, 'json_schema');
         assert.equal(format.json_schema.name, 'customMixedRepairFinal');
         assert.equal(format.json_schema.strict, true);
-        const systemContent = String((requests[1].messages as Array<{ content: string }>)[0].content);
-        assert.match(systemContent, /"type":\s*"object"/);
+        const finalizationMessages = requests[2].messages as Array<{ role: string; content: string }>;
+        assert.equal(finalizationMessages[0].role, 'system');
+        assert.equal(finalizationMessages[0].content, 'Investigate the repository.');
+        assert.doesNotMatch(finalizationMessages[0].content, /"type":\s*"object"/);
+        assert.equal(finalizationMessages[finalizationMessages.length - 1].role, 'user');
+        assert.match(finalizationMessages[finalizationMessages.length - 1].content, /"type":\s*"object"/);
         for (const body of requests) {
             assert.equal(body.reasoning_effort, 'high');
             assert.equal('thinking' in body, false);
@@ -896,12 +926,15 @@ describe('AgentRuntime contracts', () => {
         assert.match(requests[2].toolResults?.[0].output ?? '', /never present a diff-only fact as a repository fact/i);
     });
 
-    it('records a distinct degradation when the normal lookup budget ends without E* evidence', async () => {
-        // A normal budget boundary must finalize without a terminal retry and classify missing evidence as an explicit degradation.
+    it('records a distinct degradation when the reminder grace ends without E* evidence', async () => {
+        // The reminder grace boundary must finalize without a terminal retry and classify missing evidence as an explicit degradation.
         const requests: AIRunRequest[] = [];
         const events: string[] = [];
         const execution = createExecution([
-            inspectToolResponse('budgeted-lookup', 'check the changed symbol'),
+            inspectToolResponse('budgeted-lookup', 'check the changed symbol', 'src/target.ts'),
+            inspectToolResponse('grace-lookup-1', 'check the first consumer', 'src/consumer-1.ts'),
+            inspectToolResponse('grace-lookup-2', 'check the second consumer', 'src/consumer-2.ts'),
+            inspectToolResponse('grace-lookup-3', 'check the third consumer', 'src/consumer-3.ts'),
             response({ structured: { value: 'budget-done' }, text: '{"value":"budget-done"}' }),
         ], requests, []);
         const profile = {
@@ -926,20 +959,31 @@ describe('AgentRuntime contracts', () => {
         assert.equal(result.metrics.issues.filter(issue => issue.type === 'evidence_precondition_degraded').length, 1);
         assert.equal(result.metrics.issues.filter(issue => issue.type === 'evidence_precondition').length, 0);
         assert.equal(result.metrics.issues.filter(issue => issue.type === 'terminal_failure').length, 0);
-        assert.equal(result.state.steps, 1);
-        assert.equal(result.metrics.toolSteps, 1);
-        assert.equal(requests.length, 2);
-        assert.equal(requests[1].toolChoice, 'none');
+        assert.equal(result.state.steps, 1 + 3);
+        assert.equal(result.metrics.toolSteps, 1 + 3);
+        assert.equal(requests.length, 5);
+        assert.equal(requests[4].toolChoice, 'none');
     });
 
-    it('soft-rejects over-budget tool calls then completes on forced terminal', async () => {
-        // Verify soft-rejects over-budget tool calls then completes on forced terminal.
+    it('tolerates over-budget lookups until the reminder grace is spent, then soft-rejects the overflow', async () => {
+        // Verify the reminder grace runs over-budget lookups before the tool contract changes.
         const requests: AIRunRequest[] = [];
         const execution = createExecution([
             response({
                 toolCalls: [
-                    { id: 'allowed', name: 'inspect', arguments: { reason: 'one' } },
-                    { id: 'over-budget', name: 'inspect', arguments: { reason: 'too late' } },
+                    { id: 'allowed', name: 'inspect', arguments: { reason: 'one', filePath: 'src/one.ts' } },
+                    { id: 'grace-1', name: 'inspect', arguments: { reason: 'two', filePath: 'src/two.ts' } },
+                ],
+                stopReason: 'tool_call',
+            }),
+            response({
+                toolCalls: [{ id: 'grace-2', name: 'inspect', arguments: { reason: 'three', filePath: 'src/three.ts' } }],
+                stopReason: 'tool_call',
+            }),
+            response({
+                toolCalls: [
+                    { id: 'grace-3', name: 'inspect', arguments: { reason: 'four', filePath: 'src/four.ts' } },
+                    { id: 'over-budget', name: 'inspect', arguments: { reason: 'too late', filePath: 'src/five.ts' } },
                 ],
                 stopReason: 'tool_call',
             }),
@@ -975,27 +1019,74 @@ describe('AgentRuntime contracts', () => {
 
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'forced-done');
-        assert.equal(result.state.steps, 1);
+        assert.equal(result.state.steps, 4);
         assert.equal(result.metrics.issues.filter(issue => issue.type === 'budget_exhausted').length, 0);
-        assert.equal(requests.length, 2);
+        assert.equal(requests.length, 4);
         assert.equal(requests[0].toolChoice, 'auto');
-        assert.equal(requests[1].toolChoice, 'none');
-        assert.ok(requests[1].responseFormat);
-        assert.equal(requests[1].toolResults?.length, 2);
-        assert.equal(requests[1].toolResults?.[1].isError, true);
-        assert.match(requests[1].toolResults?.[1].output ?? '', /<investigation_closed>/);
-        assert.match(requests[1].toolResults?.[1].output ?? '', /not executed/);
+        assert.equal(requests[3].toolChoice, 'none');
+        assert.ok(requests[3].responseFormat);
+        assert.equal(requests[3].toolResults?.length, 2);
+        assert.equal(requests[3].toolResults?.[0].output, 'executed-once');
+        assert.notEqual(requests[3].toolResults?.[0].isError, true);
+        assert.equal(requests[3].toolResults?.[1].isError, true);
+        assert.match(requests[3].toolResults?.[1].output ?? '', /<investigation_closed>/);
+        assert.match(requests[3].toolResults?.[1].output ?? '', /not executed/);
     });
 
-    it('executes the first tool in a batch then soft-rejects the rest before forced terminal', async () => {
-        // Verify executes the first tool in a batch then soft-rejects the rest before forced terminal.
+    it('reminds the model at the budget boundary and keeps every request prefix append-only', async () => {
+        // The budget is spent on a tail reminder first and on the tool contract
+        // only afterwards, so no earlier token is rewritten while warning.
+        const requests: AIRunRequest[] = [];
+        const execution = createExecution([
+            inspectToolResponse('call-1', 'last permitted lookup', 'src/last.ts'),
+            inspectToolResponse('call-2', 'one over budget', 'src/over-1.ts'),
+            inspectToolResponse('call-3', 'two over budget', 'src/over-2.ts'),
+            inspectToolResponse('call-4', 'three over budget', 'src/over-3.ts'),
+            response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
+        ], requests, []);
+        const profile = buildInspectProfile(1, () => ({ output: 'inspected' }));
+
+        const result = await new AgentRuntime().run(execution, profile, null);
+
+        assert.equal(result.status, 'complete');
+        assert.equal(result.output, 'done');
+        assert.equal(result.metrics.toolSteps, 4);
+        assert.equal(requests.length, 5);
+        const reminders = requests.slice(0, 4).map(request => {
+            const messages = request.messages ?? [];
+            const reminder = messages[messages.length - 1];
+            return { role: reminder.role, content: String(reminder.content) };
+        });
+        for (const reminder of reminders) {
+            assert.equal(reminder.role, 'user');
+            assert.match(reminder.content, /<system_reminder>/);
+        }
+        assert.match(reminders[0].content, /1 of 1 call\(s\) remains/);
+        for (const [index, used] of [1, 2, 3].entries()) {
+            assert.match(reminders[index + 1].content, new RegExp(`exhausted: ${used} of 1 call\\(s\\) used`));
+        }
+        assert.match(reminders[3].content, /finishInvestigation/);
+        // The contract is identical in every request, investigation and terminal alike.
+        assert.equal(requests[4].toolChoice, 'none');
+        assert.ok(requests[4].responseFormat);
+        for (const request of requests) {
+            assert.deepEqual(request.tools, requests[0].tools);
+            assert.equal(request.messages?.some(message => message.role === 'system'), false);
+        }
+    });
+
+    it('executes a batch until the reminder grace is spent then soft-rejects the rest before forced terminal', async () => {
+        // Verify the grace is charged per executed call inside one batch.
         const requests: AIRunRequest[] = [];
         let executeCount = 0;
         const execution = createExecution([
             response({
                 toolCalls: [
-                    { id: 'first', name: 'inspect', arguments: { reason: 'one' } },
-                    { id: 'second', name: 'inspect', arguments: { reason: 'two' } },
+                    { id: 'first', name: 'inspect', arguments: { reason: 'one', filePath: 'src/1.ts' } },
+                    { id: 'second', name: 'inspect', arguments: { reason: 'two', filePath: 'src/2.ts' } },
+                    { id: 'third', name: 'inspect', arguments: { reason: 'three', filePath: 'src/3.ts' } },
+                    { id: 'fourth', name: 'inspect', arguments: { reason: 'four', filePath: 'src/4.ts' } },
+                    { id: 'fifth', name: 'inspect', arguments: { reason: 'five', filePath: 'src/5.ts' } },
                 ],
                 stopReason: 'tool_call',
             }),
@@ -1032,20 +1123,22 @@ describe('AgentRuntime contracts', () => {
 
         const result = await new AgentRuntime().run(execution, profile, null);
 
-        assert.equal(executeCount, 1);
+        assert.equal(executeCount, 4);
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'after-batch');
-        assert.equal(result.state.steps, 1);
+        assert.equal(result.state.steps, 4);
         assert.equal(result.metrics.issues.filter(issue => issue.type === 'budget_exhausted').length, 0);
         assert.equal(requests.length, 2);
         assert.equal(requests[0].toolChoice, 'auto');
         assert.equal(requests[1].toolChoice, 'none');
-        assert.equal(requests[1].toolResults?.length, 2);
-        assert.equal(requests[1].toolResults?.[0].output, 'executed-once');
-        assert.notEqual(requests[1].toolResults?.[0].isError, true);
-        assert.equal(requests[1].toolResults?.[1].isError, true);
-        assert.match(requests[1].toolResults?.[1].output ?? '', /<investigation_closed>/);
-        assert.match(requests[1].toolResults?.[1].output ?? '', /not executed/);
+        assert.equal(requests[1].toolResults?.length, 5);
+        for (const result of requests[1].toolResults?.slice(0, 4) ?? []) {
+            assert.equal(result.output, 'executed-once');
+            assert.notEqual(result.isError, true);
+        }
+        assert.equal(requests[1].toolResults?.[4].isError, true);
+        assert.match(requests[1].toolResults?.[4].output ?? '', /<investigation_closed>/);
+        assert.match(requests[1].toolResults?.[4].output ?? '', /not executed/);
     });
 
     it('returns partial when forced finalize turn still requests tools', async () => {
@@ -1198,6 +1291,7 @@ describe('AgentRuntime contracts', () => {
                 toolCalls: [{ id: 'inspect', name: 'inspect', arguments: { reason: 'collect details' } }],
                 stopReason: 'tool_call',
             }),
+            finishInvestigationResponse('the observation is enough'),
             response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
         ], requests, []);
         const rawOutput = 'A complete repository observation that is longer than the visible budget.';
@@ -1235,7 +1329,6 @@ describe('AgentRuntime contracts', () => {
 
         assert.equal(result.status, 'complete');
         assert.equal(result.output, 'done');
-        assert.equal(requests[1].toolChoice, 'none');
         assert.equal(result.state.observations.length, 1);
         const observation = result.state.observations[0];
         assert.equal(observation.rawOutput, rawOutput);
@@ -1244,7 +1337,10 @@ describe('AgentRuntime contracts', () => {
         assert.match(observation.output, /tool output truncated by runtime policy/);
         assert.equal(observation.summary, 'Collected a complete observation.');
         assert.equal(observation.evidenceCount, 2);
+        // The lookup result travels with the reminder turn; the terminal request
+        // only carries the accepted close.
         assert.equal(requests[1].toolResults?.[0].output, observation.output);
+        assert.equal(requests[2].toolChoice, 'none');
     });
 
     it('ends investigation early through finishInvestigation without consuming repository budget', async () => {
@@ -1558,6 +1654,7 @@ describe('AgentRuntime contracts', () => {
             inspectToolResponse('call-1', 'first attempt'),
             inspectToolResponse('call-2', 'second attempt'),
             inspectToolResponse('call-3', 'third attempt'),
+            finishInvestigationResponse('the inspected evidence is enough'),
             response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
         ], requests, []);
         const profile = buildInspectProfile(maxSteps, () => {
@@ -1572,11 +1669,11 @@ describe('AgentRuntime contracts', () => {
         assert.equal(result.metrics.toolSteps, maxSteps);
         assert.equal(executeCount, 1);
         assert.equal(result.metrics.issues.filter(issue => issue.type === 'duplicate_tool_call').length, 2);
-        assert.equal(requests.length, 4);
+        assert.equal(requests.length, 5);
         assert.equal(requests[0].toolChoice, 'auto');
         assert.equal(requests[0].responseFormat, undefined);
-        assert.equal(requests[3].toolChoice, 'none');
-        assert.ok(requests[3].responseFormat);
+        assert.equal(requests[4].toolChoice, 'none');
+        assert.ok(requests[4].responseFormat);
     });
 
     it('treats duplicate tool calls as identical when only reason differs', async () => {
@@ -1586,6 +1683,7 @@ describe('AgentRuntime contracts', () => {
         const execution = createExecution([
             inspectToolResponse('call-1', 'first reason'),
             inspectToolResponse('call-2', 'second reason'),
+            finishInvestigationResponse('the duplicate is not needed'),
             response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
         ], requests, []);
         const profile = buildInspectProfile(2, () => {
@@ -1602,7 +1700,8 @@ describe('AgentRuntime contracts', () => {
         const duplicateResult = requests[2].toolResults?.find(result => result.isError === true);
         assert.ok(duplicateResult);
         assert.match(duplicateResult?.output ?? '', /Duplicate tool call/);
-        assert.equal(requests[2].toolChoice, 'none');
+        assert.equal(requests[2].toolChoice, 'auto');
+        assert.equal(requests[3].toolChoice, 'none');
     });
 
     it('keeps ten repository evidence items and continues after an in-band memory rejection', async () => {
@@ -1750,6 +1849,7 @@ describe('AgentRuntime contracts', () => {
                 toolCalls: [{ id: 'memory-search', name: 'searchMemory', arguments: {} }],
                 stopReason: 'tool_call',
             }),
+            finishInvestigationResponse('the published navigation is enough'),
             response({ structured: { value: 'done' }, text: '{"value":"done"}' }),
         ], requests, []);
         execution.tokenBudget.compressionTriggerTokens = 21;
@@ -1796,9 +1896,10 @@ describe('AgentRuntime contracts', () => {
         assert.equal(result.output, 'done');
         assert.deepEqual(published.map(item => item.id), ['M1']);
         assert.deepEqual(queries, [{ paths: ['src/parser.ts'], keywords: ['parse'] }]);
-        assert.equal(requests.length, 2);
+        assert.equal(requests.length, 3);
         assert.equal(requests[1].messages?.[0].content, 'checkpoint:M1');
-        assert.equal(requests[1].toolChoice, 'none');
+        assert.equal(requests[1].toolChoice, 'auto');
+        assert.equal(requests[2].toolChoice, 'none');
 
         const nextRun = new MemoryRetriever(view, snapshot, []);
         assert.deepEqual(
