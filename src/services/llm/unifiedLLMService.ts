@@ -179,7 +179,7 @@ export class UnifiedLLMService extends BaseLLMService {
                 if (!cfg.get('showUsageCost', false)) {
                     return;
                 }
-                const costLabel = summary.totalUsd === 0 ? 'Free' : `$${summary.totalUsd.toFixed(6)}`;
+                const costLabel = summary.totalUsd.toFixed(6);
                 const cacheLabel = summary.cacheHitPercent.toFixed(2);
                 const messageKey = callType === 'memory'
                     ? 'Repository memory: ${0} | Cache hit: {1}%'
