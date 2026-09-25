@@ -383,21 +383,17 @@ describe('auto routing card', () => {
     it('reports a router fallback as a warning that still names the Deep route', () => {
         const presentation = presentPipelineEvent({
             stage: 'autoRouted',
-            data: { route: 'deep', failure: 'router artifact hash mismatch: expected a, got b' },
+            data: { route: 'deep', fallback: true },
         });
 
         assert.equal(presentation.tone, 'warning');
         assert.equal(presentation.title, 'Automatic routing unavailable');
         assert.equal(
             presentation.description,
-            'The routing model could not be verified; the change goes through the multi-stage workflow.',
+            'Automatic routing is unavailable, so this change uses Deep.',
         );
         assert.deepEqual(presentation.metrics, [{ label: 'Route', value: 'Deep' }]);
-        assert.deepEqual(presentation.details, {
-            kind: 'autoRouted',
-            route: 'deep',
-            failure: 'router artifact hash mismatch: expected a, got b',
-        });
+        assert.deepEqual(presentation.details, { kind: 'autoRouted', route: 'deep', fallback: true });
     });
 
     it('rejects a persisted route card that names no route this build can render', () => {

@@ -362,18 +362,28 @@ export class UnifiedLLMService extends BaseLLMService {
             const repoPath = this.getRepoPathForLogging(options?.targetRepo);
             safeRun('UnifiedLLM.logGenerationStart', () => logger.logGenerationStart(repoPath, resolvedRoute === 'deep' ? 'thinking' : 'default'));
             if (autoDecision) {
-                if (autoDecision.probabilityDirect === null || autoDecision.directThreshold === null) {
-                    logger.warn(`[AutoRouter] ${autoDecision.failure}; falling back to the chain workflow`);
+                // The Output channel is user-visible, so the always-on line states the outcome in product
+                // terms. Scores, thresholds, coverage, rule names, artifact hashes and the internal failure
+                // reason are diagnostics: they are written only when raw data is enabled for debugging.
+                const fallback = autoDecision.reason === 'fallback';
+                if (fallback) {
+                    logger.warn('[Auto] Automatic routing is unavailable; this change uses Deep.');
                 } else {
-                    logger.info(`[AutoRouter] route=${autoDecision.route} probabilityDirect=${autoDecision.probabilityDirect.toFixed(6)} directThreshold=${autoDecision.directThreshold.toFixed(4)} coverageTarget=${autoDecision.coverageTarget} artifact=${autoDecision.artifactSha256?.slice(0, 12)}`);
+                    logger.info(`[Auto] This change uses ${autoDecision.route === 'fast' ? 'Fast' : 'Deep'}.`);
+                }
+                if (cfg.get<boolean>('ui.rawData.enabled', false)) {
+                    const score = autoDecision.probabilityDirect === null ? 'null' : autoDecision.probabilityDirect.toFixed(6);
+                    const threshold = autoDecision.directThreshold === null ? 'null' : autoDecision.directThreshold.toFixed(4);
+                    logger.info(`[Auto][debug] reason=${autoDecision.reason}${autoDecision.rule ? `:${autoDecision.rule}` : ''} pDirect=${score} threshold=${threshold} coverageTarget=${autoDecision.coverageTarget} artifact=${autoDecision.artifactSha256?.slice(0, 12) ?? 'null'}${autoDecision.failure ? ` failure=${autoDecision.failure}` : ''}`);
                 }
                 // The decision opens the generation flow in the Webview, so the user sees which route
-                // Auto took without reading the extension log. Score and threshold stay out of the card.
+                // Auto took without reading the extension log. Only the route (and whether Auto had to
+                // fall back) crosses over: the card never carries scores, thresholds or error internals.
                 safeRun('UnifiedLLM.logAutoRoute', () => logCommitStageToWebview(repoPath, {
                     type: 'autoRouted',
                     data: {
                         route: autoDecision.route,
-                        ...(autoDecision.failure ? { failure: autoDecision.failure } : {}),
+                        ...(fallback ? { fallback: true } : {}),
                     },
                 }));
             }

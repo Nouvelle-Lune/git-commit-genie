@@ -201,7 +201,7 @@
 	"The Fast route was selected for this change.": "本次变更选择了快速路由。",
 	"The Deep route was selected for this change.": "本次变更选择了深度路由。",
 	"Automatic routing unavailable": "自动路由不可用",
-	"The routing model could not be verified; the change goes through the multi-stage workflow.": "路由模型未通过校验，本次变更将走多阶段流程。",
+	"Automatic routing is unavailable, so this change uses Deep.": "自动选择暂不可用，本次改用「深度」。",
 	"Generation flow": "生成流程",
 	"Current repository": "当前仓库",
 	"Generation started: {0} — {1}": "开始生成：{0} — {1}",

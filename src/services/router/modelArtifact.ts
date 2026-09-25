@@ -21,8 +21,17 @@ const FORMAT = 'router-artifact-v1';
 const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 
-/** Coverage the shipped default routes at: top 20% of scores, holdout Direct precision 0.812. */
-export const DEFAULT_COVERAGE_TARGET = 0.2;
+/**
+ * Coverage the shipped default routes at: top 30% of scores, which on the 678-case holdout bought
+ * Direct precision 0.7264 (274 false Fast per 1000 routed) at an achieved coverage of 0.2965.
+ *
+ * The knob is coverage, not probability: the model has no high-confidence region (`pDirect` never
+ * exceeds ~0.83), so a rule like "pDirect >= 0.9" would never fire. Raising the target trades Fast-lane
+ * correctness for cost — 0.2 buys precision 0.8116, 0.3 buys 0.7264 — and the full curve lives in the
+ * artifact's `productTable`; this constant must match `DEFAULT_COVERAGE_TARGET` in
+ * `scripts/export_artifact_encrypted.py`, which writes the model card from the same table.
+ */
+export const DEFAULT_COVERAGE_TARGET = 0.3;
 
 export class RouterArtifactError extends Error {
     public constructor(message: string) {

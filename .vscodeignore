@@ -1,5 +1,12 @@
 .vscode/**
 .vscode-test/**
+# Agent/tooling state that must never ship (pi task files were previously packaged).
+.pi/**
+.claude/**
+.codex/**
+.cursor/**
+.aider*
+.tasks/**
 src/**
 out/**
 # Ship only the two webpack bundles and their license notices. tsconfig.json also emits

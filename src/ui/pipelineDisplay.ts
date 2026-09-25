@@ -327,7 +327,7 @@ export const DEFAULT_PIPELINE_TEXT: PipelineTextCatalog = {
     autoRoutedFastDescription: 'The Fast route was selected for this change.',
     autoRoutedDeepDescription: 'The Deep route was selected for this change.',
     autoRoutedFailedTitle: 'Automatic routing unavailable',
-    autoRoutedFailedDefault: 'The routing model could not be verified; the change goes through the multi-stage workflow.',
+    autoRoutedFailedDefault: 'Automatic routing is unavailable, so this change uses Deep.',
     evidenceReadyTitle: 'Change evidence collected',
     evidenceReadyDescription: '{0} staged files entered the pipeline as complete raw diffs.',
     summarizeStartTitle: 'Evidence compaction started',
@@ -560,7 +560,7 @@ export interface StructuredValidationPayload {
 export type AutoRouteName = 'fast' | 'deep';
 
 export type PipelineEventDetails =
-    | { kind: 'autoRouted'; route: AutoRouteName; failure?: string }
+    | { kind: 'autoRouted'; route: AutoRouteName; fallback?: boolean }
     | { kind: 'evidenceReady'; files: EvidenceFileEntry[]; fileCount: number; rawFiles: number; summarizedFiles: number; initialEstimatedInputTokens: number; maxInputTokens: number; contextWindowTokens: number; hardInputTokens: number; compressionTriggerTokens: number; maxOutputTokens: number; safetyTokens?: number }
     | { kind: 'summarizeProgress'; file: string; summary: string; breaking: boolean; current: number; total: number }
     | { kind: 'summarizeFailed'; target: string; error: string }
@@ -969,7 +969,7 @@ function buildDetailsForStage(stage: PipelineStageName, data: Record<string, unk
             return {
                 kind: 'autoRouted',
                 route: requireAutoRouteField(data, stage),
-                ...(asString(data.failure) ? { failure: asString(data.failure) } : {}),
+                ...(data.fallback === true ? { fallback: true } : {}),
             };
         case 'evidenceReady':
             return {
@@ -1389,18 +1389,18 @@ function presentPipelineEventCore(
             // Falls back to Deep for the label alone: that is the route a router failure always takes,
             // and the details builder rejects a payload that named neither route.
             const route = autoRouteOf(data) ?? 'deep';
-            const failure = asString(data.failure);
+            const fallback = data.fallback === true;
             return {
                 stage,
                 phase: text.phaseRoute,
-                title: failure
+                title: fallback
                     ? text.autoRoutedFailedTitle
                     : formatPipelineText(text.autoRoutedTitle, autoRouteLabel(route, text)),
-                description: failure
+                description: fallback
                     ? text.autoRoutedFailedDefault
                     : (route === 'fast' ? text.autoRoutedFastDescription : text.autoRoutedDeepDescription),
                 metrics: [{ label: text.metricRoute, value: autoRouteLabel(route, text) }],
-                tone: failure ? 'warning' : 'success',
+                tone: fallback ? 'warning' : 'success',
                 data,
             };
         }

@@ -7,8 +7,7 @@ import { createHash } from 'node:crypto';
  * can read the bundle can recover the key and re-encrypt a modified model. What it buys is that the
  * key is not sitting next to the artifact in plain text, and that the artifact is unreadable weight
  * data at rest. The real guarantee for "the model cannot be modified" is the GCM authentication tag
- * checked in `modelArtifact.ts`, which makes any edit a hard load failure. See the model card in
- * `resources/models/router/MODEL-CARD.md`.
+ * checked in `modelArtifact.ts`, which makes any edit a hard load failure.
  */
 
 const KEY_DOMAIN = 'gitCommitGenie.autoRouter.rf79.v1';

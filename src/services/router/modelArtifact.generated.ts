@@ -5,7 +5,7 @@
  * Base64 of `resources/models/router/rf-79-router.enc`: nonce || AES-256-GCM ciphertext of
  * gzip(payload). It is embedded so the router artifact is available synchronously (and in any
  * bundling target) without filesystem access; the binary file next to it is the same bytes and
- * is what the model card hashes.
+ * is the copy the artifact file holds.
  *
  * sha256(artifact) = 6281063308dcedcab121a292ae1e99d6cd27845bdd2fefde3a38e4fadd8b8b21
  * payload          = model: RF-79 trees, calibration: coverage -> threshold table + ECE

@@ -1,4 +1,5 @@
 import type { DiffData } from '../git/gitTypes';
+import { applyDeterministicRules, type AutoRouterRuleName } from './deterministicRules';
 import { extractFeatures79, toFeatureVector } from './features79';
 import {
     ARTIFACT_SHA256,
@@ -19,10 +20,16 @@ import {
  * commit messages, repository identity, file paths outside the diff, or anything produced after
  * generation.
  *
- * Two behaviours are deliberate:
+ * Three behaviours are deliberate:
  *
- * - **The threshold comes from the artifact's coverage table.** `0.2` means "route the top ~20% of
- *   scores", which on the 678-case holdout buys Direct precision 0.812. A precision floor chosen on
+ * - **Deterministic rules run first** (`deterministicRules.ts`). When a change has no readable diff
+ *   content at all — a screenshot, a lockfile, a build artifact, a submodule pointer — a rule routes
+ *   it `fast` and the model is never consulted. Rule hits do not depend on the artifact, so they keep
+ *   working even when the artifact fails verification; the rejection list and its measurements live
+ *   in that module.
+ *
+ * - **The threshold comes from the artifact's coverage table.** `0.3` means "route the top ~30% of
+ *   scores", which on the 678-case holdout buys Direct precision 0.7264. A precision floor chosen on
  *   training OOF does not transfer to new data, so the knob is expressed as coverage and the
  *   precision it bought is recorded in the table instead of promised.
  * - **Failures refuse to route.** A hash mismatch, a broken GCM tag, a truncated payload or an
@@ -39,13 +46,21 @@ export type AutoRoute = 'fast' | 'deep';
 
 export interface AutoRouterDecision {
     route: AutoRoute;
-    /** `null` when the artifact could not be loaded; `route` is then always `deep`. */
+    /**
+     * Which layer decided: a deterministic rule, the model's score versus the coverage threshold, or
+     * the fail-closed path. `probabilityDirect`/`directThreshold` are only *used* when this is
+     * `'model'`; on a rule hit they are `null` because the model was never consulted.
+     */
+    reason: 'rule' | 'model' | 'fallback';
+    /** Set when `reason === 'rule'`. */
+    rule?: AutoRouterRuleName;
+    /** `null` when a rule decided, or when the artifact could not be loaded. */
     probabilityDirect: number | null;
-    /** `null` when the artifact could not be loaded. */
+    /** `null` when a rule decided, or when the artifact could not be loaded. */
     directThreshold: number | null;
     /** Coverage target the threshold was looked up for (route the top N% of scores). */
     coverageTarget: number;
-    /** sha256 of the encrypted artifact that produced the decision; `null` on failure. */
+    /** sha256 of the encrypted artifact that produced the decision; `null` on a rule hit or failure. */
     artifactSha256: string | null;
     /** Present only when the router declined to score and fell back to the Deep route. */
     failure?: string;
@@ -53,31 +68,45 @@ export interface AutoRouterDecision {
 
 /** Routes a change with the exported RF-79 forest and the calibrated coverage threshold. */
 export function routeAutoGeneration(diffs: readonly DiffData[]): AutoRouterDecision {
+    const stagedDiff = buildStagedDiff(diffs);
+    if (stagedDiff.length === 0) {
+        return failureDecision('no diff content to route', false);
+    }
+    const changedFiles = changedFilesOf(diffs);
+    if (changedFiles.length === 0) {
+        return failureDecision('no changed files to route', false);
+    }
+
+    const rule = applyDeterministicRules(stagedDiff, changedFiles);
+    if (rule) {
+        return {
+            route: 'fast',
+            reason: 'rule',
+            rule,
+            probabilityDirect: null,
+            directThreshold: null,
+            coverageTarget: DEFAULT_COVERAGE_TARGET,
+            artifactSha256: null,
+        };
+    }
+
     try {
         const artifact = loadRouterArtifact();
         const operatingPoint = operatingPointFor(artifact.calibration, DEFAULT_COVERAGE_TARGET);
-        const stagedDiff = buildStagedDiff(diffs);
-        if (stagedDiff.length === 0) {
-            return failureDecision('no diff content to route', true);
-        }
-        const changedFiles = changedFilesOf(diffs);
-        if (changedFiles.length === 0) {
-            return failureDecision('no changed files to route', true);
-        }
-
         const probabilityDirect = scoreDirectProbability(stagedDiff, changedFiles);
         return {
             route: routeDirect(probabilityDirect, operatingPoint.threshold) ? 'fast' : 'deep',
+            reason: 'model',
             probabilityDirect,
             directThreshold: operatingPoint.threshold,
             coverageTarget: operatingPoint.targetCoverage,
             artifactSha256: ARTIFACT_SHA256,
         };
     } catch (error) {
-        const reason = error instanceof RouterArtifactError
+        const message = error instanceof RouterArtifactError
             ? error.message
             : `unexpected router failure: ${error instanceof Error ? error.message : String(error)}`;
-        return failureDecision(reason, false);
+        return failureDecision(message, false);
     }
 }
 
@@ -142,6 +171,7 @@ function changedFilesOf(diffs: readonly DiffData[]): string[] {
 function failureDecision(reason: string, artifactLoaded: boolean): AutoRouterDecision {
     return {
         route: 'deep',
+        reason: 'fallback',
         probabilityDirect: null,
         directThreshold: null,
         coverageTarget: DEFAULT_COVERAGE_TARGET,

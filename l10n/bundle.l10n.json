@@ -201,7 +201,7 @@
 	"The Fast route was selected for this change.": "The Fast route was selected for this change.",
 	"The Deep route was selected for this change.": "The Deep route was selected for this change.",
 	"Automatic routing unavailable": "Automatic routing unavailable",
-	"The routing model could not be verified; the change goes through the multi-stage workflow.": "The routing model could not be verified; the change goes through the multi-stage workflow.",
+	"Automatic routing is unavailable, so this change uses Deep.": "Automatic routing is unavailable, so this change uses Deep.",
 	"Generation flow": "Generation flow",
 	"Current repository": "Current repository",
 	"Generation started: {0} — {1}": "Generation started: {0} — {1}",

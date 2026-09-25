@@ -20,7 +20,7 @@ import { deriveRouterArtifactKey } from '../../../services/router/modelKey';
 import type { DiffData, DiffStatus } from '../../../services/git/gitTypes';
 
 const ARTIFACT_PATH = resolve(__dirname, '../../../../resources/models/router/rf-79-router.enc');
-const THRESHOLD_AT_DEFAULT_COVERAGE = 0.6219035253036144;
+const THRESHOLD_AT_DEFAULT_COVERAGE = 0.5810971723856019;
 
 describe('Auto generation router', () => {
     it('loads an authenticated forest whose coverage table holds the shipped operating point', () => {
@@ -43,12 +43,18 @@ describe('Auto generation router', () => {
         assert.equal(artifact.model.semantics.featurePrecision, 'float32');
         assert.equal(artifact.model.semantics.missingValueBranch, null);
 
-        assert.equal(DEFAULT_COVERAGE_TARGET, 0.2);
-        assert.equal(operatingPoint.targetCoverage, 0.2);
+        assert.equal(DEFAULT_COVERAGE_TARGET, 0.3);
+        assert.equal(operatingPoint.targetCoverage, 0.3);
         assert.equal(operatingPoint.threshold, THRESHOLD_AT_DEFAULT_COVERAGE);
         assert.ok(operatingPoint.threshold > 0 && operatingPoint.threshold < 1);
-        assert.ok(operatingPoint.directPrecision > 0.7, `holdout Direct precision ${operatingPoint.directPrecision}`);
-        assert.ok(Math.abs(operatingPoint.achievedCoverage - 0.2035) < 0.005);
+        // The shipped trade-off is asserted, not just the row's existence: raising the coverage target
+        // buys cost at the price of Fast-lane correctness, and the extension must not drift from the card.
+        assert.ok(
+            Math.abs(operatingPoint.directPrecision - 0.7264) < 0.001,
+            `holdout Direct precision ${operatingPoint.directPrecision}`,
+        );
+        assert.ok(Math.abs(operatingPoint.falseDirectPer1000 - 273.6) < 1);
+        assert.ok(Math.abs(operatingPoint.achievedCoverage - 0.2965) < 0.005);
         assert.ok(artifact.provenance.modelSha256.length === 64);
     });
 
@@ -140,7 +146,7 @@ describe('Auto generation router', () => {
                 trees: [{ feature: [-2], threshold: [-2], left: [-1], right: [-1], leafP1: [0.5] }],
             },
             calibration: calibrationStub(),
-        }, /no operating point for coverage 0.2/);
+        }, /no operating point for coverage 0.3/);
         expectRejection({
             format: 'router-artifact-v1',
             model: {
@@ -162,7 +168,7 @@ describe('Auto generation router', () => {
         assert.ok(Math.abs((deepDecision.probabilityDirect ?? 0) - 0.4737819892150832) < 1e-12);
         assert.equal(deepDecision.route, 'deep');
         assert.equal(deepDecision.directThreshold, THRESHOLD_AT_DEFAULT_COVERAGE);
-        assert.equal(deepDecision.coverageTarget, 0.2);
+        assert.equal(deepDecision.coverageTarget, 0.3);
         assert.equal(deepDecision.artifactSha256, ARTIFACT_SHA256);
         assert.equal(deepDecision.failure, undefined);
 

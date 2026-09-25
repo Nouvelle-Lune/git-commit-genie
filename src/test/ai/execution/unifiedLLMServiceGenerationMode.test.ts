@@ -49,6 +49,63 @@ describe('UnifiedLLMService generation-mode routing', () => {
         assert.deepEqual(autoRouteLogs(stageLogs), [{ route: 'deep' }, { route: 'fast' }]);
     });
 
+    it('keeps scores, thresholds, rule names and error internals out of the user-visible surface', async () => {
+        // The Output channel and the routing card are user-visible, so the always-on line states the outcome
+        // in product terms and the card carries the route only. Diagnostics appear when raw data is enabled.
+        const diff = makeDiff(FAST_ROUTE_DIFF);
+        stubConfiguration('auto');
+        stubProvider([]);
+        stubChain([]);
+        const stageLogs = captureCommitStageLogs();
+        const infoMessages: string[] = [];
+        const warnMessages: string[] = [];
+        sinon.stub(logger, 'info').callsFake((message: string) => {
+            infoMessages.push(message);
+        });
+        sinon.stub(logger, 'warn').callsFake((message: string) => {
+            warnMessages.push(message);
+        });
+        const service = await createService();
+
+        await service.generateCommitMessage([diff]);
+
+        const autoLines = [...infoMessages, ...warnMessages].filter(message => message.includes('[Auto]'));
+        assert.deepEqual(autoLines, ['[Auto] This change uses Fast.']);
+        for (const message of autoLines) {
+            for (const leak of ['pDirect=', 'threshold=', 'coverageTarget=', 'artifact=', 'reason=', 'failure=']) {
+                assert.equal(message.includes(leak), false, `${leak} leaked into: ${message}`);
+            }
+        }
+        // The card that opens the generation flow carries the route and nothing else.
+        assert.deepEqual(autoRouteLogs(stageLogs), [{ route: 'fast' }]);
+        assert.equal('failure' in stageLogs[0].data, false);
+        assert.equal('probabilityDirect' in stageLogs[0].data, false);
+        assert.equal('directThreshold' in stageLogs[0].data, false);
+        assert.equal('artifactSha256' in stageLogs[0].data, false);
+    });
+
+    it('adds the diagnostic line only when raw data is enabled', async () => {
+        const diff = makeDiff(FAST_ROUTE_DIFF);
+        stubConfiguration('auto', { rawDataEnabled: true });
+        stubProvider([]);
+        stubChain([]);
+        const infoMessages: string[] = [];
+        sinon.stub(logger, 'info').callsFake((message: string) => {
+            infoMessages.push(message);
+        });
+        sinon.stub(logger, 'warn').callsFake(() => undefined);
+        const service = await createService();
+
+        await service.generateCommitMessage([diff]);
+
+        const debugLines = infoMessages.filter(message => message.includes('[Auto][debug]'));
+        assert.equal(debugLines.length, 1);
+        assert.match(debugLines[0], /reason=model/u);
+        assert.match(debugLines[0], /pDirect=/u);
+        assert.match(debugLines[0], /threshold=/u);
+        assert.match(debugLines[0], /artifact=[0-9a-f]{12}/u);
+    });
+
     it('honors a forced Fast mode even when the model would select Deep', async () => {
         // Explicit Fast mode must bypass the Auto score and produce a real provider-session request.
         const diff = makeDiff(DEEP_ROUTE_DIFF);
@@ -163,6 +220,7 @@ describe('UnifiedLLMService generation-mode routing', () => {
 interface LegacyConfiguration {
     legacyChainEnabled?: unknown;
     legacyUseChainPrompts?: unknown;
+    rawDataEnabled?: boolean;
 }
 
 interface ConfigurationTrace {
@@ -178,6 +236,9 @@ function stubConfiguration(mode: unknown, legacy: LegacyConfiguration = {}): Con
             }
             if (key === 'llm.maxRetries') {
                 return 0 as T;
+            }
+            if (key === 'ui.rawData.enabled') {
+                return (legacy.rawDataEnabled ?? false) as T;
             }
             return defaultValue;
         },
@@ -327,7 +388,7 @@ const DEEP_ROUTE_DIFF = [
     '+const value = 2;',
 ].join('\n');
 
-// RF-79 scores this new-file diff at pDirect=0.656328 (coverage 0.2 threshold 0.621904), so Auto
+// RF-79 scores this new-file diff at pDirect=0.656328 (coverage 0.3 threshold 0.581097), so Auto
 // sends it to Fast while DEEP_ROUTE_DIFF stays at pDirect=0.473782.
 const FAST_ROUTE_DIFF = [
     'diff --git a/src/service.ts b/src/service.ts',

@@ -120,8 +120,8 @@ function renderDetails(details: PipelineEventDetails, text: PipelineTextCatalog)
                         label: text.metricRoute,
                         value: <SemanticTag value={details.route === 'fast' ? text.autoRouteFast : text.autoRouteDeep} />,
                     },
-                    ...(details.failure
-                        ? [{ label: text.detailReason, value: <span className="pipeline-details-warning">{details.failure}</span> }]
+                    ...(details.fallback
+                        ? [{ label: text.detailReason, value: <span className="pipeline-details-warning">{text.autoRoutedFailedDefault}</span> }]
                         : []),
                 ]} />
             );
